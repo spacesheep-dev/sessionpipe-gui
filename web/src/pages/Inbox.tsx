@@ -462,10 +462,12 @@ function InboxRow({
           ) : (
             <StateDot state={out === "going" ? "working" : row.answerable ? "needs_you" : s.state} decorative />
           )}
-          <LabelDot session={s.key} />
         </span>
-        <span className="inbox-title" id={titleId}>
-          {sessionTitle(s)}
+        <span className="inbox-row-head">
+          <span className="inbox-title" id={titleId}>
+            {sessionTitle(s)}
+          </span>
+          <LabelDot session={s.key} />
         </span>
         <span className="inbox-age">
           <Ago iso={a.at} />

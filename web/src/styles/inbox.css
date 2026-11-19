@@ -101,18 +101,15 @@
   width: 16px;
   align-self: center;
 }
-/* A colour label: its dot 6 px after the glyph and 6 px before the title. */
-.inbox-lead:has(.label-dot) {
-  justify-content: flex-start;
+/* The title and its colour label after it, as on the board. */
+.inbox-row-head {
+  grid-area: title;
+  display: flex;
+  align-items: center;
   gap: 6px;
-  width: auto;
-  padding: 0 6px 0 3px;
-}
-.inbox-main:has(.inbox-lead .label-dot) {
-  grid-template-columns: minmax(28px, auto) minmax(0, 1fr) auto;
+  min-width: 0;
 }
 .inbox-title {
-  grid-area: title;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

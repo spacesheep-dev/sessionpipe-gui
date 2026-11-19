@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// A session's colour label as the one small dot every surface draws beside the status
-// glyph (ORGANIZE-SPEC.md §3), the toolbar chip that filters by it, and the ⌥⌘1 … ⌥⌘7 /
-// ⌥⌘0 keys that set it on whatever a list's cursor (or a page) is on. The dot reads the
-// label itself, so a row re-renders only when its own label changes. Nothing renders for
-// a session with no label.
+// A session's colour label as one small dot (ORGANIZE-SPEC.md §3): after the title in a
+// list, beside the status glyph in a page's or panel's bar. Also the toolbar chip that
+// filters by it, and the ⌥⌘1 … ⌥⌘7 / ⌥⌘0 keys that set it on whatever a list's cursor (or
+// a page) is on. The dot reads the label itself, so a row re-renders only when its own
+// label changes. Nothing renders for a session with no label.
 import { LABEL_COLORS, type LabelColor, type SessionKey } from "@shared/api";
 import type { RefObject } from "react";
 import { useLabel, useLabels, useStore } from "../data/hooks";

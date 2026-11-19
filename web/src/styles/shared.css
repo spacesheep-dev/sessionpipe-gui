@@ -363,9 +363,10 @@
   border-top-color: var(--bg);
 }
 
-/* A colour label (LabelDot): one small dot beside the status glyph, never a stripe, a
-   fill or a tinted row. The colours are the skin's --label-* tokens; a hairline ring keeps
-   a pale one (yellow on paper) from melting into the ground. */
+/* A colour label (LabelDot): one small dot after the title in a list, beside the status
+   glyph in a page's or panel's bar; never a stripe, a fill or a tinted row. The colours
+   are the skin's --label-* tokens; a hairline ring keeps a pale one (yellow on paper)
+   from melting into the ground. */
 .label-dot {
   display: inline-block;
   flex: none;

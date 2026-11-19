@@ -577,7 +577,7 @@ test.describe("inside the native shell", () => {
     await card.locator("a.card-link").focus();
     await expect(card).toHaveAttribute("aria-current", "true");
     await page.keyboard.press("Control+Alt+Digit1");
-    await expect(card.locator(".card-state .label-dot--red")).toBeVisible();
+    await expect(card.locator(".card-head .label-dot--red")).toBeVisible();
     await page.keyboard.press("Control+Alt+Digit0");
     await expect(card.locator(".label-dot")).toHaveCount(0);
     // Ctrl+Shift+2 is the menu's: the page lets it pass, and the menu opens the Inbox.

@@ -115,9 +115,12 @@ export function AgentRow({
         modClick={(o) => openAgent(s, a, "beside", { background: o.background })}
       >
         <AgentGlyph a={a} />
-        {a.session && <LabelDot session={a.session} />}
-        {/* A child session's own title says what it was asked, when its launch did not. */}
-        <AgentText a={child && !a.description ? { type: a.type, description: sessionTitle(child) } : a} />
+        {/* A child session's own title says what it was asked, when its launch did not; its
+            label follows it, as a board row's does. */}
+        <span className="kid-head">
+          <AgentText a={child && !a.description ? { type: a.type, description: sessionTitle(child) } : a} />
+          {a.session && <LabelDot session={a.session} />}
+        </span>
         <span className="sr-only">, {a.state === "running" ? "running" : a.state === "stale" ? "quiet" : "done"}</span>
         {child && <NotifyOff s={child} under />}
         <AgentNow a={a} />

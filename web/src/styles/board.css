@@ -175,6 +175,15 @@
   outline: none;
 }
 
+/* The title and, after it, the person's colour label: the dot 6 px past the last letter
+   (or the ellipsis), never cut, so the lead keeps only the state. */
+.card-head {
+  grid-area: title;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .card-title {
   grid-area: title;
   min-width: 0;
@@ -207,17 +216,6 @@
   justify-content: center;
   width: 16px;
   align-self: center;
-}
-/* A colour label: the person's dot 6 px after the glyph and 6 px before the title. The
-   lead widens for it on this row only, so the glyph column stays where it is. */
-.card-state:has(.label-dot) {
-  justify-content: flex-start;
-  gap: 6px;
-  width: auto;
-  padding: 0 6px 0 3px;
-}
-.card-link:has(.card-state .label-dot) {
-  grid-template-columns: minmax(28px, auto) auto minmax(0, 1fr) auto auto;
 }
 .card-time {
   grid-area: time;
@@ -558,6 +556,17 @@
 .agent-text {
   flex: 1;
   min-width: 0;
+}
+/* A child session's text and its label after it; the text is only as wide as it reads. */
+.kid-head {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.kid-head > .agent-text {
+  flex: 0 1 auto;
 }
 .agent-type {
   color: var(--fg);

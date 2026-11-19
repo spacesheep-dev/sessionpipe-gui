@@ -362,7 +362,12 @@ export const SessionCard = memo(function SessionCard({
           }
           aria-expanded={agents.length > 0 ? showAgents : undefined}
         >
-          <h3 className="card-title ellipsis">{title}</h3>
+          {/* The person's label follows the title (as Finder's tags do), outside the
+              heading, so the lead holds only the state and every title starts at one x. */}
+          <span className="card-head">
+            <h3 className="card-title ellipsis">{title}</h3>
+            <LabelDot session={s.key} />
+          </span>
           {/* The state, the request and the time: one element for e2e, laid out across the
               row's two lines (the glyph in the lead, the time at line 1's end). */}
           <span className="card-status">
@@ -376,7 +381,6 @@ export const SessionCard = memo(function SessionCard({
               )}
               <span className="sr-only">{STATE_LABEL[s.state]}</span>
               {unread && <span className="sr-only">Unread</span>}
-              <LabelDot session={s.key} />
             </span>
             {attention && (
               <span className={`card-kind ${attnTool ? "sr-only" : ""}`}>

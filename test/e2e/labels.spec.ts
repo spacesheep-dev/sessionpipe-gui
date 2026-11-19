@@ -6,9 +6,10 @@
 // the chip and `label:<name>` filters; the keyboard path through Shift+F10; forgetting a
 // session takes its label away. The specs share one receiver, so they run in order and
 // each clears the labels it set.
+import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, tier1Batch } from "./helpers.js";
+import { EVENTS, INFO, openBoard, openPage, openPrompt, tier1Batch, ulid } from "./helpers.js";
 
 const LABELS = "/api/ui/labels";
 const menu = (page: Page) => page.getByRole("menu").last();
@@ -39,6 +40,50 @@ async function ownRow(page: Page, title: string) {
   const card = page.locator(`article.card:has(a.card-link[href^="${href}"])`);
   await expect(card).toBeVisible();
   return { card, href, key: `${b.harness}:${b.sessionId}`, harness: b.harness, id: b.sessionId };
+}
+
+/** A working parent of the test's own with two child sessions (`parent_id`, the spec's
+ *  other subagent shape), both still at work, so its row opens to them. */
+async function parentWithKids(page: Page, title: string) {
+  const { sinkToken } = (await (await page.request.get(INFO)).json()) as { sinkToken: string };
+  const harness = "cursor";
+  const ids = [randomUUID(), randomUUID(), randomUUID()] as const;
+  let clock = Date.now() - 20_000;
+  const seqs = new Map<string, number>();
+  const ev = (id: string, type: string, data: Record<string, unknown>, extra: Record<string, unknown> = {}) => {
+    clock += 500;
+    seqs.set(id, (seqs.get(id) ?? -1) + 1);
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: harness, version: "1.0.0", event: "hook" },
+      session: { id, seq: seqs.get(id), machine: "e2e-box", cwd: "~/code/e2e", ...extra },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const [parent, ...kids] = ids;
+  const events = [
+    ev(parent, "session.started", { source: "startup" }, { title, title_source: "custom" }),
+    ev(parent, "turn.started", { turn_id: "t1", prompt_chars: 40 }, { title, title_source: "custom" }),
+  ];
+  for (const [i, k] of kids.entries()) {
+    const kid = { parent_id: parent, title: `E2E kid ${i}`, title_source: "custom" };
+    events.push(ev(k, "session.started", { source: "fork" }, kid));
+    events.push(ev(k, "tool.started", { tool: "Read", call_id: `c${i}` }, kid));
+  }
+  const res = await page.request.post(EVENTS, {
+    headers: { authorization: `Bearer ${sinkToken}` },
+    data: { events },
+  });
+  expect(res.status()).toBe(202);
+  return {
+    row: page.locator(`article.card[data-flip="${harness}:${parent}"]`),
+    kids: kids.map((k) => ({ key: `${harness}:${k}`, id: k })),
+  };
 }
 
 /** A row's Label submenu, open. The demo keeps the board moving (a scroll closes a menu,
@@ -73,11 +118,11 @@ test.describe("colour labels", () => {
     await openBoard(other);
 
     await labelFromMenu(page, card, /^Blue/);
-    const dot = card.locator(".card-state .label-dot--blue");
+    const dot = card.locator(".card-head .label-dot--blue");
     await expect(dot).toBeVisible();
     await expect(dot).toHaveAttribute("aria-label", "Label: Blue");
     await expect(
-      other.locator(`article.card:has(a.card-link[href^="${href}"]) .card-state .label-dot--blue`).first(),
+      other.locator(`article.card:has(a.card-link[href^="${href}"]) .card-head .label-dot--blue`).first(),
     ).toBeVisible();
     // The receiver holds it.
     const doc = (await (await page.request.get(LABELS)).json()) as { sessions: Record<string, string> };
@@ -115,13 +160,83 @@ test.describe("colour labels", () => {
     expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
   });
 
+  test("a label sits after the title: a labelled row's title starts where an unlabelled one's does", async ({
+    page,
+  }) => {
+    const plain = await ownRow(page, "E2E label align plain");
+    const short = await ownRow(page, "E2E label align short");
+    const long = await ownRow(page, `E2E label align long ${"and longer still ".repeat(30)}`);
+    await labelFromMenu(page, short.card, /^Red/);
+    await labelFromMenu(page, long.card, /^Orange/);
+    await expect(short.card.locator(".card-head .label-dot--red")).toBeVisible();
+    await expect(long.card.locator(".card-head .label-dot--orange")).toBeVisible();
+    // The lead holds only the state.
+    await expect(page.locator(".card-state .label-dot")).toHaveCount(0);
+
+    const box = async (l: Locator) => (await l.boundingBox())!;
+    const x0 = (await box(plain.card.locator(".card-title"))).x;
+    for (const { card } of [short, long]) {
+      const title = await box(card.locator(".card-title"));
+      const dot = await box(card.locator(".card-head .label-dot"));
+      const link = await box(card.locator("a.card-link"));
+      expect(Math.abs(title.x - x0)).toBeLessThanOrEqual(0.5);
+      // After the title, whole, inside the row.
+      expect(dot.x).toBeGreaterThanOrEqual(title.x + title.width);
+      expect(dot.width).toBe(8);
+      expect(dot.x + dot.width).toBeLessThanOrEqual(link.x + link.width);
+    }
+    // The long one is cut, and its dot still follows it.
+    expect(
+      await long.card.locator(".card-title").evaluate((el) => el.scrollWidth > el.clientWidth),
+      "the long title is ellipsized",
+    ).toBe(true);
+    // The heading's name is the title alone: the dot is beside it, not in it.
+    await expect(short.card.getByRole("heading", { name: "E2E label align short", exact: true })).toBeVisible();
+  });
+
+  test("in the Inbox too, a labelled prompt's title starts where an unlabelled one's does", async ({
+    page,
+    request,
+  }) => {
+    const plain = await openPrompt(request, { machine: "e2e-label-box", title: "E2E inbox align plain" });
+    const marked = await openPrompt(request, { machine: "e2e-label-box", title: "E2E inbox align marked" });
+    try {
+      expect((await request.patch(LABELS, { data: { sessions: { [marked.key]: "purple" } } })).status()).toBe(200);
+      await openPage(page, "/inbox");
+      const row = (k: string) => page.locator(`.inbox-row[data-session="${k}"]`).first();
+      await expect(row(marked.key).locator(".inbox-row-head .label-dot--purple")).toBeVisible();
+      await expect(page.locator(".inbox-lead .label-dot")).toHaveCount(0);
+      const a = (await row(plain.key).locator(".inbox-title").boundingBox())!;
+      const b = (await row(marked.key).locator(".inbox-title").boundingBox())!;
+      const dot = (await row(marked.key).locator(".label-dot").boundingBox())!;
+      expect(Math.abs(a.x - b.x)).toBeLessThanOrEqual(0.5);
+      expect(dot.x).toBeGreaterThanOrEqual(b.x + b.width);
+    } finally {
+      await plain.clear();
+      await marked.clear();
+    }
+  });
+
+  test("a child session's label follows its text, which starts where its sibling's does", async ({ page, request }) => {
+    const { row, kids } = await parentWithKids(page, "E2E label kids");
+    expect((await request.patch(LABELS, { data: { sessions: { [kids[1]!.key]: "green" } } })).status()).toBe(200);
+    await openBoard(page);
+    const kid = (id: string) => row.locator(`li[data-agent="${id}"]`);
+    await expect(kid(kids[1]!.id).locator(".kid-head .label-dot--green")).toBeVisible();
+    const a = (await kid(kids[0]!.id).locator(".agent-text").boundingBox())!;
+    const b = (await kid(kids[1]!.id).locator(".agent-text").boundingBox())!;
+    const dot = (await kid(kids[1]!.id).locator(".label-dot").boundingBox())!;
+    expect(Math.abs(a.x - b.x)).toBeLessThanOrEqual(0.5);
+    expect(dot.x).toBeGreaterThanOrEqual(b.x + b.width);
+  });
+
   test("⌥⌘3 labels the row under the cursor yellow and ⌥⌘0 clears it", async ({ page }) => {
     const { card } = await ownRow(page, "E2E label by key");
     // Focus puts the list's cursor on the row.
     await card.locator("a.card-link").focus();
     await expect(card).toHaveAttribute("aria-current", "true");
     await page.keyboard.press("Alt+ControlOrMeta+3");
-    await expect(card.locator(".card-state .label-dot--yellow")).toBeVisible();
+    await expect(card.locator(".card-head .label-dot--yellow")).toBeVisible();
     await page.keyboard.press("Alt+ControlOrMeta+0");
     await expect(card.locator(".label-dot")).toHaveCount(0);
   });

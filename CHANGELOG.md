@@ -340,6 +340,11 @@ pairing link that carries the board's key only for a pairing the sink token star
 
 ### Fixed
 
+- **A colour label sits after the title, so the titles line up.** Its dot sat
+  between the state and the title, which moved a labelled row's title and preview about
+  5 px right of its neighbours'. It now follows the title, 6 px after it (after the …
+  when the title is cut), on the Board, a child session's row and the Inbox, as Search
+  already had it. The lead holds the state alone, and ⌘'s jump number lands on it.
 - **"Menu bar only" can no longer hide the Mac app completely.** With "Show in menu bar"
   off and "Menu bar only" on, the app ran with no Dock icon, no menu bar item and no app
   menu. "Menu bar only" now sits under "Show in menu bar" and shows only while that is
