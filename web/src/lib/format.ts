@@ -135,6 +135,8 @@ const HARNESSES: Record<string, HarnessMark> = {
   antigravity: { glyph: "Ag", label: "Antigravity", hue: 300 },
   cursor: { glyph: "Cu", label: "Cursor", hue: 200 },
   devin: { glyph: "De", label: "Devin", hue: 20 },
+  // Its hooks report sessions since sessionpipe 0.16; the hue is the one its name gave it before.
+  "grok-build": { glyph: "Gb", label: "Grok Build", hue: 168 },
   "copilot-cli": { glyph: "Cp", label: "Copilot CLI", hue: 230 },
   droid: { glyph: "Dr", label: "Droid", hue: 120 },
   kiro: { glyph: "Ki", label: "Kiro", hue: 330 },

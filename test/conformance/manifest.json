@@ -1,9 +1,9 @@
 {
   "source": "https://github.com/spacesheep-dev/sessionpipe",
   "license": "Apache-2.0",
-  "version": "0.13.6",
-  "tag": "v0.13.6",
-  "commit": "13996b7df16f3221740bc60f19195faf63b1033f",
+  "version": "0.17.0",
+  "tag": "v0.17.0",
+  "commit": "d4228fadb5f3b03a52c44f63d3e7566a6b799ebb",
   "files": {
     "control-vectors/01-valid-grant-prompt.json": "498902fbfb84dac2df38c30e9bf685ea6d2cb21669a5510faf2f2e3015ed3db6",
     "control-vectors/02-valid-confirm-prompt.json": "71f4438c3996f5565eee0a5ef5eb56e2e1d6e7b269d892959d75ccaa57980d39",
@@ -92,6 +92,7 @@
     "control-vectors/168-reply-to-malformed.json": "e4c73106d26e6b7f0ed8c97732d821ccab85f0d528548d9da986ccf7410258f3",
     "control-vectors/169-reply-to-own-session.json": "388655d8b2a384f6eb0d012a54543eeb9bc9970eb6fea3f8d8b1cea2a04389ab",
     "control-vectors/17-wrong-machine.json": "5e484343f723d57c3160861c8cc4251a4c88c4c6c2cc1dd53be809b221c4c37b",
+    "control-vectors/170-start-fx-harness.json": "8c2359c2f2c8708717dbc44bc1b706078f4eff001adf28f9a2008867c4a14958",
     "control-vectors/18-tampered-text.json": "874e107f4e8f26a929b14bf26c136e83a67b3172cb3187dcd92df61f1119e2e7",
     "control-vectors/19-reserialized.json": "ec30091b21484a5ea0a660b5d10fbe1e1a6e2cacf230a0d6a918a4c632581c7a",
     "control-vectors/20-csig-by-other-key.json": "7927f8db7d771a323207ded63695e55d45a13699f9c3bf02db03c7f7a623603c",

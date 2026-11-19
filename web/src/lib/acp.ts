@@ -7,5 +7,5 @@
 import { addHarnessLabels } from "./format";
 
 addHarnessLabels(
-  "goose:goose kilo:Kilo qwen-code:Qwen_Code cline:Cline auggie:Auggie kimi:Kimi_CLI amp:Amp mistral-vibe:Mistral_Vibe bob:Bob grok-build:Grok_Build qoder:Qoder_CLI minimax-code:MiniMax_Code codebuddy-code:Codebuddy_Code nova:Nova dimcode:DimCode dirac:Dirac harn:Harn vtcode:VT_Code stakpak:Stakpak crow-cli:crow-cli corust-agent:Corust_Agent cortex-code:Cortex_Code kimchi:Kimchi",
+  "goose:goose kilo:Kilo qwen-code:Qwen_Code cline:Cline auggie:Auggie kimi:Kimi_CLI amp:Amp mistral-vibe:Mistral_Vibe bob:Bob qoder:Qoder_CLI minimax-code:MiniMax_Code codebuddy-code:Codebuddy_Code nova:Nova dimcode:DimCode dirac:Dirac harn:Harn vtcode:VT_Code stakpak:Stakpak crow-cli:crow-cli corust-agent:Corust_Agent cortex-code:Cortex_Code kimchi:Kimchi",
 );
