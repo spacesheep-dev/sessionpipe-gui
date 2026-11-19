@@ -400,13 +400,10 @@ pairing link that carries the board's key only for a pairing the sink token star
   title shows, in the menu bar and notifications as well. Code written without backticks
   (`__init__.py`) stays as it is, in previews too, and a preview no longer drops a " - "
   after a code span.
-- **↵ on a list does what the row's menu says.** With Settings › General › Open sessions
-  set to Beside, the menu read "Open beside ↵", but ↵ opened the session as a page. Now ↵
-  and ⌘1 to 9 open the way Settings says, ⇧↵ and ⇧-click open the other way, and ⌘↵ and
-  ⌘-click open a background tab, on the Board, the Inbox and the Feed. The menu's first
-  Open item is the one ↵ does, and the other carries ⇧↵. On Usage, Workflows and the
-  other pages with no panel, every way opens the page. In Settings › Shortcuts, ⇧↵ is
-  "Open the other way".
+- **↵ on a list does what the row's menu says.** With Open sessions set to Beside, the
+  menu read "Open beside ↵", but ↵ opened the page. Now ↵ and ⌘1 to 9 open the way
+  Settings says and ⇧↵ the other way, on the Board, the Inbox and the Feed, and so do a
+  click and ⇧-click on the Board and the Feed; ⌘ opens a background tab.
 - **A colour label sits after the title, so the titles line up.** Its dot sat
   between the state and the title, which moved a labelled row's title and preview about
   5 px right of its neighbours'. It now follows the title, 6 px after it (after the …

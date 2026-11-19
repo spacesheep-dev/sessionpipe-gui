@@ -52,7 +52,7 @@ import {
   setSettings,
   useAppSettings,
 } from "../lib/settings";
-import { allActions, applyPreset, getPreset, PRESETS, useShortcutMap } from "../lib/shortcuts";
+import { allActions, applyPreset, getPreset, IS_MAC, PRESETS, useShortcutMap } from "../lib/shortcuts";
 import { DEFAULT_SKIN, type InstalledSkin } from "../lib/skins";
 import { resolvedScheme, setSkin, setTextSize, setTheme, type Theme, useSettings } from "../lib/theme";
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
@@ -151,6 +151,11 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: "data", label: "Data" },
   { id: "about", label: "About" },
 ];
+/** What a click and ↵ do is the setting; ⇧ goes the other way (keys.ts, SessionCard). */
+const OPEN_SESSIONS_HINT = IS_MAC
+  ? "Click or ↵. Hold ⇧ for the other way."
+  : "Click or Enter. Hold Shift for the other way.";
+
 const isSection = (v: string | null): v is Section => SECTIONS.some((s) => s.id === v);
 
 const FOCUSABLE =
@@ -515,12 +520,12 @@ function General() {
             options={DEFAULT_PAGES}
           />
         </Row>
-        <Row label="Open sessions" hint="A plain click. Shift-click always opens beside.">
+        <Row label="Open sessions" hint={OPEN_SESSIONS_HINT}>
           <Choice<OpenSessions>
             value={s.openSessions}
             onChange={(openSessions) => setSettings({ openSessions })}
             label="Open sessions"
-            note="A plain click. Shift-click always opens beside."
+            note={OPEN_SESSIONS_HINT}
             options={[
               { value: "page", label: "As page" },
               { value: "beside", label: "Beside" },

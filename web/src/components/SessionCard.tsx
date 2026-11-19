@@ -1053,7 +1053,7 @@ export function BesideButton({
         onClick();
       }}
       aria-label="Open beside"
-      title="Open beside (shift+click; ⌘/ctrl+click for a background tab)"
+      title="Open beside"
       tabIndex={-1}
     >
       {children ?? (

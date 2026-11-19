@@ -875,6 +875,22 @@ test.describe("split panel", () => {
         await expect(page).toHaveURL((u) => u.pathname === b!.href);
         await expect(page.locator("h1.sess-title")).toBeVisible();
       });
+
+      test("what ⇧ does is said as the other way, in Settings and on the row's button", async ({ page }) => {
+        await openBoard(page);
+        await holdBoard(page);
+        // The row's button names one thing; ⇧-click's way follows the setting, so it is not in it.
+        await expect(page.locator("article.card .icon-btn[aria-label='Open beside']").first()).toHaveAttribute(
+          "title",
+          "Open beside",
+        );
+        await page.locator("nav.rail a[aria-label='Settings']").click();
+        const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+        const row = settings.locator(".settings-row").filter({ hasText: "Open sessions" });
+        await expect(row.locator(".settings-hint")).toHaveText(
+          /^(Click or ↵\. Hold ⇧ for the other way\.|Click or Enter\. Hold Shift for the other way\.)$/,
+        );
+      });
     });
 
     test("a theme opens a background tab through api.openSession({ split, background })", async ({ page }) => {

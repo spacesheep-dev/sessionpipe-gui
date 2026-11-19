@@ -241,7 +241,10 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
     const key = keys?.[at];
     if (mode !== "page" && key) {
       openSplit(key, {
-        from: document.querySelector(`[data-cursor="${at}"]`)?.getBoundingClientRect(),
+        // The row grows from where it is: the cursor row, or (⌘1–9) the nth item.
+        from: (
+          document.querySelector(`[data-cursor="${at}"]`) ?? root().querySelectorAll("[data-nav-item]")[at]
+        )?.getBoundingClientRect(),
         background: mode === "background",
       });
     } else navigate(href);

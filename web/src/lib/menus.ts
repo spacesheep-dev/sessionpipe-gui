@@ -97,9 +97,11 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
   const phone = phoneLayout();
   // On a list ↵ and ⇧↵ go the two ways (lib/split.ts openWay): the item ↵ does comes first
   // and carries ↵, the other ⇧↵. The phone keeps the order Settings says.
+  const primary = openWay("primary");
+  const other = openWay("other");
   const keyFor = (way: "page" | "beside") =>
-    !list ? undefined : openWay("primary") === way ? "list.open" : openWay("other") === way ? "list.beside" : undefined;
-  const besideFirst = phone ? getSettings().openSessions === "beside" : openWay("primary") === "beside";
+    !list ? undefined : primary === way ? "list.open" : other === way ? "list.beside" : undefined;
+  const besideFirst = phone ? getSettings().openSessions === "beside" : primary === "beside";
   const openPage: MenuItem | null = onItsPage
     ? null
     : { label: "Open as page", action: keyFor("page"), run: () => navigate(path) };
