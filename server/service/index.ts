@@ -8,13 +8,18 @@
 // `install` finds a service of ours already there (every app upgrade does: the plist
 // names the cli of the version that installed it) and upgrades it in place: the same port,
 // state dir and options unless flags say otherwise, the new node and cli, a restart, and a
-// wait until the receiver answers with the new version. A plist under our label that runs
-// something else is left alone.
+// wait until the receiver answers with the new version. A service whose file is already
+// this one but whose receiver answers with another version is restarted too: the package
+// was replaced under it (`npm i -g` over the same prefix) and the process still runs the
+// old code. An older sessionpipe-gui does not put itself in place of a newer one that runs
+// from elsewhere unless `--downgrade` says so. A plist under our label that runs
+// something else is left alone. `--if-installed` (the desktop app's own check on launch)
+// only ever upgrades: with no service of ours there it does nothing.
 //
 // Everything outside the process (the platform, HOME, the uid, launchctl / systemctl, the
 // port probe) comes in through `ServiceEnv`, so tests run against a temp HOME and a fake
-// launchctl (`SP_LAUNCHCTL`, `SP_SYSTEMCTL`, `SP_SCHTASKS`, `SP_TASKKILL`) and never touch
-// the real session.
+// launchctl (`SP_LAUNCHCTL`, `SP_SYSTEMCTL`, `SP_SCHTASKS`, `SP_TASKKILL`, `SP_POWERSHELL`)
+// and never touch the real session.
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -24,12 +29,14 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { DEFAULT_PORT } from "../../shared/api.js";
+import { compareVersions } from "../../shared/version.js";
 import { packageVersion } from "../config.js";
 import { pidAlive, readRunFile, readRunFileRaw, removeRunFile, runFilePath } from "../runfile.js";
 import { launchAgentPath, launchAgentPlist, parseLaunchctlPrint, plistArgv } from "./launchd.js";
@@ -38,8 +45,10 @@ import {
   isReceiverCommandLine,
   parseTaskQuery,
   processQueryScript,
+  system32,
   TASK_RUNNING,
   taskArgv,
+  taskFolderRemoveScript,
   taskName,
   taskQueryScript,
   taskXml,
@@ -60,6 +69,10 @@ export interface ServiceOptions {
   /** Receiver options after `--`, passed on to the service as they are. */
   extra?: string[];
   dryRun?: boolean;
+  /** Let an older sessionpipe-gui replace a newer service that runs from elsewhere. */
+  downgrade?: boolean;
+  /** Upgrade a service of ours when there is one; never install one. */
+  ifInstalled?: boolean;
 }
 
 export interface ExecResult {
@@ -103,6 +116,24 @@ export interface ServiceEnv {
   err(line: string): void;
 }
 
+/** The programs `service` runs. On Windows schtasks, taskkill and PowerShell are named in
+ *  full, under %SystemRoot%\System32 (windows.ts), never by a bare name; an `SP_*` variable
+ *  names a stand-in, as the tests do. */
+export function serviceTools(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): Pick<ServiceEnv, "launchctl" | "systemctl" | "schtasks" | "taskkill" | "powershell"> {
+  const win = platform === "win32";
+  return {
+    launchctl: env.SP_LAUNCHCTL || "launchctl",
+    systemctl: env.SP_SYSTEMCTL || "systemctl",
+    schtasks: env.SP_SCHTASKS || (win ? system32(env, "schtasks.exe") : "schtasks"),
+    taskkill: env.SP_TASKKILL || (win ? system32(env, "taskkill.exe") : "taskkill"),
+    powershell:
+      env.SP_POWERSHELL || (win ? system32(env, "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe"),
+  };
+}
+
 /** The real environment, with the test overrides read from `process.env`. */
 export function processEnv(defaultState: string): ServiceEnv {
   const env = process.env;
@@ -115,11 +146,7 @@ export function processEnv(defaultState: string): ServiceEnv {
     home: env.HOME ?? os.homedir(),
     uid: process.getuid?.() ?? 0,
     label: env.SP_SERVICE_LABEL || SERVICE_LABEL,
-    launchctl: env.SP_LAUNCHCTL || "launchctl",
-    systemctl: env.SP_SYSTEMCTL || "systemctl",
-    schtasks: env.SP_SCHTASKS || "schtasks",
-    taskkill: env.SP_TASKKILL || "taskkill",
-    powershell: env.SP_POWERSHELL || "powershell.exe",
+    ...serviceTools(env, process.platform),
     user: env.USERDOMAIN && env.USERNAME ? `${env.USERDOMAIN}\\${env.USERNAME}` : os.userInfo().username,
     node: process.execPath,
     cli,
@@ -175,6 +202,11 @@ const tilde = (p: string, home: string) =>
 /** The last part of a path written with either separator (a Windows argv read on any OS). */
 const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** How a message names a program. On Windows by its file name (`schtasks.exe`), not the full
+ *  path it is run by: `--dry-run` shows that one. */
+const named = (env: ServiceEnv, cmd: string) => (env.platform === "win32" ? path.win32.basename(cmd) : cmd);
+/** The first words of a command, as a message names it. */
+const head = (env: ServiceEnv, c: string[]) => [named(env, c[0] ?? ""), ...c.slice(1, 3)].join(" ");
 
 /** The PATH the service runs with: launchd and systemd start programs with a bare one, and
  *  the receiver runs `sessionpipe` (pairing) and `npm` (view add) found on it. */
@@ -202,13 +234,15 @@ function serviceFile(env: ServiceEnv): string {
   return unitPath(env.home, env.label);
 }
 
+const POWERSHELL_FLAGS = ["-NoProfile", "-NonInteractive", "-Command"];
+
 /** Windows: runs a script that may write text to the file it is given (see windows.ts);
  *  `text` is what it wrote, without Out-File's byte-order mark and last line end. */
 function powershell(env: ServiceEnv, script: (file: string) => string): ExecResult & { text: string } {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "sessionpipe-gui-"));
   const file = path.join(tmp, "answer.txt");
   try {
-    const r = env.exec(env.powershell, ["-NoProfile", "-NonInteractive", "-Command", script(file)]);
+    const r = env.exec(env.powershell, [...POWERSHELL_FLAGS, script(file)]);
     let text = "";
     try {
       text = readFileSync(file, "utf8")
@@ -219,6 +253,20 @@ function powershell(env: ServiceEnv, script: (file: string) => string): ExecResu
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/** Windows: what takes Task Scheduler's \sessionpipe\ folder away once no task is left in
+ *  it (another label's can be: SP_SERVICE_LABEL). */
+const taskFolderCommand = (env: ServiceEnv): string[] => [
+  env.powershell,
+  ...POWERSHELL_FLAGS,
+  taskFolderRemoveScript(),
+];
+/** Runs it, after our task is deleted. Best-effort (windows.ts): where the folder can't be
+ *  removed it stays, empty, as it did; that fails nothing and nothing is said. */
+function removeTaskFolder(env: ServiceEnv): void {
+  const c = taskFolderCommand(env);
+  env.exec(c[0]!, c.slice(1));
 }
 
 /** Task Scheduler didn't answer: nothing is known about the task, so nothing is done to it. */
@@ -237,13 +285,18 @@ function queryTask(env: ServiceEnv): { state: number; xml: string } | null {
     if (!r.text) throw new Error("it wrote no task definition");
     return { state, xml: r.text };
   } catch (e) {
-    throw new TaskQueryError(`can't read Task Scheduler through ${env.powershell}: ${(e as Error).message}`);
+    throw new TaskQueryError(
+      `can't read Task Scheduler through ${named(env, env.powershell)}: ${(e as Error).message}`,
+    );
   }
 }
 
 /** managerState where the work is already done and only a last look is wanted: an
  *  unreadable Task Scheduler there is not a failure of the verb. */
-function managerStateOr(env: ServiceEnv, otherwise: { loaded: boolean; running: boolean }) {
+function managerStateOr(
+  env: ServiceEnv,
+  otherwise: { loaded: boolean; running: boolean },
+): { loaded: boolean; running: boolean; pid?: number } {
   try {
     return managerState(env);
   } catch (e) {
@@ -284,6 +337,46 @@ export function isOurs(argv: string[], cli?: string): boolean {
   return /(^|[\\/])sessionpipe-gui[\\/]dist[\\/]cli\.js$/.test(script) || base(script) === "sessionpipe-gui";
 }
 
+/** The CLI an installed service runs: the script node is given, or the sessionpipe-gui bin. */
+export function installedCli(argv: string[]): string | undefined {
+  return base(argv[0] ?? "") === "sessionpipe-gui" ? argv[0] : argv[1];
+}
+const realPath = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+/** The package a CLI belongs to: two folders up from `dist/cli.js` (a bin is followed to it).
+ *  Undefined for a path that isn't absolute: nothing is looked up from the working directory. */
+function packageDir(cli: string): string | undefined {
+  if (!path.isAbsolute(cli)) return undefined;
+  return path.dirname(path.dirname(realPath(cli)));
+}
+/** The version in that package's package.json: what the installed file runs, whatever the
+ *  process on the port says. Undefined when it can't be read. */
+export function packageVersionAt(cli: string): string | undefined {
+  const dir = packageDir(cli);
+  if (!dir) return undefined;
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")) as {
+      name?: string;
+      version?: string;
+    };
+    return pkg.name === "sessionpipe-gui" && typeof pkg.version === "string" ? pkg.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/** A developer's checkout, not an install: its package folder has the sources (server/cli.ts)
+ *  or a .git beside dist/. npm, npx and the installer never put either there. */
+export function isCheckout(cli: string): boolean {
+  const dir = packageDir(cli);
+  if (!dir) return false;
+  return existsSync(path.join(dir, ".git")) || existsSync(path.join(dir, "server", "cli.ts"));
+}
+
 /** The receiver options an installed service was given: port, state, host, and the rest. */
 export function installedOptions(argv: string[]): { port?: number; state?: string; host?: string; extra: string[] } {
   const rest = argv.slice(base(argv[0] ?? "") === "sessionpipe-gui" ? 1 : 2);
@@ -319,6 +412,21 @@ function managerState(env: ServiceEnv): { loaded: boolean; running: boolean; pid
   return { loaded: true, ...parseSystemctlShow(r.stdout) };
 }
 
+/** Is pid the service's own receiver? macOS and Linux: the manager's pid for the job (it
+ *  starts node itself). Windows: the task starts conhost and cmd, so the pid's command line
+ *  is read: the task's cli on the task's state dir. */
+function ownsPid(
+  env: ServiceEnv,
+  mgr: { running: boolean; pid?: number },
+  pid: number,
+  cli: string,
+  state: string,
+): boolean {
+  if (env.platform !== "win32") return mgr.running && mgr.pid === pid;
+  const line = powershell(env, (file) => processQueryScript(pid, file));
+  return line.code === 0 && isReceiverCommandLine(line.text, cli, state);
+}
+
 /** `launchctl bootout` returns before the job is gone; a bootstrap (or a "still loaded"
  *  verdict) right after it is too early. Polls the manager until the label is unloaded. */
 async function waitUnloaded(env: ServiceEnv): Promise<boolean> {
@@ -347,8 +455,8 @@ export async function runService(o: ServiceOptions, env: ServiceEnv): Promise<nu
   }
 }
 
-const failedCommand = (c: string[], r: ExecResult) =>
-  `${c.slice(0, 3).join(" ")} failed: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
+const failedCommand = (env: ServiceEnv, c: string[], r: ExecResult) =>
+  `${head(env, c)} failed: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
 
 /** The file the service runs from. */
 function serviceText(env: ServiceEnv, argv: string[], state: string): string {
@@ -410,7 +518,13 @@ async function waitForReceiver(
     }
     await sleep(200);
   }
-  return managerStateOr(env, { loaded: true, running: false }).running ? "running" : "silent";
+  // "Running" only when the manager says so twice, a second apart, with the same pid: a
+  // receiver that crashes at boot under KeepAlive is running for a moment of each restart.
+  const first = managerStateOr(env, { loaded: true, running: false });
+  if (!first.running) return "silent";
+  await sleep(1000);
+  const again = managerStateOr(env, { loaded: true, running: false });
+  return again.running && again.pid === first.pid ? "running" : "silent";
 }
 
 function afterWait(env: ServiceEnv, verdict: "running" | "silent", port: number, state: string): number {
@@ -422,6 +536,107 @@ function afterWait(env: ServiceEnv, verdict: "running" | "silent", port: number,
     env.out(`not answering on :${port} after ${secs} s; it keeps trying: see ${log}`);
   }
   return 0;
+}
+
+/** Exit code of an upgrade that stopped the old receiver and whose new one isn't running. */
+export const EXIT_NOT_RUNNING = 4;
+/** Exit code of `install --if-installed` where it did nothing (no service of ours, already
+ *  running this version, or one newer than this CLI): not a failure, and not an update. */
+export const EXIT_NOTHING_DONE = 5;
+
+/** After an upgrade's restart: still loading is fine (exit 0); not running at all is a
+ *  failure, and says the old receiver is gone (EXIT_NOT_RUNNING). */
+function afterUpgradeWait(env: ServiceEnv, verdict: "running" | "silent", port: number, state: string): number {
+  if (verdict === "running") return afterWait(env, verdict, port, state);
+  const secs = Math.round(env.waitMs / 1000);
+  const log = tilde(path.join(state, SERVICE_LOG), env.home);
+  env.err(
+    `${env.version} isn't running on :${port} after ${secs} s, and the old receiver was stopped for the update: see ${log}`,
+  );
+  return EXIT_NOT_RUNNING;
+}
+
+/** One `service install` or `uninstall` at a time per label: the file
+ *  `<default state folder>/service-<label>.lock` (in it, not beside it), made with O_EXCL. A
+ *  lock whose pid is gone, or older than STALE_LOCK_MS, is a crashed run's and is taken
+ *  over, under a second lock (`….lock.takeover`, also O_EXCL) so that two installs that both
+ *  find it stale can't both end up holding it: only the one holding the takeover lock
+ *  removes the stale file, and only after reading it again under that lock. A takeover lock
+ *  left by a crash (older than STALE_TAKEOVER_MS) is removed. Returns the release, or the
+ *  line that says who holds it. `onStale` is the tests' seam: it runs after a stale lock
+ *  was seen ("seen") and again once the takeover lock is held ("takingOver"). */
+const STALE_LOCK_MS = 15 * 60_000;
+const STALE_TAKEOVER_MS = 10_000;
+export const lockPath = (env: ServiceEnv): string => path.join(env.defaultState, `service-${env.label}.lock`);
+const busyLine = (env: ServiceEnv, pid?: number) =>
+  `another \`service install\` or \`uninstall\` for ${env.label} is running${pid ? ` (pid ${pid})` : ""}; try again when it is done`;
+export function takeLock(env: ServiceEnv, onStale?: (stage: "seen" | "takingOver") => void): (() => void) | string {
+  const file = lockPath(env);
+  const takeover = `${file}.takeover`;
+  mkdirSync(path.dirname(file), { recursive: true });
+  const mine = `${process.pid} ${new Date().toISOString()} ${Math.random().toString(36).slice(2)}\n`;
+  const exclusive = (f: string, text: string): boolean => {
+    try {
+      writeFileSync(f, text, { flag: "wx", mode: 0o644 });
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      return false;
+    }
+  };
+  /** The lock as it is now: its text, holder and whether that holder still counts. */
+  const look = (): { text: string; pid: number; live: boolean } | null => {
+    try {
+      const text = readFileSync(file, "utf8");
+      const pid = Number.parseInt(text, 10) || 0;
+      const age = Date.now() - statSync(file).mtimeMs;
+      return { text, pid, live: pid > 0 && pidAlive(pid) && age < STALE_LOCK_MS };
+    } catch {
+      return null; // it went while we looked
+    }
+  };
+  const release = () => {
+    try {
+      if (readFileSync(file, "utf8") === mine) rmSync(file, { force: true });
+    } catch {}
+  };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (exclusive(file, mine)) return release;
+    const seen = look();
+    if (!seen) continue;
+    if (seen.live) return busyLine(env, seen.pid);
+    onStale?.("seen");
+    // Take over under the takeover lock; a takeover lock a crash left behind goes first.
+    try {
+      if (Date.now() - statSync(takeover).mtimeMs > STALE_TAKEOVER_MS) rmSync(takeover, { force: true });
+    } catch {}
+    if (!exclusive(takeover, mine)) return busyLine(env);
+    try {
+      onStale?.("takingOver");
+      const again = look();
+      // Still the stale one we saw: it goes. Anything else (gone, or another's fresh lock) is
+      // decided on the next turn by O_EXCL.
+      if (again && again.text === seen.text && !again.live) rmSync(file, { force: true });
+    } finally {
+      rmSync(takeover, { force: true });
+    }
+  }
+  return `can't take ${tilde(file, env.home)}; try again`;
+}
+
+/** Runs `verb` under the label's lock (a dry run changes nothing and takes none). */
+async function locked(env: ServiceEnv, dryRun: boolean | undefined, verb: () => Promise<number>): Promise<number> {
+  if (dryRun) return verb();
+  const release = takeLock(env);
+  if (typeof release === "string") {
+    env.err(release);
+    return 1;
+  }
+  try {
+    return await verb();
+  } finally {
+    release();
+  }
 }
 
 /** `schtasks /Create /XML` reads UTF-16 with a byte-order mark. */
@@ -446,8 +661,9 @@ function stopTask(env: ServiceEnv, argv: string[], state: string): { commands: s
     left: pid && !ours && pidAlive(pid) ? pid : undefined,
   };
 }
-const leftRunning = (pid: number, state: string, home: string): string =>
-  `pid ${pid} (${tilde(runFilePath(state), home)}) is running, and its command line doesn't show it to be this service's receiver: left alone. If it is one, stop it yourself (taskkill /PID ${pid} /T /F)`;
+/** The command to type names taskkill in full, as the ones `service` runs itself do. */
+const leftRunning = (env: ServiceEnv, pid: number, state: string): string =>
+  `pid ${pid} (${tilde(runFilePath(state), env.home)}) is running, and its command line doesn't show it to be this service's receiver: left alone. If it is one, stop it yourself (${env.taskkill} /PID ${pid} /T /F)`;
 /** The receiver we killed never got to remove its run.json: remove it, if it is still that one. */
 function afterStop(env: ServiceEnv, c: string[], r: ExecResult, state: string): void {
   if (c[0] === env.taskkill && r.code === 0) removeRunFile(state, Number(c[2]));
@@ -464,13 +680,22 @@ function taskCarries(env: ServiceEnv, argv: string[], state: string, dryRun?: bo
 }
 const isStop = (env: ServiceEnv, c: string[]) => c[0] === env.taskkill || (c[0] === env.schtasks && c[1] === "/End");
 
-async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
+/** `install` under the label's lock. */
+const install = (o: ServiceOptions, env: ServiceEnv): Promise<number> =>
+  locked(env, o.dryRun, () => installUnlocked(o, env));
+
+async function installUnlocked(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   const file = serviceFile(env);
   const prefix = o.dryRun ? "would refuse: " : "";
 
   // A service under our label already: ours is upgraded in place; anything else is refused.
   const inst = readInstalled(env);
-  if (inst || managerState(env).loaded) {
+  const loaded = inst !== null || managerState(env).loaded;
+  if (!loaded && o.ifInstalled) {
+    env.out(`no service ${env.label} installed: nothing to do`);
+    return EXIT_NOTHING_DONE;
+  }
+  if (loaded) {
     if (inst && isOurs(inst.argv, env.cli)) return upgrade(o, env, inst);
     env.err(
       inst
@@ -534,10 +759,11 @@ async function install(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     if (r.code !== 0) {
       if (env.platform === "win32") {
         if (c[1] !== "/Create") env.exec(env.schtasks, ["/Delete", "/TN", file, "/F"]);
+        removeTaskFolder(env);
         rmSync(xmlFile, { force: true });
       } else rmSync(file, { force: true });
       if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
-      env.err(`${failedCommand(c, r)} (nothing installed)`);
+      env.err(`${failedCommand(env, c, r)} (nothing installed)`);
       return 1;
     }
   }
@@ -572,13 +798,62 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     env.err(`${o.dryRun ? "would refuse: " : ""}port ${port} is in use by another program (try --port)`);
     return 1;
   }
-  const running = who === "gui" ? await env.running(port) : undefined;
-  if (same && running !== undefined) {
+  const prefix = o.dryRun ? "would refuse: " : "";
+  const wasState = path.resolve(was.state ?? env.defaultState);
+  const instCli = installedCli(inst.argv);
+  // The file runs this very CLI (by its real path), or another one.
+  const sameCli = instCli !== undefined && realPath(instCli) === env.cli;
+  // A developer's checkout is theirs to update: a release never takes its place unasked.
+  if (!sameCli && instCli && isCheckout(instCli)) {
+    env.err(
+      `${prefix}${env.label} runs a development checkout (${tilde(packageDir(instCli) ?? instCli, env.home)}): left as it is. \`service install\` from that checkout updates it; \`service uninstall\` first puts this one in its place`,
+    );
+    return 1;
+  }
+  let mgr = managerState(env);
+  const answered = who === "gui" ? await env.running(port) : undefined;
+  // Is the receiver that answers this service's own? Its run.json (written once, when it
+  // starts) names its pid: the manager's pid on macOS and Linux, the task's cli on the
+  // task's state dir on Windows. Only then does run.json say what it runs: up to 0.8.0
+  // /api/ui/info read package.json on every request, so a receiver whose package was
+  // replaced under it answered with the new version while it ran the old code. With no
+  // live run.json for the port (a receiver that couldn't write it), the manager saying the
+  // service runs is taken as the answer being its. Only a live run.json naming a pid that
+  // isn't the service's says another receiver answers; the manager is asked once more
+  // before that is believed (a KeepAlive restart between the two looks moves the pid).
+  const run = answered !== undefined ? readRunFileRaw(wasState) : null;
+  const live = run && run.port === port && pidAlive(run.pid) ? run : null;
+  const ownsLive = () => live !== null && ownsPid(env, mgr, live.pid, instCli ?? "", wasState);
+  let owned = answered !== undefined && (live ? ownsLive() : mgr.running);
+  if (answered !== undefined && !owned) {
+    mgr = managerState(env);
+    owned = live ? ownsLive() : mgr.running;
+  }
+  const running = owned && live ? live.version : answered;
+  /** What --if-installed (the app's check) returns where it did nothing: the app tells it
+   *  from an update. A plain install says 0 there, as before. */
+  const nothing = o.ifInstalled ? EXIT_NOTHING_DONE : 0;
+  // The same file answering with this version: nothing to do.
+  if (same && running === env.version) {
     env.out(`already running ${running} on ${url}`);
-    return 0;
+    return nothing;
+  }
+  // Something answers that isn't this service's receiver (one started by hand, a stale
+  // run.json): a restart of the service can't reach it, and would only fight it for the port.
+  if (answered !== undefined && !owned) {
+    env.err(
+      `${prefix}a sessionpipe-gui ${answered} answers on :${port}, and it isn't ${env.label}'s receiver (${
+        mgr.running
+          ? mgr.pid
+            ? `the service's is pid ${mgr.pid}`
+            : "the service runs another process"
+          : "the service isn't running"
+      }): left as it is. Stop that one, then \`service install\` again`,
+    );
+    return 1;
   }
   // The same service, up but not answering yet (a big board loading): leave it to it.
-  if (same && managerState(env).running && !o.dryRun) {
+  if (same && running === undefined && mgr.running && !o.dryRun) {
     env.out(`already installed ${env.label}; it is starting`);
     if (env.waitMs > 0) {
       const verdict = await waitForReceiver(env, { port, state, version: env.version });
@@ -587,8 +862,29 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     env.out(`running ${env.version} on ${url} · state ${tilde(state, env.home)}`);
     return 0;
   }
-  const from = running ?? readRunFileRaw(state)?.version;
+  // With the same CLI's files and another version answering, the process is a stale one
+  // (the package was replaced under it): it is restarted below, whichever way it differs.
+  const from = running ?? readRunFileRaw(wasState)?.version;
+  // What the installed file runs: the package.json beside its cli, else what last ran.
+  const installed = (instCli && packageVersionAt(instCli)) || from;
   const change = `${env.label}: ${from && from !== env.version ? `${from} → ` : ""}${env.version}`;
+  // --if-installed (the app's check) only ever moves a service forward.
+  const newest = [from, installed]
+    .filter((v): v is string => !!v)
+    .sort(compareVersions)
+    .at(-1);
+  if (o.ifInstalled && newest && compareVersions(newest, env.version) > 0) {
+    env.out(`${env.label} runs ${newest}, newer than this sessionpipe-gui (${env.version}): left as it is`);
+    return nothing;
+  }
+  // Another CLI in the file, at a newer version than this one: putting this one there is
+  // a downgrade, done only when asked for.
+  if (!sameCli && installed && compareVersions(installed, env.version) > 0 && !o.downgrade) {
+    env.err(
+      `${prefix}${env.label} runs ${installed}, newer than this sessionpipe-gui (${env.version}): left as it is. \`service install\` from ${installed} or later keeps it; --downgrade puts ${env.version} in its place`,
+    );
+    return 1;
+  }
 
   if (!taskCarries(env, argv, state, o.dryRun)) return 1;
   const text = serviceText(env, argv, state);
@@ -597,7 +893,7 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
   const commands: string[][] =
     env.platform === "darwin"
       ? [
-          ...(managerState(env).loaded ? [[env.launchctl, "bootout", `gui/${env.uid}/${env.label}`]] : []),
+          ...(mgr.loaded ? [[env.launchctl, "bootout", `gui/${env.uid}/${env.label}`]] : []),
           [env.launchctl, "bootstrap", `gui/${env.uid}`, inst.file],
         ]
       : env.platform === "win32"
@@ -617,7 +913,7 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
     env.out("");
     for (const c of commands) env.out(`$ ${c.join(" ")}`);
     env.out("");
-    if (stop?.left) env.out(leftRunning(stop.left, was.state ?? env.defaultState, env.home));
+    if (stop?.left) env.out(leftRunning(env, stop.left, was.state ?? env.defaultState));
     env.out(`dry run: nothing written or restarted; it would update ${change} on ${url}`);
     return 0;
   }
@@ -629,11 +925,14 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
   for (const c of commands) {
     const r = env.exec(c[0]!, c.slice(1));
     afterStop(env, c, r, was.state ?? env.defaultState);
-    // Stopping what isn't running fails, and is fine.
-    if (r.code !== 0 && !isStop(env, c)) {
+    // Stopping what isn't running fails, and is fine: on Windows ending a task that isn't
+    // running; on macOS booting out a job launchd no longer has ("No such process").
+    const notLoaded =
+      c[1] === "bootout" && r.code !== 0 && !managerStateOr(env, { loaded: true, running: false }).loaded;
+    if (r.code !== 0 && !isStop(env, c) && !notLoaded) {
       if (env.platform === "win32") rmSync(xmlFile, { force: true });
       env.err(
-        `${failedCommand(c, r)} (${where(env, inst.file)} is rewritten; \`service uninstall\` then \`service install\` starts over)`,
+        `${failedCommand(env, c, r)} (${where(env, inst.file)} is rewritten; \`service uninstall\` then \`service install\` starts over)`,
       );
       return 1;
     }
@@ -645,11 +944,11 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
   }
   if (env.platform === "win32") rmSync(xmlFile, { force: true });
   env.out(`updated ${change} (${where(env, inst.file)})`);
-  if (stop?.left) env.err(leftRunning(stop.left, was.state ?? env.defaultState, env.home));
+  if (stop?.left) env.err(leftRunning(env, stop.left, was.state ?? env.defaultState));
 
   if (env.waitMs > 0) {
     const verdict = await waitForReceiver(env, { port, state, version: env.version });
-    if (verdict !== "answered") return afterWait(env, verdict, port, state);
+    if (verdict !== "answered") return afterUpgradeWait(env, verdict, port, state);
     env.out(`running ${env.version} on ${url} · state ${tilde(state, env.home)}`);
     return 0;
   }
@@ -657,13 +956,19 @@ async function upgrade(o: ServiceOptions, env: ServiceEnv, inst: Installed): Pro
   return 0;
 }
 
-async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
+/** `uninstall` under the label's lock, as `install`. */
+const uninstall = (o: ServiceOptions, env: ServiceEnv): Promise<number> =>
+  locked(env, o.dryRun, () => uninstallUnlocked(o, env));
+
+async function uninstallUnlocked(o: ServiceOptions, env: ServiceEnv): Promise<number> {
   const file = serviceFile(env);
   const st = managerState(env);
   const inst = env.platform === "win32" ? readInstalled(env) : null;
   const has = env.platform === "win32" ? st.loaded : existsSync(file);
   const wasState = (inst && installedOptions(inst.argv).state) || env.defaultState;
   if (!has && !st.loaded) {
+    // An uninstall by 0.8.0 left the task folder behind, empty: it goes now.
+    if (env.platform === "win32" && !o.dryRun) removeTaskFolder(env);
     env.out(`no service ${env.label} installed: nothing to do`);
     return 0;
   }
@@ -680,7 +985,8 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     for (const c of commands) env.out(`$ ${c.join(" ")}`);
     if (has && env.platform !== "win32") env.out(`$ rm ${file}`);
     if (env.platform === "linux") env.out(`$ ${env.systemctl} --user daemon-reload`);
-    if (stop?.left) env.out(leftRunning(stop.left, wasState, env.home));
+    if (env.platform === "win32") env.out(`$ ${taskFolderCommand(env).join(" ")}`);
+    if (stop?.left) env.out(leftRunning(env, stop.left, wasState));
     env.out("dry run: nothing stopped or removed");
     return 0;
   }
@@ -689,7 +995,7 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     const r = env.exec(c[0]!, c.slice(1));
     afterStop(env, c, r, wasState);
     if (r.code !== 0 && !isStop(env, c))
-      failed = `${c.slice(0, 3).join(" ")}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
+      failed = `${head(env, c)}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
   }
   if (env.platform !== "win32") rmSync(file, { force: true });
   if (env.platform === "linux") env.exec(env.systemctl, ["--user", "daemon-reload"]);
@@ -703,9 +1009,10 @@ async function uninstall(o: ServiceOptions, env: ServiceEnv): Promise<number> {
     );
     return 1;
   }
+  if (env.platform === "win32") removeTaskFolder(env);
   if (stop?.left) {
     env.out(`removed ${env.label}: it won't start at login`);
-    env.err(leftRunning(stop.left, wasState, env.home));
+    env.err(leftRunning(env, stop.left, wasState));
     return 0;
   }
   env.out(`removed ${env.label}: stopped, and it won't start at login`);

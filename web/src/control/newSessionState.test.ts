@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentLeft,
   aliasHidden,
+  fixedLine,
   fixedPermission,
   machineFacts,
   permissionChoices,
@@ -56,6 +57,24 @@ describe("pickContext", () => {
   it("then the first machine, or nothing", () => {
     expect(pickContext({ sessions: [], machines })).toEqual({ machine: "build-box" });
     expect(pickContext({ sessions: [], machines: [] })).toEqual({});
+  });
+  it("past an explicit target, a machine that can take a start while one can (one not approved there is passed over)", () => {
+    const ready = ["build-box"];
+    // studio-mac has the newest session, the board is filtered to it, and it was the last start.
+    expect(pickContext({ filter: { machine: "studio-mac" }, sessions, machines, ready })).toEqual({
+      machine: "build-box",
+    });
+    expect(pickContext({ last: { machine: "studio-mac", harness: "codex" }, sessions, machines, ready })).toEqual({
+      machine: "build-box",
+    });
+    expect(pickContext({ sessions, machines, ready })).toEqual({ machine: "build-box" });
+    // Machines' "New session on studio-mac…" still opens on it.
+    expect(pickContext({ target: { machine: "studio-mac" }, sessions, machines, ready })).toEqual({
+      machine: "studio-mac",
+    });
+    // None can: the order as before.
+    expect(pickContext({ sessions, machines, ready: [] })).toEqual({ machine: "studio-mac" });
+    expect(pickContext({ sessions, machines, ready: ["gone-box"] })).toEqual({ machine: "studio-mac" });
   });
 });
 
@@ -130,7 +149,14 @@ describe("the Permission row on an inherit machine (CONTROL.md §3.1)", () => {
   });
   it("an ACP agent there takes no options: its own settings, its asks refused", () => {
     expect(permissionChoices(c.start?.goose)).toEqual([]);
-    expect(fixedPermission(c, "goose", {})).toBe("Its own settings; what it asks is refused");
+    expect(fixedPermission(c, "goose", {})).toEqual({
+      value: "Its own settings",
+      note: "Anything it asks permission for is refused.",
+    });
+    // Where nothing goes under it (a desktop's options line, a workflow step): one run.
+    expect(fixedLine(fixedPermission(c, "goose", {})!)).toBe(
+      "Its own settings. Anything it asks permission for is refused.",
+    );
     expect(machineFacts(c, (h) => h).hint).toBe("inherit mode");
   });
   it("one level and no inherit: a fixed line, as before", () => {
@@ -139,7 +165,8 @@ describe("the Permission row on an inherit machine (CONTROL.md §3.1)", () => {
       mode: "safe",
       start: { "claude-code": { permissions: ["safe"], permission: "safe" } },
     };
-    expect(fixedPermission(one, "claude-code", { safe: "Safe" })).toBe("Safe");
+    expect(fixedPermission(one, "claude-code", { safe: "Safe" })).toEqual({ value: "Safe" });
+    expect(fixedLine({ value: "Safe" })).toBe("Safe");
   });
 });
 
@@ -196,8 +223,8 @@ describe("machineFacts and fixedPermission", () => {
     expect(machineFacts({ ...base, online: false, mode: "auto", start: {} }, label).hint).toBe("offline");
     expect(machineFacts(undefined, label)).toEqual({});
   });
-  it("keeps the Permission row on every machine: a pop-up, one level, or set at the machine", () => {
-    const L = { read: "Read only", safe: "Safe" };
+  it("keeps the Permission row on every machine: a pop-up, one level, the mode in the pop-up's words, or set on the machine", () => {
+    const L = { read: "Read only", safe: "Safe", auto: "Auto" };
     expect(
       fixedPermission(
         { ...base, start: { "claude-code": { ...opts, permissions: ["read", "safe"] } } },
@@ -211,9 +238,10 @@ describe("machineFacts and fixedPermission", () => {
         "claude-code",
         L,
       ),
-    ).toBe("Safe");
-    expect(fixedPermission({ ...base, mode: "safe" }, "claude-code", L)).toBe("Safe mode, set at the machine");
-    expect(fixedPermission(base, "claude-code", L)).toBe("Set at the machine");
+    ).toEqual({ value: "Safe" });
+    expect(fixedPermission({ ...base, mode: "safe" }, "claude-code", L)).toEqual({ value: "Safe" });
+    expect(fixedPermission({ ...base, mode: "auto" }, "claude-code", L)).toEqual({ value: "Auto" });
+    expect(fixedPermission(base, "claude-code", L)).toEqual({ value: "Set on the machine" });
   });
 });
 
@@ -287,6 +315,7 @@ describe("agentLeft", () => {
       hint: "None left",
       detail: "3 accounts, none with room · first back in 2 h 10 m",
       out: true,
+      aside: "None left",
     });
   });
 });

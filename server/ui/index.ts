@@ -6,7 +6,6 @@ import QRCode from "qrcode";
 import {
   type FeedQuery,
   type Info,
-  type MachineSummary,
   ROUTES,
   type Snapshot,
   type StreamMessage,
@@ -27,8 +26,11 @@ import { type MarkStore, registerMarks } from "./marks.js";
 import { cutPreview } from "./preview.js";
 import { registerProcessStats } from "./process.js";
 import { registerReview } from "./review.js";
+import { snapshotWithControl } from "./snapshot.js";
 import { serveStream } from "./stream.js";
 import { ViewerRegistry } from "./viewers.js";
+
+export { snapshotWithControl };
 
 export interface UiDeps {
   store: Store;
@@ -58,34 +60,6 @@ export interface UiDeps {
   limits?: LimitsStore;
   /** More stream messages from elsewhere (a view's state written, themes/routes.ts). */
   broadcast?: { subscribe(l: (m: StreamMessage) => void): () => void };
-}
-
-/** The store's snapshot with what control knows about each machine merged in, plus
- *  machines control paired that sent no event yet. */
-export function snapshotWithControl(store: Store, control: Control): Snapshot {
-  const snap = store.snapshot();
-  const paired = control.machines();
-  const seen = new Set<string>();
-  for (const m of snap.machines) {
-    seen.add(m.name);
-    const c = paired.get(m.name);
-    if (c) m.control = c;
-  }
-  for (const [name, c] of paired) {
-    if (seen.has(name)) continue;
-    const m: MachineSummary = {
-      name,
-      lastAt: c.lastPollAt ?? c.lastHelloAt ?? snap.at,
-      harnesses: Object.fromEntries((c.harnesses ?? []).map((h) => [h, undefined])),
-      sessions: 0,
-      working: 0,
-      needsYou: 0,
-      control: c,
-    };
-    snap.machines.push(m);
-  }
-  snap.stats.machines = snap.machines.length;
-  return snap;
 }
 
 /** The guard every /api/ui route wears: this machine, or the UI key; else 401. */

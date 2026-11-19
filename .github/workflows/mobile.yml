@@ -79,7 +79,7 @@ jobs:
 
   android:
     name: Android debug build
-    runs-on: ubuntu-latest
+    runs-on: graphide
     timeout-minutes: 45
     defaults:
       run:

@@ -6,13 +6,13 @@ import type { PhoneDeviceState, PhoneInfo, PhoneTrustCheck } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { useEffect, useState } from "react";
 import { ControlError, type DeviceRequest } from "../control/api";
-import { apiUrl } from "../lib/net";
+import { apiFetch } from "../lib/net";
 
 const BASE = ROUTES.ui.phone;
 const POLL_MS = 2000;
 
 async function call<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T> {
-  const res = await fetch(apiUrl(url), {
+  const res = await apiFetch(url, {
     method,
     headers: { accept: "application/json", ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),

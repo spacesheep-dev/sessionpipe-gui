@@ -551,6 +551,25 @@ export function Listening({ children, label = "Listening" }: { children?: ReactN
   );
 }
 
+/** `text` with the machine's `name` in it kept whole on a line (base.css `.whole-name`): a
+ *  name such as "Misha-Petrov-laptop" breaks at no hyphen where it fits a line. The text as
+ *  it is where the name is not in it. */
+export function WithName({ text, name }: { text: string; name?: string | null }) {
+  const i = name ? text.indexOf(name) : -1;
+  if (!name || i < 0) return <>{text}</>;
+  // A line may break on either side of the span, so it takes what touches the name up to a
+  // space: a full stop after it, or a wide card's "·", never starts a line of its own.
+  const from = i - (text.slice(0, i).match(/[^ \n]*$/)?.[0].length ?? 0);
+  const to = i + name.length + (text.slice(i + name.length).match(/^[^ \n]*/)?.[0].length ?? 0);
+  return (
+    <>
+      {text.slice(0, from)}
+      <span className="whole-name">{text.slice(from, to)}</span>
+      {text.slice(to)}
+    </>
+  );
+}
+
 /** A condition of the system ("Notifications are off for this site"), as one quiet row
  *  with its one way out at the right. Not a banner slab: the well tier, no icon colour. */
 export function Notice({ children, action }: { children: ReactNode; action?: ReactNode }) {

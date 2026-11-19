@@ -149,4 +149,4 @@ export const menuSubtitle = (m: SessionMatch) =>
     .join(" · ");
 
 /** The history transcript's own page path, for its menu's "Copy link". */
-export const historyLink = (m: SessionMatch) => absoluteUrl(sessionPath(m.harness, m.id));
+export const historyLink = (m: SessionMatch): string => absoluteUrl(sessionPath(m.harness, m.id)) ?? "";

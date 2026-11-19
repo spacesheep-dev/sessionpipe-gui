@@ -6,6 +6,7 @@
 // whether this page can sign, and the app's words. Rust validates each command, writes the
 // grant string itself and rate-limits; this file names the receiver and passes the bytes.
 import type { Info, KeyType } from "@shared/api";
+import { NEW_WORDS } from "../native/accountWords.new";
 import { invoke } from "../native/bridge";
 import { type DeviceSignature, lastInfo, rpId, type SendBody, type TrustedKey } from "./api";
 import { deviceWords, notifySigner, type SignOptions } from "./signer";
@@ -113,8 +114,14 @@ export async function grantExpiry(rp: string): Promise<number | null> {
 }
 
 // --- what Rust holds, per rp id, as it last said -----------------------------------------
+/** null: Rust said it holds no key for the rp id. Absent: not known (not asked yet, or the
+ *  last `status` failed). */
 const keys = new Map<string, TrustedKey | null>();
 const why = new Map<string, string>();
+/** The rp ids whose last `status` failed, with what it threw. `ownKeys` does not ask again
+ *  for them (each answer draws again, and would ask again); the app coming to the front does. */
+const failed = new Map<string, string>();
+const warned = new Set<string>();
 
 /** Ask Rust what it holds for `rp` (no key is made, no prompt shows). */
 export async function refresh(rp: string): Promise<TrustedKey | null> {
@@ -122,10 +129,15 @@ export async function refresh(rp: string): Promise<TrustedKey | null> {
   try {
     const s = await status(rp);
     keys.set(rp, s.key ?? null);
+    failed.delete(rp);
     if (!s.available && s.reason) why.set(rp, s.reason);
     else why.delete(rp);
-  } catch {
-    keys.set(rp, null);
+  } catch (e) {
+    // Not "no key": nothing is known, and nothing is read as if it were.
+    keys.delete(rp);
+    failed.set(rp, errorWords(e) ?? String(e));
+    if (!warned.has(rp)) console.warn("[signer] status failed for", rp, e);
+    warned.add(rp);
   }
   notifySigner();
   return keys.get(rp) ?? null;
@@ -133,9 +145,26 @@ export async function refresh(rp: string): Promise<TrustedKey | null> {
 
 export function ownKeys(rp: string): TrustedKey[] {
   const k = keys.get(rp);
-  if (k === undefined) void refresh(rp);
+  if (k === undefined && !failed.has(rp)) void refresh(rp);
   return k ? [k] : [];
 }
+
+/** Rust has said whether it holds a key for `rp`: `ownKeys` is then the whole answer. */
+export const ownKeyKnown = (rp: string): boolean => keys.has(rp);
+
+/** What the last read of the key for `rp` threw, when it failed: for the log, not a person. */
+export const ownKeyFailed = (rp: string): string | null => failed.get(rp) ?? null;
+
+// Rust makes the key where the page does not see it (the hub's ask, a notification's answer,
+// another window): an rp id it held no key for, or whose read failed, is read again each
+// time the app comes to the front.
+if (typeof document !== "undefined")
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") return;
+    const again = new Set(failed.keys());
+    for (const [rp, k] of keys) if (k === null) again.add(rp);
+    for (const rp of again) void refresh(rp);
+  });
 
 /** The kinds of key the receiver carries whole: Info.control.keyTypes, else its well-known
  *  `control.signing.key_types`; passkeys only on an older receiver. */
@@ -192,7 +221,8 @@ export function errorWords(e: unknown): string | null {
     case "cancelled":
       return `${deviceWords().auth} was cancelled, so nothing was signed`;
     case "lockout":
-      return `${deviceWords().auth} is locked: unlock it with your ${shell()?.platform === "macos" ? "password" : "passcode"}, then try again`;
+      // Two sentences: after "Not sent: " a second colon would not read.
+      return NEW_WORDS.signerLocked(deviceWords().auth, shell()?.platform === "macos" ? "password" : "passcode");
     case "rate_limited":
       return "slow down: too many sends in a row";
     default:

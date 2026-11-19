@@ -14,6 +14,7 @@ import {
   type WorkflowRun,
   type WorkflowStep,
 } from "@shared/api";
+import { signerLabel } from "../../control/signer";
 import { harnessMark } from "../../lib/format";
 
 /** A run is still moving: its steps may change under the page. */
@@ -226,7 +227,7 @@ export function stepRowWords(
           glyph: "needs",
           right: "",
           second: o.needsUnlock
-            ? "Waiting for your passkey."
+            ? `Waiting for ${signerLabel()}.`
             : o.untrusted
               ? `Waiting for a signer. ${machine} trusts no passkey from this browser.`
               : o.elsewhere
@@ -329,11 +330,13 @@ export function serverSaveWords(e: unknown): string {
   return err?.message ?? "the server didn't answer";
 }
 
+/** Six characters of chance for an id, from the platform's own generator (an id names a
+ *  thing; it is not made of Math.random). */
+export const randomTail = (): string =>
+  Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => (b % 36).toString(36)).join("");
+
 /** A workflow id for a new document: a slug of its name and a short random tail. */
-export function newWorkflowId(
-  name: string,
-  random: () => string = () => Math.random().toString(36).slice(2, 8),
-): string {
+export function newWorkflowId(name: string, random: () => string = randomTail): string {
   const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")

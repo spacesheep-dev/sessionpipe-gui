@@ -12,10 +12,12 @@ import {
   type StartFile,
   type StartPermission,
 } from "@shared/api";
+import { cleanReason } from "@shared/reason";
+import { accountBackend } from "../account/current";
 import { noteOwnSend } from "../lib/toasts";
-import { controlApi, type SendBody, type TrustedKey } from "./api";
+import { ControlError, controlApi, type SendBody, type TrustedKey, UNHEARD_CODE } from "./api";
 import { nonce } from "./bytes";
-import { remoteRpFor } from "./remoteRp";
+import { remoteHostFor, remoteRpFor } from "./remoteRp";
 import { dropGrant, sign, signerKind } from "./signer";
 
 export const COMMAND_TYPE = "sessionpipe.control";
@@ -25,8 +27,10 @@ export const KEY_STORE_SESSION = "sessionpipe:keys";
 export type CommandFields =
   /** `replyTo` (CONTROL.md §3.1 `reply_to`, a handoff): the session on the same machine
    *  the daemon relays the answer into. Inside the signed bytes; only when the machine's
-   *  hello said `handoff` (orchestrate/handoff decides). */
-  | { kind: "prompt"; session: string; text: string; replyTo?: SessionKey }
+   *  hello said `handoff` (orchestrate/handoff decides). `files`: the pictures sent beside
+   *  the message, held by the receiver under their hashes; only when the hello said
+   *  `prompt_files` (Attachments.tsx `pictureMode` decides). */
+  | { kind: "prompt"; session: string; text: string; files?: StartFile[]; replyTo?: SessionKey }
   | { kind: "permission.answer"; session: string; for: string; decision: "allow" | "deny"; note?: string }
   | { kind: "cancel"; session: string; note?: string }
   /** `files`, `permission` and `model` only when the machine's hello advertised them
@@ -48,6 +52,11 @@ export type CommandFields =
    *  for order (every account id), `code` for login.complete (the pasted `code#state`). */
   | { kind: "pool"; action: PoolAction; account?: string; order?: string[]; code?: string };
 
+/** A command's `files` as CONTROL.md §3.1 writes each: its four fields and nothing else an
+ *  upload's answer may hold beside them (a picture's pixels, or anything a receiver adds). */
+const signedFiles = (files: readonly StartFile[]): StartFile[] =>
+  files.map((x) => ({ name: x.name, type: x.type, size: x.size, sha256: x.sha256 }));
+
 /** The command string, fields in the spec's order, no field a kind does not own. */
 export function commandString(machine: string, f: CommandFields): string {
   const session = f.kind === "key.add" ? KEY_STORE_SESSION : f.kind === "pool" ? POOL_SESSION : f.session;
@@ -55,6 +64,8 @@ export function commandString(machine: string, f: CommandFields): string {
   switch (f.kind) {
     case "prompt":
       o.text = f.text;
+      // Never an empty list: `files` absent is no files, an empty one is malformed.
+      if (f.files?.length) o.files = signedFiles(f.files);
       if (f.replyTo) o.reply_to = f.replyTo;
       break;
     case "permission.answer":
@@ -68,8 +79,7 @@ export function commandString(machine: string, f: CommandFields): string {
     case "start":
       o.text = f.text;
       o.cwd = f.cwd;
-      if (f.files?.length)
-        o.files = f.files.map((x) => ({ name: x.name, type: x.type, size: x.size, sha256: x.sha256 }));
+      if (f.files?.length) o.files = signedFiles(f.files);
       if (f.permission) o.permission = f.permission;
       if (f.model) o.model = f.model;
       if (f.replyTo) o.reply_to = f.replyTo;
@@ -125,11 +135,53 @@ const GRANT_FAULTS = new Set(["bad_grant", "outside_grant", "bad_csig", "bad_ass
 const faultCode = (e: unknown): string | undefined =>
   e && typeof e === "object" && (e as { status?: unknown }).status === 422 ? (e as { code?: string }).code : undefined;
 
+/** A send the receiver's second look held for a fresh confirm (CONTROL.md §3.2: "a
+ *  receiver's second look may ask for one"). spacesheep holds a message to a machine paired
+ *  there when its safety check is unsure it is its owner's (server/control/ui.ts
+ *  forwardSend), and a confirm skips that check: so nothing here confirms on its own. The
+ *  page shows `why` (the receiver's own words) where the person pressed, and `confirm` runs
+ *  only from a press on that notice: it builds the command again (same fields, a new nonce
+ *  and `iat`), signs it once with a confirm and sends that alone. A caller that may not
+ *  prompt never gets one of these: it gets the refusal as `deliver` threw it. */
+export class HeldForConfirm<T> extends ControlError {
+  constructor(
+    held: unknown,
+    /** What the receiver said about why, as text. */
+    readonly why: string,
+    /** What was held: the fields as they were signed, the only ones a confirm sends. */
+    readonly fields: CommandFields,
+    /** The machine it was for. */
+    readonly machineId: string,
+    /** Who held it: the host of the spacesheep a machine paired there is reached through
+     *  (remoteRp.ts), or null for this receiver itself. */
+    readonly from: string | null,
+    /** Sign the same send again with one confirm and deliver it; call from a press only. */
+    readonly confirm: (o?: Pick<SendOptions, "onTap">) => Promise<T>,
+  ) {
+    const e = held as { status?: number; reason?: unknown; code?: string; detail?: unknown };
+    super(
+      e.status ?? 422,
+      typeof e.reason === "string" ? e.reason : "confirm_required",
+      e.code ?? "confirm_required",
+      typeof e.detail === "string" ? e.detail : undefined,
+    );
+    this.name = "HeldForConfirm";
+  }
+}
+
+/** The receiver's reason for a hold, cleaned (shared/reason.ts): its detail (spacesheep's
+ *  `why`, carried by forwardSend), else its reason. Also for a confirm held again. */
+export const heldWhy = (e: unknown): string => {
+  const x = (e ?? {}) as { detail?: unknown; reason?: unknown };
+  return cleanReason(x.detail) || cleanReason(x.reason);
+};
+
 /** Sign one command for `machineId` and hand the signed body to `deliver`: /send for the
  *  page's own commands (sendCommand), the run's PATCH for a workflow step (useRunner.ts),
  *  which queues it only once the server has seen the step is still this tab's. A refusal
- *  of the cached grant drops it and tries once more with a new one; any other refusal is
- *  thrown as `deliver` threw it. */
+ *  of the cached grant drops it and tries once more with a new one; a send the receiver
+ *  holds for a confirm is thrown as HeldForConfirm (never confirmed here); any other
+ *  refusal is thrown as `deliver` threw it. */
 export async function signAndDeliver<T>(
   rp: string,
   machineId: string,
@@ -147,24 +199,54 @@ export async function signAndDeliver<T>(
     if (o.from) body.from = o.from;
     return deliver(body);
   };
+  // Held for a confirm: the caller says so and offers one; a send that was a confirm
+  // already, or a caller that may not prompt, gets the refusal itself.
+  const held = (e: unknown): unknown =>
+    !o.confirm && !o.noPrompt && faultCode(e) === "confirm_required"
+      ? new HeldForConfirm<T>(e, heldWhy(e), fields, machineId, remoteHostFor(machineId) ?? null, (c = {}) =>
+          signAndDeliver(rp, machineId, fields, deliver, { ...o, onTap: c.onTap, confirm: true }),
+        )
+      : e;
   try {
     return await attempt();
   } catch (e) {
     const code = faultCode(e);
+    // A key the machine does not trust is no fault of the grant: nothing is signed again.
+    // On a spacesheep account its machines are read again, so the page knows the key list
+    // spacesheep checked the send against, and offers nothing else that would be refused.
+    const account = code === "untrusted_key" ? accountBackend() : null;
+    if (account) void account.machinesNow().catch(() => {});
     if (!o.confirm && code && GRANT_FAULTS.has(code)) {
       await dropGrant(rpUse);
       // A caller that may not prompt (the workflows runner) stops here: the grant is
       // gone, every useGrant on the page reads so, and the page the person is on asks.
       if (o.noPrompt) throw e;
       // The app's signer gets one fresh grant after a refusal (it rate-limits the rest).
-      return attempt(signerKind() === "device");
+      try {
+        return await attempt(signerKind() === "device");
+      } catch (again) {
+        throw held(again);
+      }
     }
-    throw e;
+    throw held(e);
+  }
+}
+
+/** A send nobody heard the answer to: thrown where a send's row would be returned, with the
+ *  id of the row that is followed in its place, so the caller can tell what became of it. */
+export class UnheardSend extends ControlError {
+  constructor(
+    readonly id: string,
+    words: string,
+  ) {
+    super(504, words, UNHEARD_CODE, words);
+    this.name = "UnheardSend";
   }
 }
 
 /** Build, sign and send one command to `machineId`. A refusal of the cached grant drops
- *  it and tries once more with a new one; any other refusal is thrown as ControlError. */
+ *  it and tries once more with a new one; a hold is thrown as HeldForConfirm; any other
+ *  refusal is thrown as ControlError. */
 export function sendCommand(
   rp: string,
   machineId: string,
@@ -177,6 +259,9 @@ export function sendCommand(
     fields,
     async (body) => {
       const carried = await controlApi.send(body);
+      // Nobody heard its answer (a page on a spacesheep account, account/unheard.ts): not
+      // sent as far as this caller may say, and never "not sent". The row is followed.
+      if (carried.unheard?.state === "asking") throw new UnheardSend(carried.id, carried.detail ?? "");
       noteOwnSend(carried.id);
       return carried;
     },

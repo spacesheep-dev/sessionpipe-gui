@@ -42,6 +42,15 @@ impl Refusal {
 /// `rx://localhost/<id>/<path>?<q>` (macOS, iOS, Linux) or `http://rx.localhost/<id>/<path>?<q>`
 /// (Windows) → (`id`, `/<path>?<q>`).
 pub fn parse_rx_uri(uri: &str) -> Result<(String, String), Refusal> {
+    let (id, path) = split_rx_uri(uri)?;
+    check_path(&path)?;
+    Ok((id, path))
+}
+
+/// The same split with the path as the page wrote it, unchecked: whose request it is
+/// decides which rule the path meets (`check_path` for a receiver, the doors for a
+/// spacesheep account, `account::open_door`).
+pub fn split_rx_uri(uri: &str) -> Result<(String, String), Refusal> {
     let rest = if let Some(r) = uri.strip_prefix("rx://localhost/") {
         r
     } else if let Some(r) = uri.strip_prefix("http://rx.localhost/") {
@@ -65,7 +74,6 @@ pub fn parse_rx_uri(uri: &str) -> Result<(String, String), Refusal> {
     } else {
         path.to_string()
     };
-    check_path(&path)?;
     Ok((id.to_string(), path))
 }
 
@@ -151,9 +159,20 @@ pub fn allow_origin<'a>(origin: Option<&'a str>, allowed: &[String]) -> Option<&
 }
 
 fn with_cors(
+    res: Response<Vec<u8>>,
+    origin: Option<&str>,
+    allowed: &[String],
+) -> Response<Vec<u8>> {
+    finish_exposing(res, origin, allowed, "etag, content-type")
+}
+
+/// `finish` with the response headers the page may read named by the caller (an account's
+/// answers expose `retry-after`, which a receiver's never needed).
+pub fn finish_exposing(
     mut res: Response<Vec<u8>>,
     origin: Option<&str>,
     allowed: &[String],
+    expose: &'static str,
 ) -> Response<Vec<u8>> {
     if let Some(o) = allow_origin(origin, allowed) {
         let h = res.headers_mut();
@@ -162,7 +181,7 @@ fn with_cors(
         }
         h.insert(
             "access-control-expose-headers",
-            HeaderValue::from_static("etag, content-type"),
+            HeaderValue::from_static(expose),
         );
     }
     res.headers_mut()

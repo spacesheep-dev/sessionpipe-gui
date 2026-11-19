@@ -350,6 +350,11 @@ export class PluginHost {
     if (!(att.answerable ?? !att.attentionId.startsWith("notif-"))) {
       throw new Error(`suggest: ${s.attentionId} cannot be answered from here (a notification twin)`);
     }
+    // Claude Code's question (AskUserQuestion): its answer is the option chosen, which an
+    // allow or a deny cannot carry, so it is answered on its computer and never suggested.
+    if (att.tool === "AskUserQuestion") {
+      throw new Error(`suggest: ${s.attentionId} is a question, answered on its computer`);
+    }
     const suggestion: Suggestion = {
       session: s.session,
       attentionId: s.attentionId,
