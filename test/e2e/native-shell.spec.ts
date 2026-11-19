@@ -24,8 +24,9 @@ interface FakeOptions {
    *  "later" nothing until Start sessionpipe has been pressed. */
   discover?: "switch" | "stay" | "none" | "later";
   /** What each press of Start sessionpipe ends in, the last one for every press after it:
-   *  the failure rx_start_local rejects with (lifecycle/supervisor.rs UpdateFailure), or
-   *  "hang" for a start that sends one progress line and never ends. */
+   *  the failure rx_start_local rejects with (lifecycle/supervisor.rs UpdateFailure),
+   *  "hang" for a start that sends one progress line and never ends, or "ok" for one that
+   *  sends it and brings this Mac's receiver (the one the window already shows). */
   start?: StartOutcome[];
   /** The stream: "big" grows the receiver's snapshot past 400 KB (sessions cloned) on its
    *  way through the channel, as a busy Mac's is; "silent" opens and sends nothing;
@@ -45,7 +46,7 @@ type UpdateOut = { state: string; version?: string; lastChecked?: string; error?
 /** An update that is downloaded and waits to be installed. */
 const READY: UpdateOut = { state: "ready", version: "0.3.1", lastChecked: new Date().toISOString() };
 
-type StartOutcome = { kind: string; line: string; log?: string } | "hang";
+type StartOutcome = { kind: string; line: string; log?: string } | "hang" | "ok";
 
 /** The fake shell, as an init script (runs before any page script, as the shell's does). */
 type FakeArgs = [
@@ -213,11 +214,18 @@ function fakeShell() {
             if (!start?.length) throw new Error("fake shell: no rx_start_local");
             const nth = calls.filter((c) => c.cmd === "rx_start_local").length - 1;
             const outcome = start[Math.min(nth, start.length - 1)] as StartOutcome;
-            if (outcome !== "hang") throw outcome;
+            if (outcome !== "hang" && outcome !== "ok") throw outcome;
             send((args.onProgress as { id: number }).id, {
               index: 0,
               message: { step: "install", message: "Installing the background service…" },
             });
+            if (outcome === "ok")
+              return new Promise((done) =>
+                setTimeout(
+                  () => done({ id: "e2erx00001", name: "This Mac", origin: location.origin, local: true }),
+                  300,
+                ),
+              );
             return new Promise(() => {});
           }
           case "rx_select":
@@ -715,32 +723,115 @@ test.describe("inside the native shell", () => {
     await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toBeVisible({ timeout: 12_000 });
   });
 
-  test("a first snapshot that doesn't come is said, with Retry", async ({ page }) => {
+  test("a first snapshot that doesn't come: still connecting to this Mac, with nothing to press", async ({ page }) => {
     await openInShell(page, "/", { stream: "silent" });
     await expect(page.locator(".board-skeleton")).toBeVisible();
-    const slow = page.getByRole("heading", { name: "Still connecting to the receiver…" });
+    const slow = page.getByRole("heading", { name: "Connecting to sessionpipe on this Mac…" });
     await expect(slow).toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: "Retry", exact: true }).first().click();
-    await expect.poll(async () => (await calls(page)).filter((c) => c === "rx_stream").length).toBe(2);
+    const state = page.locator("main .state");
+    await expect(state).toHaveAttribute("role", "status");
+    await expect(state.getByRole("button")).toHaveCount(0);
+    // A wait, not a failure: nothing on the page offers a retry, and the bar says nothing.
+    await expect(page.getByRole("button", { name: /^(Retry|Try again|Start sessionpipe)$/ })).toHaveCount(0);
+    await expect(page.locator(".bar-conn")).toHaveCount(0);
   });
 
-  test("a stream that fails says so on the board, with Retry, and the bar does not say it a second time", async ({
+  test("a stream that fails names this Mac, offers Start sessionpipe beside Retry, and is said once", async ({
     page,
   }) => {
     await openInShell(page, "/", { stream: "down" });
-    await expect(page.getByRole("heading", { name: "No connection to the receiver" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Can't reach sessionpipe on this Mac" })).toBeVisible({
       timeout: 10_000,
     });
     await expect(page.locator(".board-skeleton")).toHaveCount(0);
+    const state = page.locator("main .state");
+    await expect(state).toHaveAttribute("role", "status");
+    await expect(state.getByRole("button")).toHaveText(["Start sessionpipe", "Retry"]);
     // Before the first snapshot the board's own state is the one statement, with the one Retry.
-    await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(1);
-    await expect(page.locator("main .state").getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Retry|Try again)$/ })).toHaveCount(1);
     await expect(page.locator(".bar-conn")).toHaveCount(0);
-    // The sidebar's foot is its dot, named by its tooltip: no words, no button.
+    // The sidebar's foot is its dot, named by its tooltip in the same words: no button.
     const dot = page.locator(".rail .conn");
-    await expect(dot).toHaveAttribute("data-tip", "Reconnecting…");
+    await expect(dot).toHaveAttribute("data-tip", "Can't reach sessionpipe on this Mac");
     await expect(dot).toHaveText("");
     await expect(dot.locator("button")).toHaveCount(0);
+    await expect(page.getByText(/Reconnecting|receiver/)).toHaveCount(0);
+    // Retry asks again at once.
+    const asked = (await calls(page)).filter((c) => c === "rx_stream").length;
+    await state.getByRole("button", { name: "Retry" }).click();
+    await expect.poll(async () => (await calls(page)).filter((c) => c === "rx_stream").length).toBeGreaterThan(asked);
+  });
+
+  test("Start sessionpipe on a board that can't reach this Mac: its progress as the title, then this Mac selected and the stream asked again", async ({
+    page,
+  }) => {
+    await openInShell(page, "/", { stream: "down", start: ["ok"] });
+    const state = page.locator("main .state");
+    await expect(page.getByRole("heading", { name: "Can't reach sessionpipe on this Mac" })).toBeVisible({
+      timeout: 10_000,
+    });
+    const asked = (await calls(page)).filter((c) => c === "rx_stream").length;
+    await state.getByRole("button", { name: "Start sessionpipe" }).click();
+    // While it works: the installer's line is the title, Start can't be pressed, Retry steps aside.
+    await expect(page.getByRole("heading", { name: "Installing the background service…" })).toBeVisible();
+    const start = state.getByRole("button", { name: "Start sessionpipe" });
+    await expect(start).toHaveAttribute("aria-busy", "true");
+    await expect(start).toHaveAttribute("aria-disabled", "true");
+    await expect(state.getByRole("button", { name: "Retry" })).toHaveCount(0);
+    // It brought this Mac's receiver: selected, then the board connects again.
+    await expect.poll(() => calls(page)).toContain("rx_select");
+    const all = await calls(page);
+    expect(all.indexOf("rx_select")).toBeGreaterThan(all.indexOf("rx_start_local"));
+    const select = await page.evaluate(
+      () =>
+        (window as unknown as { __calls: { cmd: string; args: { id?: string } }[] }).__calls.find(
+          (c) => c.cmd === "rx_select",
+        )?.args.id,
+    );
+    expect(select).toBe("e2erx00001");
+    await expect.poll(async () => (await calls(page)).filter((c) => c === "rx_stream").length).toBeGreaterThan(asked);
+    // The receiver is still away here, so the board says so again, with Start ready to press.
+    await expect(page.getByRole("heading", { name: "Can't reach sessionpipe on this Mac" })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(state.getByRole("button", { name: "Start sessionpipe" })).not.toHaveAttribute("aria-busy");
+  });
+
+  test("a start from the board that fails says it as the welcome does, and Try again starts it again", async ({
+    page,
+  }) => {
+    await openInShell(page, "/", {
+      stream: "down",
+      start: [{ kind: "download", line: "npm error code E404 sessionpipe-gui" }, "hang"],
+    });
+    const state = page.locator("main .state");
+    await state.getByRole("button", { name: "Start sessionpipe" }).click({ timeout: 10_000 });
+    await expect(page.getByRole("heading", { name: "It didn't start." })).toBeVisible();
+    await expect(state.getByRole("button")).toHaveText(["Try again"]);
+    await state.locator("summary").click();
+    await expect(state.getByText("npm error code E404 sessionpipe-gui")).toBeVisible();
+    await state.getByRole("button", { name: "Try again" }).click();
+    await expect(page.getByRole("heading", { name: "Installing the background service…" })).toBeVisible();
+    expect((await calls(page)).filter((c) => c === "rx_start_local")).toHaveLength(2);
+  });
+
+  test("before the first snapshot a page with no loading state of its own says it in its bar", async ({ page }) => {
+    await openInShell(page, "/machines", { stream: "silent" });
+    const bar = page.locator(".bar .bar-conn");
+    await expect(bar).toContainText("Connecting…", { timeout: 5000 });
+    await expect(bar.getByRole("button")).toHaveCount(0);
+    await expect(page.locator(".rail .conn")).toHaveAttribute("data-tip", "Connecting…");
+  });
+
+  test("before the first snapshot a page with no loading state of its own says a failure in its bar, with Retry", async ({
+    page,
+  }) => {
+    await openInShell(page, "/machines", { stream: "down" });
+    const bar = page.locator(".bar .bar-conn");
+    await expect(bar).toContainText("Can't reach sessionpipe on this Mac", { timeout: 10_000 });
+    await expect(bar.getByRole("button", { name: "Retry" })).toBeVisible();
+    await expect(page.getByText(/Reconnecting/)).toHaveCount(0);
+    await expect(page.locator("[data-conn-announcer]")).toHaveText("Can't reach sessionpipe on this Mac.");
   });
 
   test("with the sidebar hidden, a dropped stream is said in the page bar, with Retry", async ({ page }) => {
@@ -1648,6 +1739,25 @@ test("in the phone app ⌘K opens the palette", async ({ page }) => {
   await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("ControlOrMeta+k");
   await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
+});
+
+// The phone's board that never got its first sessions names the computer it reads from,
+// with Retry alone: a phone starts nothing, and loads none of the start's code.
+test("in the phone app a board that can't reach its computer names it, with Retry", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const scripts: string[] = [];
+  page.on("request", (r) => {
+    if (r.resourceType() === "script") scripts.push(new URL(r.url()).pathname);
+  });
+  await page.route(/\/api\/ui\/stream/, (r) => r.abort());
+  await openInPhone(page, "/", { receiver: true });
+  await expect(page.getByRole("heading", { name: "Can't reach studio-mac" })).toBeVisible({ timeout: 10_000 });
+  const state = page.locator("main .state");
+  await expect(state).toHaveAttribute("role", "status");
+  await expect(state.getByRole("button")).toHaveText(["Retry"]);
+  await expect(page.getByRole("button", { name: /^(Retry|Try again)$/ })).toHaveCount(1);
+  await expect(page.locator(".phone-conn-sub")).toHaveCount(0);
+  expect(scripts.filter((s) => /StartHere/.test(s))).toEqual([]);
 });
 
 test("in a browser nothing native loads", async ({ page }) => {

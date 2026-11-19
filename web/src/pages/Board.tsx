@@ -29,6 +29,7 @@ import {
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
+import { NoConnection } from "../components/NoConnection";
 import { OfflineLine } from "../components/OfflineLine";
 import { BarStatus, PageBar } from "../components/PageBar";
 import {
@@ -508,8 +509,9 @@ export function Board() {
         title="Board"
         meta={catchingUp ? <BarStatus>{N.catchingUp}</BarStatus> : undefined}
         connSaid={
-          // Before the first snapshot the state below says it, with its own Retry.
-          firstLoad === "down"
+          // Before the first snapshot the page itself says where the connection stands
+          // (its loading rows, or the state below with its own Retry).
+          firstLoad !== null
         }
         tools={
           // Not before the first snapshot: the filters it decides would push the search
@@ -572,19 +574,7 @@ export function Board() {
           ))}
         </div>
       ) : firstLoad ? (
-        <EmptyState
-          center
-          title={firstLoad === "slow" ? "Still connecting to the receiver…" : "No connection to the receiver"}
-          actions={
-            <button type="button" className="btn btn--sm" onClick={() => store.reconnect()}>
-              Retry
-            </button>
-          }
-        >
-          {firstLoad === "slow"
-            ? "Its sessions show up here as soon as the first update arrives."
-            : "The board fills in as soon as the stream is back."}
-        </EmptyState>
+        <NoConnection slow={firstLoad === "slow"} />
       ) : null}
       {emptyShown.mounted && (
         <div className="board-empty" data-closing={emptyShown.closing ? "" : undefined}>

@@ -261,8 +261,8 @@ pairing link that carries the board's key only for a pairing the sink token star
   refused. "Ask another agent…" is not offered meanwhile, and its sheet, if open, waits
   and says so. A drop that is over within 400 ms changes nothing (it turned the message
   field off for an instant), and before the first sessions have loaded the Board and the
-  Inbox say "No connection to the receiver" alone. The board's line for an offline
-  computer dims with the rows it stands over. Nothing counts seconds any more, on the
+  Inbox say it alone. The board's line for an offline computer dims with the rows it
+  stands over. Nothing counts seconds any more, on the
   phone either, and a screen reader hears "Reconnecting." or "Offline." once and
   "Reconnected." once, where it read the countdown out every second. "Retry now" is
   "Retry" everywhere.
@@ -337,6 +337,19 @@ pairing link that carries the board's key only for a pairing the sink token star
   pool's accounts and their windows are one box, and on Connect the QR and its addresses
   are one, each folded group one row that opens in its box. Rows keep their height, and
   the phone looks as it did.
+- **When the first sessions never come, the Board and the Inbox name the computer they
+  can't reach, and the Mac app offers to start sessionpipe.** They said "No connection to
+  the receiver" or "Still connecting to the receiver…", with a sentence about the stream
+  and Retry, while the sidebar said "Reconnecting" about a connection there had never
+  been. They now say "Connecting to studio-mac…" while it waits, with nothing to press, and
+  "Can't reach studio-mac" with Retry when it fails ("spacesheep" for an account,
+  "sessionpipe" in a browser, "You're offline" with no network). For this Mac's own
+  sessionpipe the desktop app reads "Can't reach sessionpipe on this Mac" and puts Start
+  sessionpipe beside Retry: while it works its progress is the title, and a start that
+  didn't work says so as the welcome does, with Try again. Before the first sessions, a
+  page with no loading state of its own (Search, Machines) says "Connecting…" or "Can't
+  reach studio-mac" in its bar, and the sidebar's dot says the same. The menu bar item
+  reads "Can't reach this Mac", in lower case.
 
 ### Fixed
 

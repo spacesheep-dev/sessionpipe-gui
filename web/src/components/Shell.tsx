@@ -16,7 +16,7 @@ import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
 import { useAnswerableCount, useAppState, useStore, useStreamMark } from "../data/hooks";
-import { phoneLayout, usePanelCovers, usePhoneLayout } from "../lib/device";
+import { phoneLayout, reachName, usePanelCovers, usePhoneLayout } from "../lib/device";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
@@ -700,7 +700,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <div className="sr-only" aria-live="polite" aria-atomic="true" data-announcer>
         {announce}
       </div>
-      <ConnAnnouncer />
+      <ConnAnnouncer owned={route.name === "board" || route.name === "inbox"} />
       <nav className="rail" aria-label="Pages" {...railMenuProps}>
         <div className="rail-head">
           <Link to="/" className="rail-brand" title="sessionpipe gui">
@@ -817,11 +817,14 @@ const RECONNECT_GRACE_MS = 400;
 /** The stream's state in words, after a short grace (a reconnect that lands within it is
  *  never shown): what to draw ("live" inside the grace) and its words, "Reconnecting…" or
  *  "Offline" when the device is. No seconds: the words change only when the state does.
+ *  Before the first snapshot (`first`) there is nothing to reconnect to: a failure is
+ *  "Can't reach studio-mac" (lib/device.ts reachName), the board's own words for it.
  *  One reading for the sidebar's dot, the page bar (PageBar.tsx ConnStatus), the phone's
  *  pill and what is spoken. A reader that mounts while the stream is already down (a page
  *  opened during a drop) says so at once: the grace is for a drop it watched begin. */
-export function useConnection(): { as: string; label: string; down: boolean } {
-  const { connection } = useAppState();
+export function useConnection(): { as: string; label: string; down: boolean; first: boolean } {
+  const { connection, snapshotAt } = useAppState();
+  const first = !snapshotAt;
   const down = connection === "reconnecting" || connection === "offline";
   const [shown, setShown] = useState(down);
   useEffect(() => {
@@ -837,8 +840,16 @@ export function useConnection(): { as: string; label: string; down: boolean } {
   if (!down) was.current = connection;
   const as = down && !shown ? was.current : connection;
   const label =
-    as === "live" ? "live" : as === "connecting" ? "Connecting…" : as === "offline" ? "Offline" : "Reconnecting…";
-  return { as, label, down: as === "reconnecting" || as === "offline" };
+    as === "live"
+      ? "live"
+      : as === "connecting"
+        ? "Connecting…"
+        : as === "offline"
+          ? "Offline"
+          : first
+            ? NEW_WORDS.reachFailed(reachName())
+            : "Reconnecting…";
+  return { as, label, down: as === "reconnecting" || as === "offline", first };
 }
 
 /** The stream in the sidebar's foot: a dot in every state (solid while live, a ring while
@@ -861,22 +872,34 @@ export function ConnectionPill() {
 
 /** What a screen reader hears of the stream, once per change: "Reconnecting." or
  *  "Offline." when a drop has outlasted the grace, and "Reconnected." when a drop it
- *  spoke of is over. A first connect says nothing. Always mounted, beside the route
- *  announcer, so it speaks with the sidebar hidden and on a page with no bar; it is the
- *  only live region the stream has (the bar's words and the dot are not). */
-function ConnAnnouncer() {
-  const { as } = useConnection();
+ *  spoke of is over. A first connect says nothing; one that fails says "Can't reach
+ *  studio-mac." and then "Connected.", except on a page whose own first load says it
+ *  (`owned`: the Board's and the Inbox's, a live region of their own,
+ *  components/NoConnection.tsx). Always mounted,
+ *  beside the route announcer, so it speaks with the sidebar hidden and on a page with no
+ *  bar; it is the only live region the stream has (the bar's words and the dot are not). */
+function ConnAnnouncer({ owned }: { owned: boolean }) {
+  const { as, first } = useConnection();
   const [said, setSaid] = useState("");
-  const spoke = useRef(false);
+  // What it said of a failure: one before the first snapshot ("first") or a drop.
+  const spoke = useRef<"first" | "drop" | null>(null);
+  const quiet = first && owned;
   useEffect(() => {
     if (as === "reconnecting" || as === "offline") {
-      spoke.current = true;
-      setSaid(as === "offline" ? NEW_WORDS.streamOfflineSpoken : NEW_WORDS.streamReconnectingSpoken);
+      if (quiet) return;
+      spoke.current = first ? "first" : "drop";
+      setSaid(
+        as === "offline"
+          ? NEW_WORDS.streamOfflineSpoken
+          : first
+            ? NEW_WORDS.reachFailedSpoken(reachName())
+            : NEW_WORDS.streamReconnectingSpoken,
+      );
     } else if (as === "live" && spoke.current) {
-      spoke.current = false;
-      setSaid(NEW_WORDS.streamBackSpoken);
+      setSaid(spoke.current === "first" ? NEW_WORDS.streamConnectedSpoken : NEW_WORDS.streamBackSpoken);
+      spoke.current = null;
     }
-  }, [as]);
+  }, [as, first, quiet]);
   return (
     <div className="sr-only" role="status" aria-atomic="true" data-conn-announcer>
       {said}
@@ -892,7 +915,7 @@ function ConnAnnouncer() {
  *  is on the page. The pull down a list that refreshes it (PullRefresh) is the other way
  *  to retry: the pill rides with the content (pull.css) and the reconnect is the same one. */
 function PhoneConn() {
-  const { as, label, down } = useConnection();
+  const { as, label, down, first } = useConnection();
   const store = useStore();
   if (!down) return null;
   return (
@@ -900,7 +923,7 @@ function PhoneConn() {
       type="button"
       className={`phone-conn phone-conn--${as}`}
       onClick={() => store.reconnect()}
-      aria-label={`${as === "offline" ? NEW_WORDS.streamOfflineSpoken : NEW_WORDS.streamReconnectingSpoken} Retry`}
+      aria-label={`${as === "offline" ? NEW_WORDS.streamOfflineSpoken : first ? NEW_WORDS.reachFailedSpoken(reachName()) : NEW_WORDS.streamReconnectingSpoken} Retry`}
     >
       <span className="conn-dot" aria-hidden="true" />
       <span className="phone-conn-label">{label}</span>

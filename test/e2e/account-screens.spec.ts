@@ -2570,7 +2570,8 @@ test.describe("what else an account shows", () => {
       await expect(rows).toHaveAttribute("aria-hidden", "true");
       // Past the wait after which a receiver would be said to be slow: still the loading rows.
       await page.waitForTimeout(6500);
-      await expect(page.getByText("Still connecting to the receiver…")).toHaveCount(0);
+      await expect(page.getByText("Connecting to spacesheep…")).toHaveCount(0);
+      await expect(page.getByText("Connecting…")).toHaveCount(0);
       await expect(catching).toBeVisible();
       await expect(page.locator(".nav-badge")).toHaveCount(0);
       expect(await page.title()).not.toMatch(/^\(/);

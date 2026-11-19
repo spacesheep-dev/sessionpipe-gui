@@ -36,11 +36,12 @@ pub struct Model {
     pub paused: bool,
 }
 
-/// The tray's name for the receiver on this machine.
+/// The tray's name for the receiver on this machine, inside "Can't reach {name}" (the
+/// page's words for it name the same place: web/src/lib/device.ts reachName).
 const THIS_MACHINE: &str = if cfg!(target_os = "macos") {
-    "This Mac"
+    "this Mac"
 } else {
-    "This computer"
+    "this computer"
 };
 
 /// One row's text: title, the machine when there are several receivers, then what it needs.
@@ -572,9 +573,9 @@ mod tests {
         assert_eq!(m.title, None, "no number when disconnected");
         assert_eq!(m.unreachable, vec![THIS_MACHINE.to_string()]);
         #[cfg(target_os = "macos")]
-        assert_eq!(THIS_MACHINE, "This Mac");
+        assert_eq!(THIS_MACHINE, "this Mac");
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(THIS_MACHINE, "This computer");
+        assert_eq!(THIS_MACHINE, "this computer");
         let m = model(
             &[],
             &[

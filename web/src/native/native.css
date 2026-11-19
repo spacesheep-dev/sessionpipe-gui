@@ -155,6 +155,22 @@
   mask-image: none;
 }
 
+/* The board's first load on this computer's receiver (StartHere.tsx NoConnectionStart):
+   the same dimmed button while it works, the link in the title in its ink, and the raw
+   line under the buttons, across the state's width, read left to right. */
+.no-conn--start .btn[aria-disabled="true"] {
+  opacity: 0.45;
+}
+.no-conn--start .state-title a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+}
+.no-conn--start .start-details > .cmdwell {
+  text-align: left;
+}
+
 /* ----- the first-run sheet ----- */
 
 .first-run {

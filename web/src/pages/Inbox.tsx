@@ -31,6 +31,7 @@ import { ActionButton, Ago, EmptyState, HarnessGlyph, Notice, Redacted, StateDot
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
+import { NoConnection } from "../components/NoConnection";
 import { NotifyBlocked, NotifyMenu, notifyBlocked, useAppNotify } from "../components/NotifyToggle";
 import { BarStatus, PageBar } from "../components/PageBar";
 import {
@@ -259,8 +260,9 @@ export function Inbox() {
         className="inbox-head"
         meta={catchingUp ? <BarStatus>{NEW_WORDS.catchingUp}</BarStatus> : meta || undefined}
         connSaid={
-          // Before the first snapshot the state below says it, with its own Retry.
-          firstLoad === "down"
+          // Before the first snapshot the page itself says where the connection stands
+          // (its loading rows, or the state below with its own Retry).
+          firstLoad !== null
         }
         tools={<LabelChip value={label} onChange={setLabelFilter} />}
         actions={
@@ -316,17 +318,7 @@ export function Inbox() {
           ))}
         </div>
       ) : firstLoad ? (
-        <EmptyState
-          center
-          title={firstLoad === "slow" ? "Still connecting to the receiver…" : "No connection to the receiver"}
-          actions={
-            <button type="button" className="btn btn--sm" onClick={() => store.reconnect()}>
-              Retry
-            </button>
-          }
-        >
-          Prompts show up here as soon as the {firstLoad === "slow" ? "first update arrives" : "stream is back"}.
-        </EmptyState>
+        <NoConnection slow={firstLoad === "slow"} />
       ) : held.length === 0 && label ? (
         <EmptyState
           center

@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useBehind } from "../account/current";
 import { useStore } from "../data/hooks";
 import { usePhoneLayout } from "../lib/device";
 import { SearchInput } from "./bits";
@@ -28,8 +29,8 @@ import { listBehind, useConnection } from "./Shell";
  *  its state and Retry (ConnStatus below, in the phone's look). Its own component, so the
  *  bar itself does not follow the stream's state. */
 function PhoneSub({ meta, connSaid }: { meta?: ReactNode; connSaid?: boolean }) {
-  const { down } = useConnection();
-  if (down && !connSaid) return <ConnStatus phone />;
+  const said = useConnSaid();
+  if (said && !connSaid) return <ConnStatus phone />;
   return meta ? <div className="bar-sub">{meta}</div> : null;
 }
 
@@ -37,40 +38,64 @@ function PhoneSub({ meta, connSaid }: { meta?: ReactNode; connSaid?: boolean }) 
  *  down its state and Retry. The down state takes the slot on every page ("Catching up…",
  *  a session's machine and repo come back with the stream). */
 function BarMeta({ meta, connSaid }: { meta?: ReactNode; connSaid?: boolean }) {
-  const { down } = useConnection();
-  if (down && !connSaid) return <ConnStatus />;
+  const said = useConnSaid();
+  if (said && !connSaid) return <ConnStatus />;
   return meta ? <span className="bar-meta">{meta}</span> : null;
+}
+
+/** How long a first connect goes unsaid: one that answers at once never shows. */
+const FIRST_CONNECT_QUIET_MS = 1000;
+
+/** Whether the bar says where the stream stands: while it is down, and before the first
+ *  snapshot while a connect takes longer than a moment ("Connecting…", nothing to press;
+ *  not while an account catches up, which its page says). */
+function useConnSaid(): boolean {
+  const { as, down, first } = useConnection();
+  const behind = useBehind();
+  const waiting = first && as === "connecting" && !behind;
+  const [long, setLong] = useState(false);
+  useEffect(() => {
+    setLong(false);
+    if (!waiting) return;
+    const t = window.setTimeout(() => setLong(true), FIRST_CONNECT_QUIET_MS);
+    return () => window.clearTimeout(t);
+  }, [waiting]);
+  return down || (waiting && long);
 }
 
 /** A dropped stream, said once: its dot (a ring while reconnecting, red when offline),
  *  "Reconnecting…" or "Offline", and the one Retry (the same reconnect as the pull down a
- *  phone's page). One component for a desktop's bar and, as `phone`, the phone's subtitle
- *  line: the same words, each in its own look. Not a live region: what is spoken is the
+ *  phone's page). Before the first snapshot: "Can't reach studio-mac" with Retry, and a
+ *  long connect's "Connecting…" alone. One component for a desktop's bar and, as
+ *  `phone`, the phone's subtitle line: the same words, each in its own look. Not a live region: what is spoken is the
  *  shell's (Shell.tsx ConnAnnouncer), once per change. When the stream comes back while
  *  Retry holds the focus, the focus goes to the page rather than to nowhere. */
 function ConnStatus({ phone = false }: { phone?: boolean }) {
-  const { as, label } = useConnection();
+  const { as, label, down } = useConnection();
   const store = useStore();
   const retry = useRef<HTMLButtonElement>(null);
-  // A layout effect: its cleanup runs while the button is still in the document.
+  // A layout effect: its cleanup runs while the button is still in the document. Again
+  // when Retry comes and goes (a first connect's "Connecting…" has none).
   useLayoutEffect(() => {
-    const button = retry.current;
+    const button = down ? retry.current : null;
     return () => {
       if (button && document.activeElement === button) document.getElementById("main")?.focus({ preventScroll: true });
     };
-  }, []);
+  }, [down]);
   return (
     <div className={phone ? `bar-sub phone-conn-sub phone-conn-sub--${as}` : `bar-conn bar-conn--${as}`}>
       <span className="conn-dot" aria-hidden="true" />
       <span className={phone ? "phone-conn-label" : "bar-conn-label"}>{label}</span>
-      <button
-        ref={retry}
-        type="button"
-        className={phone ? "phone-conn-act" : "btn btn--ghost btn--sm"}
-        onClick={() => store.reconnect()}
-      >
-        Retry
-      </button>
+      {down ? (
+        <button
+          ref={retry}
+          type="button"
+          className={phone ? "phone-conn-act" : "btn btn--ghost btn--sm"}
+          onClick={() => store.reconnect()}
+        >
+          Retry
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -129,9 +154,9 @@ export function PageBar({
   actions?: ReactNode;
   /** The phone's large title; false on a detail page, whose title sits in the bar. */
   large?: boolean;
-  /** The page itself says that the stream is down (the Board and the Inbox before their
-   *  first snapshot: "No connection to the receiver", with Retry): the bar does not say
-   *  it a second time. */
+  /** The page itself says where the stream stands (the Board and the Inbox before their
+   *  first snapshot: their loading rows, "Can't reach studio-mac" with Retry): the bar
+   *  does not say it a second time. */
   connSaid?: boolean;
   /** Extra classes on the h1 (the session page's `sess-title`). */
   titleClassName?: string;

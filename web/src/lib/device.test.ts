@@ -5,11 +5,13 @@ import "../native/test-env";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DESKTOP_QUERY,
+  localReceiver,
   PANEL_COVERS_QUERY,
   PHONE_QUERY,
   panelCovers,
   phoneLayout,
   phoneShell,
+  reachName,
   shellPlatform,
   TOUCH_QUERY,
   touchKeys,
@@ -47,6 +49,47 @@ describe("shellPlatform", () => {
     expect(shellPlatform()).toBeNull();
     html.dataset.shell = "";
     expect(shellPlatform()).toBeNull();
+  });
+});
+
+describe("reachName", () => {
+  const here = { id: "rx1", name: "This Mac", origin: "http://127.0.0.1:7373", local: true };
+
+  it("names this Mac's own receiver, and this computer's off a Mac", () => {
+    g.sessionpipeShell = { v: 1, platform: "macos", receiver: here };
+    expect(reachName()).toBe("sessionpipe on this Mac");
+    expect(localReceiver()).toBe(true);
+    html.dataset.shell = "windows";
+    expect(reachName()).toBe("sessionpipe on this computer");
+    html.dataset.shell = "linux";
+    expect(reachName()).toBe("sessionpipe on this computer");
+    expect(localReceiver()).toBe(true);
+  });
+
+  it("names another computer by its name", () => {
+    g.sessionpipeShell = { v: 1, platform: "macos", receiver: { ...here, name: "studio-mac", local: false } };
+    expect(reachName()).toBe("studio-mac");
+    expect(localReceiver()).toBe(false);
+    g.sessionpipeShell = { v: 1, platform: "ios", receiver: { ...here, name: "studio-mac", local: false } };
+    expect(reachName()).toBe("studio-mac");
+  });
+
+  it("names spacesheep for an account", () => {
+    g.sessionpipeShell = {
+      v: 1,
+      platform: "ios",
+      receiver: { ...here, name: "me@example.com", local: false, kind: "spacesheep" },
+    };
+    expect(reachName()).toBe("spacesheep");
+    expect(localReceiver()).toBe(false);
+  });
+
+  it("is sessionpipe in a browser, and before a window has a receiver", () => {
+    expect(reachName()).toBe("sessionpipe");
+    expect(localReceiver()).toBe(false);
+    g.sessionpipeShell = { v: 1, platform: "macos", receiver: null };
+    expect(reachName()).toBe("sessionpipe");
+    expect(localReceiver()).toBe(false);
   });
 });
 

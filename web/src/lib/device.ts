@@ -3,7 +3,8 @@
 // (native/shell.ts, which only main.tsx imports): the shell's platform, which shell.ts
 // writes to `<html data-shell>` before the app renders (the flag it parsed stands in until
 // then, and in a unit test), the phone layout (where tokens.css switches) and whether a
-// finger is the main pointer, each as a yes or no, now or live. The layout's widths are
+// finger is the main pointer, each as a yes or no, now or live, and the place the
+// page's sessions come from, by the name the page says it with. The layout's widths are
 // written here and nowhere else in the page's code (breakpoints.test.ts).
 import { useSyncExternalStore } from "react";
 
@@ -31,6 +32,35 @@ export const phoneShell = (): boolean => {
   const p = shellPlatform();
   return p === "ios" || p === "android";
 };
+
+/** The receiver the shell says this window shows, as page code may read it. */
+type FlagReceiver = { name?: unknown; local?: unknown; kind?: unknown };
+const flagReceiver = (): FlagReceiver | null => {
+  const r = (globalThis as { sessionpipeShell?: { receiver?: unknown } }).sessionpipeShell?.receiver;
+  return r && typeof r === "object" ? (r as FlagReceiver) : null;
+};
+const DESKTOPS: readonly (ShellPlatform | null)[] = ["macos", "windows", "linux"];
+
+/** This window's receiver is the one on this computer, in the desktop app: the one the
+ *  app can start ("Start sessionpipe"). False on a phone, in a browser, for another
+ *  computer's and for a spacesheep account. */
+export const localReceiver = (): boolean => {
+  const r = flagReceiver();
+  return !!r && r.local === true && r.kind !== "spacesheep" && DESKTOPS.includes(shellPlatform());
+};
+
+/** Where the page's sessions come from, as the words that say it can't be reached name it
+ *  ("Can't reach …", "Connecting to …"): "spacesheep" for an account, "sessionpipe on this
+ *  Mac" (or "this computer" off a Mac) for the app's own receiver, another computer by its
+ *  name, and "sessionpipe" in a browser, where the page's own server is the receiver. The
+ *  menu bar's item says the same place ("Can't reach this Mac", tray.rs THIS_MACHINE). */
+export function reachName(): string {
+  const r = flagReceiver();
+  if (!r) return "sessionpipe";
+  if (r.kind === "spacesheep") return "spacesheep";
+  if (localReceiver()) return shellPlatform() === "macos" ? "sessionpipe on this Mac" : "sessionpipe on this computer";
+  return typeof r.name === "string" && r.name ? r.name : "sessionpipe";
+}
 
 /** The phone layout: a tab bar, sheets, large titles (tokens.css switches on the same
  *  query). A screen under 840 px whose main pointer is a finger, or that has none: a phone,

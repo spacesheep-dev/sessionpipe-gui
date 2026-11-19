@@ -596,6 +596,7 @@ export function EmptyState({
   center = false,
   glyph,
   className = "",
+  role,
 }: {
   title: ReactNode;
   children?: ReactNode;
@@ -603,9 +604,11 @@ export function EmptyState({
   center?: boolean;
   glyph?: ReactNode;
   className?: string;
+  /** "status" for a state that changes in place and is read out as it does. */
+  role?: "status";
 }) {
   return (
-    <div className={`state ${center ? "state--center" : ""} ${className}`}>
+    <div className={`state ${center ? "state--center" : ""} ${className}`} role={role}>
       {glyph ? <div className="state-glyph">{glyph}</div> : null}
       <h2 className="state-title">{title}</h2>
       {children ? <div className="state-text">{children}</div> : null}
