@@ -10,6 +10,8 @@
 // looks for the same reference. The block a machine writes after the words of a message
 // with files (sessionpipe's "Attached files", CONTROL.md §6) is read back here too: each
 // line a file saved in the session's folder, which the page draws as a thumbnail or a chip.
+// So is the block spacesheep's Talk pane wrote before it sent pictures as files: each line a
+// signed link, of which only the name is kept, so the link is never drawn.
 import type { Attachment } from "./api.js";
 
 /** CONTROL.md §3.1: a prompt's `text` is at most this many characters. */
@@ -76,7 +78,24 @@ export interface SavedFileRef {
   size: string;
 }
 
-export type PromptItem = AttachmentRef | SavedFileRef;
+/** Read only: the heading spacesheep's Talk pane writes over the pictures a message carries
+ *  in its words, a signed link each (spacesheep's talk-images.ts `TALK_IMAGES_HEAD`). */
+export const TALK_HEADING = "Images attached (download each one to look at it):";
+/** One line of that block: `- [<name>](<origin>/talk-files/<owner>/<sha>.<ext>?e=…&k=…)`.
+ *  spacesheep writes no bracket in a name; one that has them is still read whole. */
+const TALK_LINE_RE = /^- \[(.*)\]\(https?:\/\/[^\s()]+\/talk-files\/[^\s()]+\)$/;
+/** Such a line where a cut ends the text, before its closing parenthesis: its name, once
+ *  that is whole. */
+const TALK_CUT_RE = /^- \[(?:(.*)\]\([^\s()]*|[^\]]*)$/;
+
+/** A picture a spacesheep Talk message linked to: its name only. The link carries its own
+ *  key and is not this page's to show. */
+export interface LinkPictureRef {
+  kind: "link-picture";
+  name: string;
+}
+
+export type PromptItem = AttachmentRef | SavedFileRef | LinkPictureRef;
 
 /** 183402 → "179 KB", 1258291 → "1.2 MB": units of 1024, the way the machine's list says a
  *  size (sessionpipe's files.ts `humanSize`), so a file reads the same before and after. */
@@ -108,12 +127,42 @@ function splitSavedFiles(text: string): { body: string; files: SavedFileRef[] } 
   return { body: text, files: [] };
 }
 
+/** spacesheep's Talk block taken out of `text`: the last heading, at the start or after a
+ *  blank line, whose lines up to the next blank line (or the end) are all its links. The
+ *  last line of a text that ends inside the block may be cut short (a record's preview): it
+ *  is a picture when its name is whole, else nothing. Anything else after the heading keeps
+ *  the whole of it as words. */
+function splitTalkPictures(text: string): { body: string; pictures: LinkPictureRef[] } {
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i] !== TALK_HEADING || (i > 0 && lines[i - 1] !== "")) continue;
+    let end = i + 1;
+    while (end < lines.length && lines[end] !== "") end++;
+    const pictures: LinkPictureRef[] = [];
+    let read = end > i + 1;
+    for (let n = i + 1; n < end && read; n++) {
+      const m = TALK_LINE_RE.exec(lines[n]!);
+      const cut = m || n < lines.length - 1 ? null : TALK_CUT_RE.exec(lines[n]!);
+      const name = m?.[1] ?? cut?.[1];
+      if (name !== undefined) pictures.push({ kind: "link-picture", name });
+      read = !!(m || cut);
+    }
+    if (!read) continue;
+    const before = lines.slice(0, i).join("\n").replace(/\s+$/, "");
+    const after = lines.slice(end).join("\n").replace(/^\s+/, "");
+    return { body: before && after ? `${before}\n\n${after}` : before || after, pictures };
+  }
+  return { body: text, pictures: [] };
+}
+
 /** A prompt text taken apart: `body` is the message without the attachments block (and
- *  without bare references) and without the machine's list of saved files, `items` the
- *  images it named, in order, each once, then the files the list names. */
+ *  without bare references), without spacesheep's Talk block and without the machine's
+ *  list of saved files; `items` the images it named, in order, each once, then the
+ *  pictures the Talk block names, then the files the list names. */
 export function splitAttachments(prompt: string): { body: string; items: PromptItem[] } {
   const saved = splitSavedFiles(prompt);
-  const text = saved.body;
+  const talk = splitTalkPictures(saved.body);
+  const text = talk.body;
   const items: PromptItem[] = [];
   const seen = new Set<string>();
   let body = text;
@@ -138,8 +187,20 @@ export function splitAttachments(prompt: string): { body: string; items: PromptI
     }
     items.push(ref);
   }
-  items.push(...saved.files);
+  items.push(...talk.pictures, ...saved.files);
   return { body: body.trimEnd(), items };
+}
+
+/** A prompt's words for a preview of one line (a board's row, the palette's peek), which
+ *  may be cut anywhere: everything from the first heading of a block of pictures or files
+ *  on is left out, so no path and no link of one is shown. */
+export function promptWords(text: string): string {
+  let at = text.length;
+  for (const h of [LOCAL_HEADING, REMOTE_HEADING, FILES_HEADING, TALK_HEADING]) {
+    const i = text.startsWith(h) ? 0 : text.indexOf(`\n${h}`);
+    if (i >= 0 && i < at) at = i;
+  }
+  return text.slice(0, at).trim();
 }
 
 /** Every attachment id a text refers to (the server's retention scan). */

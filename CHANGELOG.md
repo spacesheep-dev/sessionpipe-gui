@@ -214,6 +214,13 @@ could not read.
   ("only lets the agent work in"); now it offers the computer's own folders and recent
   ones under them, as full paths, and Start sends the full path. New session here and Ask
   another agent, from a session in a `~/…` folder, start from those too.
+- **Pictures another surface sent are chips, not links or paths.** A message sent from
+  spacesheep's Talk pane shows each picture by its name (`kiwi.png · picture · kept on
+  spacesheep`) instead of its link, on the board, on a spacesheep account and in a row of
+  the board, which quotes only the words. On a spacesheep account, a message sent from an
+  older version of this app's message box shows a chip for each picture it named
+  (`picture · 1200×900 · kept on the board it was sent from`), and one of pictures alone is
+  its chips instead of an empty bubble.
 
 ## [0.8.5] - 2026-11-18
 

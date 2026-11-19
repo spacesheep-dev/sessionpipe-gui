@@ -17,6 +17,9 @@
 // receiver still keeps (GET …/control/files/:sha), else a chip with its name, type and size.
 // Before the session's record of the turn arrives that is the sent row's `files`; after, the
 // list of saved files the machine added to the message, each found again by its nonce.
+// A picture held somewhere this page can't show it from is a chip that says where it is
+// kept: one an older version of this page named (on a spacesheep account, which holds no
+// receiver's pictures), and one spacesheep's Talk pane linked to (the link is never drawn).
 import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_TYPES,
@@ -38,6 +41,7 @@ import {
   attachmentLines,
   composePrompt,
   humanSize,
+  type LinkPictureRef,
   PROMPT_MAX_CHARS,
   type PromptItem,
   type SavedFileRef,
@@ -872,11 +876,38 @@ function SentFile({ f, draw }: { f: ShownFile; draw: boolean }) {
   );
 }
 
-/** Thumbnails for the images a prompt text names; each opens the full image in a new tab. */
+/** Where a picture this page can't show is kept, as its chip says it. */
+export const KEPT_ON_BOARD = "kept on the board it was sent from";
+export const KEPT_ON_SPACESHEEP = "kept on spacesheep";
+
+/** A picture as words, where this page has no way to show it: its name, then what it is and
+ *  where it is kept ("picture · 1200×900 · kept on the board it was sent from"). */
+function ElsewhereChip({ name, facts }: { name: string; facts: string }) {
+  return (
+    <span className="att-chip att-chip--elsewhere" title={`${name} · ${facts}`} data-picture-elsewhere={name}>
+      <span className="att-chip-name">{name}</span>
+      <span className="att-chip-meta num">{facts}</span>
+    </span>
+  );
+}
+
+/** Thumbnails for the images a prompt text names; each opens the full image in a new tab.
+ *  On a spacesheep account, whose relay holds none of a receiver's images, a chip each:
+ *  nothing is asked for that would come back broken. */
 export function AttachmentThumbs({ items, small }: { items: readonly AttachmentRef[]; small?: boolean }) {
-  // The images a receiver holds are not on a spacesheep account's relay: nothing to show,
-  // and nothing to ask for that would come back broken.
-  if (items.length === 0 || accountMode()) return null;
+  if (items.length === 0) return null;
+  if (accountMode())
+    return (
+      <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`}>
+        {items.map((it) => (
+          <ElsewhereChip
+            key={it.id}
+            name="picture"
+            facts={[it.width && it.height ? `${it.width}×${it.height}` : "", KEPT_ON_BOARD].filter(Boolean).join(" · ")}
+          />
+        ))}
+      </span>
+    );
   return (
     <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`} data-attachment-thumbs={items.length}>
       {items.map((it) => (
@@ -898,11 +929,23 @@ export function AttachmentThumbs({ items, small }: { items: readonly AttachmentR
   );
 }
 
-/** A prompt's text with the attachments block, or the machine's list of saved files,
- *  turned into thumbnails; `files`: what the message signed, drawn when its words have no
- *  list (they are the message as sent). `render` draws the remaining text (Redacted by
- *  default), so a composer with markdown can pass its own. A message of pictures alone is
- *  its pictures. */
+/** The pictures a spacesheep Talk message linked to, a chip each with its name. */
+export function LinkPictures({ items, small }: { items: readonly LinkPictureRef[]; small?: boolean }) {
+  if (items.length === 0) return null;
+  return (
+    <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`}>
+      {items.map((it, i) => (
+        <ElsewhereChip key={`${i}:${it.name}`} name={it.name || "picture"} facts={`picture · ${KEPT_ON_SPACESHEEP}`} />
+      ))}
+    </span>
+  );
+}
+
+/** A prompt's text with its block of pictures (this page's, an older one's or spacesheep's
+ *  Talk pane's), or the machine's list of saved files, turned into thumbnails and chips;
+ *  `files`: what the message signed, drawn when its words have no list (they are the
+ *  message as sent). `render` draws the remaining text (Redacted by default), so a composer
+ *  with markdown can pass its own. A message of pictures alone is its pictures. */
 export function PromptBody({
   text,
   small,
@@ -918,11 +961,13 @@ export function PromptBody({
   const { body, items } = useMemo(() => splitAttachments(text), [text]);
   const shown = useMemo(() => shownFiles(items, files, rows), [items, files, rows]);
   const legacy = attachmentRefs(items);
-  if (legacy.length === 0 && shown.length === 0) return <>{render(text)}</>;
+  const links = linkPictures(items);
+  if (legacy.length === 0 && links.length === 0 && shown.length === 0) return <>{render(text)}</>;
   return (
     <>
       {body ? render(body) : null}
       <AttachmentThumbs items={legacy} small={small} />
+      <LinkPictures items={links} small={small} />
       <SentPictures files={shown} small={small} />
     </>
   );
@@ -930,7 +975,11 @@ export function PromptBody({
 
 /** The pictures a prompt's text names in the composer's own block (shared/attachments.ts). */
 export const attachmentRefs = (items: readonly PromptItem[]): AttachmentRef[] =>
-  items.filter((it): it is AttachmentRef => it.kind !== "file");
+  items.filter((it): it is AttachmentRef => it.kind === undefined);
+
+/** The pictures a prompt's text links to in spacesheep's Talk block. */
+export const linkPictures = (items: readonly PromptItem[]): LinkPictureRef[] =>
+  items.filter((it): it is LinkPictureRef => it.kind === "link-picture");
 
 /** For list rows: the prompt's first line without the block, and what it carried. */
 export function promptParts(text: string): { body: string; items: PromptItem[] } {

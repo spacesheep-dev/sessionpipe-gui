@@ -4,13 +4,15 @@
 // that an upload arrived whole, and the pin that nothing of the board (its key, an address
 // of it, a link to a file it holds) is in what is signed. And a sent message's files: the
 // list of them the machine adds to its words read back, each found by its hash, and drawn
-// as a thumbnail or a chip.
+// as a thumbnail or a chip; a picture kept elsewhere (an older version's block on an
+// account, spacesheep's Talk block) drawn as a chip, never as its path or link.
 import "../native/test-env";
 import type { Attachment, ControlActivity, MachineControl } from "@shared/api";
-import { composePrompt, humanSize, splitAttachments } from "@shared/attachments";
+import { composePrompt, humanSize, LOCAL_HEADING, promptWords, splitAttachments } from "@shared/attachments";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ActivityRow } from "./Activity";
 import {
   composeFiles,
   fileWords,
@@ -30,6 +32,13 @@ import {
 } from "./Attachments";
 import { b64url, sha256 } from "./bytes";
 import { commandString } from "./command";
+
+// A spacesheep account's window, when a test asks for one: its relay holds no receiver's pictures.
+const shell = vi.hoisted(() => ({ account: false }));
+vi.mock("../lib/net", async (actual) => ({
+  ...(await actual<typeof import("../lib/net")>()),
+  accountMode: () => shell.account,
+}));
 
 const M = "m_testmachine0000000001";
 const SID = "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e";
@@ -464,5 +473,160 @@ describe("a sent message's files, found and drawn", () => {
     const before = renderToStaticMarkup(createElement(PromptBody, { text: "Look", files: rows[1]!.files }));
     expect(before).toContain(`src="/api/ui/control/files/${SHA.birch}"`);
     expect(before).toContain('data-sent-file="notes.pdf"');
+  });
+});
+
+// ---------- pictures kept elsewhere ----------
+
+const TALK = "Images attached (download each one to look at it):";
+const talkLink = (name: string, sha = "TKk3".padEnd(43, "x")) =>
+  `- [${name}](https://spacesheep.dev/talk-files/${"0".repeat(32)}/${sha}.png?e=1795139368424&k=c838${"0".repeat(28)})`;
+
+describe("spacesheep's Talk block, read back", () => {
+  it("one link: the words, and the picture by its name, with nothing of the link", () => {
+    const text = `What colour is the square?\n\n${TALK}\n${talkLink("kiwi.png")}`;
+    expect(splitAttachments(text)).toEqual({
+      body: "What colour is the square?",
+      items: [{ kind: "link-picture", name: "kiwi.png" }],
+    });
+  });
+
+  it("several links, and a message of pictures alone, which is its pictures", () => {
+    const text = `${TALK}\n${talkLink("kiwi.png")}\n${talkLink("birch.jpg", "b".repeat(43))}\n${talkLink("Screenshot 2026-11-17 at 10.41.07 PM.png")}`;
+    expect(splitAttachments(text)).toEqual({
+      body: "",
+      items: [
+        { kind: "link-picture", name: "kiwi.png" },
+        { kind: "link-picture", name: "birch.jpg" },
+        { kind: "link-picture", name: "Screenshot 2026-11-17 at 10.41.07 PM.png" },
+      ],
+    });
+  });
+
+  it("a name with brackets: spacesheep writes them as spaces, and one written whole is read whole", () => {
+    // talk-images.ts talkImagesBlock: "[shot] 1].png" is written "shot  1 .png".
+    expect(splitAttachments(`${TALK}\n${talkLink("shot  1 .png")}`).items).toEqual([
+      { kind: "link-picture", name: "shot  1 .png" },
+    ]);
+    expect(splitAttachments(`Look\n\n${TALK}\n${talkLink("[draft] kiwi (2).png")}`)).toEqual({
+      body: "Look",
+      items: [{ kind: "link-picture", name: "[draft] kiwi (2).png" }],
+    });
+  });
+
+  it("a text cut inside the block (a record's preview): the pictures whose names are whole, and no link", () => {
+    const whole = `${TALK}\n${talkLink("kiwi.png")}\n${talkLink("birch.png")}`;
+    const cutInLink = whole.slice(0, whole.length - 40);
+    expect(splitAttachments(`Look\n\n${cutInLink}`)).toEqual({
+      body: "Look",
+      items: [
+        { kind: "link-picture", name: "kiwi.png" },
+        { kind: "link-picture", name: "birch.png" },
+      ],
+    });
+    const cutInName = `${TALK}\n${talkLink("kiwi.png")}\n- [bir`;
+    expect(splitAttachments(cutInName)).toEqual({ body: "", items: [{ kind: "link-picture", name: "kiwi.png" }] });
+  });
+
+  it("anything else after the heading keeps the whole of it as words", () => {
+    const stray = `Look\n\n${TALK}\n${talkLink("kiwi.png")}\nand tell me what you see`;
+    expect(splitAttachments(stray)).toEqual({ body: stray, items: [] });
+    const elsewhere = `Look\n\n${TALK}\n- [kiwi.png](https://example.com/kiwi.png)`;
+    expect(splitAttachments(elsewhere)).toEqual({ body: elsewhere, items: [] });
+    const inline = `I wrote:\n${TALK}\n${talkLink("kiwi.png")}`;
+    expect(splitAttachments(inline)).toEqual({ body: inline, items: [] });
+    expect(splitAttachments(TALK)).toEqual({ body: TALK, items: [] });
+  });
+
+  it("with the machine's list after it, both are read", () => {
+    const text = `Look\n\n${TALK}\n${talkLink("kiwi.png")}\n\n${HEADING}\n- .sessionpipe/files/s1/${NONCE}/notes.pdf (application/pdf, 3 KB)`;
+    const { body, items } = splitAttachments(text);
+    expect(body).toBe("Look");
+    expect(items.map((it) => [it.kind, "name" in it ? it.name : ""])).toEqual([
+      ["link-picture", "kiwi.png"],
+      ["file", "notes.pdf"],
+    ]);
+  });
+
+  it("draws a chip with the name, says where it is kept, and never draws the link", () => {
+    const text = `What colour is the square?\n\n${TALK}\n${talkLink("kiwi.png")}\n${talkLink("birch.png")}`;
+    const html = renderToStaticMarkup(createElement(PromptBody, { text }));
+    expect(html).toContain("What colour is the square?");
+    expect(html).toContain('data-picture-elsewhere="kiwi.png"');
+    expect(html).toContain('title="birch.png · picture · kept on spacesheep"');
+    for (const no of ["talk-files", "?e=", "&k=", "https:", TALK, "<img", "<a "]) expect(html).not.toContain(no);
+  });
+});
+
+describe("an older version's block of pictures on a spacesheep account", () => {
+  afterEach(() => {
+    shell.account = false;
+  });
+  const STATE = "/Users/you/.local/state/sessionpipe-gui/attachments";
+  const local = (id: string, w: number, h: number) => `- ${STATE}/${id}.png (${w}×${h})`;
+  const A = "01K00000000000000000000001";
+  const B = "01K00000000000000000000002";
+
+  it("a chip each, by its size and where it is kept; no path, no thumbnail, nothing asked for", () => {
+    shell.account = true;
+    const text = `Fix this\n\n${LOCAL_HEADING}\n${local(A, 1200, 900)}\n${local(B, 10, 10)}`;
+    const html = renderToStaticMarkup(createElement(PromptBody, { text }));
+    expect(html).toContain("Fix this");
+    expect(html).toContain('title="picture · 1200×900 · kept on the board it was sent from"');
+    expect(html).toContain('title="picture · 10×10 · kept on the board it was sent from"');
+    expect(html.match(/data-picture-elsewhere/g)).toHaveLength(2);
+    for (const no of [STATE, "/attachments/", "<img", "<a ", LOCAL_HEADING]) expect(html).not.toContain(no);
+  });
+
+  it("a message of pictures alone is its chips, never an empty bubble", () => {
+    shell.account = true;
+    const html = renderToStaticMarkup(createElement(PromptBody, { text: `${LOCAL_HEADING}\n${local(A, 1200, 900)}` }));
+    expect(html).toContain("picture");
+    expect(html).toContain("1200×900 · kept on the board it was sent from");
+    // A picture named in the words, with no size: its chip says only where it is kept.
+    const bare = renderToStaticMarkup(createElement(PromptBody, { text: `Tidy the notes. /attachments/${A}.png` }));
+    expect(bare).toContain('title="picture · kept on the board it was sent from"');
+  });
+
+  it("on the board itself the same block is thumbnails, as before", () => {
+    const html = renderToStaticMarkup(createElement(PromptBody, { text: `${LOCAL_HEADING}\n${local(A, 1200, 900)}` }));
+    expect(html).toContain(`src="/attachments/${A}.png"`);
+    expect(html).not.toContain("data-picture-elsewhere");
+  });
+
+  it("an Activity row of pictures alone shows its chips, and a Talk message's row its names", () => {
+    shell.account = true;
+    const row = (text: string) =>
+      renderToStaticMarkup(
+        createElement(ActivityRow, {
+          a: {
+            id: "01ROW",
+            machineId: M,
+            kind: "prompt",
+            session: SID,
+            at: "2026-11-18T10:00:00Z",
+            expiresAt: "2026-11-18T11:00:00Z",
+            text,
+          } as ControlActivity,
+        }),
+      );
+    const legacy = row(`${LOCAL_HEADING}\n${local(A, 1200, 900)}`);
+    expect(legacy).toContain("1200×900 · kept on the board it was sent from");
+    expect(legacy).not.toContain(STATE);
+    const talk = row(`Look\n\n${TALK}\n${talkLink("kiwi.png")}`);
+    expect(talk).toContain('data-picture-elsewhere="kiwi.png"');
+    expect(talk).not.toContain("talk-files");
+  });
+});
+
+describe("a prompt's words for a one-line preview", () => {
+  it("leaves out every kind of block from its heading on, cut anywhere", () => {
+    expect(promptWords(`What colour is it?\n\n${TALK}\n${talkLink("kiwi.png")}`)).toBe("What colour is it?");
+    expect(promptWords(`${TALK}\n- [kiwi.png](https://spacesheep.dev/talk-fi`)).toBe("");
+    expect(promptWords(`Fix this\n\n${LOCAL_HEADING}\n- /Users/you/x/attachments/01K0.png (1×1)`)).toBe("Fix this");
+    expect(promptWords(`Look\n\n${HEADING}\n- .sessionpipe/files/s1/kiwi.png (image/png, 32 KB)`)).toBe("Look");
+    expect(promptWords("  Just words, with an Images attached mention.  ")).toBe(
+      "Just words, with an Images attached mention.",
+    );
   });
 });

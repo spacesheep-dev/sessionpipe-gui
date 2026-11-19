@@ -209,3 +209,19 @@
   padding: 0 6px;
   font-size: var(--text-xs);
 }
+
+/* A picture kept elsewhere (an older version's block on an account, spacesheep's Talk
+   pane): its name stays whole up to half the chip, and where it is kept wraps under it
+   in a narrow column rather than cutting either. */
+.att-chip--elsewhere {
+  white-space: normal;
+}
+.att-chip--elsewhere .att-chip-name {
+  flex: none;
+  max-width: 50%;
+  white-space: nowrap;
+}
+.att-chip--elsewhere .att-chip-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+}

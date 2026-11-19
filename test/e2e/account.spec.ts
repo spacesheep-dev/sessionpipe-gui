@@ -1148,3 +1148,114 @@ test.describe("a phone that cannot sign, with no storage to keep the board in", 
     expect(ss2.jobs).toEqual([]);
   });
 });
+
+test.describe("pictures another surface sent, on an account", () => {
+  let ss4: FakeSpacesheep;
+  let hub4: HubStandIn;
+  let server4: AccountServer;
+  let context4: BrowserContext;
+  let page4: Page;
+  const STATE = "/Users/you/.local/state/sessionpipe-gui/attachments";
+  const LOCAL = "Attached images (open them with your file-reading tool):";
+  const TALK = "Images attached (download each one to look at it):";
+  const LINK = `https://spacesheep.test/talk-files/${"0".repeat(32)}/${"k".repeat(43)}.png?e=1795139368424&k=${"c".repeat(32)}`;
+
+  test.beforeAll(async ({ browser }) => {
+    ss4 = new FakeSpacesheep();
+    ss4.machines = [
+      {
+        id: MACHINE,
+        name: NAME,
+        online: true,
+        last_seen: Date.now(),
+        agents: ["claude-code"],
+        modes: ["waiter"],
+        passkey_ids: ["a-passkey-made-on-spacesheep"],
+        key_types: ["passkey", "device"],
+      },
+    ];
+    const turns = (id: string, title: string, asks: [string, string][]): ProtocolEvent[] => {
+      const s = new Session(id);
+      const named = { ...on, session: { ...on.session, title } };
+      return [
+        s.ev("session.started", { source: "startup" }, named),
+        ...asks.flatMap(([user, assistant], i) => [
+          s.ev("turn.started", { turn_id: `t${i + 1}` }, named),
+          s.ev("turn.transcript", { turn: i + 1, user, assistant }, named),
+          s.ev("turn.ended", { turn_id: `t${i + 1}` }, named),
+        ]),
+      ];
+    };
+    // Sent from the GUI's message box before pictures went as files (like 70acd48b): a
+    // message with words and a picture, then one of a picture alone.
+    ss4.push(
+      turns("s-from-gui", "Colours from the board", [
+        [`What colour is this?\n\n${LOCAL}\n- ${STATE}/01K00000000000000000000001.png (1200×900)`, "Grey, SLATE."],
+        [`${LOCAL}\n- ${STATE}/01K00000000000000000000002.png (640×480)`, "Orange MAPLE."],
+      ]),
+    );
+    // Sent from spacesheep's Talk pane: a signed link to each picture in the words.
+    ss4.push(
+      turns("s-from-talk", "Colours from Talk", [
+        [`What colour is the square?\n\n${TALK}\n- [kiwi.png](${LINK})`, "Red KIWI."],
+      ]),
+    );
+    // And one the agent is at: the board's row quotes what it was asked.
+    const asked = new Session("s-asked-in-talk");
+    const named = { ...on, session: { ...on.session, title: "Brightness from Talk" } };
+    ss4.push([
+      asked.ev("session.started", { source: "startup" }, named),
+      asked.ev("turn.started", { turn_id: "t1" }, named),
+      asked.ev(
+        "turn.progress",
+        { turn: 1, user: `Which one is brighter?\n\n${TALK}\n- [birch.png](${LINK})`, assistant: "" },
+        named,
+      ),
+    ]);
+    hub4 = new HubStandIn({ upstream: { origin: "https://spacesheep.test", ask: (req) => ss4.handle(req) } });
+    hub4.add("me@example.com", ss4.key);
+    server4 = await startAccountServer({ web: WEB, hub: hub4 });
+    context4 = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      storageState: { cookies: [], origins: [] },
+    });
+    await context4.addInitScript(fakeShell, {});
+    page4 = await context4.newPage();
+  });
+  test.afterAll(async () => {
+    await context4?.close();
+    await server4?.close();
+  });
+
+  test("a message from the GUI's older message box shows a chip for each picture, and one of a picture alone is never empty", async () => {
+    await page4.goto(`${server4.url}/s/claude-code/s-from-gui`);
+    await expect(page4.getByText("Orange MAPLE.").first()).toBeVisible();
+    const chips = page4.locator("[data-picture-elsewhere]");
+    await expect(chips).toHaveCount(2);
+    await expect(chips.first()).toHaveAttribute("title", "picture · 1200×900 · kept on the board it was sent from");
+    await expect(chips.last()).toHaveText(/picture\s*640×480 · kept on the board it was sent from/);
+    // Every message of the person's has something in it: its words, or its pictures.
+    const prompts = page4.locator("blockquote.prompt, blockquote.chat-bubble");
+    await expect(prompts).toHaveCount(2);
+    for (const p of await prompts.all()) expect((await p.innerText()).trim()).not.toBe("");
+    const html = await page4.content();
+    for (const no of [STATE, LOCAL, "/attachments/"]) expect(html).not.toContain(no);
+    expect(server4.seen.filter((r) => r.includes("/attachments/"))).toEqual([]);
+  });
+
+  test("a message from spacesheep's Talk pane shows its picture by name, and its link is nowhere on the page", async () => {
+    await page4.goto(`${server4.url}/s/claude-code/s-from-talk`);
+    await expect(page4.getByText("Red KIWI.").first()).toBeVisible();
+    await expect(page4.getByText("What colour is the square?").first()).toBeVisible();
+    const chip = page4.locator("[data-picture-elsewhere]");
+    await expect(chip).toHaveCount(1);
+    await expect(chip).toHaveText(/kiwi\.png\s*picture · kept on spacesheep/);
+    expect(await page4.content()).not.toContain("talk-files");
+    // Nor on the board, where a row quotes the words it was asked, and only them.
+    await page4.goto(server4.url);
+    await expect(page4.getByText("Colours from Talk").first()).toBeVisible();
+    await expect(page4.getByText("“Which one is brighter?”").first()).toBeVisible();
+    expect(await page4.content()).not.toContain("talk-files");
+    expect(server4.strays).toEqual([]);
+  });
+});
