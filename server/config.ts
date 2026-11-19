@@ -65,7 +65,8 @@ export function defaultStateDir(): string {
 export const newSinkToken = (): string => `spg_${randomBytes(24).toString("base64url")}`;
 export const newUiKey = (): string => randomBytes(12).toString("base64url");
 
-/** config.json holds something readGuiConfig cannot read, and was left as it is. */
+/** config.json (or control/machines.json, control/state.ts) holds something that cannot be
+ *  read, and was left as it is. */
 export class ConfigError extends Error {
   readonly name = "ConfigError";
 }

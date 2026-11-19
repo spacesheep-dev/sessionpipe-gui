@@ -356,6 +356,22 @@ describe("attachments API", () => {
     expect(existsSync(kept.path)).toBe(true);
     expect(existsSync(gone.path)).toBe(false);
     expect(existsSync(young.path)).toBe(true);
+
+    // Also verify Windows backslash paths in events (e.g. C:\path\attachments\<id>.png) keep the file
+    const keptWin = store.save(png(7, 7));
+    utimesSync(keptWin.path, old, old);
+    const sWin = new Session("with-win-image");
+    const winPrompt = `Attached images:\n- C:\\Users\\dev\\.local\\state\\sessionpipe-gui\\attachments\\${keptWin.id}.png (100×100)`;
+    app.store.ingest(
+      [
+        sWin.ev("session.started", { source: "startup" }),
+        sWin.ev("turn.transcript", { turn: 1, user: winPrompt, assistant: "ok" }),
+      ],
+      "http",
+    );
+    const removedWin = store.prune(path.join(tmp.dir, "events"));
+    expect(removedWin).toEqual([]);
+    expect(existsSync(keptWin.path)).toBe(true);
   });
 });
 
@@ -403,6 +419,28 @@ describe("the text block", () => {
     });
     const plain = splitAttachments("Nothing attached here");
     expect(plain).toEqual({ body: "Nothing attached here", items: [] });
+    const winAttachment: Attachment = {
+      ...a(A, 800, 600),
+      path: `C:\\Users\\dev name\\.local\\state\\sessionpipe-gui\\attachments\\${A}.png`,
+    };
+    const win = splitAttachments(composePrompt("Windows path", [winAttachment]));
+    expect(win.body).toBe("Windows path");
+    expect(win.items).toEqual([{ id: A, ext: "png", src: `/attachments/${A}.png`, width: 800, height: 600 }]);
+  });
+
+  it("keeps a line under the heading that names no picture as the person's own words", () => {
+    const block = composePrompt("", [a(A, 8, 8)]);
+    const own = `Fix this\n\n${block}\n- and also the second page (1×1)`;
+    const read = splitAttachments(own);
+    expect(read.body).toBe(own);
+    expect(read.items).toEqual([{ id: A, ext: "png", src: `/attachments/${A}.png`, width: 8, height: 8 }]);
+  });
+
+  it("reads a message that ends in a very long run of spaces at once", () => {
+    const long = `${composePrompt("", [a(A, 8, 8)])}\n- ${" ".repeat(200_000)}x (1×1`;
+    const t0 = performance.now();
+    expect(splitAttachments(long).items).toHaveLength(1);
+    expect(performance.now() - t0).toBeLessThan(1000);
   });
 });
 

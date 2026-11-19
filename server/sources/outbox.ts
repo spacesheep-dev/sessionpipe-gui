@@ -57,12 +57,15 @@ export function startOutboxSource(store: Store, opts: OutboxSourceOptions = {}):
   /** Session files that could not be read, and the error code each last failed with:
    *  logged once per file and code, not on every tick. */
   const unreadable = new Map<string, string>();
+  /** Sessions the store could not take a batch for, and the error code: logged the same way. */
+  const unstorable = new Map<string, string>();
 
   const tick = (): void => {
     const refs = outbox.sessions();
     sessions = refs.length;
     const seen = new Set(refs.map((r) => `${r.harness}/${r.session}`));
     for (const k of unreadable.keys()) if (!seen.has(k)) unreadable.delete(k);
+    for (const k of unstorable.keys()) if (!seen.has(k)) unstorable.delete(k);
     for (const ref of refs) {
       const k = `${ref.harness}/${ref.session}`;
       let from = offsets[k] ?? 0;
@@ -85,18 +88,33 @@ export function startOutboxSource(store: Store, opts: OutboxSourceOptions = {}):
         }
         unreadable.delete(k);
         const { events: batch, offset } = read;
+        const valid: ProtocolEvent[] = [];
+        for (const e of batch) if (!eventProblem(e)) valid.push(e as unknown as ProtocolEvent);
+        if (valid.length) {
+          // A store that can't take the batch (ENOSPC, EACCES) skips this session for the
+          // tick before its offset moves, so the next tick reads the same lines again; the
+          // store's (harness, session, seq) dedup drops whatever already landed. Other
+          // sessions carry on. A throw without an fs error code is a bug and propagates.
+          let r: ReturnType<Store["ingest"]>;
+          try {
+            r = store.ingest(valid, "outbox");
+          } catch (e) {
+            const code = (e as NodeJS.ErrnoException | undefined)?.code;
+            if (typeof code !== "string") throw e;
+            if (unstorable.get(k) !== code) {
+              unstorable.set(k, code);
+              process.stderr.write(`[outbox] can't store ${k}: ${(e as Error).message}; read again next tick\n`);
+            }
+            break;
+          }
+          unstorable.delete(k);
+          events += r.accepted;
+        }
         if (offset !== from) {
           offsets[k] = offset;
           dirty = true;
         }
         from = offset;
-        if (!batch.length) break;
-        const valid: ProtocolEvent[] = [];
-        for (const e of batch) if (!eventProblem(e)) valid.push(e as unknown as ProtocolEvent);
-        if (valid.length) {
-          const r = store.ingest(valid, "outbox");
-          events += r.accepted;
-        }
         if (batch.length < 200) break;
       }
     }

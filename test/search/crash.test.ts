@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: search perf. Crash torture (SEARCH-SPEC.md §8.4): the writer runs in a child over
-// a generated home and is SIGKILLed at a random moment, 20 times, with new bytes appended
-// between rounds. After every kill a reader must open clean; after a last full pass the index
-// must hold exactly the docs the oracle holds: none lost, none twice.
-import { fork } from "node:child_process";
+// a generated home and is SIGKILLed 20 times at the first segment or MANIFEST commit of a pass,
+// at a point it reports: its .tmp cut to half its bytes, or just before or after its rename.
+// Kills at random moments are server/search/engine/crash.test.ts's. New bytes are appended
+// between rounds. After every kill a reader must open clean and serve no fewer docs than it
+// did before; after a last full pass the index must hold exactly the docs the oracle holds:
+// none lost, none twice.
+import { type ChildProcess, fork } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -20,6 +23,8 @@ const NOW = Date.parse("2026-10-25T00:00:00Z");
 let tmp: { dir: string; cleanup: () => void };
 let child = "";
 let m: GenManifest;
+const writers = new Set<ChildProcess>();
+let stopped = false;
 const home = (): string => path.join(tmp.dir, "gen", "home");
 const state = (): string => path.join(tmp.dir, "gen", "state");
 const dir = (): string => path.join(tmp.dir, "search");
@@ -33,9 +38,50 @@ async function bundleChild(): Promise<string> {
   const { writeFileSync } = await import("node:fs");
   writeFileSync(
     entry,
-    `import { runIndexer } from ${JSON.stringify(ENGINE)};
+    `import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { basename } from "node:path";
+import { runIndexer } from ${JSON.stringify(ENGINE)};
 import { eventsAdapter, historyAdapters, sourceEnv } from ${JSON.stringify(path.join(ROOT, "server/search/sources/index.ts"))};
-const [home, stateDir, dir, how] = process.argv.slice(2);
+const [home, stateDir, dir, how, checkpoint] = process.argv.slice(2);
+// Only this test's killed writers pause. Normal passes use the real fs unchanged.
+if (checkpoint) {
+  const [kind, side] = checkpoint.split(":");
+  const { renameSync: rename, openSync: open, fsyncSync: fsync } = fs;
+  const { writeSync: write, readSync: read } = fs;
+  const target = (p) => {
+    const name = basename(p);
+    return kind === "manifest" ? name === "MANIFEST" : /^seg-\\d+\\.sps$/.test(name);
+  };
+  const pause = (at) => {
+    // A synchronous pipe write works even while the indexer owns the event loop.
+    write(4, "commit " + at + "\\n");
+    // The parent never releases this pipe. EOF also ends the child if its parent dies.
+    read(5, Buffer.alloc(1), 0, 1, null);
+    throw new Error("commit barrier closed without SIGKILL");
+  };
+  // "torn": the target's .tmp, fully written, is cut to half its bytes at its fsync, then parks.
+  const torn = new Map();
+  fs.openSync = (p, ...rest) => {
+    const fd = open(p, ...rest);
+    const s = String(p);
+    if (side === "torn" && s.endsWith(".tmp") && target(s.slice(0, -4))) torn.set(fd, s);
+    return fd;
+  };
+  // codec.ts fsyncs both kinds once, after their last write and before the rename.
+  fs.fsyncSync = (fd) => {
+    if (!torn.has(fd)) return fsync(fd);
+    fs.ftruncateSync(fd, fs.fstatSync(fd).size >> 1);
+    pause(torn.get(fd));
+  };
+  fs.renameSync = (from, to) => {
+    const match = String(from) === String(to) + ".tmp" && target(String(to));
+    if (match && side === "before") pause(String(to));
+    rename(from, to);
+    if (match && side === "after") pause(String(to));
+  };
+  syncBuiltinESMExports();
+}
 const env = sourceEnv({ home, stateDir, hostname: "crash-host" });
 await runIndexer({ dir, env, adapters: [...historyAdapters(), eventsAdapter()], history: true, mode: "once", rebuild: how === "rebuild" });
 `,
@@ -54,47 +100,38 @@ await runIndexer({ dir, env, adapters: [...historyAdapters(), eventsAdapter()], 
   return file;
 }
 
-/** Any `*.tmp` under the index: a segment or the MANIFEST being written (a commit in flight). */
-function committing(d: string): boolean {
-  if (!existsSync(d)) return false;
-  for (const e of readdirSync(d, { withFileTypes: true })) {
-    if (e.isDirectory()) {
-      if (committing(path.join(d, e.name))) return true;
-    } else if (e.name.endsWith(".tmp")) return true;
-  }
-  return false;
-}
-
-/** Runs the writer; with `kill`, SIGKILLs it `jitter` ms after the first commit in flight is
- *  seen (or at `fallback` ms if none is seen first). */
+/** Runs the writer; with `checkpoint`, the child parks at that commit point and names the file
+ *  on fd 4, and the parent SIGKILLs it there. `at` is that file, or "" if none was reached. */
 function runWriter(
-  kill: { jitter: number; fallback: number } | null,
+  checkpoint: string | null,
   how: "once" | "rebuild" = "once",
-): Promise<{ how: "killed" | "done"; inCommit: boolean }> {
+): Promise<{ how: "killed" | "done"; at: string }> {
   return new Promise((resolve, reject) => {
-    const c = fork(child, [home(), state(), dir(), how], { stdio: "ignore" });
-    let inCommit = false;
-    let fired = false;
-    const fire = (): void => {
-      if (fired) return;
-      fired = true;
-      c.kill("SIGKILL");
-    };
-    const t0 = Date.now();
-    const poll = kill
-      ? setInterval(() => {
-          if (fired) return;
-          if (committing(dir())) {
-            inCommit = true;
-            setTimeout(fire, kill.jitter);
-          } else if (Date.now() - t0 > kill.fallback) fire();
-        }, 1)
-      : undefined;
+    if (stopped) return reject(new Error("crash test has finished"));
+    const c = fork(child, [home(), state(), dir(), how, checkpoint ?? ""], {
+      stdio: ["ignore", "ignore", "pipe", "ipc", "pipe", "pipe"],
+    });
+    writers.add(c);
+    let at = "";
+    let signal = "";
+    let stderr = "";
+    c.stderr?.on("data", (data: Buffer) => {
+      stderr = (stderr + data.toString()).slice(-2000);
+    });
+    c.stdio[4]?.on("data", (data: Buffer) => {
+      signal += data.toString();
+      const hit = /^commit (.*)\n/.exec(signal);
+      if (checkpoint && !at && hit) {
+        at = hit[1]!;
+        c.kill("SIGKILL");
+      }
+    });
+    c.on("error", reject);
     c.on("exit", (code, sig) => {
-      if (poll) clearInterval(poll);
-      if (sig === "SIGKILL") resolve({ how: "killed", inCommit });
-      else if (code === 0) resolve({ how: "done", inCommit: false });
-      else reject(new Error(`writer exited ${code}`));
+      writers.delete(c);
+      if (sig === "SIGKILL") resolve({ how: "killed", at });
+      else if (code === 0) resolve({ how: "done", at: "" });
+      else reject(new Error(`writer exited ${code}: ${stderr.trim().split("\n").at(-1) ?? ""}`));
     });
   });
 }
@@ -143,7 +180,12 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
     m = generate({ out: path.join(tmp.dir, "gen"), profile: "dense", size: 8_000_000, seed: 21, now: NOW });
     child = await bundleChild();
   }, 120_000);
-  afterAll(() => tmp?.cleanup());
+  afterAll(() => {
+    stopped = true;
+    for (const c of writers) c.kill("SIGKILL");
+    writers.clear();
+    tmp?.cleanup();
+  }, 60_000);
 
   it(`${ROUNDS} kills, each recovering clean; then nothing lost and nothing twice`, async () => {
     const e = await engineModule();
@@ -155,40 +197,49 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
     t0 = Date.now();
     await runWriter(null);
     const inc = Date.now() - t0;
-    let killed = 0;
-    let inCommit = 0;
-    let rounds = 0;
     const opens: string[] = [];
+    // Docs a reader saw once stay: a kill never takes back a commit (grow only appends).
+    const lost: string[] = [];
+    const warm = await e.openReader({ dir: dir(), sources: BOTH });
+    let committed = warm.stats().messages;
+    warm.close();
     const probes: number[] = [];
-    // A commit can finish between two polls (a fast disk), and that kill lands outside one:
-    // keep going until enough kills hit a commit in flight, up to three times the rounds.
-    const wantInCommit = Math.ceil(ROUNDS * 0.6);
-    for (let round = 0; round < ROUNDS * 3 && (round < ROUNDS || inCommit < wantInCommit); round++) {
-      rounds++;
+    const hits = new Set<string>();
+    // The first segment or MANIFEST commit of the pass: its .tmp half-written, just before its
+    // rename, just after. With 20 rounds, each point is hit in a rebuild and in an append pass.
+    const sides = ["torn", "before", "after"];
+    const checkpoints = [...sides.map((s) => `segment:${s}`), ...sides.map((s) => `manifest:${s}`)];
+    for (let round = 0; round < ROUNDS; round++) {
       // Even rounds: a rebuild beside the live generation. Odd: new bytes appended, then a pass.
       const rebuild = round % 2 === 0;
       if (!rebuild) {
         grow(round);
         probes.push(round);
       }
-      const jitter = (round * 7) % 6;
-      const r = await runWriter({ jitter, fallback: 0.6 * (rebuild ? full : inc) }, rebuild ? "rebuild" : "once");
-      if (r.how === "killed") killed++;
-      if (r.inCommit) inCommit++;
+      const checkpoint = checkpoints[Math.floor(round / 2) % checkpoints.length]!;
+      const r = await runWriter(checkpoint, rebuild ? "rebuild" : "once");
+      if (r.how === "done")
+        throw new Error(
+          `round ${round}: the writer finished without reaching ${checkpoint}; did the engine's segment/MANIFEST commit change?`,
+        );
+      if (!r.at) throw new Error(`round ${round}: the writer was SIGKILLed before ${checkpoint}, not by this test`);
+      hits.add(`${checkpoint} ${path.relative(dir(), r.at).replace(/seg-\d+/, "seg-N")}`);
       try {
         const rd = await e.openReader({ dir: dir(), sources: BOTH });
         rd.search(eq("error"));
+        const n = rd.stats().messages;
+        if (n < committed) lost.push(`round ${round} (${checkpoint}): ${n} messages, ${committed} before`);
+        committed = Math.max(committed, n);
         rd.close();
       } catch (err) {
         opens.push(`round ${round}: ${(err as Error).message}`);
       }
     }
     console.log(
-      `crash torture: first build ${full} ms, append pass ${inc} ms, ${killed}/${rounds} kills, ${inCommit} with a commit in flight`,
+      `crash torture: first build ${full} ms, append pass ${inc} ms, ${ROUNDS} kills at: ${[...hits].sort().join(", ")}`,
     );
     expect(opens).toEqual([]);
-    expect(killed).toBe(rounds);
-    expect(inCommit).toBeGreaterThanOrEqual(wantInCommit);
+    expect(lost).toEqual([]);
     // A last, uninterrupted pass; then the index equals the oracle over the same files.
     expect((await runWriter(null)).how).toBe("done");
     const engine = await e.openReader({ dir: dir(), sources: BOTH });
@@ -231,5 +282,5 @@ describe.skipIf(!existsSync(ENGINE))("crash torture: SIGKILL during commit", () 
     expect(stray).toEqual([]);
     engine.close();
     void m;
-  }, 300_000);
+  }, 900_000);
 });
