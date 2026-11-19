@@ -65,6 +65,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
   date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
   lists the fields or indexes), and keep the old words for a key that is not a filter.
+- **A GUI that stops at "port N is in use" ends there.** The search indexer it had already
+  started then printed a Node crash (`Error: write EPIPE`) on the same terminal. It now
+  stops quietly once the GUI has gone, as it does when a GUI is stopped while indexing.
 
 ## [0.8.5] - 2026-11-18
 

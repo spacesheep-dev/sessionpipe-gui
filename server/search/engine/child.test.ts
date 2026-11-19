@@ -55,8 +55,10 @@ describe("indexer child, server gone", () => {
       stderr += String(d);
     });
     c.once("message", () => {
+      // The channel closes a tick after disconnect() returns: tell the child only then, so
+      // its next send cannot slip through a channel that is still open.
+      c.once("disconnect", () => writeFileSync(gone, ""));
       c.disconnect();
-      writeFileSync(gone, "");
     });
     // stderr is read to its end, not only to the exit, before the checks.
     const [code] = await Promise.all([
