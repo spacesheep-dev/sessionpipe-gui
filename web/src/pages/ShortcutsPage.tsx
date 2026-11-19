@@ -283,7 +283,7 @@ function Row({ action: a, keys, hint }: { action: Action; keys: string[]; hint?:
               type="button"
               className={`sc-key ${browserTakes(k) === "soft" ? "sc-key--soft" : ""}`}
               onClick={(e) => start(i, e.currentTarget)}
-              aria-label={`${a.label}: ${k}. Press to change`}
+              aria-label={`${a.label}: ${formatBinding(k).join(" ")}. Press to change`}
               title={browserTakes(k) === "soft" ? "The browser may take this key first" : "Change this key"}
             >
               <Keys binding={k} />
