@@ -23,6 +23,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A shortcut's keys are read out as they are shown.** On the Shortcuts page a screen
+  reader said "Command palette: mod+k. Press to change" where the key shows ⌘K (Ctrl+K on
+  Windows and Linux); it now says the key as it is drawn, ⌘K or Ctrl+K, and so for every
+  key with a modifier. The text of a two-key shortcut such as g b is "g b", two keys, not
+  the one word "gb", there, in the `?` help and in Settings › Keyboard. Nothing on screen
+  moves.
 - **Turn on (the secure address) finds openssl on Windows.** The receiver looked for
   `openssl` on the PATH only, and neither Git for Windows (its `usr\bin`; only `Git\cmd` is
   on the PATH) nor `winget install ShiningLight.OpenSSL.Light` (`Program Files\OpenSSL-Win64`,
