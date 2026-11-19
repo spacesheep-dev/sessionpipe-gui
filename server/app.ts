@@ -28,6 +28,7 @@ import { registerExtras } from "./extensions/extras.js";
 import { bundledDirs } from "./extensions/kind.js";
 import { isLoopback, lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
+import { DEFAULT_HOST } from "./listen-error.js";
 import { createOrchestrate, type Orchestrate } from "./orchestrate/index.js";
 import { registerOrchestrate } from "./orchestrate/routes.js";
 import { registerPhone } from "./phone/index.js";
@@ -623,7 +624,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   });
   router.fallback = staticFiles(opts.webDir ?? webDir(), { uiAuth, uiKey });
 
-  const host = opts.host ?? "0.0.0.0";
+  const host = opts.host ?? DEFAULT_HOST;
   port = await listen(listener, opts.port ?? DEFAULT_PORT, host);
   const addr = listener.address();
   // Node reports 0 as 0.0.0.0 and ::0 as ::. The IPv4-mapped wildcard (::ffff:0.0.0.0, or
