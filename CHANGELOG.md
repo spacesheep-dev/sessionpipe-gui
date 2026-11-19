@@ -186,59 +186,6 @@ pairing link that carries the board's key only for a pairing the sink token star
   Enter, a or d no longer reach past the cards to the row under the cursor.
 - **The offline line's Machines follows its sentence** ("old-mbp is offline. Machines"),
   where it sat at the far right under the notifications; × stays at the end of the line.
-- **A picture sent from a session's message box reaches the agent as a file in the
-  session's own folder.** Until now the message named it: by a path in the GUI's own
-  folder, which a session at Safe could not read and one at Accept edits asked about, or,
-  for a session on another computer, by a link to this board, which often could not be
-  opened from there. A computer whose sessionpipe is 0.10 or later
-  now fetches each picture itself and saves it under `.sessionpipe/files` in the session's
-  folder, where the agent reads it at every permission level. The message holds your words
-  and nothing else. A picture may be 25 MB (it was 8), six to a
-  message and 50 MB together; two upload at a time and the rest wait; a pasted screenshot
-  goes under a plain name (`image.png`, `image-2.png`); and a picture with no words is sent
-  as "Look at the attached picture." A file that is not the picture its type says is
-  refused in words, and so is one that did not arrive whole. An older sessionpipe on the
-  computer the GUI runs on still gets the path.
-- **Where a picture cannot be sent, the message box says so.** For a computer whose
-  sessionpipe is older than 0.10 and that is not the one the GUI runs on, and for one
-  reached through spacesheep, there is no paperclip, and a picture pasted or dropped is
-  answered under the field ("Pictures can't be sent to studio-mac: its sessionpipe is older
-  than 0.10. Run `sessionpipe update` there.") where it used to vanish or go as a link.
-  A file dropped on the message box that is no picture stays out of the way: the browser
-  no longer opens it in the page's place.
-- **A view's `control.attach` answers the board's own path to the image.** `url` is
-  `/attachments/<id>.<ext>`, with no address: it shows the image on this board
-  and opens nothing from another computer. A view that sends an image names its `path`.
-- **A pairing link carries the board's key only when the sink token started the pairing.**
-  A pairing started with no token (`sessionpipe connect`, or `sessionpipe control pair` on
-  a machine that has no sink for this GUI) gets a link with its code alone: open it in a
-  browser where the board is already open, or approve it on the Machines page, which lists
-  every pairing that waits. A pairing the sink token started (Setup's "Pair this machine",
-  a machine that has a sink for this GUI, `--token`) gets the link it always did.
-- **Through the proxy of `--public-url`, every request is a visitor's.** The visitor's
-  address is the last one in `X-Forwarded-For`, the one the proxy itself wrote; what
-  stands before it is not read. A request that came through the proxy needs the UI key
-  and is not this machine, whatever address the proxy names for it, and whether the proxy
-  reaches the port on `localhost` or on one of the machine's own addresses. A request
-  marked with `Forwarded`, `X-Real-IP`, `X-Forwarded-Host` or `-Proto` and no
-  `X-Forwarded-For` counts as one too. On the machine that runs the GUI, Setup's actions
-  and the search index's are done at `http://localhost:7373`, not at the proxy's address,
-  and a browser there that a proxy reported as loopback is asked for the key once (the
-  banner's "anywhere" link carries it).
-- **The receiver answers a browser on its own pages, and on its own machine under its own
-  names.** Before any route is reached, a request the browser marks as coming from another
-  origin is refused (403 `cross_site`); a link from another site to a page of the board
-  still opens, and pages are sent with `frame-ancestors 'self'`, so the board is not shown
-  inside another site's frame (an editor's built-in preview is one). A request made on the
-  machine that runs the GUI must name it by a name the GUI hands out or was given (403
-  `unknown_host`, with a page that says where to go): `localhost`, any address and the
-  `<name>.local` secure address are known, and `--allow-host NAME` adds another, such as
-  the machine's hostname or an `/etc/hosts` alias; `http://0.0.0.0:7373` is not one, open
-  `http://localhost:7373`. The public url is answered through its proxy. This covers every
-  route, uploads and deletes among them. Sinks, the daemon, the desktop and phone apps and
-  the CLI send none of what is refused and work as before. A reverse proxy on this machine
-  is answered once `--public-url` names its address and it sends `X-Forwarded-For`; one
-  over plain http must pass on the `Host` it was asked for.
 - **The desktop app on Windows and Linux has its own menu bar.** It had the Mac's: a first
   menu named after the app, with Services, Hide Others and Show All, and a Window menu. It
   is now File (New Session, Settings…, and Exit on Windows or Quit on Linux), Edit, View, Go
@@ -402,6 +349,86 @@ pairing link that carries the board's key only for a pairing the sink token star
 
 ### Fixed
 
+- **A shortcut's keys are read out as they are shown.** On the Shortcuts page a screen
+  reader said "Command palette: mod+k. Press to change" where the key shows ⌘K (Ctrl+K on
+  Windows and Linux); it now says the key as it is drawn, ⌘K or Ctrl+K, and so for every
+  key with a modifier. The text of a two-key shortcut such as g b is "g b", two keys, not
+  the one word "gb", there, in the `?` help and in Settings › Keyboard. Nothing on screen
+  moves.
+- **Turn on (the secure address) finds openssl on Windows.** The receiver looked for
+  `openssl` on the PATH only, and neither Git for Windows (its `usr\bin`; only `Git\cmd` is
+  on the PATH) nor `winget install ShiningLight.OpenSSL.Light` (`Program Files\OpenSSL-Win64`,
+  `-ARM` on arm64) puts it there, so Setup kept saying "Needs the openssl command" with
+  either installed. It now also looks in those folders, so an install shows without a PATH
+  change or a restart, and the note says so.
+- **A saved workflow run whose plan does not read no longer stops the server.** A run in
+  `workflow-runs.json` with a plan step that is not an object, has no entry in `steps`, or
+  has an `after` that is not a list of step ids threw from the orchestrator's tick, and the
+  server exited about a second after every start. Such a run, and one whose plan step has
+  text that is not a string, an id that is not an id or is used twice, or an `after` naming
+  a step that is not before it, is now left out when the file is read, as a workflow that
+  no longer reads already is; so is a run whose input or a step's reply is not text, and
+  one with an entry in `steps` that no plan step names (it kept the run from ever ending).
+  The other runs are kept, and the file as it was is set aside as
+  `workflow-runs.json.bad-<time>`; until it can be, the runs left out are written back with
+  the others. A run started from now on with a step called `__proto__` keeps that step's
+  entry in its `steps`, so it is read back like any other.
+- **A picture sent from Windows to an older sessionpipe shows in the message, and is
+  kept.** For a session on the same computer whose sessionpipe is older than 0.10, a GUI
+  on Windows names a picture by its path, with `\`. The message did not read that back, so
+  the picture was missing from it, and the daily clean-up did not see it in the stored
+  events, so a picture a session still named was removed once it was 30 days old. Both now
+  read either slash.
+- A session's "missing events" flag waits 30 s from when each hole opened. When an older
+  hole filled while a newer one was still open, the newer one kept the older one's time,
+  so it was flagged at once, with a "since" from before it opened.
+- **An event the store can't write is read from the outbox again, not lost.** When the
+  store failed to take a batch from this machine's outbox (a full disk, a store file the
+  GUI may not write), the reader had already moved past it, so those events never reached
+  the board, even once there was room again; the same failure during the first read at
+  start left the outbox off until a restart. The batch is now read again on the next tick,
+  said once, and the other sessions carry on meanwhile.
+- **A color theme, skin, view or plugin saved by Notepad or PowerShell 5 loads.** Those
+  editors start a UTF-8 file with a byte-order mark, and the receiver refused it: a theme
+  in `color-themes/` was listed as "not JSON: Unexpected token", and a `skin.json`,
+  `theme.json` or `plugin.json` as "not valid JSON". It now reads past the mark, as it
+  already did for `config.json`.
+- **A `control/machines.json` that does not read no longer unpairs every machine.** One
+  saved with a UTF-8 byte-order mark (PowerShell 5's `-Encoding UTF8`, older Windows
+  editors) is now read past it. One left empty, cut short, unreadable or without a list of
+  machines was read as "no machines": the receiver deleted every machine's queued sends at
+  start, and the next pairing or hello wrote the file over, so every machine had to pair
+  again. The receiver now stops at start with a message naming the file and what to do, as
+  it does for `config.json`, and leaves the file as it was.
+- **Search's status line says when history search is off but its index could not be
+  deleted.** It read "The index needs rebuilding" instead. It now says the history index
+  could not be deleted, and that Rebuild (on this computer) or restarting the app tries
+  again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
+  code when there is one, and points at `index --rebuild`. The status carries a new
+  `historyLeft` field for it.
+- **Search names a filter value it could not read.** `since:2026-2-1`, `until:3days`,
+  `in:everything` or `source:mars` was left out of the search but reported as "“since:”
+  isn't a filter, so it was searched as text", though `since:` is a filter and nothing was
+  searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
+  date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
+  lists the fields or indexes), and keep the old words for a key that is not a filter.
+- **Search finds Gemini CLI history when `GEMINI_CLI_HOME` is set.** Gemini CLI keeps
+  its `.gemini` folder inside that path, but search took `$GEMINI_CLI_HOME` to be the
+  `.gemini` folder itself, so it found none of those sessions. It now reads
+  `$GEMINI_CLI_HOME/.gemini`; with the variable unset nothing changes (`~/.gemini`).
+- **Labels, read marks and usage limits saved with a byte-order mark are kept.** A
+  `labels.json`, `marks.json` or `limits.json` saved by Notepad or PowerShell 5 (which
+  start a UTF-8 file with a byte-order mark) was taken for a broken file: it was set aside
+  as `<file>.bad-<time>` and the board started without its label names and colours, read
+  marks and notification levels. It is now read past the mark, as `config.json` is.
+- **A GUI that stops at "port N is in use" ends there.** The search indexer it had already
+  started then printed a Node crash (`Error: write EPIPE`) on the same terminal. It now
+  stops quietly once the GUI has gone, as it does when a GUI is stopped while indexing.
+- **A `--host` or `--port` the receiver cannot listen on is named.** A `--host` that is
+  not an address of this machine (say, after a network change) or a name that does not
+  look up, and a `--port` this user may not open, stopped with Node's own message
+  (`listen EADDRNOTAVAIL: …`, `getaddrinfo ENOTFOUND …`, `listen EACCES: …`). It now says
+  which flag to change, as it already did for a port in use, and still exits 2.
 - **A session's title is plain words everywhere.** A title written with Markdown showed
   its marks: "the old \`--sink\` flag?". It now reads "the old --sink flag?" wherever a
   title shows, in the menu bar and notifications as well. Code written without backticks
@@ -594,6 +621,69 @@ pairing link that carries the board's key only for a pairing the sink token star
 - **The right-click that opens a menu no longer chooses from it.** Letting the button go
   ran the item under the pointer, and the first one starts a few pixels from where the
   menu opens. Only a press held and dragged onto an item chooses it now.
+
+## [0.8.5] - 2026-11-18
+
+Pictures from a session's message box reach the agent as files in the session's own
+folder, at every permission level, and the receiver is stricter about which requests it
+answers: a browser on its own pages, a proxy's visitor by the proxy's own word, and a
+pairing link that carries the board's key only for a pairing the sink token started.
+
+### Changed
+
+- **A picture sent from a session's message box reaches the agent as a file in the
+  session's own folder.** Until now the message named it: by a path in the GUI's own
+  folder, which a session at Safe could not read and one at Accept edits asked about, or,
+  for a session on another computer, by a link to this board, which often could not be
+  opened from there. A computer whose sessionpipe is 0.10 or later
+  now fetches each picture itself and saves it under `.sessionpipe/files` in the session's
+  folder, where the agent reads it at every permission level. The message holds your words
+  and nothing else. A picture may be 25 MB (it was 8), six to a
+  message and 50 MB together; two upload at a time and the rest wait; a pasted screenshot
+  goes under a plain name (`image.png`, `image-2.png`); and a picture with no words is sent
+  as "Look at the attached picture." A file that is not the picture its type says is
+  refused in words, and so is one that did not arrive whole. An older sessionpipe on the
+  computer the GUI runs on still gets the path.
+- **Where a picture cannot be sent, the message box says so.** For a computer whose
+  sessionpipe is older than 0.10 and that is not the one the GUI runs on, and for one
+  reached through spacesheep, there is no paperclip, and a picture pasted or dropped is
+  answered under the field ("Pictures can't be sent to studio-mac: its sessionpipe is older
+  than 0.10. Run `sessionpipe update` there.") where it used to vanish or go as a link.
+  A file dropped on the message box that is no picture stays out of the way: the browser
+  no longer opens it in the page's place.
+- **A view's `control.attach` answers the board's own path to the image.** `url` is
+  `/attachments/<id>.<ext>`, with no address: it shows the image on this board
+  and opens nothing from another computer. A view that sends an image names its `path`.
+- **A pairing link carries the board's key only when the sink token started the pairing.**
+  A pairing started with no token (`sessionpipe connect`, or `sessionpipe control pair` on
+  a machine that has no sink for this GUI) gets a link with its code alone: open it in a
+  browser where the board is already open, or approve it on the Machines page, which lists
+  every pairing that waits. A pairing the sink token started (Setup's "Pair this machine",
+  a machine that has a sink for this GUI, `--token`) gets the link it always did.
+- **Through the proxy of `--public-url`, every request is a visitor's.** The visitor's
+  address is the last one in `X-Forwarded-For`, the one the proxy itself wrote; what
+  stands before it is not read. A request that came through the proxy needs the UI key
+  and is not this machine, whatever address the proxy names for it, and whether the proxy
+  reaches the port on `localhost` or on one of the machine's own addresses. A request
+  marked with `Forwarded`, `X-Real-IP`, `X-Forwarded-Host` or `-Proto` and no
+  `X-Forwarded-For` counts as one too. On the machine that runs the GUI, Setup's actions
+  and the search index's are done at `http://localhost:7373`, not at the proxy's address,
+  and a browser there that a proxy reported as loopback is asked for the key once (the
+  banner's "anywhere" link carries it).
+- **The receiver answers a browser on its own pages, and on its own machine under its own
+  names.** Before any route is reached, a request the browser marks as coming from another
+  origin is refused (403 `cross_site`); a link from another site to a page of the board
+  still opens, and pages are sent with `frame-ancestors 'self'`, so the board is not shown
+  inside another site's frame (an editor's built-in preview is one). A request made on the
+  machine that runs the GUI must name it by a name the GUI hands out or was given (403
+  `unknown_host`, with a page that says where to go): `localhost`, any address and the
+  `<name>.local` secure address are known, and `--allow-host NAME` adds another, such as
+  the machine's hostname or an `/etc/hosts` alias; `http://0.0.0.0:7373` is not one, open
+  `http://localhost:7373`. The public url is answered through its proxy. This covers every
+  route, uploads and deletes among them. Sinks, the daemon, the desktop and phone apps and
+  the CLI send none of what is refused and work as before. A reverse proxy on this machine
+  is answered once `--public-url` names its address and it sends `X-Forwarded-For`; one
+  over plain http must pass on the `Host` it was asked for.
 
 ## [0.8.4] - 2026-11-17
 
