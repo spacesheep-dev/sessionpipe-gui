@@ -95,7 +95,7 @@ Scrolling inside it is yours to do. Return the function that unmounts (it may be
 | `storage.get()` / `storage.set(value)` | One JSON document per theme, kept by the server and shared by every device, at most 256 KB. `get()` is `null` until the first `set`. |
 | `local.get(key)` / `local.set(key, value)` | `localStorage`, namespaced to your theme, for per-device conveniences. May silently be unavailable. |
 | `control` | The control channel, signed by the host: `availability(target)`, `send`, `answer`, `cancel`, `start`. See [Control from a theme](#control-from-a-theme). |
-| `react` | `{ React, ReactDOM, createRoot }`: the host's React 18, for a theme that wants it without bundling its own. |
+| `react` | `{ React, ReactDOM, createRoot }`: the host's React 19 (18 up to 0.8.5; `React.version` says which), for a theme that wants it without bundling its own. See [what React 19 no longer has](#what-react-19-no-longer-has). |
 | `shortcuts` | The host's keymap: `register(actions)` adds your keys while you are mounted (listed in the `?` help and on `/shortcuts`, rebindable, dispatched by the host), `active()` is every binding in force. See [Keyboard](#keyboard). |
 | `format.ago(iso)` | `"12 s ago"`, `"3 m ago"`, `"yesterday"`. |
 | `format.duration(ms)` | `"0.4 s"`, `"4 m 12 s"`, `"2 h 05 m"`. |
@@ -271,6 +271,28 @@ export default {
 `react` and `react-dom/client` are not on the page under those names: bundle them,
 or map them to `api.react` with a shim.
 
+### What React 19 no longer has
+
+`api.react` is React 19, and what React 19 took out is not there for a theme either:
+
+- `ReactDOM.render`, `hydrate`, `unmountComponentAtNode` and `findDOMNode`. Use
+  `createRoot`, `root.unmount()` and refs. A `mount` that calls one of them throws, and
+  the page shows that your theme failed to mount.
+- String refs (`ref="input"`) and legacy context (`contextTypes`, `getChildContext`).
+- `propTypes` and a function component's `defaultProps`: both are ignored. Give the prop
+  its default in the parameters, `function Row({ dense = false })`.
+- `react-dom/test-utils`. `act` comes from `react` now.
+- Elements made by another copy of React. Each element has to come from the host's
+  `createElement`: one built by a `react/jsx-runtime` bundled from React 18 is refused,
+  and the theme draws nothing (the error is in the console). Alias the JSX runtime too
+  (below).
+
+A function a ref callback returns is now its cleanup, called in place of the call with
+`null`, and `@types/react` 19 refuses any other return value: write
+`ref={(el) => { node = el; }}`, not `ref={(el) => (node = el)}`. A theme that bundles its
+own React, of any version, is not affected by any of this. React's full list is its
+[upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide).
+
 ## Bundling with esbuild
 
 Everything in, simplest (your theme carries its own React, ~45 KB gzipped):
@@ -305,7 +327,8 @@ await build({
 
 and first thing in `mount`: `globalThis.__themeReact = api.react;`. (With
 `jsx: "automatic"` esbuild also imports `react/jsx-runtime`; alias that to a shim
-exporting `jsx`, `jsxs` and `Fragment` from `api.react.React`, or use
+that builds `jsx` and `jsxs` on `api.react.React.createElement` and exports `Fragment`
+(the bundled Office view's README says how its own does it), or use
 `jsx: "transform"` with `jsxFactory: "React.createElement"` and the default import.)
 Point `theme.json`'s `entry` at `dist/index.js`, or keep `index.js` as the output
 name.

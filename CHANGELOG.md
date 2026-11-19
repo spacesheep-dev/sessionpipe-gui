@@ -14,6 +14,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   the board and in search's agent chips, where it read `grok-build`; fx, which a 0.16
   machine can start and message, is listed under its own name. Events and commands are
   accepted and refused as before.
+- **A view gets React 19.** `api.react` is the host's React, now 19. What React 19 took
+  out is gone from it: `ReactDOM.render`, `hydrate`, `unmountComponentAtNode` and
+  `findDOMNode`, string refs and legacy context; `propTypes` and a function component's
+  `defaultProps` are ignored, and an element made by another copy of React is not drawn.
+  A view that bundles its own React, and the bundled Canvas and Office, draw as before.
+  [docs/theme-authoring.md](docs/theme-authoring.md) lists what to use instead.
 
 ### Fixed
 

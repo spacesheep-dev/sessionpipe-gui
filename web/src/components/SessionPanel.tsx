@@ -70,7 +70,11 @@ const reduced = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").ma
 /** The strip's tabs move instead of jumping: a tab whose place changed (a reorder, a
  *  neighbour closed) slides there from where it was drawn; a new one fades in. The tab
  *  under the pointer in a drag is the pointer's, not this. Transform and opacity only. */
-function useTabFlip(strip: RefObject<HTMLDivElement>, keys: readonly SessionKey[], skip: SessionKey | null): void {
+function useTabFlip(
+  strip: RefObject<HTMLDivElement | null>,
+  keys: readonly SessionKey[],
+  skip: SessionKey | null,
+): void {
   const prev = useRef<Map<string, number> | null>(null);
   const sig = keys.join(",");
   useLayoutEffect(() => {
@@ -173,7 +177,7 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   const [mounted, setMounted] = useState<SessionKey[]>(activeKey ? [activeKey] : []);
   /** What the panel shows while it slides out: the tabs lag the URL by one animation. */
   const [shownTabs, setShownTabs] = useState<SessionKey[]>(tabs);
-  const bodyRefs = useRef(new Map<SessionKey, RefObject<HTMLDivElement>>());
+  const bodyRefs = useRef(new Map<SessionKey, RefObject<HTMLDivElement | null>>());
   const bodyRef = (k: SessionKey) => {
     let r = bodyRefs.current.get(k);
     if (!r) {

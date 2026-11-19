@@ -228,7 +228,7 @@ interface Timeline {
   /** An open prompt has no answer out yet: the session asks. With every answer out, its
    *  calls run as far as this page knows. */
   asks: boolean;
-  root: RefObject<HTMLDivElement>;
+  root: RefObject<HTMLDivElement | null>;
   session: () => SessionSummary | undefined;
   /** The session's subagents (its summary's). */
   agents: readonly AgentRun[];

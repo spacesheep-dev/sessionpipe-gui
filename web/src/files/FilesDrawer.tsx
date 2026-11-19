@@ -1114,7 +1114,7 @@ function Changes({
   pick: (n: number, extend: boolean) => void;
   hunkAt: (n: number) => Hunk | undefined;
   onKey: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
-  codeRef: RefObject<HTMLDivElement>;
+  codeRef: RefObject<HTMLDivElement | null>;
   form: ReactNode;
 }) {
   const rows = useMemo(() => diffRows(base, lines, start), [base, lines, start]);
