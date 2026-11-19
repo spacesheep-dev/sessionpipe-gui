@@ -78,7 +78,7 @@ equal), so the first frame is already on brand.
 | `--tint` | #FF5A1F (3.1:1) | #FF5A1F (5.9:1) | the phone's tint: the selected tab's glyph, the back chevron, a switch on |
 | `--tint-fg` | #C13B01 (5.4:1) | #FF5A1F | the tint as text: the selected tab's label, a bar's buttons, a link |
 | `--err` | #CB234D (5.4:1) | #EF4C73 (5.2:1) | errors only |
-| `--focus` | #F24D06 (3.6:1) | #FF5A1F | the focus ring |
+| `--focus` | #141414 | #F5F5F3 | the keyboard ring: ink |
 | `--mark` / `--mark-fg` | #FFE1D7 / #141414 | #512617 / #F5F5F3 | a search hit |
 
 The orange is never small text on a light ground (#FF5A1F is 3.1:1 on white): there it is a

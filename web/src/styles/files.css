@@ -230,8 +230,9 @@
   background: var(--press);
 }
 .files-row:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline: none;
+  background: var(--sel);
+  box-shadow: var(--cursor-edge);
 }
 .files-row.is-viewed .files-row-name,
 .files-row.is-viewed .files-row-fact {

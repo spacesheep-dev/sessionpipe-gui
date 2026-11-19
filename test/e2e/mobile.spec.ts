@@ -409,6 +409,9 @@ test.describe("phone: the composer", () => {
       await page.goto(`${CONTROL_BASE}${sessionUrl(s.harness, s.id)}`);
       const box = composer(page);
       await expect(box).toBeEnabled();
+      // Focused, the field never glows.
+      await box.focus();
+      await expect(page.locator(".ctl-field")).toHaveCSS("box-shadow", "none");
       // No grant yet today, in a browser: the line offers Unlock now.
       const foot = page.locator(".ctl-foot[data-reason=passkey]");
       const link = foot.getByRole("button", { name: "Unlock now" });

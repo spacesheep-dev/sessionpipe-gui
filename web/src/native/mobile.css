@@ -59,6 +59,11 @@ html:is([data-shell="ios"], [data-shell="android"]) :is(input, textarea, [conten
   -webkit-user-select: text;
   user-select: text;
 }
+/* The selection keeps the app's tint, as its caret and its handles do. A browser and the
+   desktop apps draw the system's own (no ::selection rule in base.css). */
+html:is([data-shell="ios"], [data-shell="android"]) ::selection {
+  background: color-mix(in oklch, var(--tint) 28%, transparent);
+}
 
 /* The bars are solid, as UIKit's opaque bar appearance is: a list stops under their hairline
    and never shows through them. The tab bar and the session's control strip are the

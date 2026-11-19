@@ -184,8 +184,8 @@
   --err: #cb234d;
   --err-soft: #e07a93;
   --err-bg: #fbf0f3;
-  /* The ring: the accent's 3:1 cut, so it reads on its own beside any control. */
-  --focus: #f24d06;
+  /* The keyboard ring: the ink. Never the orange, which says needs you. */
+  --focus: #141414;
   /* A search hit: a tint of the accent under ink. */
   --mark: #ffe1d7;
   --mark-fg: #141414;
@@ -201,6 +201,12 @@
   --raised: var(--bg-2);
   --hover: color-mix(in oklch, var(--fg) 5%, transparent);
   --sel: color-mix(in oklch, var(--fg) 9%, transparent);
+  /* A focused field: its edge steps up to the meta ink, with a soft ink halo. The keyboard
+     cursor on a list row: the same edge as a hairline inside the --sel fill (3:1 or better
+     on it), 2 px under Increase contrast; never a ring around the row. */
+  --focus-line: var(--fg-3);
+  --focus-halo: color-mix(in oklch, var(--fg) 10%, transparent);
+  --cursor-edge: inset 0 0 0 var(--hairline) var(--focus-line);
   --press: color-mix(in oklch, var(--fg) 13%, transparent);
   /* Light: the page under a dialog stays readable (Settings' Appearance is judged on it);
      the sheet's hairline and shadow set it apart. */
@@ -272,7 +278,7 @@
     --err: #ef4c73;
     --err-soft: #a8405a;
     --err-bg: #23181b;
-    --focus: #ff5a1f;
+    --focus: #f5f5f3;
     --mark: #512617;
     --mark-fg: #f5f5f3;
 
@@ -322,7 +328,7 @@
   --err: #ef4c73;
   --err-soft: #a8405a;
   --err-bg: #23181b;
-  --focus: #ff5a1f;
+  --focus: #f5f5f3;
   --mark: #512617;
   --mark-fg: #f5f5f3;
 
@@ -352,6 +358,7 @@
     --line: color-mix(in oklab, var(--fg-2) 40%, var(--bg)) !important;
     /* biome-ignore-end lint/complexity/noImportantStyles: the four above */
     --focus-width: 3px;
+    --cursor-edge: inset 0 0 0 2px var(--focus-line);
   }
 }
 

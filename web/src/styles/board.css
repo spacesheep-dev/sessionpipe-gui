@@ -413,7 +413,7 @@
 }
 .card-row:has(> .card-link:focus-visible) {
   background: var(--sel);
-  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--focus) 60%, transparent);
+  box-shadow: var(--cursor-edge);
 }
 .card:is([aria-current="true"], [data-open], :has(> .card-row:hover)) > .card-row::before,
 .card:not(:has(.card-kids)):is([aria-current="true"], [data-open], :has(> .card-row:hover)) + .card > .card-row::before,

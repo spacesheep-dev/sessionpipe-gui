@@ -616,8 +616,8 @@ textarea.field {
 .field:focus,
 .field:focus-visible {
   outline: none;
-  border-color: color-mix(in oklch, var(--focus) 70%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  border-color: var(--focus-line);
+  box-shadow: 0 0 0 3px var(--focus-halo);
 }
 
 /* The toolbar search: a filled field with no border (the macOS toolbar's), a magnifier,
@@ -642,8 +642,8 @@ textarea.field {
 }
 .search:focus-within {
   background: var(--bg-2);
-  border-color: color-mix(in oklch, var(--focus) 70%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  border-color: var(--focus-line);
+  box-shadow: 0 0 0 3px var(--focus-halo);
 }
 .search-icon {
   color: var(--fg-3);
@@ -1271,12 +1271,12 @@ fieldset.seg {
 
 /* One highlight at a time on a list row (POLISH-PLAN.md §5): the pointer's --hover, the
    open row's and the keyboard cursor's --sel, the menu target's --sel while its menu is
-   up. The cursor is the selection fill with a hairline edge in the focus hue, never a
-   2 px ring around the row: the ring stays for real Tab stops (buttons, fields). */
+   up. The cursor is the selection fill with a hairline edge at 3:1 or better (--cursor-edge),
+   never a 2 px ring around the row: the ring stays for real Tab stops (buttons, fields). */
 [data-nav-item]:focus-visible {
   outline: none;
   background: var(--sel);
-  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--focus) 60%, transparent);
+  box-shadow: var(--cursor-edge);
 }
 [data-nav-item][data-menu-open] {
   background: var(--sel);

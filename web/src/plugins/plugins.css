@@ -56,8 +56,8 @@
 .plug-field input[type="password"]:focus,
 .plug-field input[type="number"]:focus {
   outline: none;
-  border-color: color-mix(in oklch, var(--focus) 70%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  border-color: var(--focus-line);
+  box-shadow: 0 0 0 3px var(--focus-halo);
 }
 .plug-field input:disabled {
   opacity: 0.6;

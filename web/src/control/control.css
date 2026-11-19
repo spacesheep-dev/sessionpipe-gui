@@ -232,8 +232,9 @@
 }
 
 /* The composer: one field that grows to 40 % of the view, the images to send at its
-   top, attach, stop and send on its last line; the focus halo is the field's, not the
-   textarea's. */
+   top, attach, stop and send on its last line. Focused, its edge steps to the meta ink and
+   never glows: it holds the focus the whole time a session is read, right under a prompt's
+   orange dot (as Messages and Mail). The edge is the field's, not the textarea's. */
 .ctl-field {
   border: var(--hairline) solid var(--line-2);
   border-radius: var(--radius);
@@ -243,8 +244,8 @@
     box-shadow var(--dur-fast) var(--ease-out);
 }
 .ctl-field:focus-within {
-  border-color: color-mix(in oklch, var(--focus) 70%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  border-color: var(--fg-3);
+  box-shadow: none;
 }
 .ctl--off .ctl-field {
   background: var(--bg);

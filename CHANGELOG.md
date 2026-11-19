@@ -360,6 +360,14 @@ pairing link that carries the board's key only for a pairing the sink token star
   is lighter, so Appearance and Text size are judged on a page that is not greyed. Old
   `/settings?section=…` links open it over the page Open on names. The phone's Settings
   is the same full-screen sheet as before.
+- **Focus is ink, so the orange means only "needs you".** The keyboard's ring is ink in
+  every skin and both schemes, where it was the orange. A focused field's edge steps up to
+  grey with a soft grey halo; the message box, which has the focus the whole time a
+  session is read, only steps its edge up and never glows. The keyboard cursor's edge on a
+  Board, Inbox, Feed, Search, Review or Files row is drawn at full strength, 3:1 or better
+  on its fill (2 px with Increase contrast on), and a Files row no longer gets a ring of
+  its own. Selected text is the system's own colour on a computer; the phone app keeps its
+  tint.
 
 ### Fixed
 

@@ -196,10 +196,6 @@ textarea,
   }
 }
 
-::selection {
-  background: color-mix(in oklch, var(--focus) 28%, transparent);
-}
-
 /* The browser's own checkboxes, radios and ranges take the ink, not the browser's blue:
    there is no accent hue in the UI. */
 :root {
