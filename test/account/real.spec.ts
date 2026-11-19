@@ -9,6 +9,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { composer } from "../e2e/helpers.js";
 import type { FakeAnswer, FakeRequest } from "./fake-spacesheep.js";
 import { HubStandIn } from "./hub.js";
 import { startAccountServer } from "./serve.js";
@@ -91,7 +92,7 @@ test("the page on an account against a real local spacesheep", async ({ browser 
 
   // A session's page.
   await page.getByText("Phone app on a spacesheep account").first().click();
-  const box = page.getByLabel("Message for the next turn");
+  const box = composer(page);
   await expect(box).toBeEnabled();
   await page.waitForTimeout(800);
   await shots("session");
@@ -100,7 +101,7 @@ test("the page on an account against a real local spacesheep", async ({ browser 
   // shows it held, and the confirm sends it; the computer takes it and its answer comes back.
   const text = "ping from the page on an account";
   await box.fill(text);
-  await box.press("Enter");
+  await page.locator(".ctl-send").click();
   const notice = page.locator("[data-held]");
   await expect(notice).toBeVisible();
   await expect(notice.locator("[data-held-what]")).toHaveText(text);

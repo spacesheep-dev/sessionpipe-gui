@@ -121,9 +121,7 @@ pub fn check(cmd: &str, mode: Mode, now_ms: u64) -> Result<Checked, Error> {
         .and_then(Value::as_u64)
         .ok_or_else(|| refuse("the command has no signing time"))?;
     if (iat as i64 - now_ms as i64).abs() > IAT_SLACK_MS {
-        return Err(refuse(
-            "the command's time is more than a minute off this Mac's clock",
-        ));
+        return Err(refuse(crate::words::Device::current().clock_off()));
     }
     let mut name = None;
     if kind == "key.add" {
@@ -131,7 +129,7 @@ pub fn check(cmd: &str, mode: Mode, now_ms: u64) -> Result<Checked, Error> {
         // NATIVE-SPEC §5.3): never under the day grant.
         if mode != Mode::Confirm {
             return Err(refuse(
-                "a key.add is signed with Touch ID, never under the day grant",
+                crate::words::Device::current().key_add_needs_presence(),
             ));
         }
         if session != KEY_STORE_SESSION {
@@ -160,7 +158,7 @@ pub fn check(cmd: &str, mode: Mode, now_ms: u64) -> Result<Checked, Error> {
         // forget a sign-in: always a fresh Touch ID, never the day grant (CONTROL.md SHOULD).
         if matches!(action, "on" | "off" | "remove" | "login.complete") && mode != Mode::Confirm {
             return Err(refuse(
-                "turning the pool on or off, removing an account and finishing a sign-in take Touch ID",
+                crate::words::Device::current().pool_needs_presence(),
             ));
         }
         let must_name = matches!(action, "enable" | "disable" | "remove" | "login.complete");

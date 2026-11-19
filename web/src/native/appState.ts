@@ -27,6 +27,9 @@ export interface Receiver {
   origin: string;
   local: boolean;
   connected?: boolean;
+  /** A spacesheep account in the list (docs/rfcs/08): `kind: "spacesheep"` and whose it is. */
+  kind?: string;
+  email?: string;
 }
 export type UpdateState = "idle" | "checking" | "downloading" | "ready" | "error";
 export interface UpdateStatus {

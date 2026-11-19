@@ -154,6 +154,10 @@ export interface DoorsOptions {
   /** The highest spacesheep job id this page knows of: the job of a send that was taken
    *  unheard is looked for after it. Absent: from the start of the list. */
   lastJob?: () => number;
+  /** spacesheep refused a send because the key that signed it was approved less than an
+   *  hour ago (its 403 `cooling`): until when. On this phone's clock where spacesheep said
+   *  its own `now` beside it; else as spacesheep wrote it, on its own. */
+  onCooling?: (until: number) => void;
 }
 
 async function read1(res: Response): Promise<DoorAnswer> {
@@ -308,6 +312,14 @@ export function openDoors(o: DoorsOptions): AccountDoors {
     // An error of spacesheep's own is no refusal: the job may have been made before it.
     if (a.status >= 500) return unknown(wordsOf(a.json));
     const code = typeof a.json.code === "string" ? a.json.code : "";
+    // spacesheep refused it because the key that signed it was approved less than an hour
+    // ago: until when, by its own clock, whatever else this answer settles.
+    if (a.status === 403 && code === "cooling" && typeof a.json.until === "number") {
+      // `until` is on spacesheep's clock. Where the answer says its own `now` too, the end
+      // is the time left from there, counted on this phone's clock, whatever the two differ by.
+      const theirs = typeof a.json.now === "number" && Number.isFinite(a.json.now) ? a.json.now : null;
+      o.onCooling?.(theirs === null ? a.json.until : now() + (a.json.until - theirs));
+    }
     if (unheard) {
       // spacesheep had taken it on an asking before this one: it is sent. Its job is the
       // one fit made since the send began, when the list singles one out.

@@ -15,6 +15,7 @@ import type {
   SessionSummary,
 } from "@shared/api";
 import {
+  agentAside,
   isOut,
   orderWindows,
   readWindow,
@@ -302,32 +303,31 @@ export const isPoolActivity = (a: ControlActivity): boolean => a.kind === "pool"
  *  the name the room count and that account's window ("3 accounts, 2 with room · Misha,
  *  5 hours, resets in 2 h 21 m", with "numbers as of 3 h ago" when its entry is stale), and
  *  `out` when the hint takes the accent: "None left" when no account has room and one is
- *  used up. Every account off or in error has no hint, only the count. */
+ *  used up; `aside`, the chosen agent's line, as limits.ts agentAside words it. Every account
+ *  off or in error has no hint, only the count, and so has one whose windows have all reset. */
 export function poolPickerWords(
   pool: MachinePool,
   entryFor: (accountId: string) => LimitsEntry | undefined,
   now: number,
-): { hint?: string; detail?: string; out?: boolean } {
+): { hint?: string; detail?: string; out?: boolean; aside?: string } {
   const room = roomWords(pool.accounts, now);
   const current = pool.accounts.find((a) => a.current && hasRoom(a));
   if (!current) {
     const usedUp = pool.accounts.some((a) => a.enabled && a.status === "limited");
-    return usedUp ? { hint: "None left", detail: room, out: true } : { detail: room };
+    return usedUp ? { hint: "None left", detail: room, out: true, aside: "None left" } : { detail: room };
   }
   const name = sentenceName(current, pool.accounts);
   const e = entryFor(current.id);
   const t = e ? tightest(e, now) : null;
-  if (!e) return { detail: `${room} · ${name}` };
-  if (!t) {
-    const first = orderWindows(e.windows)[0];
-    return { hint: "Reset", detail: first ? `${room} · ${name}, ${windowSentence(first, now)}` : `${room} · ${name}` };
-  }
+  // No numbers, or every window has reset since (what was used after is unknown): the count.
+  if (!e || !t) return { detail: `${room} · ${name}` };
   const r = readWindow(t, now);
   const stale = staleWords(e, now);
   const detail = [`${room} · ${name}`, windowLabel(t), r.when, stale ? `numbers ${stale}` : ""]
     .filter(Boolean)
     .join(", ");
-  return { hint: r.value, detail, out: isOut(r) };
+  const aside = agentAside(r);
+  return { hint: r.value, detail, out: isOut(r), ...(aside ? { aside } : {}) };
 }
 
 // ----- the sidebar's tooltip (§7.3) -----

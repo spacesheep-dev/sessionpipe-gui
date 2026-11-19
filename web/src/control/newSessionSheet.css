@@ -281,6 +281,38 @@
 .ns-status--err {
   color: var(--err);
 }
+/* The way on after the line's sentence ("Approve this Mac"), as the composer's line has it:
+   a word to the eye, 44 tall to a finger. */
+.ns-status-link {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+@media (pointer: coarse) {
+  .ns-status-link::after {
+    content: "";
+    position: absolute;
+    inset: -14px -6px;
+  }
+}
+@media (hover: hover) {
+  .ns-status-link:hover {
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+/* On a phone the tint at 600, as the composer's line has it there. */
+.ns-sheet--phone .ns-status-link {
+  color: var(--tint-fg);
+  font-weight: 600;
+}
 .ns-actions {
   flex: none;
   display: inline-flex;
@@ -429,6 +461,17 @@
   padding-bottom: 8px;
   text-align: left;
 }
+/* What the chosen agent has left, when it matters: just under its name, ending where the
+   name ends (the chevron and its gap are to the right of it), not under the label. It reaches
+   up into the pop-up's 44 pt, so a tap there still opens the pop-up. */
+.ns-sheet--phone .ns-row .ns-aside[data-ns-left] {
+  grid-column: 2;
+  justify-self: end;
+  margin-top: -14px;
+  padding: 0 24px 10px 0;
+  text-align: right;
+  pointer-events: none;
+}
 /* A disclosure row: the value at the right, then the chevron. */
 .ns-sheet--phone .ns-value {
   justify-content: flex-end;
@@ -481,25 +524,46 @@
   gap: 8px;
   padding: 0 16px;
 }
-/* Neutral: discarding a draft is no error (MISHA-NOTES 15). */
+/* An action, so the tint, at the sentence's weight; never red: discarding a draft is no
+   error (MISHA-NOTES 15). On its own line it takes a finger's 44 px. Positioned, so it stays
+   over the 44 pt of an Approve link that ends the line above it. */
 .ns-discard {
+  position: relative;
   padding: 0;
   border: none;
   background: none;
-  color: var(--fg-2);
+  color: var(--tint-fg);
   font: inherit;
   font-size: var(--text-sm);
 }
-.ns-passkey {
-  margin: 0;
+/* Off, it is the grey of the words: the Add account sheet's Start over, while Done waits. */
+.ns-discard:disabled {
   color: var(--fg-3);
-  font-size: var(--text-xs);
 }
+@media (pointer: coarse) {
+  .ns-discard {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}
+/* A value the machine sets: the ink of the values above it. */
 .ns-sheet--phone .ns-fixed {
-  color: var(--fg-3);
+  color: var(--fg-2);
   font-size: var(--text-md);
 }
-.ns-sheet--phone [data-ns-row="options"] .ns-value {
+/* Permission's, at the chevron's column, is never cut: it wraps, right-aligned, at a large
+   text size. (The Ask sheet's From is cut at the row's width instead: .ellipsis.) */
+.ns-sheet--phone [data-ns-row="options"] .ns-fixed,
+.ns-sheet--phone [data-hs-row="options"] .ns-fixed {
+  text-align: right;
+  text-wrap: balance;
+}
+/* The value keeps the row's 44 pt when a note goes under it (inherit mode). */
+.ns-sheet--phone [data-ns-row="options"] .ns-value,
+.ns-sheet--phone [data-hs-row="options"] .ns-value {
+  align-items: center;
+  min-height: var(--tap);
   padding-right: 8px;
 }
 /* The permission's words are the value ("As your own sessions on this machine"): too long
@@ -525,5 +589,14 @@
   text-align: center;
 }
 .ns-sheet--phone .ns-empty .state-actions {
+  align-self: stretch;
   justify-content: center;
+}
+/* Its one way on, the width of a phone's column (a button on a tablet, not a bar). */
+.ns-sheet--phone .ns-empty .btn--primary {
+  flex: 1 1 auto;
+  max-width: 360px;
+  min-height: 46px;
+  border-radius: 12px;
+  font-size: var(--text-md);
 }

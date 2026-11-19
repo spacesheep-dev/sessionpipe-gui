@@ -31,6 +31,7 @@ import { type MenuList, MoreButton, useContextMenu } from "../components/Context
 import { isThisMachine } from "../control/Attachments";
 import { lastInfo, rpId } from "../control/api";
 import { nonce } from "../control/bytes";
+import { tapWords } from "../control/signer";
 import { useSessionSend } from "../control/useSend";
 import { useResyncs, useStore } from "../data/hooks";
 import { toolLabel } from "../lib/format";
@@ -1443,9 +1444,7 @@ function Review({
       {(send.error || why || send.tap || (can && working)) && (
         <p className={`page-note files-review-note ${send.error ? "is-err" : ""}`}>
           {send.error ??
-            (send.tap
-              ? "Confirm with your passkey…"
-              : (why ?? "The agent is mid-turn: it reads the review when this turn ends."))}
+            (send.tap ? tapWords() : (why ?? "The agent is mid-turn: it reads the review when this turn ends."))}
         </p>
       )}
     </section>

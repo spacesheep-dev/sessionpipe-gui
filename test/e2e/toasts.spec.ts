@@ -5,9 +5,11 @@
 // with the unpaired reason) that stays until dismissed, leaves with its attention.cleared,
 // and opens the session beside the page on a click; a turn that ends with an error is a
 // card that leaves by itself; what was open at the first snapshot never toasts; the
-// sound of the moment plays through a stubbed AudioContext, and not with sounds off.
+// sound of the moment plays through a stubbed AudioContext, and not with sounds off. On a
+// paired machine, a prompt whose hook stopped waiting has nothing to press.
 import { randomUUID } from "node:crypto";
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
+import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
 import { EVENTS, INFO, openPage, ulid } from "./helpers.js";
 
 declare global {
@@ -317,5 +319,45 @@ test.describe("toasts", () => {
     await expect(page.locator(".toasts .toast-unlock")).toHaveCount(0);
     await s.cleared(id);
     await s.done();
+  });
+});
+
+// A paired machine (the test-door instance, control-helpers.ts): Claude Code's hook waits
+// 125 s for an answer, so past 120 s a banner offers nothing to press, and says why.
+test.describe("toasts: a prompt's answer window", () => {
+  test("a prompt its hook stopped waiting on has no Allow / Deny, and a fresh one loses them as its window runs out", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const bearer = await sinkToken();
+    const d = await fakeDaemon(key, { name: `window-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const posted: { clear: () => Promise<void> }[] = [];
+    try {
+      await page.goto(`${CONTROL_BASE}/feed`);
+      await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+      const words = `too late to answer from here; answer it on ${d.name}`;
+      const late = await postPrompt(bearer, { machine: d.name, title: "Asked 130 s ago", agoMs: 130_000 });
+      posted.push(late);
+      const card = page.locator(`.toast[data-attention="${late.attention}"]`);
+      await expect(card.locator(".toast-actions")).toHaveAttribute("data-answer", "late");
+      await expect(card.locator(".toast-note")).toHaveText(words);
+      await expect(card.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      await card.getByRole("button", { name: "Dismiss" }).click();
+      // Inside its window, Allow is there to press until the window runs out.
+      const fresh = await postPrompt(bearer, { machine: d.name, title: "Asked 112 s ago", agoMs: 112_000 });
+      posted.push(fresh);
+      const next = page.locator(`.toast[data-attention="${fresh.attention}"]`);
+      await expect(next.locator(".toast-actions")).toHaveAttribute("data-answer", "open");
+      await expect(next.getByRole("button", { name: "Allow" })).toBeEnabled();
+      await expect(next.locator(".toast-actions")).toHaveAttribute("data-answer", "late", { timeout: 20_000 });
+      await expect(next.locator(".toast-note")).toHaveText(words);
+      await expect(next.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+    } finally {
+      for (const p of posted) await p.clear();
+      await d.stop();
+    }
   });
 });

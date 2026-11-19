@@ -4,10 +4,11 @@
 import type { ControlActivity, ControlKind, ControlOutcome, RunLevel } from "@shared/api";
 import { asSentence } from "@shared/reason";
 import { accountMode } from "../lib/net";
+import { clock, NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { ControlError, UNHEARD_CODE, wrongOriginHere } from "./api";
 import { wrongOriginWords } from "./origin";
 import { remoteHostFor } from "./remoteRp";
-import { deviceRefusal, nativeErrorWords } from "./signer";
+import { deviceRefusal, deviceWords, nativeErrorWords } from "./signer";
 import { webauthnError } from "./webauthn";
 
 export const KIND_LABEL: Record<ControlKind, string> = {
@@ -150,17 +151,28 @@ export function unheardWords(a: Pick<ControlActivity, "unheard" | "code" | "deta
   return sendErrorWords(new ControlError(504, a.detail ?? "", UNHEARD_CODE, a.detail));
 }
 
-/** What went wrong before anything was queued, in words. */
-export function sendErrorWords(e: unknown): string {
+/** What went wrong before anything was queued, in words. `machine`: the name of the computer
+ *  it was for, where the words name it. */
+export function sendErrorWords(e: unknown, machine?: string | null): string {
   if (e instanceof ControlError) {
     // A send naming files for a computer reached through spacesheep (forwardSend): its reason.
     if (e.code === "relay_files") return `Not sent. ${e.detail ?? e.reason}`;
+    // spacesheep holds a key approved from another device for an hour (its 403 `cooling`):
+    // from when this device can send, in the app's words; never spacesheep's own sentence,
+    // which calls it "This device" and counts the minutes.
+    if (e.status === 403 && e.code === "cooling")
+      return e.until === undefined ? NEW_WORDS.sendCoolingWhy : NEW_WORDS.sendCooling(ThisPhone(), clock(e.until));
+    // On a spacesheep account the computer's key list is spacesheep's: the phone's key is
+    // not on it yet (not approved, or approved and not added there yet).
+    if (e.status === 422 && e.code === "untrusted_key" && accountMode())
+      return NEW_WORDS.sendNotAdded(machine || "the computer", deviceWords().this);
     if (e.status === 422 && e.code) return `not sent · ${refusalWords(e.code)}`;
     // spacesheep refused this app's key (server/control/ui.ts forwardSend), not the page's.
-    // On an account (the phone) nothing connects in Settings: the sentence stops at what is so.
     if (e.code === "spacesheep_unauthorized")
+      // On a spacesheep account (the phone) the account is under Settings → App, and it is
+      // connected again there with no disconnect first.
       return accountMode()
-        ? "Not sent. spacesheep no longer takes this app's key."
+        ? NEW_WORDS.sendRevoked
         : "Not sent. spacesheep no longer takes this app's key: disconnect and connect again in Settings → Data.";
     // The app could get no answer for it (account/doors.ts): nobody knows whether spacesheep
     // took it, so it is never said to be not sent. The app's own words for what happened,
@@ -179,6 +191,13 @@ export function sendErrorWords(e: unknown): string {
   }
   return `not sent · ${e instanceof Error ? e.message : String(e)}`;
 }
+
+/** A send's words as a line of their own says them (under a field, in a sheet, on an
+ *  Inbox row): "Not sent: …" where a step in a list of them says "not sent · …". Any
+ *  other words as they are. */
+export const notSentLine = (words: string): string => words.replace(/^not sent · /, "Not sent: ");
+/** sendErrorWords as a line of its own says them (notSentLine). */
+export const notSentWords = (e: unknown, machine?: string | null): string => notSentLine(sendErrorWords(e, machine));
 
 /** A receiver's reason worth quoting: not the bare outcome an older spacesheep notes when the
  *  computer gave none ("refused"), which would read "refused it: refused". */
@@ -210,6 +229,36 @@ export function handoffEndWords(a: ControlActivity, machine: string): string {
   if (a.outcome === "unconfirmed" || (a.outcome === "failed" && a.code === "untracked"))
     return outcomeWords(a, { machine });
   return `not sent · ${a.outcome === "refused" ? refusalWords(a.code) : (a.detail ?? a.outcome)}`;
+}
+
+/** The one line a prompt's card, its Inbox row and its toast say while an answer to it is
+ *  out: which answer went (`what`, its first words) and what it waits for, "Allowed ·
+ *  waiting for studio-mac". `offline`: the computer is not online now. */
+export function receiptWords(o: {
+  decision: "allow" | "deny";
+  plan?: boolean;
+  machine?: string | null;
+  offline?: boolean;
+}): { what: string; text: string } {
+  const what =
+    o.decision === "allow"
+      ? o.plan
+        ? NEW_WORDS.answerPlanApproved
+        : NEW_WORDS.answerAllowed
+      : o.plan
+        ? NEW_WORDS.answerPlanChanges
+        : NEW_WORDS.answerDenied;
+  const machine = o.machine || "its computer";
+  return { what, text: o.offline ? NEW_WORDS.answerOutOffline(what, machine) : NEW_WORDS.answerOut(what, machine) };
+}
+
+/** An answer that ended without reaching its prompt, which takes an answer again: why, as
+ *  a line of its own ("Not sent: …"), in the words a send's own refusal has. */
+export function answerEndWords(a: ControlActivity, machine: string): string {
+  if (a.unheard) return notSentLine(unheardWords(a) ?? "");
+  if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
+  if (a.outcome === "unconfirmed") return unconfirmedWords(machine, a);
+  return notSentLine(handoffEndWords(a, machine));
 }
 /** A waiting row nothing reads right now: disconnected, or the key refused. */
 export const unfollowedWords = (a: Pick<ControlActivity, "unfollowed">): string =>

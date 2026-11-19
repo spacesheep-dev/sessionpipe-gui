@@ -47,4 +47,34 @@ describe("createApp", () => {
       tmp.cleanup();
     }
   });
+
+  it("answers a pairing started with no token with the code alone, and one the sink token started with the board's key", async () => {
+    const tmp = tempDir();
+    const app = await createApp({ port: 0, stateDir: tmp.dir, outbox: false, quiet: true });
+    try {
+      const key = app.config().uiKey;
+      const hello = { name: "box", harnesses: ["claude-code"], modes: ["waiter", "turn"], version: "0.13.6" };
+      const pair = (body: unknown, bearer?: string) =>
+        fetch(`${app.url}${ROUTES.control}/pair`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+          body: JSON.stringify(body),
+        });
+      const open = await pair({ ...hello, poll_key: "k".repeat(43) });
+      expect(open.status).toBe(201);
+      const answer = await open.text();
+      expect(answer).not.toContain(key);
+      const { code, url } = JSON.parse(answer) as { code: string; url: string };
+      expect(url).toBe(`http://localhost:${app.port}/pair?code=${code}`);
+      // The well-known file, the one other thing a caller with no token can read, has no key either.
+      expect(await (await fetch(`${app.url}${ROUTES.wellKnown}`)).text()).not.toContain(key);
+      const keyed = await pair(hello, app.config().sinkToken);
+      expect(keyed.status).toBe(201);
+      const k = (await keyed.json()) as { code: string; url: string };
+      expect(k.url).toBe(`http://localhost:${app.port}/pair?code=${k.code}&k=${encodeURIComponent(key)}`);
+    } finally {
+      await app.close();
+      tmp.cleanup();
+    }
+  });
 });

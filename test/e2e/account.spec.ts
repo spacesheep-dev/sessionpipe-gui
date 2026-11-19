@@ -15,6 +15,7 @@ import { HubStandIn } from "../account/hub.js";
 import { type AccountServer, startAccountServer } from "../account/serve.js";
 import { fakeShell } from "../account/shell-init.js";
 import { Session } from "../events.js";
+import { composer as composerOf } from "./helpers.js";
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/web");
 const MACHINE = "m_studio0123456789abcd";
@@ -101,7 +102,7 @@ const invoke = <T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> 
       ).__TAURI_INTERNALS__.invoke(c as string, a),
     [cmd, args] as const,
   ) as Promise<T>;
-const composer = () => page.getByLabel("Message for the next turn");
+const composer = () => composerOf(page);
 
 test.beforeAll(async ({ browser }) => {
   ss = new FakeSpacesheep();
@@ -171,8 +172,8 @@ test("connects: the digits, the approval on spacesheep, the account as this wind
   expect(status.accounts[0]!.id).toMatch(/^[a-z2-7]{52}$/);
   // The key is nowhere a page can read.
   expect(JSON.stringify(status)).not.toContain(ss.key);
-  await invoke("rx_select", { id: status.connect.receiver });
-  await page.reload();
+  // The shell reopens the window on the account it was told to show.
+  await Promise.all([page.waitForEvent("load"), invoke("rx_select", { id: status.connect.receiver })]);
   expect(
     await page.evaluate(
       () => (window as unknown as { sessionpipeShell: { receiver: { kind: string } } }).sessionpipeShell.receiver.kind,
@@ -244,6 +245,30 @@ test("this phone's key is asked to be trusted through the hub; once the computer
     text: "Check the refund webhook too.",
   });
   await expect(box).toHaveValue("");
+});
+
+test("a picture can't go to a computer reached through spacesheep yet: no paperclip, and a pasted one is answered under the field", async () => {
+  const box = composer();
+  await expect(box).toBeEnabled();
+  await expect(page.locator("input[data-attach-input]")).toHaveCount(0);
+  const line = page.locator(".ctl-foot[data-reason=pictures-off] .ctl-hint");
+  await expect(line).toHaveCount(0);
+  const prevented = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "image.png", { type: "image/png" }));
+    const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+    document.querySelector(".ctl-ask textarea")!.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+  // Nothing is taken, so nothing is prevented, and the line says why the picture did not go.
+  expect(prevented).toBe(false);
+  await expect(line).toHaveText(`Pictures can't be sent to ${NAME} through spacesheep from here yet.`);
+  await expect(page.locator(".att-item")).toHaveCount(0);
+  // It answers the paste; once the person writes on, it goes. (Nothing was asked of the hub
+  // for it: the last test of this story reads every door that was.)
+  await box.fill("In words, then");
+  await expect(line).toHaveCount(0);
+  await box.fill("");
 });
 
 test("a message whose answer never comes back is not said to be not sent: it went once, and its reply arrives", async () => {
@@ -367,6 +392,8 @@ test("a message spacesheep held, with that answer lost: the held notice comes by
 
 test("a permission question is answered from the inbox, and the computer gets the answer", async () => {
   const s = session("s-login");
+  // Asked now, as a hook asks: an answer reaches it only while the hook waits (lib/answerWindow.ts).
+  s.clock = Date.now() - 2_000;
   ss.push([
     s.ev("turn.started", { turn_id: "t5" }, on),
     s.ev(
@@ -379,6 +406,12 @@ test("a permission question is answered from the inbox, and the computer gets th
   const row = page.locator(".inbox-row--answerable").first();
   await expect(row).toBeVisible();
   await expect(row).toContainText("Add a login test");
+  // The app's half is handed the session with its question (it took the list: the stand-in
+  // refuses one over the hub's bounds), so a notification can be posted as for a receiver's.
+  type Handed = { key: string; state: string; openAttentions: { attentionId: string; answerable: boolean }[] };
+  await expect
+    .poll(() => (hub.needs.at(-1)?.sessions as Handed[] | undefined)?.find((x) => x.key === "claude-code:s-login"))
+    .toMatchObject({ state: "needs_you", openAttentions: [{ attentionId: "perm-1", kind: "permission" }] });
   await row.getByRole("button", { name: "Allow" }).click();
   await expect.poll(() => ran.some((c) => c.kind === "permission.answer")).toBe(true);
   expect(ran.find((c) => c.kind === "permission.answer")).toMatchObject({
@@ -468,6 +501,40 @@ test("a session the account forgets leaves the board and the phone, and a reload
   await expect.poll(async () => (await view()).relay.state, { timeout: 20_000 }).toBe("ok");
   await expect(page.getByText("Rotate the staging password")).toHaveCount(0);
   expect((await view()).store.sessions).toBe(2);
+});
+
+test("long turns read whole from what the phone holds: the newest reply at once, an older one on Show more", async () => {
+  const s = session("s-long");
+  const named = { ...on, session: { ...on.session, title: "Long turns" } };
+  const reply = (last: string) => `${"The export now takes a fresh connection for each batch. ".repeat(88)}${last}`;
+  ss.push([
+    s.ev("session.started", { source: "startup" }, named),
+    s.ev("turn.started", { turn_id: "t1" }, named),
+    s.ev("turn.transcript", { turn: 1, user: "Read the export code.", assistant: reply("OLDEND") }, named),
+    s.ev("turn.ended", { turn_id: "t1" }, named),
+    s.ev("turn.started", { turn_id: "t2" }, named),
+    s.ev(
+      "turn.transcript",
+      { turn: 2, user: `${"Batch 7 failed: connection reset by peer. ".repeat(35)}LOGEND`, assistant: reply("NEWEND") },
+      named,
+    ),
+    s.ev("turn.ended", { turn_id: "t2" }, named),
+  ]);
+  await expect(page.getByText("Long turns").first()).toBeVisible();
+  await page.goto(`${server.url}/s/claude-code/s-long`);
+  const cards = page.locator(".timeline li.reply, .timeline .chat-card");
+  // The newest reply whole as it opens, and a message of 1,500 characters whole (folded).
+  await expect(cards.nth(1)).toContainText("NEWEND");
+  await expect(cards.nth(1).locator(".reply-more")).toHaveCount(0);
+  await expect(page.locator(".timeline blockquote").nth(1)).toContainText("LOGEND");
+  // The older reply ends in "…"; "Show more" brings the rest from what the phone holds.
+  await expect(cards.nth(0)).not.toContainText("OLDEND");
+  await cards.nth(0).getByRole("button", { name: "Show more" }).click();
+  await expect(cards.nth(0)).toContainText("OLDEND");
+  await expect(cards.nth(0).locator(".reply-more")).toHaveCount(0);
+  await expect(page.getByText(/A preview of/)).toHaveCount(0);
+  await page.goto(server.url);
+  await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
 });
 
 test("a 429 from spacesheep is waited out and read on from; a full room at the hub and an answer too large are not errors", async () => {
@@ -615,34 +682,37 @@ test("Disconnect in Settings, once confirmed, leaves nothing of the account on s
   const name = `sessionpipe.account.${id}`;
   expect(await databases()).toContain(name);
   await leaveTraces();
-  await page.goto(`${server.url}/settings?section=data`);
-  await expect(page.getByText(/Connected as me@example\.com/).first()).toBeVisible();
+  // On the phone the account is Settings › App's own group (account/AccountSettings.tsx).
+  await page.goto(`${server.url}/settings?section=app`);
+  const group = page.locator("[data-account-settings]");
+  await expect(group.getByText("me@example.com")).toBeVisible();
   // What Disconnect removes, and what it does not, said before it is pressed.
   await expect(
-    page.getByText(
+    group.getByText(
       "Disconnect removes the account from this iPhone: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.",
-      { exact: false },
     ),
   ).toBeVisible();
-  // The key was revoked in the test before: said as it is, with nothing to do here that is not here.
-  await expect(page.getByText(/the key was revoked on spacesheep ·|the key was revoked on spacesheep\./)).toBeVisible();
+  // The key was revoked in the test before: said as it is, with the way to mend it beside it.
+  await expect(group.locator(".acct-state--warn").first()).toHaveText("The key was revoked on spacesheep");
   await expect(page.getByText(/disconnect and connect again/)).toHaveCount(0);
-  const button = page.getByRole("button", { name: "Disconnect" });
+  const button = group.locator("[data-disconnect]");
   // The person says no in the app's own alert: nothing changes.
   hub.alert = () => false;
   await button.click();
   await expect(button).toBeEnabled();
-  await expect(page.getByText(/Connected as me@example\.com/).first()).toBeVisible();
+  await expect(group.getByText("me@example.com")).toBeVisible();
   expect(hub.accounts.size).toBe(1);
   expect(await databases()).toContain(name);
   expect(Object.keys(await stored())).toEqual(expect.arrayContaining(TRACES));
-  // Yes: the window leaves the account for what the app shows with none, the welcome.
+  // Yes: the window leaves the account, says what became of the key, then is the welcome.
   hub.alert = () => true;
   await button.click();
+  await expect(page.locator(".onb[data-step='account-disconnected']")).toBeVisible();
+  await page.getByRole("button", { name: "Done" }).click();
   await expect(welcome()).toBeVisible();
   expect(hub.accounts.size).toBe(0);
   await expect(page.getByText("Fix the invoice webhook")).toHaveCount(0);
-  await expect(page.getByText(/Connected as/)).toHaveCount(0);
+  await expect(page.getByText("me@example.com")).toHaveCount(0);
   // Nothing of it is kept: not the sessions, not what was written beside them.
   await expect.poll(databases).not.toContain(name);
   const left = await stored();
@@ -977,7 +1047,7 @@ test.describe("a phone that cannot sign, with no storage to keep the board in", 
   test("it reads; where it would send, one line says why not and leads to the session on spacesheep", async () => {
     await page2.goto(`${server2.url}/s/claude-code/s-android`);
     await expect(page2.getByText("It is.").first()).toBeVisible();
-    await expect(page2.getByLabel("Message for the next turn")).toBeDisabled();
+    await expect(composerOf(page2)).toBeDisabled();
     await expect(page2.getByText("Sending from this phone comes in a later version").first()).toBeVisible();
     const link = page2.locator("[data-elsewhere]");
     await expect(link).toHaveText("Open on spacesheep.test");

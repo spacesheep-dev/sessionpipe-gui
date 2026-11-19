@@ -19,13 +19,14 @@ import { sendCommand } from "./command";
 import { useControlActivity } from "./hooks";
 import "./newSession.css";
 import { openNewSession } from "./newSessionState";
+import { isCancel } from "./signer";
 import {
   harnessCommand,
   isFinal,
+  notSentWords,
   outcomeWords,
   PERMISSION_LABEL,
   promptFailureWords,
-  sendErrorWords,
   sentLine,
   shownState,
   startFailureWords,
@@ -244,9 +245,7 @@ export function SentFailure({
           <ActionButton
             className="btn btn--sm"
             pendingLabel="Starting…"
-            onClick={() =>
-              startAtSafe(a, control).catch((e) => setErr(sendErrorWords(e).replace(/^not sent · /, "Not sent: ")))
-            }
+            onClick={() => startAtSafe(a, control).catch((e) => setErr(isCancel(e) ? null : notSentWords(e)))}
           >
             Start in Safe instead
           </ActionButton>

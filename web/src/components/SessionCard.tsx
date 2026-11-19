@@ -9,7 +9,7 @@
 // touch) opens the session's menu; resting on a row warms its transcript (data/prefetch).
 // The class names are the e2e contract (`article.card`, `.card-status`, `.card-meta`…),
 // so they stay even though nothing here is a card any more.
-import type { AgentRun, SessionFlag, SessionKey, SessionSummary } from "@shared/api";
+import type { AgentRun, Attention, SessionFlag, SessionKey, SessionSummary } from "@shared/api";
 import {
   Fragment,
   type MutableRefObject,
@@ -26,12 +26,18 @@ import {
 import { answerState, useSessionSend } from "../control/useSend";
 import { useAppState, useStore, useUnread } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
-import { agentsChoice, agentsFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
+import { agentFound, agentsChoice, agentsRunningFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
+import { useAnswerClock } from "../lib/answerWindow";
+import { useAskedInput } from "../lib/askedInput";
+import { usePhoneLayout } from "../lib/device";
 import {
   ATTENTION_LABEL,
+  askedQuestion,
+  askFitsRow,
   attentionMessage,
   harnessMark,
   isPlanReview,
+  isQuestion,
   oneLine,
   repoShort,
   STATE_LABEL,
@@ -78,8 +84,9 @@ interface SessionCardProps {
   open?: boolean;
   /** The panel's active tab, when it is one of this session's agents (that row is open). */
   openTab?: string | null;
-  /** A search found one of its agents: they show, whatever the disclosure says. */
-  agentsMatch?: boolean;
+  /** The search that found one of its agents: they show, whatever the disclosure says, and
+   *  the finished ones listed are the ones it found. */
+  agentsMatch?: string;
   /** The board's filters, for the menu's "Show only …" (stable setters). */
   onlyMachine?: (m: string) => void;
   onlyHarness?: (h: string) => void;
@@ -150,7 +157,7 @@ export const SessionCard = memo(function SessionCard({
   openBeside = false,
   open = false,
   openTab = null,
-  agentsMatch = false,
+  agentsMatch,
   onlyMachine,
   onlyHarness,
   gone = false,
@@ -172,14 +179,14 @@ export const SessionCard = memo(function SessionCard({
   // the person opens or folds does it at once.
   const auto = useRef(chosen);
   if (!held || agentsChoice(s.key) !== undefined) auto.current = chosen;
-  const showAgents = agents.length > 0 && (auto.current || agentsMatch);
+  const showAgents = agents.length > 0 && (auto.current || !!agentsMatch);
   const [allDone, setAllDone] = useState(false);
   const toggleAgents = (to = !showAgents) => {
     if (agents.length > 0 && to !== showAgents) setAgentsChoice(s.key, to);
   };
-  // The subagents running, and the agents it asked (one fact when both: "2 subagents
+  // The subagents running now, and the agents it asked (one fact when both: "2 subagents
   // running · asking Codex").
-  const fact = [agentsFact(s), askingFact(s)].filter(Boolean).join(" · ") || null;
+  const fact = [agentsRunningFact(s), askingFact(s)].filter(Boolean).join(" · ") || null;
   // sessionpipe 0.10: paused on its own background work, a turn nobody typed, a run
   // nobody attended. One trailing fact at most, after the subagents'.
   const quiet = quietRun(s);
@@ -207,14 +214,21 @@ export const SessionCard = memo(function SessionCard({
   const beside = (o: { background: boolean } = { background: false }) =>
     openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background: o.background });
   // Allow / Deny in the menu, through the same signed send as the inbox, while a
-  // permission is open (CardAnswer keeps them current).
+  // permission is open (CardAnswer keeps them current) and the row's one line shows it
+  // whole, which on a phone a command often is not. The line is read as the menu opens, so
+  // nothing on the row moves for it.
   const answer = useRef<MenuList>([]);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const cut = () => {
+    const line = rowRef.current?.querySelector<HTMLElement>(".card-attn");
+    return !line || line.scrollWidth > line.clientWidth;
+  };
   const menu = useContextMenu(
     () =>
       sessionItems(s, {
         store,
         surface: "list",
-        answer: answer.current,
+        answer: cut() ? [] : answer.current,
         children,
         extra: onlyItems(s, { onlyMachine, onlyHarness }),
       }),
@@ -226,7 +240,6 @@ export const SessionCard = memo(function SessionCard({
   // The counts the row no longer prints are its tooltip: "2 turns · 5 tools · 1 error".
   const tip = [title, countsLine(s, showTools)].filter(Boolean).join("\n");
   const warm = prefetchProps(store, s);
-  const rowRef = useRef<HTMLDivElement>(null);
   // A phone's swipes (iOS Mail): trailing hides it (with Undo), or unhides a hidden one;
   // leading labels it.
   useSwipe(rowRef, {
@@ -244,7 +257,7 @@ export const SessionCard = memo(function SessionCard({
       data-open={open ? "" : undefined}
       {...menu}
     >
-      {attention?.kind === "permission" && <CardAnswer s={s} into={answer} />}
+      {attention?.kind === "permission" && <CardAnswer s={s} into={answer} shown={showTools} />}
       <div className="card-row" ref={rowRef} {...warm}>
         <SwipePanes lead="Label" trail={hidden ? "Unhide" : "Hide"} />
         {agents.length > 0 && (
@@ -305,7 +318,7 @@ export const SessionCard = memo(function SessionCard({
             {attention && (
               <span className={`card-kind ${attnTool ? "sr-only" : ""}`}>
                 {attnTool ? " · " : ""}
-                {ATTENTION_LABEL[attention.kind] ?? attention.kind}
+                {ATTENTION_LABEL[isQuestion(attention) ? "question" : attention.kind] ?? attention.kind}
               </span>
             )}
             {attnTool && <code className="card-tool">{toolLabel(attnTool)}</code>}
@@ -324,7 +337,9 @@ export const SessionCard = memo(function SessionCard({
           </span>
 
           <span className="card-line">
-            {attention ? (
+            {attnTool && attention && isQuestion(attention) ? (
+              <AskedLine s={s} a={attention} className="card-attn" />
+            ) : attention ? (
               <span className={`card-attn ${literalAsk(attnTool) ? "mono" : ""}`}>
                 {attention.message && showTools ? (
                   attnTool ? (
@@ -338,7 +353,7 @@ export const SessionCard = memo(function SessionCard({
               </span>
             ) : liveText ? (
               <span className="card-text">
-                <Inline text={oneLine(isLiveText ? tail(liveText, 300) : liveText, 300)} />
+                <Inline text={oneLine(isLiveText ? newest(liveText) : liveText, 300)} />
               </span>
             ) : null}
             {/* The tree under the row says it once it is open: then the words are for a
@@ -380,6 +395,7 @@ export const SessionCard = memo(function SessionCard({
         <KidList
           s={s}
           agents={showAgents}
+          match={agentsMatch}
           kids={kids ?? []}
           openTab={openTab}
           all={allDone}
@@ -393,7 +409,9 @@ export const SessionCard = memo(function SessionCard({
   );
 }, sameCard);
 
-/** How many finished agents show under a parent before "Show n more". */
+/** How many finished agents show under a parent before "Show n more". A phone shows none
+ *  while any agent is unfinished (they fold into "Show n finished"), unless a search found
+ *  the tree. */
 const DONE_SHOWN = 3;
 
 type KidItem = { kind: "agent"; a: AgentRun } | { kind: "kid"; c: SessionSummary };
@@ -401,12 +419,14 @@ const kidKey = (k: KidItem) => (k.kind === "agent" ? `a:${k.a.id}` : `c:${k.c.ke
 const kidGroup = (k: KidItem) => (k.kind === "agent" ? (k.a.state === "done" ? "done" : "open") : "kid");
 
 /** A parent's tree: its agents (the open ones, then the newest finished, then "Show n
- *  more") and its child sessions. It holds still under the pointer like the board does:
- *  an agent that finishes stays where it is until the pointer leaves, then slides down
- *  to the finished ones. */
+ *  more"; on a phone, while any is open, the open ones and "Show n finished"; the finished
+ *  ones a search found, when one did) and its child sessions. It holds still under the
+ *  pointer like the board does: an agent that finishes stays where it is until the
+ *  pointer leaves, then slides down to the finished ones. */
 function KidList({
   s,
   agents,
+  match,
   kids,
   openTab,
   all,
@@ -416,6 +436,7 @@ function KidList({
 }: {
   s: SessionSummary;
   agents: boolean;
+  match?: string;
   kids: SessionSummary[];
   openTab: string | null;
   all: boolean;
@@ -424,9 +445,14 @@ function KidList({
 } & Pick<SessionCardProps, "onlyMachine" | "onlyHarness">) {
   const ref = useRef<HTMLUListElement>(null);
   const hold = useListHold(ref) || held;
-  const { shown, more } = agents
-    ? agentsShown(s.agents, all ? Number.POSITIVE_INFINITY : DONE_SHOWN)
-    : { shown: [], more: 0 };
+  const phone = usePhoneLayout();
+  const list = s.agents ?? [];
+  const unfinished = list.some((a) => a.state !== "done");
+  const done = all ? Number.POSITIVE_INFINITY : phone && unfinished && !match ? 0 : DONE_SHOWN;
+  const keep = match && !all ? (a: AgentRun) => agentFound(a, match) : undefined;
+  const { shown, more } = agents ? agentsShown(list, done, keep) : { shown: [], more: 0 };
+  // "Show 2 more" under finished rows, "Show 19 finished" where none is listed.
+  const what = shown.some((a) => a.state === "done") ? "more" : "finished";
   const items: KidItem[] = [
     ...shown.map((a): KidItem => ({ kind: "agent", a })),
     ...kids.map((c): KidItem => ({ kind: "kid", c })),
@@ -458,7 +484,7 @@ function KidList({
       {more > 0 && (
         <li className="kid-more">
           <button type="button" className="kid-more-btn" onClick={onAll}>
-            Show {more} more
+            Show {more} {what}
           </button>
         </li>
       )}
@@ -508,16 +534,20 @@ function KidRow({
 }
 
 /** Keeps a row's Allow / Deny menu items current: mounted only while a permission is
- *  open, so the other rows never pay for the send's state. */
-function CardAnswer({ s, into }: { s: SessionSummary; into: MutableRefObject<MenuList> }) {
+ *  open, so the other rows never pay for the send's state. Only beside a request the row
+ *  shows (`shown`: the tier lens lets it) and could show whole (askFitsRow; the menu also
+ *  asks the line whether it is cut), and never for a question: anything else is answered
+ *  on the session's page, where it is shown whole. */
+function CardAnswer({ s, into, shown }: { s: SessionSummary; into: MutableRefObject<MenuList>; shown: boolean }) {
   const { machines } = useAppState();
   const control = s.machine ? machines.get(s.machine)?.control : undefined;
   const a = s.openAttentions.find((x) => x.kind === "permission");
   const send = useSessionSend(s, control, s.openAttentions);
-  const st = a ? answerState(s, a, control, send) : null;
+  const now = useAnswerClock(a ? [a] : []);
+  const st = a ? answerState(s, a, control, send, now) : null;
   useLayoutEffect(() => {
     into.current =
-      a && st && st.status !== "closed"
+      a && st && shown && !isQuestion(a) && askFitsRow(a, s.harness)
         ? answerItems(a.tool, st, (allow) =>
             send.onSend({ kind: "permission.answer", attentionId: a.attentionId, allow }).catch(() => {}),
           )
@@ -533,12 +563,16 @@ function CardAnswer({ s, into }: { s: SessionSummary; into: MutableRefObject<Men
 }
 
 /** Allow and Deny as menu items, disabled with the reason when nothing can go; a plan
- *  review's are Approve plan and Keep planning. */
+ *  review's are Approve plan and Keep planning. None once the prompt's hook stopped
+ *  waiting (answerState's "late"), once an answer is out or the prompt closed (`status`),
+ *  where nothing could go again, and none on a device not approved ("unapproved"), where
+ *  only an approval made elsewhere brings them back. */
 export function answerItems(
   tool: string | undefined,
-  st: { off: boolean; reason: string | null },
+  st: { off: boolean; reason: string | null; tag?: string; status?: string },
   answer: (allow: boolean) => unknown,
 ): MenuItem[] {
+  if (st.tag === "late" || st.tag === "unapproved" || st.status) return [];
   const disabled = st.off ? (st.reason ?? true) : undefined;
   const plan = isPlanReview({ kind: "permission", tool });
   const what = tool ? ` ${toolLabel(tool)}` : "";
@@ -594,11 +628,12 @@ export function useStickyTop(page: RefObject<HTMLElement | null>): void {
   }, [page]);
 }
 
-/** The store's flags, folded into the end of line 2 in the muted tier. A slow tool the
- *  row already names is not said again ("Read  Read · 3 m"); an error streak is the ✕ at
- *  the row's end, so it is not words here. */
+/** The store's flags that say a session is stuck, folded into the end of line 2 in the
+ *  muted tier: a slow tool and a loop. A slow tool the row already names is not said
+ *  again ("Read  Read · 3 m"); an error streak is the ✕ at the row's end; compacting and
+ *  a gap are the session page's. */
 function Flags({ flags, tool }: { flags: SessionFlag[] | undefined; tool?: string }) {
-  const shown = (flags ?? []).filter((f) => f.kind !== "error_streak" && !(f.kind === "slow_tool" && tool));
+  const shown = (flags ?? []).filter((f) => f.kind === "loop" || (f.kind === "slow_tool" && !tool));
   if (!shown.length) return null;
   return (
     <span className="card-flags">
@@ -763,9 +798,23 @@ const tokenMsSafe = () => (reducedMotion() ? 0 : tokenMs("--dur", 200));
  *  mono without its ticks, emphasis and links are their words, a heading or quote mark
  *  goes. Placeholders for removed secrets keep their highlight. */
 /** Whether a tool's request is a literal a person might copy (a command, a path), set in
- *  mono; an MCP tool's is a sentence ("Open a pull request on acme/billing"), in the UI
- *  face. */
-export const literalAsk = (tool: string | undefined): boolean => !!tool && !tool.startsWith("mcp__");
+ *  mono; an MCP tool's is a sentence ("Open a pull request on acme/billing"), and so is a
+ *  question from the agent, in the UI face. */
+export const literalAsk = (tool: string | undefined): boolean =>
+  !!tool && !tool.startsWith("mcp__") && !isQuestion({ kind: "permission", tool });
+
+/** A question row's request: the question, from the call's input where the session sent
+ *  it, beside the "Question" chip; nothing (the chip alone) until it is read, or where it
+ *  was not sent. Its own component, so only a question's row reads the input. */
+export function AskedLine({ s, a, className }: { s: SessionSummary; a: Attention; className: string }) {
+  const { input } = useAskedInput(s, a);
+  const q = askedQuestion(input);
+  return q ? (
+    <span className={className}>
+      <Redacted text={oneLine(q.text, 240)} />
+    </span>
+  ) : null;
+}
 
 export function Inline({ text }: { text: string }) {
   const parts = text.split(/(`[^`\n]+`)/g);
@@ -895,5 +944,23 @@ export function BesideButton({
   );
 }
 
-const tail = (s: string, n: number) => (s.length > n ? `…${s.slice(-n + 1)}` : s);
+/** A reply still being written, from where its newest thought starts, so a row's line
+ *  shows the newest words and CSS cuts only its end. 140 characters or fewer stay whole.
+ *  Longer text starts after the latest sentence break (".", "!", "?" or ":" and a space,
+ *  or a new line) in its last 160 characters that leaves 40 or more; with none, at the
+ *  word that starts nearest 90 from the end, after a "…". */
+export function newest(text: string): string {
+  if (text.length <= 140) return text;
+  const from = Math.max(0, text.length - 160);
+  /** Where each match of `re` in the last 160 characters ends. */
+  const ends = (re: RegExp) => [...text.slice(from).matchAll(re)].map((m) => from + m.index + m[0].length);
+  const sentence = ends(/[.!?:]\s+|\n\s*/g)
+    .filter((at) => text.length - at >= 40)
+    .pop();
+  if (sentence !== undefined) return text.slice(sentence);
+  const off = (at: number) => Math.abs(text.length - at - 90);
+  const word = ends(/\s+/g).sort((a, b) => off(a) - off(b))[0];
+  return `…${text.slice(word ?? -89)}`;
+}
+
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;

@@ -12,7 +12,8 @@
 export interface ShellInitOptions {
   /** `false`: the signer says it cannot sign here, with this reason (Android today). */
   signer?: false | string;
-  /** The page's settings, so a test starts where a person who has used the app is. */
+  /** The page's settings, so a test starts where a person who has used the app is. `false`:
+   *  a fresh install, whose first-run sheet has not been seen. */
   settled?: boolean;
 }
 
@@ -23,12 +24,19 @@ export function fakeShell(o: ShellInitOptions = {}) {
   x.send();
   const contract = JSON.parse(x.responseText) as { receiver: { id: string } | null; platform: string };
   (window as unknown as Record<string, unknown>).sessionpipeShell = Object.freeze(contract);
+  if (document.documentElement) document.documentElement.dataset.shell = contract.platform;
+  // The shell's own settings (`app_settings_*`): whether the first-run sheet was seen.
+  const SEEN = "account-test.firstRunDone";
   if (o.settled !== false) {
     localStorage.setItem("sessionpipe-gui.setup.seen", "1");
     localStorage.setItem("sessionpipe-gui.native.firstRun", "1");
+    localStorage.setItem(SEEN, "1");
     if (!localStorage.getItem("sessionpipe-gui.settings"))
       localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "advanced" }));
   }
+  /** What the app handed to the system browser (`app_open_external`). */
+  const opened: string[] = [];
+  (window as unknown as Record<string, unknown>).__opened = opened;
 
   const b64u = (buf: ArrayBuffer | Uint8Array) =>
     btoa(String.fromCharCode(...new Uint8Array(buf as ArrayBuffer)))
@@ -153,9 +161,20 @@ export function fakeShell(o: ShellInitOptions = {}) {
         return Number(args.handler);
       }
       if (cmd === "plugin:event|unlisten") return void heard.delete(Number(args.eventId));
+      if (cmd === "rx_select") {
+        const r = await hub(cmd, args);
+        // The shell rebuilds the window on the receiver it was told to show.
+        setTimeout(() => location.replace("/"), 50);
+        return r;
+      }
       if (cmd.startsWith("acct_") || cmd.startsWith("rx_")) return hub(cmd, args);
       if (cmd === "app_settings_get" || cmd === "app_settings_set")
-        return { notifications: { enabled: false, kinds: {}, pausedUntil: null }, firstRunDone: true };
+        return {
+          notifications: { enabled: false, kinds: {}, pausedUntil: null },
+          firstRunDone: !!localStorage.getItem(SEEN),
+        };
+      if (cmd === "app_first_run_done") return void localStorage.setItem(SEEN, "1");
+      if (cmd === "app_open_external") return void opened.push(String(args.url));
       if (cmd === "app_notify_status") return "undetermined";
       if (cmd === "app_update_status") return { state: "idle" };
       return null;

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // What a saved workflow must be, and the two files: private, written whole, read back the same.
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WORKFLOW_STEPS_MAX, WORKFLOW_TEXT_MAX, type WorkflowRun } from "../../shared/api.js";
 import { tempDir } from "../../test/events.js";
+import { cancel, newRun } from "./runs.js";
 import { OrchestrateStore, RUNS_MAX, readWorkflow, WorkflowError } from "./store.js";
 
 const M = "m_machine00000000000001";
@@ -133,7 +134,7 @@ describe("OrchestrateStore", () => {
     rev: 1,
     status,
     startedAt,
-    plan: [],
+    plan: [{ ...base.steps[0]!, id: "a" }],
     steps: { a: { status: status === "running" ? "ready" : "done" } },
   });
 
@@ -173,6 +174,189 @@ describe("OrchestrateStore", () => {
     expect(store.runs().map((r) => r.id)).toEqual(["01K8RUN000000000000000AAAA"]);
     expect(readdirSync(tmp.dir).some((f) => f.startsWith("workflows.json.bad-"))).toBe(true);
     expect(existsSync(path.join(tmp.dir, "workflows.json"))).toBe(false);
+  });
+
+  // A run whose plan the state machine cannot walk threw from every tick (advance:
+  // `steps[step.id]!.status`, `afterOf(...).map((id) => steps[id]!)`), and the server
+  // exited a second after each start. Such a run is left out; the good one beside it stays.
+  const planned = (id: string, plan: unknown[], steps: Record<string, unknown>): unknown => ({
+    ...run(id, "running", NOW),
+    plan,
+    steps,
+  });
+  const GOOD = "01K8RUN000000000000000GOOD";
+  const good = planned(
+    GOOD,
+    [
+      { ...base.steps[0], id: "ask" },
+      { ...base.steps[1], id: "compare", after: ["ask"] },
+    ],
+    { ask: { status: "done", reply: "r" }, compare: { status: "pending" } },
+  ) as WorkflowRun;
+  const step = (id: string, extra: Record<string, unknown> = {}) => ({ ...base.steps[0], id, ...extra });
+  const broken: [string, unknown][] = [
+    ["a plan step that is not an object", planned("01K8RUN00000000000000BAD1", [null], {})],
+    ["a plan step with no entry in steps", planned("01K8RUN00000000000000BAD2", [step("a")], {})],
+    [
+      "an after that is not a step id",
+      planned("01K8RUN00000000000000BAD3", [step("a"), step("b", { after: [5] })], {
+        a: { status: "done" },
+        b: { status: "pending" },
+      }),
+    ],
+    [
+      "an after naming a step that is not before it",
+      planned("01K8RUN00000000000000BAD4", [step("a", { after: ["b"] }), step("b")], {
+        a: { status: "pending" },
+        b: { status: "pending" },
+      }),
+    ],
+    [
+      "an after that is not a list",
+      planned("01K8RUN00000000000000BAD5", [step("a"), step("b", { after: "a" })], {
+        a: { status: "done" },
+        b: { status: "pending" },
+      }),
+    ],
+    [
+      "a plan step id that is not an id",
+      planned("01K8RUN00000000000000BAD6", [step("../x")], { "../x": { status: "pending" } }),
+    ],
+    [
+      "a plan step id used twice",
+      planned("01K8RUN00000000000000BAD7", [step("a"), step("a")], { a: { status: "pending" } }),
+    ],
+    [
+      "a plan step with no text",
+      planned("01K8RUN00000000000000BAD8", [step("a", { text: undefined })], { a: { status: "pending" } }),
+    ],
+    // fitFills reads `.length` and `.slice` of every fill: an object with a length threw.
+    [
+      "an input that is not text",
+      {
+        ...(planned("01K8RUN00000000000000BAD9", [step("a")], { a: { status: "pending" } }) as object),
+        input: { length: 5 },
+      },
+    ],
+    [
+      "a reply that is not text",
+      planned("01K8RUN0000000000000BAD10", [step("a"), step("b", { text: "{{prev}}", after: ["a"] })], {
+        a: { status: "done", reply: { length: 99999 } },
+        b: { status: "pending" },
+      }),
+    ],
+    [
+      "a session that is not text",
+      planned("01K8RUN0000000000000BAD12", [step("a")], { a: { status: "done", session: 5 } }),
+    ],
+    // The run's status is read from every entry: a pending one no step names never ends.
+    [
+      "an entry in steps that no plan step names",
+      planned("01K8RUN0000000000000BAD11", [step("a")], { a: { status: "done" }, zz: { status: "pending" } }),
+    ],
+  ];
+  it.each(broken)("leaves out a run with %s and keeps the good one whole", (_, bad) => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    writeFileSync(file, JSON.stringify({ v: 1, runs: [bad, good] }));
+    const store = new OrchestrateStore(tmp.dir);
+    expect(store.runs().map((r) => r.id)).toEqual([GOOD]);
+    // The file as it was is set aside, so the run left out is not lost.
+    const aside = readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"));
+    expect(aside).toHaveLength(1);
+    expect(JSON.parse(readFileSync(path.join(tmp.dir, aside[0]!), "utf8")).runs).toEqual([bad, good]);
+    // A second start finds nothing to set aside.
+    expect(new OrchestrateStore(tmp.dir).runs().map((r) => r.id)).toEqual([GOOD]);
+    expect(readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"))).toHaveLength(1);
+    // The next write keeps the good run whole; the one left out is not written back.
+    store.putRun(run("01K8RUN000000000000000AAAA", "done", NOW));
+    expect(new OrchestrateStore(tmp.dir).run(GOOD)).toEqual(good);
+    expect(JSON.parse(readFileSync(file, "utf8")).runs.map((r: WorkflowRun) => r.id)).toEqual([
+      GOOD,
+      "01K8RUN000000000000000AAAA",
+    ]);
+  });
+
+  it("sets aside a runs file whose runs are not a list, and keeps one where every run reads as it is", () => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    writeFileSync(file, JSON.stringify({ v: 1, runs: { not: "a list" } }));
+    expect(new OrchestrateStore(tmp.dir).runs()).toEqual([]);
+    expect(readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"))).toHaveLength(1);
+    const whole = `${JSON.stringify({ v: 1, runs: [good] })}\n`;
+    writeFileSync(file, whole);
+    new OrchestrateStore(tmp.dir);
+    expect(readFileSync(file, "utf8")).toBe(whole);
+    expect(readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"))).toHaveLength(1);
+  });
+
+  it("leaves a runs file as it is, and sets nothing aside, when it cannot be rewritten", () => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    const text = JSON.stringify({ v: 1, runs: [broken[0]![1], good] });
+    writeFileSync(file, text);
+    const blocker = `${file}.${process.pid}.tmp`;
+    mkdirSync(blocker);
+    expect(new OrchestrateStore(tmp.dir).runs().map((r) => r.id)).toEqual([GOOD]);
+    expect(readFileSync(file, "utf8")).toBe(text);
+    expect(readdirSync(tmp.dir).filter((f) => f.includes(".bad-"))).toEqual([]);
+    rmSync(blocker, { recursive: true });
+    new OrchestrateStore(tmp.dir);
+    expect(readdirSync(tmp.dir).filter((f) => f.includes(".bad-"))).toHaveLength(1);
+  });
+
+  it("keeps a run it left out in the file until the file can be set aside", () => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    const bad = broken[1]![1];
+    writeFileSync(file, JSON.stringify({ v: 1, runs: [bad, good] }));
+    // No copy can be made: a folder already has the name of the copy.
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    const blocker = `${file}.bad-1700000000000`;
+    mkdirSync(blocker);
+    const store = new OrchestrateStore(tmp.dir);
+    expect(store.runs().map((r) => r.id)).toEqual([GOOD]);
+    // A write meanwhile keeps the run left out in the file, beside the runs that read.
+    store.putRun(run("01K8RUN000000000000000AAAA", "done", NOW));
+    expect(JSON.parse(readFileSync(file, "utf8")).runs).toContainEqual(bad);
+    rmSync(blocker, { recursive: true });
+    now.mockRestore();
+    // Once a copy can be made, the file is set aside with that run, then written without it.
+    store.putRun(run("01K8RUN000000000000000BBBB", "done", NOW));
+    const aside = readdirSync(tmp.dir).filter((f) => f.startsWith("workflow-runs.json.bad-"));
+    expect(aside).toHaveLength(1);
+    expect(JSON.parse(readFileSync(path.join(tmp.dir, aside[0]!), "utf8")).runs).toContainEqual(bad);
+    expect(
+      JSON.parse(readFileSync(file, "utf8"))
+        .runs.map((r: WorkflowRun) => r.id)
+        .sort(),
+    ).toEqual(["01K8RUN000000000000000AAAA", "01K8RUN000000000000000BBBB", GOOD].sort());
+  });
+
+  it("does not write back a duplicate of a run that is gone, while the file cannot be set aside", () => {
+    const file = path.join(tmp.dir, "workflow-runs.json");
+    writeFileSync(file, JSON.stringify({ v: 1, runs: [good, { ...good, rev: 2 }, broken[1]![1]] }));
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    mkdirSync(`${file}.bad-1700000000000`);
+    const store = new OrchestrateStore(tmp.dir);
+    expect(store.deleteRun(GOOD)).toBe(true);
+    now.mockRestore();
+    const runs = JSON.parse(readFileSync(file, "utf8")).runs;
+    expect(runs).toEqual([broken[1]![1]]);
+    expect(new OrchestrateStore(tmp.dir).run(GOOD)).toBeUndefined();
+  });
+
+  it("reads back every run the server writes, also one with a step called __proto__", () => {
+    const wf = readWorkflow(withStep({ id: "__proto__" }), { id: "wf", now: NOW });
+    const started = newRun(wf, { id: "01K8RUN0000000000000PROTO1", now: Date.parse(NOW), online: () => true });
+    const ended = cancel(
+      newRun(wf, { id: "01K8RUN0000000000000PROTO2", now: Date.parse(NOW), online: () => true }),
+      Date.parse(NOW),
+    );
+    const store = new OrchestrateStore(tmp.dir);
+    store.putRun(started);
+    store.putRun(ended);
+    const again = new OrchestrateStore(tmp.dir);
+    expect(again.run(started.id)).toEqual(JSON.parse(JSON.stringify(started)));
+    expect(again.run(ended.id)).toEqual(JSON.parse(JSON.stringify(ended)));
+    expect(Object.hasOwn(again.run(ended.id)!.steps, "__proto__")).toBe(true);
+    expect(readdirSync(tmp.dir).filter((f) => f.includes(".bad-"))).toEqual([]);
   });
 
   it("keeps at most RUNS_MAX runs, dropping the oldest ended ones first", () => {

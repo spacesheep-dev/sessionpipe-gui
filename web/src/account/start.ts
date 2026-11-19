@@ -2,11 +2,15 @@
 // Owned by: web. The way in to the account's backend, loaded only when the shell says the
 // receiver this window shows is a spacesheep account (main.tsx): it starts the backend on
 // the app's own IPC and puts it where every request of the page's goes (lib/net.ts).
+import { cleanReason } from "@shared/reason";
 import { setApiBackend } from "../lib/net";
 import { pushToast } from "../lib/toasts";
 import { type AccountBackend, type AccountNotice, startAccountBackend } from "./backend";
 import { cacheName } from "./cache";
-import { accountShell, tauriCalls } from "./shell";
+import { setAccountBackend } from "./current";
+import { leaveGoneNote } from "./local";
+import { ownUrl } from "./outside";
+import { accountShell, type Disconnected, tauriCalls } from "./shell";
 
 /** What the backend had to say once (set before the app renders). */
 export const notices: AccountNotice[] = [];
@@ -49,7 +53,21 @@ export function noticeWords(n: AccountNotice): { title: string; body: string } |
 /** The account is gone from this phone and the page holds nothing of it any more: the
  *  window is opened again on what the shell shows now (another receiver, or none: the
  *  welcome). */
-const leave = (): void => {
+const leave = (gone: Disconnected | null): void => {
+  // This page's own disconnect: what the hub said of the key (it still works until it is
+  // revoked) is left for the screen the window opens on, after the storage was emptied.
+  if (gone?.note) {
+    let host = gone.origin;
+    try {
+      host = new URL(gone.origin).host;
+    } catch {
+      // as it came
+    }
+    // Nothing of who it was is left behind (no screen shows it): the hub's words, and where
+    // to revoke the key when that is on the account's own origin.
+    const revokeUrl = ownUrl(gone.revokeUrl, gone.origin);
+    leaveGoneNote({ host, note: cleanReason(gone.note, 300), ...(revokeUrl ? { revokeUrl } : {}) });
+  }
   location.replace("/");
 };
 
@@ -102,6 +120,7 @@ export async function startAccount(): Promise<AccountBackend | null> {
     },
   });
   setApiBackend(backend.answer);
+  setAccountBackend(backend);
   (window as unknown as { __sessionpipeAccount?: AccountHook }).__sessionpipeAccount = hookOf(backend);
   return backend;
 }

@@ -16,6 +16,7 @@ import type {
   Info,
   ProtocolEvent,
   SessionKey,
+  SessionSummary,
   Snapshot,
   SpacesheepSourceStatus,
   StoredEvent,
@@ -49,6 +50,7 @@ import { MarksCore } from "../../../server/ui/marksCore";
 import { cutPreview } from "../../../server/ui/preview";
 import { snapshotWithControl } from "../../../server/ui/snapshot";
 import { HttpError, type StreamHandlers, type Transport } from "../data/transport";
+import { isQuestion } from "../lib/format";
 import type { ApiBackend } from "../lib/net";
 import { type EventCache, openCache, withoutSessions } from "./cache";
 import { type AccountDocs, type DocName, openDocs } from "./docs";
@@ -123,8 +125,15 @@ export interface AccountView {
   /** As the hub last said; `gone` once the account was disconnected. */
   state: AccountState | "gone";
   relay: RelayStatus;
-  /** History is still being read: the board fills in. */
+  /** History is still being read, from the launch until a page comes back that is not
+   *  full: the board is held back and comes whole at the end. */
   catching: boolean;
+  /** A page of history came back full and its end is still to come: the page shows the
+   *  board it had (or none), and "Catching up…". A launch that reads one page is never behind. */
+  behind: boolean;
+  /** Since when it is (performance.now()), while it is: a page that opens later counts the
+   *  wait before "Catching up…" from here, not from when it opened. */
+  behindSince: number | null;
   /** Where the relay's pages are kept. */
   cache: EventCache["kind"];
   /** What was read back at the start, when anything was. */
@@ -147,6 +156,15 @@ export interface AccountBackend {
   deviceAsk(): Promise<DeviceAsked>;
   /** Where that key stands (the device door). */
   device(): Promise<DoorAnswer>;
+  /** The account's computers as this page lists them: each one's id and name, the ids of
+   *  the keys it trusts, and whether it takes a phone's own key at all. */
+  machines(): { id: string; name: string; keys: string[]; takesDevice: boolean }[];
+  /** Reads the account's machines again now, not at the minute's turn: after this phone's
+   *  key was approved, so the rest of the page agrees at once. Not metered by spacesheep. */
+  machinesNow(): Promise<void>;
+  /** Told when spacesheep refused a send because this phone's key is inside its first
+   *  hour, with the hour's end. */
+  onCooling(l: (until: number) => void): () => void;
   /** Forgets the account on this phone, with everything this page kept for it. The hub
    *  asks the person first; a no is thrown as the hub's error. */
   disconnect(): Promise<Disconnected>;
@@ -159,12 +177,15 @@ export interface AccountBackend {
 
 /** An account whose key was made this recently has had no reader before this one. */
 export const FRESH_MS = 120_000;
+/** What the hub takes in one `acct_needs`: this many sessions, this many attentions of one
+ *  session, and this many attentions in all (a longer list it refuses whole). */
+export const NEEDS_SESSIONS = 200;
+export const NEEDS_A_SESSION = 16;
+export const NEEDS_ATTENTIONS = 200;
 /** How long after one answer of the hub's that leaves the account out it is asked again. */
 export const GONE_AGAIN_MS = 3000;
 /** A stream opened while spacesheep cannot be reached reads the relay at once, this often at most. */
 export const RETRY_EVERY_MS = 3000;
-/** While history is read, the board is handed over again this often. */
-export const BOARD_EVERY_MS = 1500;
 /** A page of this many events or more is history, whenever it comes: one board, not a frame an event. */
 export const BURST_EVENTS = 50;
 const MACHINES_FRAME_MS = 300;
@@ -174,6 +195,40 @@ const json = (body: unknown, status = 200): Response =>
     status,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
+
+/** The sessions that need the person, as the hub takes them in one `acct_needs`: at most
+ *  NEEDS_SESSIONS sessions, NEEDS_A_SESSION attentions of one and NEEDS_ATTENTIONS in all.
+ *  The hub refuses a longer list whole (docs/rfcs/08), so the list is cut to that here and
+ *  what a heavy account needs is still said. */
+export function needsOf(sessions: readonly SessionSummary[]): NeedsSession[] {
+  let left = NEEDS_ATTENTIONS;
+  return sessions
+    .filter((s) => s.state === "needs_you")
+    .slice(0, NEEDS_SESSIONS)
+    .map((s) => {
+      const mine = s.openAttentions.slice(0, Math.min(NEEDS_A_SESSION, left));
+      left -= mine.length;
+      return {
+        key: s.key,
+        harness: s.harness,
+        id: s.id,
+        ...(s.title ? { title: s.title } : {}),
+        ...(s.machine ? { machine: s.machine } : {}),
+        ...(s.cwd ? { cwd: s.cwd } : {}),
+        state: "needs_you" as const,
+        stateSince: s.stateSince,
+        openAttentions: mine.map((a) => ({
+          attentionId: a.attentionId,
+          kind: a.kind,
+          ...(a.tool ? { tool: a.tool } : {}),
+          ...(a.message ? { message: a.message.slice(0, 300) } : {}),
+          at: a.at,
+          // A question is answered in its terminal: its notification has no Allow or Deny.
+          answerable: !!a.answerable && !isQuestion(a),
+        })),
+      };
+    });
+}
 
 export async function startAccountBackend(o: AccountBackendOptions): Promise<AccountBackend> {
   const { shell, calls } = o;
@@ -277,11 +332,20 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     for (const l of [...watchers]) l();
   };
   /** History is being read (or one big page of it is being taken): frames are held back,
-   *  and the board goes out whole instead. */
+   *  and the board goes out whole instead, once, when history is in. A board drawn from
+   *  part of it would be wrong (the relay is read oldest first: a session from the day
+   *  before shows as needing the person until its later events come). */
   let catching = true;
   let holding = false;
+  /** Since when a page came back full with history still to come (AccountView.behind). */
+  let behindSince: number | null = null;
   let boarded = false;
-  let lastBoard = Number.NEGATIVE_INFINITY;
+  /** A page of the relay was taken in this launch: the store holds more than was kept. */
+  let paged = false;
+  /** What the page is owed once the page being read is taken (onPage): its frames were
+   *  held for its size (`board`), or the streams were told the relay could not be read
+   *  (`live`). Either is held with it when the page is full: it is history again. */
+  let owed: "board" | "live" | null = null;
   let firstBoardMs: number | null = null;
   let caughtUpMs: number | null = null;
   let state: AccountView["state"] = shell.state;
@@ -293,12 +357,13 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     if (gone) return { ...s, sessions: [], machines: [] };
     return { ...s, labels: labels.get(), marks: marks.get(), limits: limits.list() };
   };
-  const board = (): void => {
+  const board = (tell = !catching): void => {
     boarded = true;
-    lastBoard = performance.now();
-    if (firstBoardMs === null) firstBoardMs = lastBoard - t0;
+    if (firstBoardMs === null) firstBoardMs = performance.now() - t0;
     emit({ kind: "snapshot", snapshot: snapshot() });
-    needs.tell();
+    // The hub's first list is its starting point, posted as nothing (docs/rfcs/08): it is
+    // the board with history in, never one from part of it.
+    if (tell) needs.tell();
     changed();
   };
   store.subscribe((m) => {
@@ -335,31 +400,12 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   const needs = (() => {
     let said = "";
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const list = (): NeedsSession[] =>
-      store
-        .snapshot()
-        .sessions.filter((s) => s.state === "needs_you")
-        .slice(0, 200)
-        .map((s) => ({
-          key: s.key,
-          harness: s.harness,
-          id: s.id,
-          ...(s.title ? { title: s.title } : {}),
-          ...(s.machine ? { machine: s.machine } : {}),
-          ...(s.cwd ? { cwd: s.cwd } : {}),
-          state: "needs_you" as const,
-          stateSince: s.stateSince,
-          openAttentions: s.openAttentions.map((a) => ({
-            attentionId: a.attentionId,
-            kind: a.kind,
-            ...(a.tool ? { tool: a.tool } : {}),
-            ...(a.message ? { message: a.message.slice(0, 300) } : {}),
-            at: a.at,
-            answerable: !!a.answerable,
-          })),
-        }));
+    const list = (): NeedsSession[] => needsOf(store.snapshot().sessions);
     const send = (): void => {
       timer = null;
+      // A full page came while the list waited to be said: history again, and the board
+      // that ends it says the list.
+      if (catching) return;
       const sessions = list();
       const now = JSON.stringify(sessions);
       if (now === said) return;
@@ -383,11 +429,15 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
 
   // ---------- the doors and the reader ----------
   let reader: RelayReader | null = null;
+  const coolingWatchers = new Set<(until: number) => void>();
   const doors: AccountDoors = openDoors({
     rxBase: shell.rxBase,
     ...(o.fetch ? { fetch: o.fetch } : {}),
     onUnauthorized: () => reader?.unauthorized(),
     lastJob: () => lastJob,
+    onCooling: (until) => {
+      for (const l of [...coolingWatchers]) l(until);
+    },
   });
   let gone = false;
   unheard = openUnheard({
@@ -546,6 +596,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     }
     if (!catching) return;
     catching = false;
+    behindSince = null;
     store.setLoading(false);
     if (caughtUpMs === null) caughtUpMs = performance.now() - t0;
     board();
@@ -554,9 +605,13 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
    *  end of history: a relay never read from its start is still unread when a new key reads it. */
   const giveUp = (): void => {
     if (!catching) return;
+    // Refused part-way through a backlog: what is here is part of the history. It is drawn
+    // (the page says the key is refused), and not handed to the hub.
+    const part = behindSince !== null;
     catching = false;
+    behindSince = null;
     store.setLoading(false);
-    board();
+    board(!part);
   };
   const open = (): RelayReader =>
     startRelayReader({
@@ -602,10 +657,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
             }
             return r.accepted;
           } finally {
-            if (holding && !catching) {
-              holding = false;
-              board();
-            }
+            // Its board goes out once the page is taken, unless the page was full (onPage).
+            if (holding && !catching) owed = "board";
             holding = false;
           }
         },
@@ -620,31 +673,46 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
         // Every read spent is written down as it is spent (a few kilobytes, at once): a
         // backlog is a hundred reads in a few seconds, and the next launch must know of them.
         reader?.flush();
-        if (!p.more) return caughtUp();
+        paged = true;
+        const owing = owed;
+        owed = null;
+        if (!p.more) {
+          const drawn = catching;
+          caughtUp();
+          if (owing && !drawn) board();
+          return;
+        }
+        // A full page: history, read on to its end. The page keeps the board it has, and the
+        // next comes whole with the last page (caughtUp).
         if (!catching) {
           catching = true;
           store.setLoading(true);
         }
-        // The first page is a board at once; after it, one every second and a half.
-        if (performance.now() - lastBoard > BOARD_EVERY_MS) board();
+        if (behindSince === null) {
+          behindSince = performance.now();
+          changed();
+        }
+        // Read again after it could not be: not down any more, and nothing is added yet.
+        if (owing === "live") for (const h of [...streams]) h.onWait?.();
       },
       onState(s) {
-        // It cannot be read just now: what is here is the board, shown as it is. History is
-        // not over for that: it is still held back, and comes as one board when it comes.
-        // (Once history is in, the board is on the page already and only its state changes.)
-        if ((s === "offline" || s === "limited") && catching) board();
+        // It cannot be read before anything was, and nothing is on the page: what is here is
+        // the board (none), shown as it is, so the page says what stands in the way and does
+        // not wait for ever. Once history has begun to come, the page keeps what it has (the
+        // kept board, or the skeleton) and history still comes as one board.
+        if ((s === "offline" || s === "limited") && catching && !boarded && !paged) board();
         else if (s === "unauthorized") giveUp();
         // spacesheep cannot be reached: every open stream says so, as a receiver's dropped
         // stream does (the page reads "Reconnecting…" with Retry, not "live"). It asked this
         // app to wait: the streams are told that nothing is arriving and nothing is to be
         // retried (the page says neither "live" nor "Reconnecting…"; the limit has its own
-        // line). Read again, a board says it is live.
+        // line). Read again, a board says it is live, with the page just read (onPage).
         const was = unreachable || waiting;
         unreachable = s === "offline";
         waiting = s === "limited";
         if (unreachable) for (const h of [...streams]) h.onError(0);
         else if (waiting) for (const h of [...streams]) h.onWait?.();
-        else if (was && s !== "unauthorized") board();
+        else if (was && s !== "unauthorized") owed = "live";
         // spacesheep answers again: a send nobody heard the answer to is asked for now.
         if (s === "ok") unheard?.kick();
         changed();
@@ -803,9 +871,14 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       queueMicrotask(() => {
         if (closed) return;
         h.onOpen();
-        // A board to show now: the kept one, or what history has brought so far. An empty
-        // one is not shown while the first read is still out: `board()` brings it.
-        if (boarded) send({ kind: "snapshot", snapshot: snapshot() });
+        // A board to show now: the kept one, or the one history brought. An empty one is not
+        // shown while the first read is still out: `board()` brings it. Nor is one while the
+        // store holds part of the history (a stream opened again: Retry, the app back in
+        // front): the page keeps the board it has, is told that nothing is added for now,
+        // and the next comes whole.
+        const held = boarded && catching && paged && !gone;
+        if (held) h.onWait?.();
+        else if (boarded) send({ kind: "snapshot", snapshot: snapshot() });
         // The messages carried so far, as a stream would have brought them.
         for (const message of activity(100).reverse()) send({ kind: "control", message });
         listeners.add(send);
@@ -883,6 +956,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
       state,
       relay: reader?.status() ?? { events: 0, cursor: 0, state: "starting", machines: [] },
       catching,
+      behind: behindSince !== null,
+      behindSince,
       cache: cache.kind,
       restored,
       firstBoardMs,
@@ -938,6 +1013,20 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     },
     deviceAsk,
     device: () => doors.device(),
+    machines: () =>
+      [...control.machines()].map(([name, c]) => ({
+        id: c.machineId,
+        name,
+        keys: c.keys.map((k) => k.id),
+        takesDevice: !!c.keyTypes?.includes("device"),
+      })),
+    machinesNow: async () => {
+      await reader?.pollMachines();
+    },
+    onCooling(l) {
+      coolingWatchers.add(l);
+      return () => void coolingWatchers.delete(l);
+    },
     disconnect,
     asked,
     async flushed() {

@@ -298,6 +298,24 @@ describe("accountFor / agentWords", () => {
     expect(agentWords({ kind: "ambiguous", count: 2, each: [{ name: "work", entry: out }] }, NOW)).toEqual({
       detail: "work none left as of 3 h ago",
     });
+    // An account whose windows have all reset since says nothing: what was used after is unknown.
+    const reset = { ...work, windows: [win("five_hour", 90, { resetsAt: at(-40 * MIN) })] };
+    expect(
+      agentWords(
+        {
+          kind: "ambiguous",
+          count: 2,
+          each: [
+            { name: "dev", entry: dev },
+            { name: "work", entry: reset },
+          ],
+        },
+        NOW,
+      ),
+    ).toEqual({
+      detail: "dev 62% left",
+    });
+    expect(agentWords({ kind: "ambiguous", count: 2, each: [{ name: "work", entry: reset }] }, NOW)).toEqual({});
     // Neither has sent numbers.
     expect(accountFor("claude-code", "lab-mac", two, [codex])).toEqual({ kind: "ambiguous", count: 2, each: [] });
     expect(agentWords({ kind: "ambiguous", count: 2, each: [] }, NOW)).toEqual({ detail: "2 accounts here" });
@@ -322,12 +340,29 @@ describe("accountFor / agentWords", () => {
       hint: "None left",
       detail: "5 hours, resets in 1 h 10 m",
       out: true,
+      aside: "None left, resets in 1 h 10 m",
     });
+    // Every window reset since: no bare "Reset", nothing at all.
     const reset = { ...dev, windows: [win("five_hour", 90, { resetsAt: at(-40 * MIN) })] };
-    expect(agentWords({ kind: "entry", entry: reset }, NOW)).toEqual({
-      hint: "Reset",
-      detail: "5 hours reset 40 m ago",
-    });
+    expect(agentWords({ kind: "entry", entry: reset }, NOW)).toEqual({});
+  });
+  it("under the chosen agent, only what would change what is done", () => {
+    const left = (used: number, timed = true) =>
+      agentWords(
+        {
+          kind: "entry",
+          entry: { ...dev, windows: [win("five_hour", used, { resetsAt: timed ? at(H) : undefined })] },
+        },
+        NOW,
+      ).aside;
+    expect(left(38)).toBeUndefined();
+    expect(left(79)).toBeUndefined();
+    expect(left(80)).toBe("20% left");
+    expect(left(88)).toBe("12% left");
+    expect(left(99.5)).toBe("<1% left");
+    expect(left(100)).toBe("None left, resets in 1 h");
+    expect(left(112)).toBe("12% over, resets in 1 h");
+    expect(left(100, false)).toBe("None left");
   });
 });
 

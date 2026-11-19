@@ -329,6 +329,28 @@ describe("plugin host and routes", () => {
     await reader.cancel();
   });
 
+  it("refuses a suggestion for Claude Code's question, which only its computer can answer", async () => {
+    const s = new Session("sugg-question");
+    app.store.ingest([s.ev("session.started")], "http");
+    app.store.ingest(
+      [
+        s.ev("attention.needed", {
+          attention_id: "perm-q",
+          kind: "permission",
+          tool: "AskUserQuestion",
+          message: "AskUserQuestion",
+        }),
+      ],
+      "http",
+    );
+    await expect
+      .poll(() => globalThis.__fixturePlugin!.errors)
+      .toContainEqual(expect.stringMatching(/perm-q is a question, answered on its computer/));
+    const snap = (await (await fetch(url(ROUTES.ui.snapshot))).json()) as Snapshot;
+    expect((snap.suggestions ?? []).map((x) => x.attentionId)).not.toContain("perm-q");
+    app.store.ingest([s.ev("attention.cleared", { attention_id: "perm-q" })], "http");
+  });
+
   it("a listener that throws is logged and the stream goes on", async () => {
     const put = (body: unknown) =>
       fetch(url(`${PLUGIN_ROUTES.settings}/fixture/settings`), {

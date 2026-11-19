@@ -7,10 +7,19 @@
 import type { ControlActivity, Snapshot, StreamMessage } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RELAY_BUDGET } from "../../../server/sources/relay";
-import { type FakeAnswer, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
+import { type FakeAnswer, type FakeRequest, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
 import { HubStandIn } from "../../../test/account/hub";
 import { Session } from "../../../test/events";
-import { type AccountBackend, type AccountNotice, GONE_AGAIN_MS, startAccountBackend } from "./backend";
+import {
+  type AccountBackend,
+  type AccountNotice,
+  GONE_AGAIN_MS,
+  NEEDS_A_SESSION,
+  NEEDS_ATTENTIONS,
+  NEEDS_SESSIONS,
+  needsOf,
+  startAccountBackend,
+} from "./backend";
 import { FIRST_ASKING_OVER_MS, LOOK_PAGES } from "./doors";
 import { NOT_HERE } from "./routes";
 import { type AccountShell, accountShell, type ShellCalls } from "./shell";
@@ -249,7 +258,7 @@ describe("a page's own backend on a spacesheep account", () => {
     page.off();
   });
 
-  it("reads a long history as one board that fills in, not a frame an event", async () => {
+  it("reads a long history as one board, drawn once it is in, not a frame an event", async () => {
     const all = Array.from({ length: 5 }, (_, i) => new Session(`s-${i}`)).flatMap((s) =>
       Array.from({ length: 260 }, (_, n) =>
         s.ev(n ? "tool.started" : "session.started", { call_id: `c${n}` }, { tier: 2 }),
@@ -261,10 +270,262 @@ describe("a page's own backend on a spacesheep account", () => {
     await tick(300);
     expect(b.view()).toMatchObject({ catching: false, store: { events: 1300, sessions: 5 } });
     expect(page.frames.filter((m) => m.kind === "event")).toEqual([]);
-    expect(page.frames.filter((m) => m.kind === "snapshot").length).toBeGreaterThanOrEqual(1);
+    expect(page.frames.filter((m) => m.kind === "snapshot")).toHaveLength(1);
     expect(page.last("snapshot")!.snapshot.sessions).toHaveLength(5);
     expect(b.view().firstBoardMs).not.toBeNull();
     page.off();
+  });
+
+  describe("history of more than one page", () => {
+    /** A question asked in the first of three pages and answered in the third: read from
+     *  part of the history, the session needs the person; with all of it, nobody does. */
+    const answeredLater = () => {
+      const asked = new Session("s-asked");
+      const busy = new Session("s-busy");
+      return [
+        asked.ev("session.started", {}, { tier: 2 }),
+        asked.ev("turn.started", { turn_id: "t1" }, { tier: 2 }),
+        asked.ev(
+          "attention.needed",
+          { attention_id: "a1", kind: "permission", tool: "Bash", message: "Bash rm -rf build" },
+          { tier: 2 },
+        ),
+        busy.ev("session.started", {}, { tier: 2 }),
+        ...Array.from({ length: 1000 }, (_, i) => busy.ev("tool.started", { call_id: `c${i}` }, { tier: 2 })),
+        asked.ev("attention.cleared", { attention_id: "a1" }, { tier: 2 }),
+        asked.ev("turn.ended", { turn_id: "t1" }, { tier: 2 }),
+      ];
+    };
+    /** The relay's reads: at spacesheep's limit while `limited` (a second's wait); past the
+     *  first one answered, held until `release`, or failed while `failing`. */
+    const gate = () => {
+      const g = { release: () => {}, failing: false, limited: false };
+      let reads = 0;
+      const held = new Promise<void>((y) => {
+        g.release = y;
+      });
+      const handle = r.ss.handle.bind(r.ss);
+      r.ss.handle = async (req: FakeRequest) => {
+        if (!req.path.startsWith("/api/sessionpipe/v1/relay?")) return handle(req);
+        if (g.limited)
+          return {
+            status: 429,
+            headers: { "content-type": "application/json", "retry-after": "1" },
+            body: JSON.stringify({ error: "Too many requests.", code: "rate_limited" }),
+          };
+        if (reads++ === 0) return handle(req);
+        if (g.failing) return { status: 503, headers: {}, body: "" };
+        await held;
+        return handle(req);
+      };
+      return g;
+    };
+    const boards = (frames: StreamMessage[]) =>
+      frames.filter((m): m is Extract<StreamMessage, { kind: "snapshot" }> => m.kind === "snapshot");
+
+    it("is one board, drawn once it is in, and the hub's first list is of that board", async () => {
+      r.ss.push(answeredLater());
+      const g = gate();
+      const b = await r.start();
+      const page = listen(b);
+      await tick(3000);
+      // A page in and more to come: behind, nothing drawn, nothing handed to the hub.
+      expect(b.view()).toMatchObject({ catching: true, behind: true, store: { sessions: 2 } });
+      expect(page.frames.filter((m) => m.kind === "snapshot" || m.kind === "event")).toEqual([]);
+      expect(r.hub.needs).toEqual([]);
+      g.release();
+      await tick(3000);
+      expect(b.view()).toMatchObject({ catching: false, behind: false, store: { sessions: 2 } });
+      expect(b.view().caughtUpMs).not.toBeNull();
+      const [only, ...more] = boards(page.frames);
+      expect(more).toEqual([]);
+      expect(only!.snapshot.sessions.find((s) => s.id === "s-asked")?.state).toBe("idle");
+      // The hub's starting point is the board with history in: nobody needs the person.
+      expect(r.hub.needs).toEqual([{ id: expect.any(String), sessions: [] }]);
+      page.off();
+    });
+
+    it("stalls part-way: nothing is drawn, the page is told why, and history still comes as one board", async () => {
+      r.ss.push(answeredLater());
+      const g = gate();
+      g.failing = true;
+      const b = await r.start();
+      const told: string[] = [];
+      const off = b.transport.openStream({
+        onOpen: () => told.push("open"),
+        onMessage: (m) => m.kind === "snapshot" && told.push("snapshot"),
+        onError: () => told.push("down"),
+        onWait: () => told.push("wait"),
+      });
+      await tick(3000);
+      expect(b.view()).toMatchObject({ relay: { state: "offline" }, catching: true });
+      expect(told).toEqual(["open", "down"]);
+      // Read again: no longer down, and still nothing drawn until the last page.
+      g.failing = false;
+      g.release();
+      await tick(30_000);
+      expect(b.view()).toMatchObject({ relay: { state: "ok" }, catching: false, behind: false });
+      expect(told).toEqual(["open", "down", "wait", "snapshot"]);
+      expect(r.hub.needs).toEqual([{ id: expect.any(String), sessions: [] }]);
+      off();
+    });
+
+    it("the first read at spacesheep's limit, then a long history: the empty board, held while the rest is read", async () => {
+      r.ss.push(answeredLater());
+      const g = gate();
+      g.limited = true;
+      const b = await r.start();
+      const told: string[] = [];
+      const off = b.transport.openStream({
+        onOpen: () => told.push("open"),
+        onMessage: (m) => m.kind === "snapshot" && told.push(`board of ${m.snapshot.sessions.length}`),
+        onError: () => told.push("down"),
+        onWait: () => told.push("wait"),
+      });
+      await tick(400);
+      // Nothing was read: the board is what is here (none), and the page says the limit.
+      expect(b.view()).toMatchObject({ relay: { state: "limited" }, catching: true, behind: false });
+      expect(told).toEqual(["open", "board of 0", "wait"]);
+      // The limit lifts into history of three pages: behind (the page shows its loading
+      // rows over that empty board, pages/Board.tsx), and nothing is drawn or handed on.
+      g.limited = false;
+      await tick(3000);
+      expect(b.view()).toMatchObject({ relay: { state: "ok" }, catching: true, behind: true });
+      expect(b.view().behindSince).toEqual(expect.any(Number));
+      expect(told).toEqual(["open", "board of 0", "wait", "wait"]);
+      expect(r.hub.needs).toEqual([]);
+      g.release();
+      await tick(3000);
+      expect(b.view()).toMatchObject({ catching: false, behind: false, behindSince: null });
+      expect(told).toEqual(["open", "board of 0", "wait", "wait", "board of 2"]);
+      expect(r.hub.needs).toEqual([{ id: expect.any(String), sessions: [] }]);
+      off();
+    });
+
+    it("a key refused part-way: what is here is drawn, and none of it is handed to the hub", async () => {
+      r.ss.push(answeredLater());
+      const g = gate();
+      const b = await r.start();
+      const page = listen(b);
+      await tick(3000);
+      expect(b.view()).toMatchObject({ behind: true });
+      r.ss.revoked = true;
+      g.release();
+      await tick(3000);
+      expect(b.view()).toMatchObject({ relay: { state: "unauthorized" }, catching: false, behind: false });
+      // Part of the history: the question is still open in it.
+      const [only, ...more] = boards(page.frames);
+      expect(more).toEqual([]);
+      expect(only!.snapshot.sessions.find((s) => s.id === "s-asked")?.state).toBe("needs_you");
+      expect(r.hub.needs).toEqual([]);
+      page.off();
+    });
+
+    it("a list about to be handed on as history comes again is not: the board that ends it is", async () => {
+      const asked = new Session("s-asked");
+      const busy = new Session("s-busy");
+      r.ss.push([
+        asked.ev("session.started", {}, { tier: 2 }),
+        asked.ev("turn.started", { turn_id: "t1" }, { tier: 2 }),
+      ]);
+      const b = await r.start();
+      await tick(3000);
+      expect(r.hub.needs.map((x) => x.sessions)).toEqual([[]]);
+      // A question comes on its own, live (its list is said shortly), and a backlog right
+      // behind it that ends by answering it.
+      r.ss.push([
+        asked.ev(
+          "attention.needed",
+          { attention_id: "a1", kind: "permission", tool: "Bash", message: "Bash rm -rf build" },
+          { tier: 2 },
+        ),
+      ]);
+      const backlog = [
+        busy.ev("session.started", {}, { tier: 2 }),
+        ...Array.from({ length: 1000 }, (_, i) => busy.ev("tool.started", { call_id: `c${i}` }, { tier: 2 })),
+        asked.ev("attention.cleared", { attention_id: "a1" }, { tier: 2 }),
+      ];
+      let release = () => {};
+      const held = new Promise<void>((y) => {
+        release = y;
+      });
+      let reads = 0;
+      const handle = r.ss.handle.bind(r.ss);
+      r.ss.handle = async (req: FakeRequest) => {
+        if (!req.path.startsWith("/api/sessionpipe/v1/relay?")) return handle(req);
+        if (reads++ === 0) r.ss.push(backlog);
+        else await held;
+        return handle(req);
+      };
+      await tick(30_000);
+      expect(b.view()).toMatchObject({ catching: true, behind: true });
+      // The question was never handed on: the list it was in waited, and history came first.
+      expect(r.hub.needs.map((x) => x.sessions)).toEqual([[]]);
+      release();
+      await tick(3000);
+      expect(b.view()).toMatchObject({ catching: false, behind: false });
+      expect(r.hub.needs.map((x) => x.sessions)).toEqual([[]]);
+    });
+
+    it("after a long time away: the kept board, held while the rest is read, then one board", async () => {
+      const cache = keptCache();
+      r = rig({ cache });
+      const s = new Session("s-kept");
+      r.ss.push([s.ev("session.started", {}, { tier: 2 }), s.ev("turn.started", { turn_id: "t1" }, { tier: 2 })]);
+      let b = await r.start();
+      await tick(400);
+      await b.flushed();
+      b.stop();
+      const lists = r.hub.needs.length;
+      r.ss.push(answeredLater());
+      const g = gate();
+      b = await r.start();
+      const page = listen(b);
+      await tick(3000);
+      // The kept board is on the page at once; what was read since is not, nor handed on.
+      expect(b.view()).toMatchObject({ restored: { events: 2 }, behind: true, store: { sessions: 3 } });
+      expect(boards(page.frames).map((m) => m.snapshot.sessions.map((x) => x.id))).toEqual([["s-kept"]]);
+      expect(r.hub.needs).toHaveLength(lists);
+      // The app back in front (a stream opened again): the page keeps the board it has.
+      const told: string[] = [];
+      const again = b.transport.openStream({
+        onOpen: () => told.push("open"),
+        onMessage: (m) => m.kind === "snapshot" && told.push("snapshot"),
+        onError: () => told.push("down"),
+        onWait: () => told.push("wait"),
+      });
+      await tick(50);
+      expect(told).toEqual(["open", "wait"]);
+      g.release();
+      await tick(3000);
+      expect(b.view()).toMatchObject({ catching: false, behind: false });
+      expect(boards(page.frames)).toHaveLength(2);
+      expect(told).toEqual(["open", "wait", "snapshot"]);
+      expect(r.hub.needs.slice(lists)).toEqual([{ id: expect.any(String), sessions: [] }]);
+      again();
+      page.off();
+    });
+
+    it("a launch with little to read is never behind: the kept board, then one quiet update", async () => {
+      const cache = keptCache();
+      r = rig({ cache });
+      const s = new Session("s-kept");
+      r.ss.push([s.ev("session.started", {}, { tier: 2 })]);
+      let b = await r.start();
+      await tick(400);
+      await b.flushed();
+      b.stop();
+      r.ss.push(Array.from({ length: 120 }, (_, i) => s.ev("tool.started", { call_id: `c${i}` }, { tier: 2 })));
+      b = await r.start();
+      const views: boolean[] = [];
+      b.subscribe(() => views.push(b.view().behind));
+      const page = listen(b);
+      await tick(3000);
+      expect(b.view()).toMatchObject({ catching: false, behind: false, store: { events: 121 } });
+      expect(views).not.toContain(true);
+      expect(boards(page.frames)).toHaveLength(2);
+      page.off();
+    });
   });
 
   it("sends a signed message through the jobs door with only what the door takes, and follows its job", async () => {
@@ -335,10 +596,24 @@ describe("a page's own backend on a spacesheep account", () => {
     expect(res.status).toBe(201);
     expect(r.ss.jobs[0]!.sent).toMatchObject({ confirm: { cred: "k1" }, match: "0417", csig: null, grant: null });
 
-    // The hub cannot reach spacesheep (or its answer stopped: the hub has one word for
-    // both): asked again twice, then its words under the code that says nobody knows, never
-    // a 401 or a hold.
+    // The hub can make no connection to spacesheep: nothing of the command left the phone.
+    // Not sent, in the hub's words, asked once, and nothing waits to be asked again.
     r.hub.down = true;
+    const jobs = r.ss.jobs.length;
+    const posts = r.asked.filter((x) => x.startsWith("POST ")).length;
+    res = await post(b, "/api/ui/control/send", signed("claude-code:s-1"));
+    expect([res.status, await res.json()]).toEqual([
+      502,
+      { reason: "spacesheep could not be reached.", code: "hub_not_sent" },
+    ]);
+    expect(r.asked.filter((x) => x.startsWith("POST ")).length - posts).toBe(1);
+    expect(r.ss.jobs).toHaveLength(jobs);
+    expect((await b.transport.controlActivity!(10)).filter((x) => x.unheard)).toEqual([]);
+    r.hub.down = false;
+    // A connection was made and the answer stopped on its way: nobody knows whether a job
+    // was made. Asked again twice, then the hub's words under the code that says nobody
+    // knows, never a 401 or a hold.
+    r.hub.stopped = true;
     const unreached = post(b, "/api/ui/control/send", signed("claude-code:s-1"));
     await tick(7000);
     res = await unreached;
@@ -350,7 +625,7 @@ describe("a page's own backend on a spacesheep account", () => {
       unheard: { state: "asking" },
     });
     expect(dark.outcome).toBeUndefined();
-    r.hub.down = false;
+    r.hub.stopped = false;
     // Reached again, the same bytes are asked once more and taken: the row is a send like any other.
     await tick(9000);
     const lit = (await b.transport.controlActivity!(10)).find((a) => a.id === dark.id)!;
@@ -976,7 +1251,7 @@ describe("a page's own backend on a spacesheep account", () => {
       const big = "w".repeat(70_000);
       // Unknown sends with long words, to other sessions, while no answer comes back, until
       // one more would not fit.
-      r.hub.down = true;
+      r.hub.stopped = true;
       let n = 0;
       for (;;) {
         const before = sends();
@@ -1000,7 +1275,7 @@ describe("a page's own backend on a spacesheep account", () => {
       expect(doc.unheard).toHaveLength(n);
       expect(doc.unheard.every((u) => u.state === "asking" && u.row.text === big && !!u.body)).toBe(true);
       // A short message to another session still goes.
-      r.hub.down = false;
+      r.hub.stopped = false;
       const short = await send(b, signed("claude-code:s-2", "a short one"), 100);
       expect(short.status).toBe(201);
       expect(short.body.unheard).toBeUndefined();
@@ -1440,7 +1715,10 @@ describe("a page's own backend on a spacesheep account", () => {
     ]);
     // The key that was enrolled is the hub's, whatever the page sent.
     expect([...r.ss.deviceRequests.keys()]).toEqual(["A".repeat(43)]);
-    r.ss.trusting.set("A".repeat(43), [M1]);
+    // The request is open until a computer takes the key (approved on spacesheep's Devices).
+    res = await b.answer("/api/ui/spacesheep/device");
+    expect(await res.json()).toMatchObject({ trustedOn: [], pending: true });
+    r.ss.approveDevice("A".repeat(43));
     res = await b.answer("/api/ui/spacesheep/device");
     expect(await res.json()).toMatchObject({ trustedOn: [M1], pending: false });
   });
@@ -1666,7 +1944,60 @@ describe("a page's own backend on a spacesheep account", () => {
       expect(r.hub.needs[1]!.sessions).toEqual([]);
       page.off();
     });
+    it("stays inside what the hub takes: 200 sessions, 16 attentions of one, 200 in all", () => {
+      const session = (i: number, asks: number, state = "needs_you") =>
+        ({
+          key: `claude-code:s-${i}`,
+          harness: "claude-code",
+          id: `s-${i}`,
+          state,
+          stateSince: "2026-11-13T10:00:00.000Z",
+          openAttentions: Array.from({ length: asks }, (_, j) => ({
+            attentionId: `a-${i}-${j}`,
+            kind: "permission",
+            at: "2026-11-13T10:00:00.000Z",
+            answerable: true,
+          })),
+        }) as never;
+      // Thirty sessions, each asking twenty things at once: sixteen of each, two hundred in all.
+      let said = needsOf(Array.from({ length: 30 }, (_, i) => session(i, 20)));
+      expect(said).toHaveLength(30);
+      expect(Math.max(...said.map((x) => x.openAttentions.length))).toBe(NEEDS_A_SESSION);
+      expect(said.reduce((n, x) => n + x.openAttentions.length, 0)).toBe(NEEDS_ATTENTIONS);
+      // Three hundred sessions that need the person, among others that do not: two hundred.
+      said = needsOf(Array.from({ length: 600 }, (_, i) => session(i, 1, i % 2 ? "working" : "needs_you")));
+      expect(said).toHaveLength(NEEDS_SESSIONS);
+      expect(said.every((x) => x.openAttentions.length === 1)).toBe(true);
+      // An ordinary list is as it was.
+      expect(needsOf([session(1, 2)])).toMatchObject([{ key: "claude-code:s-1", openAttentions: [{}, {}] }]);
+    });
+
+    it("hands a question over as not answerable, so its notification has no Allow or Deny", () => {
+      const ask = (tool: string) =>
+        ({
+          key: "claude-code:s-1",
+          harness: "claude-code",
+          id: "s-1",
+          state: "needs_you",
+          stateSince: "2026-11-13T10:00:00.000Z",
+          openAttentions: [
+            {
+              attentionId: "a-1",
+              kind: "permission",
+              tool,
+              message: tool,
+              at: "2026-11-13T10:00:00.000Z",
+              answerable: true,
+            },
+          ],
+        }) as never;
+      expect(needsOf([ask("AskUserQuestion")])[0]!.openAttentions[0]).toMatchObject({ answerable: false });
+      expect(needsOf([ask("Bash")])[0]!.openAttentions[0]).toMatchObject({ answerable: true });
+    });
+
     it("is not called at all on a shell that does not list it", async () => {
+      // A shell with the account mode and without the hand-over (an older app).
+      r = rig({ features: ["notifications", "signer", "account"] });
       r.ss.push(needing(new Session("s-1")));
       await r.start();
       await tick(2000);

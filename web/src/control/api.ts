@@ -13,9 +13,9 @@ import type {
   MachineControl,
   MachineMode,
   SessionKey,
-  StartFile,
   TlsInfo,
   TrustedKey,
+  UploadedFile,
 } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { apiFetch } from "../lib/net";
@@ -109,13 +109,15 @@ export interface DeviceRequest {
 export const UNHEARD_CODE = "hub_unknown";
 
 /** A refusal from the server: `status` and the body's `reason`; `code` is the verifier's
- *  word on a refused command (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …). */
+ *  word on a refused command (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …).
+ *  `until`: for spacesheep's `cooling`, when this device may send (ms). */
 export class ControlError extends Error {
   constructor(
     readonly status: number,
     readonly reason: string,
     readonly code?: string,
     readonly detail?: string,
+    readonly until?: number,
   ) {
     super(detail ?? reason);
     this.name = "ControlError";
@@ -140,7 +142,8 @@ async function call<T>(method: "GET" | "POST", url: string, body?: unknown): Pro
     const code = typeof json.code === "string" ? json.code : undefined;
     const detail =
       typeof json.detail === "string" ? json.detail : typeof json.error === "string" ? json.error : undefined;
-    throw new ControlError(res.status, reason, code, detail);
+    const until = typeof json.until === "number" && Number.isFinite(json.until) ? json.until : undefined;
+    throw new ControlError(res.status, reason, code, detail, until);
   }
   return json as T;
 }
@@ -161,19 +164,23 @@ export const controlApi = {
   activity: (limit = 100) =>
     call<{ activity: ControlActivity[] }>("GET", `${BASE}/activity?limit=${limit}`).then((r) => r.activity),
   machines: () => call<{ machines: PairedMachine[] }>("GET", `${BASE}/machines`).then((r) => r.machines),
-  /** One file a start will carry: held here under its hash, named in the signed `files`. */
-  uploadFile: async (file: File): Promise<StartFile> => {
-    const res = await apiFetch(`${BASE}/files?name=${encodeURIComponent(file.name)}`, {
+  /** One file a start or a prompt will carry: held by the receiver under its hash, named in
+   *  the signed `files`. `machineId`: the machine it is for (a receiver that holds every
+   *  file itself does not read it). The body goes as an ArrayBuffer, never the File: the
+   *  app's webview can hand a Blob to the shell's rx: protocol as an empty stream. */
+  uploadFile: async (file: File, machineId?: string): Promise<UploadedFile> => {
+    const to = machineId ? `&machine=${encodeURIComponent(machineId)}` : "";
+    const res = await apiFetch(`${BASE}/files?name=${encodeURIComponent(file.name)}${to}`, {
       method: "POST",
       headers: { "content-type": file.type || "application/octet-stream", accept: "application/json" },
-      body: file,
+      body: await file.arrayBuffer(),
     });
     const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) {
       const reason = typeof json.reason === "string" ? json.reason : `http_${res.status}`;
       throw new ControlError(res.status, reason, undefined, typeof json.error === "string" ? json.error : undefined);
     }
-    return json as unknown as StartFile;
+    return json as unknown as UploadedFile;
   },
   deviceRequest: (body: { key: TrustedKey; name?: string }) => call<DeviceRequest>("POST", `${BASE}/devices`, body),
   devices: () => call<{ devices: DeviceRequest[] }>("GET", `${BASE}/devices`).then((r) => r.devices),

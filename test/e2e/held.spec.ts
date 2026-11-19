@@ -23,7 +23,7 @@ import {
   seenSetupHere,
   sinkToken,
 } from "./control-helpers.js";
-import { ulid } from "./helpers.js";
+import { composer, ulid } from "./helpers.js";
 
 test.describe.configure({ mode: "serial" });
 test.skip(({ isMobile }) => isMobile, "desktop project; the widths are set per test");
@@ -34,7 +34,6 @@ const STILL = "it still reads like someone else wrote it";
 const CWD = "/Users/e2e/code";
 const tag = () => randomUUID().slice(0, 6);
 const notice = (page: Page) => page.locator("[data-held]");
-const composer = (page: Page) => page.getByLabel("Message for the next turn");
 
 interface Posted {
   grant: boolean;
