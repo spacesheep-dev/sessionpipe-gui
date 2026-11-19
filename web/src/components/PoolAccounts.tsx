@@ -527,7 +527,7 @@ export function PoolSection({
         <button
           type="button"
           className="pool-add"
-          aria-label={`Add an account to ${machine}`}
+          aria-label={`Add account to ${machine}`}
           disabled={!!send.blocked}
           data-tip={send.blocked ?? undefined}
           onClick={() => openPoolAdd({ machine })}
