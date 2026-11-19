@@ -26,6 +26,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   `workflow-runs.json.bad-<time>`; until it can be, the runs left out are written back with
   the others. A run started from now on with a step called `__proto__` keeps that step's
   entry in its `steps`, so it is read back like any other.
+- **A picture sent from Windows to an older sessionpipe shows in the message, and is
+  kept.** For a session on the same computer whose sessionpipe is older than 0.10, a GUI
+  on Windows names a picture by its path, with `\`. The message did not read that back, so
+  the picture was missing from it, and the daily clean-up did not see it in the stored
+  events, so a picture a session still named was removed once it was 30 days old. Both now
+  read either slash.
 
 ## [0.8.5] - 2026-11-18
 
