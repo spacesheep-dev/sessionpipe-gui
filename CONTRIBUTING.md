@@ -18,7 +18,7 @@ merged change is to keep to it.
 ## Running it
 
 ```sh
-nvm use                 # Node 22 (anything ≥ 20 works)
+nvm use                 # Node 22; working on the code needs 22.12 or later (Vitest)
 npm install
 npm run dev             # server on :7373 (rebuilt on change) + Vite on :5173 proxying to it
 npm run build           # dist/ (server) + dist/web (app)

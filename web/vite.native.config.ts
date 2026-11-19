@@ -8,11 +8,13 @@ import { createReadStream, statSync } from "node:fs";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { ROLLDOWN, TARGET } from "./vite.config.ts";
 
 const port = Number(process.env.VITE_PORT);
 if (!port) throw new Error("set VITE_PORT (the app's devUrl port)");
 
-const VIEWS = path.resolve(__dirname, "../dist/bundled/views");
+const here = import.meta.dirname;
+const VIEWS = path.resolve(here, "../dist/bundled/views");
 const TYPES: Record<string, string> = { ".js": "text/javascript", ".css": "text/css", ".json": "application/json" };
 
 /** /themes/{canvas,office}/<file> from dist/bundled/views, as the app bundles them. */
@@ -36,9 +38,15 @@ const appViews = (): Plugin => ({
 });
 
 export default defineConfig({
-  root: __dirname,
+  root: here,
   plugins: [react(), appViews()],
-  resolve: { alias: { "@shared": path.resolve(__dirname, "../shared") } },
-  build: { outDir: path.resolve(__dirname, "../dist/web"), emptyOutDir: true, sourcemap: true },
+  resolve: { alias: { "@shared": path.resolve(here, "../shared") } },
+  build: {
+    outDir: path.resolve(here, "../dist/web"),
+    emptyOutDir: true,
+    sourcemap: true,
+    target: TARGET,
+    rolldownOptions: ROLLDOWN,
+  },
   server: { port, strictPort: true, host: "127.0.0.1" },
 });

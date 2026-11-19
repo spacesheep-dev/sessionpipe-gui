@@ -341,7 +341,7 @@ function InstallSteps() {
                       >
                         {WORDS.install.siteLabel}
                       </a>
-                      , or with Node 20 in a terminal:
+                      , or with Node 22.12 or later in a terminal:
                     </>
                   ) : (
                     st.caption

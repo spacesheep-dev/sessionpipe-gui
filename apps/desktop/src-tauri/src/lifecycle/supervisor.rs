@@ -65,7 +65,12 @@ pub enum StartError {
 impl std::fmt::Display for StartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StartError::NoNode => write!(f, "sessionpipe needs Node 20 or later"),
+            StartError::NoNode => {
+                write!(
+                    f,
+                    "sessionpipe needs Node 22.12 or later, or Node 20 from 20.19 on"
+                )
+            }
             StartError::Failed(m) => write!(f, "{m}"),
             StartError::Timeout(p) => {
                 write!(
