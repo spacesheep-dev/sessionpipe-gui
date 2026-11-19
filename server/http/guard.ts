@@ -49,6 +49,8 @@ export interface GuardDeps {
   origins?: () => readonly (string | undefined)[];
   /** Whether a socket's remote address is this machine's (tests). */
   thisMachine?: (ip: string) => boolean;
+  /** Where this computer opens the board (Info.urls.local), for the words of a refusal. */
+  home?: () => string;
 }
 
 export type GuardReason = "cross_site" | "unknown_host";
@@ -193,7 +195,7 @@ export function checkRequest(g: GuardRequest, deps: GuardDeps = {}): GuardRefusa
     return {
       status: 403,
       reason: "unknown_host",
-      error: `sessionpipe-gui does not know this machine by the name "${host.replace(/[^a-z0-9.:_-]/g, "")}". Open http://localhost${port ? `:${port}` : ""} instead, or start it with --allow-host <name>. Behind a reverse proxy: --public-url https://<name>, and the proxy must send X-Forwarded-For.`,
+      error: `sessionpipe-gui does not know this machine by the name "${host.replace(/[^a-z0-9.:_-]/g, "")}". Open ${deps.home?.() ?? `http://localhost${port ? `:${port}` : ""}`} instead, or start it with --allow-host <name>. Behind a reverse proxy: --public-url https://<name>, and the proxy must send X-Forwarded-For.`,
     };
   }
   return null;

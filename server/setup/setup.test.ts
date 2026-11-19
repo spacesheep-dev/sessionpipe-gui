@@ -167,14 +167,18 @@ describe("this machine", () => {
   });
   it("is never a request the proxy forwarded, whatever address it carries", async () => {
     const reached: string[] = [];
-    const guarded = thisMachineOnly({ testDoor: false, port: () => 7373 })((ctx) => {
-      reached.push(ctx.remote.ip);
-      return { status: 200, json: {} };
-    });
+    const guarded = thisMachineOnly({ testDoor: false, home: () => "http://localhost:7373", uiKey: () => "ui-key" })(
+      (ctx) => {
+        reached.push(ctx.remote.ip);
+        return { status: 200, json: {} };
+      },
+    );
     const ask = (remote: Ctx["remote"]) => guarded({ remote, req: { headers: {} } } as unknown as Ctx);
-    expect(await ask({ ip: "127.0.0.1", loopback: true, forwarded: false })).toMatchObject({ status: 200 });
+    expect(await ask({ ip: "127.0.0.1", loopback: true, forwarded: false, thisComputer: true })).toMatchObject({
+      status: 200,
+    });
     for (const ip of ["127.0.0.1", "::1", ...ownAddresses().slice(0, 2)]) {
-      const r = await ask({ ip, loopback: false, forwarded: true });
+      const r = await ask({ ip, loopback: false, forwarded: true, thisComputer: false });
       expect(r).toMatchObject({ status: 403, json: { reason: "local_only" } });
     }
     expect(reached).toEqual(["127.0.0.1"]);

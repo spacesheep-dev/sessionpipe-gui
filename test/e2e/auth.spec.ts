@@ -73,12 +73,14 @@ test.describe("auth from a non-loopback address", () => {
       // Navigating by URL again still works: the cookie carries the session.
       await page.goto("/connect");
       await expect(page.locator(".sect--phone")).toBeVisible();
-      // A fresh context has not chosen a mode, so it is in Simple: the token block is behind "Advanced".
+      // The sink token is this computer's alone: the page here says where the line is copied,
+      // and has no token group, no copy and no rotate.
+      await expect(page.locator("[data-connect-sink-away]")).toContainText("copied on the computer this board runs on");
       const fold = page.locator("[data-connect-advanced]");
       if (await fold.isVisible()) await fold.click();
-      // The token's group is folded to one line; it opens in place.
-      await page.getByRole("button", { name: /^Sink token/ }).click();
-      await expect(page.getByRole("button", { name: /^Rotate/ })).toBeDisabled();
+      await expect(page.getByRole("button", { name: /^Sink token/ })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Rotate/ })).toHaveCount(0);
+      expect(await page.content()).not.toContain("spg_");
     } finally {
       await ctx.close();
     }

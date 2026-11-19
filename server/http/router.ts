@@ -8,7 +8,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { gzipSync } from "node:zlib";
 import { checkRequest, type GuardDeps, type GuardRefusal, NO_FRAMING, type RouteOptions } from "./guard.js";
-import { isLoopback, isThisMachine } from "./net.js";
+import { isLoopback, isThisMachine, onThisComputer } from "./net.js";
 
 export type { RouteOptions } from "./guard.js";
 
@@ -21,8 +21,9 @@ export interface Ctx {
    *  the trusted proxy (Router.trustProxy), so `ip` is the address the proxy named in
    *  X-Forwarded-For (the socket's own when it named none) and `loopback` is false,
    *  whatever that address is: the visitor is never this machine, though the socket is.
-   *  A route that acts on this machine asks `forwarded` before it reads anything into `ip`. */
-  remote: { ip: string; loopback: boolean; forwarded: boolean };
+   *  A route that acts on this machine asks `forwarded` before it reads anything into `ip`.
+   *  `thisComputer`: the one rule for this computer (net.ts onThisComputer). */
+  remote: { ip: string; loopback: boolean; forwarded: boolean; thisComputer: boolean };
   /** The raw body, read once and cached. Rejects with { status: 413 } over `maxBytes`. */
   body: (maxBytes?: number) => Promise<Buffer>;
   /** The body parsed as JSON. Rejects with { status: 400 } on bad JSON. */
@@ -114,6 +115,10 @@ export class Router {
    *  with no trusted proxy, is ignored. */
   trustProxy: () => boolean = () => false;
 
+  /** The one address the receiver is bound to when it is not every address (`--host`), or
+   *  null: what `ctx.remote.thisComputer` is judged by (net.ts onThisComputer). */
+  bound: () => string | null = () => null;
+
   /** What guard.ts needs to know of this server: the names it answers to beyond the
    *  machine's own, and the origins that are this server through a proxy. app.ts fills
    *  it; empty, the guard still stands with the machine's own names. */
@@ -134,7 +139,7 @@ export class Router {
         forwarded = true;
         ip = proxyEntry(req.headers["x-forwarded-for"]) || ip;
       }
-      const ctx = makeCtx(req, res, url, ip, forwarded);
+      const ctx = makeCtx(req, res, url, ip, forwarded, this.bound());
       // Inside the try: a path whose percent escape does not decode is the sender's
       // mistake (a 400), and an unauthenticated one; it must never reach the process.
       const m = this.match(req.method ?? "GET", url.pathname);
@@ -282,7 +287,14 @@ export function send(res: ServerResponse, r: Reply, req?: IncomingMessage): void
   res.end(body);
 }
 
-function makeCtx(req: IncomingMessage, res: ServerResponse, url: URL, ip: string, forwarded = false): Ctx {
+function makeCtx(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  ip: string,
+  forwarded = false,
+  bound: string | null = null,
+): Ctx {
   let raw: Promise<Buffer> | null = null;
   let limit = Number.POSITIVE_INFINITY;
   const body = (maxBytes = 1024 * 1024): Promise<Buffer> => {
@@ -310,7 +322,12 @@ function makeCtx(req: IncomingMessage, res: ServerResponse, url: URL, ip: string
     res,
     url,
     params: {},
-    remote: { ip, loopback: !forwarded && isLoopback(ip), forwarded },
+    remote: {
+      ip,
+      loopback: !forwarded && isLoopback(ip),
+      forwarded,
+      thisComputer: onThisComputer({ ip, forwarded }, bound),
+    },
     body,
     json: async <T>(maxBytes?: number) => {
       const b = await body(maxBytes);

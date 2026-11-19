@@ -48,6 +48,9 @@ export interface Transport {
   digest(q: DigestQuery): Promise<Digest>;
   forget(harness: string, id: string): Promise<void>;
   rotateToken(): Promise<{ sinkToken: string }>;
+  /** A new key for the board, in use at once (this computer only); absent where there is no
+   *  receiver's key (the mock, an account). */
+  renewKey?(): Promise<void>;
   demo(on: boolean): Promise<{ on: boolean }>;
   /** URL for the QR image, or null when there is none (mock). */
   qrUrl(): string | null;
@@ -89,6 +92,7 @@ export const STREAM_KINDS = [
   "searchIndex",
   "workflowRun",
   "workflows",
+  "info",
 ] as const satisfies readonly StreamMessage["kind"][];
 /** Fails to compile while a StreamMessage kind is missing from STREAM_KINDS. */
 const _everyKind: Exclude<StreamMessage["kind"], (typeof STREAM_KINDS)[number]> extends never ? true : never = true;
@@ -238,6 +242,7 @@ export function createHttpTransport(): Transport {
     digest: (q) => get<Digest>(`${ROUTES.ui.digest}${params(q) ? `?${params(q)}` : ""}`),
     forget: (harness, id) => post<void>(`${ROUTES.ui.forget}/${enc(harness)}/${enc(id)}/forget`),
     rotateToken: () => post<{ sinkToken: string }>(ROUTES.ui.rotateToken),
+    renewKey: () => post<void>(ROUTES.ui.renewKey),
     demo: (on) => post<{ on: boolean }>(ROUTES.ui.demo, { on }),
     qrUrl: () => apiUrl(ROUTES.ui.qr),
     labels: () => get<Labels>(ROUTES.ui.labels),

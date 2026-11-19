@@ -3,6 +3,7 @@
 // person reads under the strip (CONTROL.md §5, §10).
 import type { ControlActivity, ControlKind, ControlOutcome, RunLevel } from "@shared/api";
 import { asSentence } from "@shared/reason";
+import { KEY_LOST } from "../lib/keyWords";
 import { accountMode } from "../lib/net";
 import { clock, NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { ControlError, UNHEARD_CODE, wrongOriginHere } from "./api";
@@ -180,7 +181,7 @@ export function sendErrorWords(e: unknown, machine?: string | null): string {
     if (e.code === UNHEARD_CODE)
       return `It may have been sent: ${asSentence(e.detail ?? e.reason)} Look at the session before you send it again.`;
     if (e.status === 404) return "not sent · this machine is no longer paired here";
-    if (e.status === 401) return "not sent · this page lost its key; reload it from the terminal's link";
+    if (e.status === 401) return `not sent · ${KEY_LOST}`;
     return `not sent · ${e.detail ?? e.reason}`;
   }
   const native = nativeErrorWords(e);

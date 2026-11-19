@@ -56,7 +56,7 @@ anyway if any of these was ever pasted into a chat, a screenshot or a scratch fi
 | Credential | How |
 |---|---|
 | Sink token (`spg_…`) | Connect page → *Rotate*, or `curl -X POST http://localhost:7373/api/ui/token/rotate` from the receiver machine; then `sessionpipe sink add … --token <new>` on every sending machine |
-| UI key (`?k=`) | delete `uiKey` from `~/.local/state/sessionpipe-gui/config.json`, restart; re-scan the QR on every phone |
+| UI key (`?k=`) | `sessionpipe-gui key renew` on the receiver machine (or Connect → a link's menu → *New link…*); open the new link or re-scan the QR on every phone |
 | Telegram bot token | BotFather → `/revoke`, then `npx ping-a-human setup` again |
 | TLS CA (`~/.local/state/sessionpipe-gui/tls`) | `sessionpipe-gui tls reset`; re-trust on each phone (not committed anywhere; listed for completeness) |
 

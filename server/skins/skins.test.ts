@@ -415,7 +415,11 @@ describe("skin routes", () => {
   });
 
   it("needs the UI key away from loopback", async () => {
-    const ctx = { remote: { ip: "10.0.0.2", loopback: false }, url: new URL("http://x/"), cookies: () => ({}) };
+    const ctx = {
+      remote: { ip: "10.0.0.2", loopback: false, thisComputer: false },
+      url: new URL("http://x/"),
+      cookies: () => ({}),
+    };
     const reply = await app.router.match("GET", SKIN_ROUTES.list)!.handler(ctx as never);
     expect(reply).toMatchObject({ status: 401 });
     const files = await app.router
@@ -424,7 +428,7 @@ describe("skin routes", () => {
     expect(files).toMatchObject({ status: 401 });
     const reload = await app.router.match("POST", SKIN_ROUTES.reload)!.handler({
       ...ctx,
-      remote: { ip: "10.0.0.2", loopback: false },
+      remote: { ip: "10.0.0.2", loopback: false, thisComputer: false },
       cookies: () => ({ spgui: app.config().uiKey }),
     } as never);
     expect(reload).toMatchObject({ status: 403 });

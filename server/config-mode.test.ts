@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readGuiConfig, setTlsPreference, tightenMode } from "./config.js";
+import { hashSecret, readGuiConfig, renewUiKey, setTlsPreference, tightenMode } from "./config.js";
 
 // Node applies writeFileSync's `mode` only when it makes the file; config.json holds the
 // sink token and the UI key, so a write must leave it at 0600 even when it was looser.
@@ -44,6 +44,17 @@ describe.skipIf(process.platform === "win32")("config.json mode", () => {
     chmodSync(file, 0o640);
     expect(readGuiConfig(dir)).toEqual(cfg);
     expect(mode()).toBe(0o600);
+  });
+
+  it("a new UI key is written whole at 0600, everything else kept, nothing left beside it", () => {
+    const cfg = setTlsPreference(dir, readGuiConfig(dir), true);
+    chmodSync(file, 0o644);
+    const next = renewUiKey(dir, cfg);
+    expect(next.uiKey).not.toBe(cfg.uiKey);
+    expect(next).toEqual({ ...cfg, uiKey: next.uiKey, retired: [hashSecret(cfg.uiKey)] });
+    expect(readGuiConfig(dir)).toEqual(next);
+    expect(mode()).toBe(0o600);
+    expect(readdirSync(dir)).toEqual(["config.json"]);
   });
 
   it("leaves the bits alone on Windows, where they are not the file's access rules", () => {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: server-core. The UI API under /api/ui (ARCHITECTURE.md "UI API"): what the
 // web app reads and the few things it may do. Every route needs uiAuth; the token
-// rotation only loopback.
+// rotation and a new UI key this computer only (http/net.ts onThisComputer).
 import QRCode from "qrcode";
 import {
   type FeedQuery,
@@ -15,6 +15,7 @@ import {
 } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
+import { DOOR_HEADER, throughDoor } from "../localDoor.js";
 import type { Store } from "../store/store.js";
 import { registerAttachments } from "./attachments.js";
 import { uiAuth } from "./auth.js";
@@ -40,6 +41,11 @@ export interface UiDeps {
   info: () => Info;
   /** Makes a new sink token, persists it and returns it. */
   rotateSinkToken: () => string;
+  /** Makes a new UI key, persists and applies it. */
+  renewUiKey?: () => void;
+  /** This run's secret in `<state>/run/` (localDoor.ts): the renew route takes it from
+   *  `sessionpipe-gui key renew`, and judges a request that brings the door's header by it alone. */
+  doorSecret?: () => string | undefined;
   demo: { on: () => boolean; set: (on: boolean) => void };
   /** SSE ping interval (tests). */
   pingMs?: number;
@@ -83,7 +89,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
 
   router.get(
     ROUTES.ui.info,
-    guard(() => ({ status: 200, json: deps.info() })),
+    guard((ctx) => ({ status: 200, json: infoFor(deps.info(), ctx.remote.thisComputer) })),
   );
   router.get(
     ROUTES.ui.snapshot,
@@ -102,6 +108,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
         pingMs: deps.pingMs,
         plugins: deps.plugins,
         more: [deps.labels, deps.marks, deps.limits, deps.broadcast].filter((x) => x !== undefined),
+        allowed: (c) => uiAuth(c, deps.uiKey()),
       });
     }),
   );
@@ -171,10 +178,32 @@ export function registerUi(router: Router, deps: UiDeps): void {
   router.post(
     ROUTES.ui.rotateToken,
     guard((ctx): Reply => {
-      if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+      if (!ctx.remote.thisComputer) return { status: 403, json: { reason: "loopback_only" } };
       return { status: 200, json: { sinkToken: deps.rotateSinkToken() } };
     }),
   );
+
+  // This computer only, or the run's secret from `<state>/run/` (localDoor.ts). A request
+  // that brings the door's header is judged by that secret alone: another receiver's door
+  // (a run file left for another folder) is refused, never taken as this computer.
+  // The answer carries no key; this computer reads it from /info.
+  const renewUiKey = deps.renewUiKey;
+  if (renewUiKey)
+    router.post(ROUTES.ui.renewKey, (ctx): Reply => {
+      if (ctx.req.headers[DOOR_HEADER] !== undefined) {
+        const secret = deps.doorSecret?.();
+        if (secret === undefined || !throughDoor(ctx, secret))
+          return { status: 403, json: { reason: "not_this_door" } };
+        renewUiKey();
+        return { status: 204, text: "" };
+      }
+      if (!ctx.remote.thisComputer)
+        return uiAuth(ctx, deps.uiKey())
+          ? { status: 403, json: { reason: "loopback_only" } }
+          : { status: 401, json: { reason: "unauthorized" } };
+      renewUiKey();
+      return { status: 204, text: "" };
+    });
 
   router.post(
     ROUTES.ui.demo,
@@ -207,6 +236,19 @@ export function registerUi(router: Router, deps: UiDeps): void {
       };
     }),
   );
+}
+
+/** Info as a caller may have it: the sink token, and the commands that carry it, only for
+ *  this computer (http/net.ts onThisComputer). A phone or a browser elsewhere holds the board's key, which
+ *  lets it read the board; a sender's token is not part of that. */
+export function infoFor(info: Info, thisComputer: boolean): Info {
+  if (thisComputer) return info;
+  return {
+    ...info,
+    sinkToken: "",
+    sinkCommand: "",
+    ...(info.remote ? { remote: { ...info.remote, sinkCommand: "" } } : {}),
+  };
 }
 
 function intParam(ctx: Ctx, name: string): number | undefined {

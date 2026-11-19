@@ -13,13 +13,22 @@ Versions: only the latest `0.x` release receives fixes.
 ## What this software does, in security terms
 
 `sessionpipe-gui` is one Node process on a machine you own. It listens on one port
-(7373 by default) for three kinds of callers:
+(7373 by default) for these callers. "This computer" is a request from loopback that did
+not come through the proxy; only when `--host` binds the receiver to one address that is
+not loopback, a request from that same address (not through the proxy) is this computer
+instead. One rule decides it everywhere (`server/http/net.ts` `onThisComputer`). As with loopback
+in the default mode, a program on the machine, a tunnel or a proxy that connects to that
+bound address and names no visitor counts as this computer there. Setup's actions, the
+phone page's Tailscale button and the search index's also answer a request from one of
+this machine's own addresses (not through the proxy) that brings the UI key: the `.local`
+secure page in a browser on the computer itself.
 
 | Caller | Credential | What it may do |
 |---|---|---|
 | A `sessionpipe` sink on another machine | `Authorization: Bearer <sink token>` | `POST` event batches (`/api/sessionpipe/v1/events`) |
-| A browser on the LAN | the UI key, carried once in `?k=` and then as the `spgui` cookie | read the board, the UI API and the SSE stream; sign control commands with a passkey |
-| A browser on `localhost` | none (loopback is trusted), on the receiver's own pages | the above, plus the loopback-only routes: rotate the sink token, toggle demo, plugin and skin settings, setup |
+| A browser on another device, or through the proxy | the UI key, carried once in `?k=` and then as the `spgui` cookie | read the board, the UI API and the SSE stream (not the sink token); sign control commands with a passkey |
+| A browser on this computer | none, on the receiver's own pages | the above, plus the sink token and the routes for this computer only: rotate the sink token, a new UI key, toggle demo, plugin and skin settings, setup |
+| `sessionpipe-gui key renew` on this computer | the run's secret in `<state>/run/` (0600) | a new UI key |
 | A paired machine's daemon | that machine's own bearer token | poll and ack its control queue |
 
 **The control channel.** Every command a page sends to a machine (a message, a
@@ -47,9 +56,21 @@ tokens. Details: `server/http/guard.ts` and [ARCHITECTURE.md](ARCHITECTURE.md).
 **Where secrets live.** `~/.local/state/sessionpipe-gui/config.json` (the sink token,
 the UI key), `control/` (hashes of the per-machine tokens), `tls/` (the local CA and
 server key when `--tls` is on), `plugins-settings/` (plugin secrets, mode 0600, masked on
-the wire and in logs). Rotate the sink token from the Connect page or
-`POST /api/ui/token/rotate` (loopback only); a new UI key is made by deleting `uiKey`
-from `config.json` and restarting.
+the wire and in logs). The sink token is shown only on this computer (`/api/ui/info`
+gives it to no one else), and a pairing link carries its code and nothing else. Every
+machine that sends holds the sink token; rotating it stops a sender (the Connect page, or
+`POST /api/ui/token/rotate`, this computer only), and every machine that should go on
+sending is given the new one. Give the board a new UI key with `sessionpipe-gui key renew`,
+or *New link…* in a link's menu on the Connect page (`POST /api/ui/key/renew`, this
+computer only). After a new key only the new key opens a receiver of this version, and no route answers
+anything that leads to it; a phone or browser that came in by the old link is asked for
+the new one. A new UI key does not stop a sender; the sink token does that. The receiver
+also makes a new UI key when the text it keeps or takes in holds the current one (a key of
+at least 16 characters): the first at once, a later one in the same run of finds after 30
+seconds, then twice as long each time, up to ten minutes. `config.json` keeps the SHA-256
+of every key and token of 16 characters or more this board replaced (the newest 64, never
+the secrets), and no
+receiver of this version on the folder takes one of them back, also after a restart.
 
 **Network exposure.** The GUI is meant for a trusted LAN. The web bundle calls only its
 own origin, and there is no telemetry. The server makes outbound requests only for what
@@ -67,7 +88,7 @@ supported configuration.
 ## In scope
 
 - Reading events, sessions or the stream without the UI key or the sink token.
-- Reaching a loopback-only route from a non-loopback address.
+- Reaching a route for this computer only, from elsewhere.
 - A page of another origin changing anything through the receiver, or reading anything
   from it.
 - Forging, replaying or redirecting a control command; getting a suggestion delivered

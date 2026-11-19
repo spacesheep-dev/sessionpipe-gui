@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// GET /api/ui/stats/process, loopback only: what this process weighs right now
+// GET /api/ui/stats/process, this computer only: what this process weighs right now
 // (process.memoryUsage, uptime, the store's counts), for a `watch curl` while the GUI
 // runs on a machine someone cares about. A POST runs a full GC first, so heapUsed is
 // live data and not garbage waiting its turn: a GET only ever reads. Not part of the
@@ -15,7 +15,7 @@ export function registerProcessStats(router: Router, store: Store, guard: (h: Ha
   const stats =
     (collect: boolean): Handler =>
     (ctx): Reply => {
-      if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+      if (!ctx.remote.thisComputer) return { status: 403, json: { reason: "loopback_only" } };
       if (collect) fullGc();
       const m = process.memoryUsage();
       const s = store.stats();

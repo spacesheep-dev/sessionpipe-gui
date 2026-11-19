@@ -42,7 +42,10 @@ export function registerReceiver(to: Router, deps: ReceiverDeps): void {
   }));
 
   router.post(ROUTES.events, async (ctx: Ctx): Promise<Reply> => {
-    if (ctx.bearer() !== deps.sinkToken()) {
+    // An empty token is never a token, on either side.
+    const token = deps.sinkToken();
+    const bearer = ctx.bearer();
+    if (!token || !bearer || bearer !== token) {
       return { status: 401, json: { reason: "unauthorized" }, headers: { "www-authenticate": "Bearer" } };
     }
     const proto = ctx.req.headers["sessionpipe-protocol"];

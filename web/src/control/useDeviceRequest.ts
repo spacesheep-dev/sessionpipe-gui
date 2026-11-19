@@ -8,6 +8,7 @@
 // In the native app the key is the app's device key for the rp id (made by the shell in
 // the Secure Enclave on first use, no prompt), never a passkey.
 import { useCallback, useEffect, useState } from "react";
+import { KEY_LOST_SENTENCE } from "../lib/keyWords";
 import { ControlError, controlApi, type DeviceRequest } from "./api";
 import { registerPasskey } from "./ceremony";
 import { deviceKey, deviceWords, nativeErrorWords, signerKind } from "./signer";
@@ -29,7 +30,7 @@ export type DevicePhase =
 export function requestErrorWords(e: unknown): string {
   if (e instanceof ControlError) {
     if (e.reason === "bad_key") return "This passkey is in a shape the machine cannot use; make a new one.";
-    if (e.status === 401) return "This page lost its key. Open the GUI again from the link or QR on the Mac.";
+    if (e.status === 401) return KEY_LOST_SENTENCE;
     return e.detail ?? e.reason;
   }
   return nativeErrorWords(e) ?? webauthnError(e);

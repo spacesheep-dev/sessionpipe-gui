@@ -166,6 +166,60 @@ test.describe("setup on the demo server (TLS off)", () => {
   });
 });
 
+test.describe("setup at the secure address, reached through this machine's network address", () => {
+  // The way a Mac's browser reaches https://<name>.local: by the network address, which is
+  // not loopback. With the board's key it is this machine for Setup; without, it is not.
+  test("the page brings the key: Setup's steps and its actions answer; without it, refused", async ({
+    playwright,
+    request,
+  }) => {
+    const info = (await (await request.get(`${TLS_HTTP}${INFO}`)).json()) as {
+      uiKey: string;
+      urls: { lan: string[] };
+      tls?: { hostname: string };
+    };
+    const lan = info.urls.lan[0] ? new URL(info.urls.lan[0]).hostname : undefined;
+    test.skip(!lan || !info.tls, "no network address, or no TLS on this instance");
+    const name = info.tls!.hostname;
+    const origin = `https://${name}:${E2E_TLS_PORT}`;
+    const browser = await playwright.chromium.launch({ args: [`--host-resolver-rules=MAP ${name} ${lan}`] });
+    try {
+      const ctx = await browser.newContext({
+        ignoreHTTPSErrors: true,
+        storageState: { cookies: [], origins: [{ origin, localStorage: [{ name: SETUP_SEEN_KEY, value: "1" }] }] },
+      });
+      const page = await ctx.newPage();
+      const statusSeen = page.waitForResponse((r) => r.url().includes(STATUS), { timeout: 30_000 });
+      await page.goto(`${origin}/setup?k=${encodeURIComponent(info.uiKey)}`);
+      const status = await statusSeen;
+      expect(status.status()).toBe(200);
+      // The key went with the page: the answer holds no key of its own.
+      expect(((await status.json()) as { uiKey: string }).uiKey).toBe("");
+      await expect(page.getByRole("heading", { name: "Set up sessionpipe gui" })).toBeVisible({ timeout: 15_000 });
+      const steps = page.locator("li.step");
+      await expect(steps).toHaveCount(6);
+      await expect(page.getByText("Setup acts on the computer this board runs on")).toHaveCount(0);
+      await expect(steps.nth(0)).toHaveAttribute("data-mark", /done|needs|todo/);
+      // An action of Setup's answers from here (pairing: nothing to cancel is still a 200).
+      const cancel = await page.evaluate(
+        async (p) => (await fetch(p, { method: "POST" })).status,
+        "/api/ui/setup/pair/cancel",
+      );
+      expect(cancel).toBe(200);
+      await ctx.close();
+      // The same address without the key, from a page of that browser: refused.
+      const bare = await browser.newContext({ ignoreHTTPSErrors: true });
+      const other = await bare.newPage();
+      await other.goto(`${origin}/`);
+      const refused = await other.evaluate(async (p) => (await fetch(p)).status, STATUS);
+      expect([401, 403]).toContain(refused);
+      await bare.close();
+    } finally {
+      await browser.close();
+    }
+  });
+});
+
 test.describe("setup on the TLS instance", () => {
   test.use({ baseURL: TLS_HTTPS, ignoreHTTPSErrors: true });
 

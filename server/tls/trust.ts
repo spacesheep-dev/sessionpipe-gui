@@ -7,6 +7,7 @@
 import type { TLSSocket } from "node:tls";
 import { type Info, ROUTES, UI_KEY_COOKIE, UI_KEY_PARAM } from "../../shared/api.js";
 import type { Ctx, Reply, Router } from "../http/router.js";
+import { unauthorizedPage } from "../static.js";
 import { WORDMARK_CSS, wordmarkHtml } from "../ui/brand.js";
 import { caDownloadName, type TlsMaterial } from "./certs.js";
 
@@ -37,7 +38,8 @@ export function registerTrust(router: Router, deps: TrustDeps): void {
   });
 
   router.get(ROUTES.trust, (ctx): Reply => {
-    if (!deps.uiAuth(ctx)) return { status: 401, json: { reason: "unauthorized" } };
+    // The page a QR opens: refused, it says what to do, as every other page does.
+    if (!deps.uiAuth(ctx)) return unauthorizedPage(ctx, deps.info().urls.local);
     const headers: Record<string, string> = { "cache-control": "no-store" };
     const k = ctx.url.searchParams.get(UI_KEY_PARAM);
     if (k !== null && k === deps.uiKey()) {
@@ -50,7 +52,7 @@ export function registerTrust(router: Router, deps: TrustDeps): void {
       html: trustPage({
         tls: deps.tls(),
         info: deps.info(),
-        key: ctx.remote.loopback ? null : deps.uiKey(),
+        key: ctx.remote.thisComputer ? null : deps.uiKey(),
         secureHere,
       }),
     };
@@ -82,7 +84,7 @@ export function trustPage(input: TrustPageInput): string {
   const caName = tls ? caDownloadName(tls.hostname) : "sessionpipe-gui.crt";
   const fp = tls?.caFingerprint ?? "";
   const expires = tls ? tls.serverExpiresAt.slice(0, 10) : "";
-  const localUrl = `http://localhost:${port}`;
+  const localUrl = info.urls.local;
 
   const body = !tls
     ? `

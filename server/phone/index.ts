@@ -77,7 +77,11 @@ export function registerPhone(router: Router, deps: PhoneDeps): void {
     (h: Handler): Handler =>
     (ctx) =>
       deps.uiAuth(ctx) ? h(ctx) : { status: 401, json: { reason: "unauthorized" } };
-  const local = thisMachineOnly({ testDoor: deps.testDoor ?? false, port: deps.port });
+  const local = thisMachineOnly({
+    testDoor: deps.testDoor ?? false,
+    home: () => deps.info().urls?.local ?? `http://localhost:${deps.port()}`,
+    uiKey: () => deps.info().uiKey,
+  });
 
   const phoneInfo = async (): Promise<PhoneInfo> => {
     const info = deps.info();

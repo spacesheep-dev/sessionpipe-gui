@@ -174,7 +174,7 @@ describe("extras routes", () => {
   it("refuses the install away from loopback with 403, before touching the installer", async () => {
     install.mockClear();
     const ctx = {
-      remote: { ip: "10.0.0.2", loopback: false },
+      remote: { ip: "10.0.0.2", loopback: false, thisComputer: false },
       params: { id: "night-owl" },
       url: new URL("http://x/"),
       cookies: () => ({}),
@@ -187,7 +187,7 @@ describe("extras routes", () => {
   it("with the real catalogue, every install is a 409: everything is bundled", async () => {
     install.mockClear();
     const ctx = {
-      remote: { ip: "127.0.0.1", loopback: true },
+      remote: { ip: "127.0.0.1", loopback: true, thisComputer: true },
       url: new URL("http://x/"),
       cookies: () => ({}),
     };
@@ -204,7 +204,11 @@ describe("extras routes", () => {
   it("needs the UI key, like the rest of /api/ui", async () => {
     const router = new Router();
     registerExtras(router, { uiAuth: () => false, dirs, install });
-    const ctx = { remote: { ip: "10.0.0.2", loopback: false }, url: new URL("http://x/"), cookies: () => ({}) };
+    const ctx = {
+      remote: { ip: "10.0.0.2", loopback: false, thisComputer: false },
+      url: new URL("http://x/"),
+      cookies: () => ({}),
+    };
     expect(await router.match("GET", ROUTES.ui.extras)!.handler(ctx as never)).toMatchObject({ status: 401 });
   });
 });

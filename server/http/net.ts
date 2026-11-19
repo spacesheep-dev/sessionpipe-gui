@@ -24,6 +24,18 @@ export function isThisMachine(ip: string, addresses: string[] = ownAddresses()):
   return addresses.some((a) => plainIp(a) === p);
 }
 
+/** The one rule for "this computer" (SECURITY.md): what needs no key, sees the sink token,
+ *  rotates it, makes a new board key, and runs Setup's actions. A request that did not come
+ *  through the proxy and is from loopback; or, only when the receiver does not listen on
+ *  loopback at all (`--host` bound it to one address that is not loopback: `bound`), one
+ *  that did not come through the proxy and comes from that very address. With every
+ *  address bound (`bound` null), or a loopback one, loopback alone is this computer. */
+export function onThisComputer(remote: { ip: string; forwarded: boolean }, bound: string | null): boolean {
+  if (remote.forwarded) return false;
+  if (isLoopback(remote.ip)) return true;
+  return bound !== null && !isLoopback(bound) && plainIp(remote.ip) === plainIp(bound);
+}
+
 /** A self-assigned address (169.254/16): no DHCP answered on that link, so nothing else
  *  on the network reaches it. */
 export const isLinkLocal = (ip: string): boolean => ip.startsWith("169.254.");

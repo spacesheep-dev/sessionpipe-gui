@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Who may use the UI API and the page: this machine (loopback), or anyone who
+// Who may use the UI API and the page: this computer (http/net.ts onThisComputer), or anyone who
 // presents the UI key, as the `spgui` cookie the page sets or as `?k=` in the URL
 // (the QR code carries it).
 import { UI_KEY_COOKIE, UI_KEY_PARAM } from "../../shared/api.js";
 import type { Ctx } from "../http/router.js";
 
 export function uiAuth(ctx: Ctx, uiKey: string): boolean {
-  if (ctx.remote.loopback) return true;
+  if (ctx.remote.thisComputer) return true;
   if (!uiKey) return false;
   if (ctx.url.searchParams.get(UI_KEY_PARAM) === uiKey) return true;
   return ctx.cookies()[UI_KEY_COOKIE] === uiKey;

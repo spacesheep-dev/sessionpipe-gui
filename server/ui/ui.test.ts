@@ -42,7 +42,11 @@ afterAll(async () => {
 
 const fakeCtx = (o: { loopback?: boolean; cookie?: string; query?: string }): Ctx =>
   ({
-    remote: { ip: o.loopback ? "127.0.0.1" : "192.168.1.9", loopback: o.loopback ?? false },
+    remote: {
+      ip: o.loopback ? "127.0.0.1" : "192.168.1.9",
+      loopback: o.loopback ?? false,
+      thisComputer: o.loopback ?? false,
+    },
     url: new URL(`http://x/${o.query ?? ""}`),
     cookies: () => (o.cookie ? { [UI_KEY_COOKIE]: o.cookie } : {}),
   }) as unknown as Ctx;

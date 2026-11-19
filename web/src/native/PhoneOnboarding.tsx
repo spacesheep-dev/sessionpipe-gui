@@ -35,10 +35,12 @@ function firstStep(): Step {
     : INITIAL;
 }
 
-export function Onboarding({ info }: { info: ShellInfo }) {
+/** `start`: where it opens instead of the welcome (the board whose key was replaced opens
+ *  it at the camera: components/KeyRefused.tsx). */
+export function Onboarding({ info, start }: { info: ShellInfo; start?: Step }) {
   const phone = info.platform === "android" ? "android" : "ios";
   const browser = trustBrowser(phone);
-  const [s, send] = useReducer(step, undefined, firstStep);
+  const [s, send] = useReducer(step, start, (given) => given ?? firstStep());
   const field = useRef<HTMLInputElement>(null);
   const scanner = hasScanner();
   // An app that takes a spacesheep account offers it as the other way in.

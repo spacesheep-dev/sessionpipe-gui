@@ -65,7 +65,7 @@ async function boot(
     testDoor: o.testDoor ?? true,
     uiAuth: (ctx) => (o.uiAuth ?? true) && ctx.remote.loopback,
     ...(o.deviceKeys !== undefined ? { deviceKeys: o.deviceKeys } : {}),
-    ...(o.uiKey !== undefined ? { uiKey: () => o.uiKey as string, origins: () => ["http://localhost:7373"] } : {}),
+    ...(o.uiKey !== undefined ? { origins: () => ["http://localhost:7373"] } : {}),
   });
   const router = new Router();
   control.register(router);
@@ -280,13 +280,13 @@ describe("open pairing", () => {
 describe("the pairing link and the board's key", () => {
   const KEY = "uik_test_board_key";
 
-  it("carries the key for a pairing the sink token started, and the code alone for an open one", async () => {
+  it("carries the code alone, for a pairing the sink token started and for an open one", async () => {
     const b = await boot({ uiKey: KEY });
     tmpDirs.push(b.stateDir);
     try {
       const keyed = await call(b.url, "POST", `${CONTROL}/pair`, { bearer: SINK, body: facts });
       expect(keyed.status).toBe(201);
-      expect(keyed.body.url).toBe(`http://localhost:7373/pair?code=${keyed.body.code}&k=${KEY}`);
+      expect(keyed.body.url).toBe(`http://localhost:7373/pair?code=${keyed.body.code}`);
       // No token, and a poll key of the caller's own making.
       const pollKey = "p".repeat(32);
       const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
@@ -2108,11 +2108,8 @@ describe("the pairing link the terminal prints (pairUrlFor)", () => {
   it("falls back to the daemon's address when no passkey origin is known", () => {
     expect(pairUrlFor("http://100.68.187.81:7373", [], "abc")).toBe("http://100.68.187.81:7373/pair?code=abc");
   });
-  it("carries the UI key when it has one, so a browser that never saw the board is let in", () => {
-    expect(pairUrlFor("http://localhost:7373", ["http://localhost:7373"], "abc", "k3y/+=")).toBe(
-      "http://localhost:7373/pair?code=abc&k=k3y%2F%2B%3D",
-    );
-    expect(pairUrlFor("http://localhost:7373", ["http://localhost:7373"], "abc", "")).toBe(
+  it("names the code and nothing else", () => {
+    expect(pairUrlFor("http://localhost:7373", ["http://localhost:7373"], "abc")).toBe(
       "http://localhost:7373/pair?code=abc",
     );
   });

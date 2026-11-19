@@ -222,11 +222,13 @@ export function rpId(): Promise<string> {
 }
 
 /** Forget the cached Info: the setup page turned TLS mode on, so the rp id and
- *  Info.tls changed under us. The next `rpId()` / `tlsInfo()` reads again. */
+ *  Info.tls changed under us, or the board's key was replaced (an `info` frame). The
+ *  next `rpId()` / `tlsInfo()` reads again. */
 export function resetInfoCache(): void {
   rpIdPromise = null;
   rpCache = undefined;
   tlsCache = undefined;
+  uiKeyCache = undefined;
   originCache = undefined;
   originsCache = undefined;
   infoCache = undefined;

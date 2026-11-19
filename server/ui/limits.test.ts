@@ -407,7 +407,11 @@ describe("limits routes", () => {
       new LimitsStore(tmp.dir),
       uiGuard(() => "key"),
     );
-    const ctx = { remote: { ip: "192.168.1.9", loopback: false }, url: new URL("http://x/"), cookies: () => ({}) };
+    const ctx = {
+      remote: { ip: "192.168.1.9", loopback: false, thisComputer: false },
+      url: new URL("http://x/"),
+      cookies: () => ({}),
+    };
     for (const [method, route] of [
       ["GET", ROUTES.ui.limits],
       ["POST", ROUTES.ui.limitsForget],

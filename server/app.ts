@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: server-core (composition root). Every module plugs in here and nowhere
 // else. Module boundaries and who owns what: ARCHITECTURE.md.
-import { readFileSync } from "node:fs";
+import { type FSWatcher, readFileSync, statSync, watch } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import type net from "node:net";
@@ -11,9 +11,16 @@ import { DEFAULT_PORT, type Info, type RemoteInfo, ROUTES } from "../shared/api.
 import {
   defaultStateDir,
   type GuiConfig,
+  hashSecret,
+  mergeRetired,
   packageVersion,
+  RETIRED_MAX,
   readGuiConfig,
+  readRetired,
+  renewUiKey,
+  retire,
   rotateSinkToken,
+  SECRET_MIN,
   type SpacesheepLink,
   setDisabled,
   setEnabled,
@@ -21,6 +28,9 @@ import {
   setSearchHistory,
   setSpacesheep,
   setTlsPreference,
+  takeWrite,
+  withoutBom,
+  writeChanged,
 } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
 import { type Runner, startDemo, startReplay } from "./demo/index.js";
@@ -29,6 +39,7 @@ import { bundledDirs } from "./extensions/kind.js";
 import { isLoopback, lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
 import { DEFAULT_HOST } from "./listen-error.js";
+import { openDoor } from "./localDoor.js";
 import { createOrchestrate, type Orchestrate } from "./orchestrate/index.js";
 import { registerOrchestrate } from "./orchestrate/routes.js";
 import { registerPhone } from "./phone/index.js";
@@ -38,7 +49,7 @@ import { registerSearch } from "./search/routes.js";
 import { createSearch, thisHostname } from "./search/service.js";
 import type { SearchService } from "./search/types.js";
 import { registerSetup } from "./setup/index.js";
-import { execDefault, isThisMachine } from "./setup/local.js";
+import { actsHere, execDefault } from "./setup/local.js";
 import { createTailscaleProbe } from "./setup/tailscale.js";
 import { registerSkins, SkinRegistry } from "./skins/index.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
@@ -52,6 +63,7 @@ import { registerTrust } from "./tls/trust.js";
 import { AttachmentStore } from "./ui/attachments.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi, uiGuard } from "./ui/index.js";
+import { watchUiKey } from "./ui/keyRenewal.js";
 import { LabelStore } from "./ui/labels.js";
 import { LimitsStore } from "./ui/limits.js";
 import { MarkStore } from "./ui/marks.js";
@@ -153,6 +165,10 @@ export interface App {
   search: SearchService;
   /** Workflows and their runs (server/orchestrate). */
   orchestrate: Orchestrate;
+  /** A new UI key, applied at once (`POST /api/ui/key/renew` does this). */
+  renewUiKey(): void;
+  /** The look for the key in what was kept before this start: true when it found it. */
+  readonly keyLooked: Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -190,18 +206,46 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const startedAt = new Date().toISOString();
   const stateDir = opts.stateDir ?? defaultStateDir();
   let config = readGuiConfig(stateDir);
-  // `plugin|skin|view enable|disable` (server/cli.ts) write config.json while this runs.
-  // The two lists they change are taken from the file each time they are read and before
-  // every write here, so Reload plugins sees the CLI's change and no write of ours drops it.
-  // The rest, the secrets above all, stays this process's own. A file that is gone, does
-  // not parse, or holds other secrets than ours changes nothing here: the CLI rebuilds a
-  // file it cannot parse with new secrets and only its own key, and those cut-down lists
-  // are not an edit of ours (the re-read never writes; the next write of ours replaces
-  // it). The CLI takes no lock, so two writes at the same instant are still last-writer-wins.
+  // config.json is the owner's, and others write it while this runs: `plugin|skin|view
+  // enable|disable` and `key renew` (server/cli.ts), and a second receiver on the same state
+  // folder. What it says is taken when it changes on disk (watched below) and before every
+  // write here: the two lists, so Reload plugins sees the CLI's change and no write of ours
+  // drops it; the secrets, so the newest on disk wins; and the retired list (config.ts
+  // `retired`), merged into ours, so a key or token any receiver on this folder replaced is
+  // never taken again, also after a start. A secret is taken only when it is at least
+  // SECRET_MIN characters and not retired. A retired one put back (a stale whole-file write)
+  // is written over with ours and the merged list; a short, empty or deleted one the owner
+  // put there is left alone (the next start reads it as main always did). A file equal to
+  // what this process last wrote or last read starts nothing, and a write that would not
+  // change the file is not made (config.ts writeIfOther), so two receivers on one folder
+  // settle instead of answering each other's writes.
+  /** Called when the secrets on disk were taken in place of ours (set once the stream exists). */
+  let onSecretsTaken = (): void => {};
+  const configFile = path.join(stateDir, "config.json");
+  const fileText = (): string | null => {
+    try {
+      return readFileSync(configFile, "utf8");
+    } catch {
+      return null;
+    }
+  };
+  /** What this process last wrote to config.json, and what it last read there. */
+  let ownText = fileText();
+  let lastRead = ownText;
+  /** After every write of ours: the text this process wrote is its own (never read back). */
+  const wrote = (next: GuiConfig): GuiConfig => {
+    ownText = takeWrite(configFile) ?? ownText;
+    lastRead = ownText;
+    seen = stamp();
+    return next;
+  };
   const live = (): GuiConfig => {
+    const text = fileText();
+    if (text === null || text === ownText || text === lastRead) return config;
+    lastRead = text;
     let disk: unknown;
     try {
-      disk = JSON.parse(readFileSync(path.join(stateDir, "config.json"), "utf8").replace(/^\uFEFF/, ""));
+      disk = JSON.parse(withoutBom(text));
     } catch {
       return config;
     }
@@ -209,8 +253,30 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     const list = (v: unknown): string[] | undefined =>
       Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : undefined;
     const { disabled, enabled, sinkToken, uiKey } = disk as Record<string, unknown>;
-    if (sinkToken !== config.sinkToken || uiKey !== config.uiKey) return config;
+    const onDisk = readRetired((disk as Record<string, unknown>).retired);
     const next: GuiConfig = { ...config };
+    let retired = mergeRetired(onDisk, config.retired ?? []);
+    const gone = (v: string): boolean => retired.includes(hashSecret(v));
+    let taken = false;
+    let refused = false;
+    const look = (v: unknown, ours: string): "take" | "refuse" | "leave" => {
+      if (typeof v !== "string" || v === ours) return "leave";
+      if (gone(v)) return "refuse";
+      return v.length >= SECRET_MIN ? "take" : "leave";
+    };
+    const k = look(uiKey, config.uiKey);
+    if (k === "take") {
+      retired = retire(retired, config.uiKey);
+      next.uiKey = uiKey as string;
+      taken = true;
+    } else if (k === "refuse") refused = true;
+    const t = look(sinkToken, config.sinkToken);
+    if (t === "take") {
+      retired = retire(retired, config.sinkToken);
+      next.sinkToken = sinkToken as string;
+      taken = true;
+    } else if (t === "refuse") refused = true;
+    if (retired.length) next.retired = retired;
     const off = list(disabled);
     const on = list(enabled);
     if (off) next.disabled = off;
@@ -218,8 +284,57 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     if (on) next.enabled = on;
     else delete next.enabled;
     config = next;
+    // A retired secret put back, or a retired list that lost what we know: ours and the
+    // merged list go back on disk, the rest of the file as it is.
+    const lost = onDisk.length < RETIRED_MAX && (config.retired ?? []).some((h) => !onDisk.includes(h));
+    if (refused || lost) {
+      // Only a refused field differs from ours: a short or deleted one stays as it is.
+      const asOnDisk = {
+        ...next,
+        uiKey: k === "refuse" ? (uiKey as string) : next.uiKey,
+        sinkToken: t === "refuse" ? (sinkToken as string) : next.sinkToken,
+      };
+      try {
+        writeChanged(stateDir, refused ? asOnDisk : next, next);
+        wrote(next);
+      } catch {}
+    }
+    if (taken) onSecretsTaken();
     return config;
   };
+  // A change on disk is read at once (fs.watch on the folder, which sees the rename a
+  // write ends with), and every few seconds by its time and size, where watching is not
+  // to be had (a network share).
+  let seen = "";
+  const stamp = (): string => {
+    try {
+      const st = statSync(path.join(stateDir, "config.json"));
+      return `${st.mtimeMs}:${st.size}:${st.ino}`;
+    } catch {
+      return "";
+    }
+  };
+  const recheck = (): void => {
+    const now = stamp();
+    if (now === seen) return;
+    seen = now;
+    live();
+  };
+  seen = stamp();
+  // A key or token this board retired is not taken at a start either: a new one is made.
+  const retiredAtStart = config.retired ?? [];
+  if (retiredAtStart.includes(hashSecret(config.uiKey))) config = wrote(renewUiKey(stateDir, config));
+  if (retiredAtStart.includes(hashSecret(config.sinkToken))) config = wrote(rotateSinkToken(stateDir, config));
+  let watcher: FSWatcher | null = null;
+  try {
+    watcher = watch(stateDir, (_e, name) => {
+      if (name === null || String(name) === "config.json") recheck();
+    });
+    watcher.on("error", () => {});
+    watcher.unref();
+  } catch {}
+  const recheckTimer = setInterval(recheck, 3000);
+  recheckTimer.unref();
   const store = new Store(stateDir, { tickMs: opts.tickMs, keepDays: opts.keepDays });
   // Each account's usage limits follow the store from its first event (the outbox's
   // first read, the demo's) on.
@@ -232,7 +347,9 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     : null;
   // --public-url: given → remembered; null → forgotten; undefined → the remembered one.
   if (opts.publicUrl !== undefined)
-    config = setPublicUrl(stateDir, live(), opts.publicUrl === null ? undefined : normalizePublicUrl(opts.publicUrl));
+    config = wrote(
+      setPublicUrl(stateDir, live(), opts.publicUrl === null ? undefined : normalizePublicUrl(opts.publicUrl)),
+    );
   let publicUrl: string | undefined = config.publicUrl ? normalizePublicUrl(config.publicUrl) : undefined;
   const publicHost = (): string | undefined => (publicUrl ? new URL(publicUrl).hostname : undefined);
   const chooseRpId = (): string => opts.rpId ?? publicHost() ?? tls?.hostname ?? "localhost";
@@ -261,6 +378,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       ...(opts.allowHosts ?? []),
     ],
     origins: () => [publicUrl],
+    home: () => home(),
   };
   const uiKey = (): string => config.uiKey;
   const uiAuth = uiAuthFor(uiKey);
@@ -273,7 +391,6 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     uiAuth,
     sessionExists: (key) => store.sessionExists(key),
     origins,
-    uiKey,
     // A send for a machine paired on spacesheep: the signed body to its jobs route, as
     // this account (the gui key), which verifies it against the machine's keys.
     remoteSend: async (m, body) => {
@@ -377,6 +494,13 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   const urlHost = (ip: string): string => (ip.includes(":") ? `[${ip}]` : ip);
   const usable = (): string | null => (bound !== null && !bound.includes("%") ? bound : null);
   const selfUrl = (): string => `http://${urlHost(usable() ?? "127.0.0.1")}:${port}`;
+  /** Where this computer opens the board with no key: localhost, or the one address
+   *  `--host` bound when that is not loopback (net.ts onThisComputer). */
+  const home = (): string => {
+    const ip = usable();
+    return ip !== null && !isLoopback(ip) ? `http://${urlHost(ip)}:${port}` : `http://localhost:${port}`;
+  };
+  router.bound = () => usable();
   const lanUrls = (): string[] => {
     if (bound === null) return lanAddresses().map((ip) => `http://${ip}:${port}`);
     const ip = usable();
@@ -395,7 +519,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       startedAt,
       port,
       urls: {
-        local: `http://localhost:${port}`,
+        local: home(),
         lan,
         ...(tls ? { https: httpsUrl()! } : {}),
         ...(publicUrl ? { public: publicUrl } : {}),
@@ -449,7 +573,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     control,
     info,
     setEnabled: (id, on) => {
-      config = setEnabled(stateDir, live(), `plugin:${id}`, on);
+      config = wrote(setEnabled(stateDir, live(), `plugin:${id}`, on));
     },
   });
   // The person's labels follow the store: a forgotten session loses its label.
@@ -459,6 +583,21 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   marks.follow(store);
   // Stream messages that come from neither the store nor control: a view's state written.
   const broadcast = new Broadcast();
+  /** A new UI key, written and applied at once: the guard reads it on every request, and
+   *  the `info` frame ends every stream opened with the old one (stream.ts) and has the
+   *  pages here read the new link. This computer never needs a key; the sinks
+   *  and the daemon have tokens of their own. */
+  let door: { secret: string; close(): void } | null = null;
+  const renewKey = (): void => {
+    const was = live();
+    config = wrote(renewUiKey(stateDir, was));
+    seen = stamp();
+    broadcast.emit({ kind: "info" });
+  };
+  // Secrets another writer put on disk: the same frame, for the same reasons.
+  onSecretsTaken = () => broadcast.emit({ kind: "info" });
+  // The current key in the text this receiver keeps or takes in: a new key (ui/keyRenewal.ts).
+  const keyWatch = watchUiKey({ stateDir, store, control, key: uiKey, renew: renewKey });
   registerUi(router, {
     labels,
     marks,
@@ -472,9 +611,12 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     viewers,
     plugins,
     rotateSinkToken: () => {
-      config = rotateSinkToken(stateDir, live());
+      const was = live();
+      config = wrote(rotateSinkToken(stateDir, was));
       return config.sinkToken;
     },
+    renewUiKey: renewKey,
+    doorSecret: () => door?.secret,
     demo: { on: () => demo !== null, set: setDemo },
   });
   // Session search (server/search): after the store and labels, behind the same UI guard;
@@ -488,18 +630,15 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     home: opts.searchHome ?? path.join(stateDir, "search", "no-home"),
     history: () => config.searchHistory !== false,
     setHistory: (on) => {
-      config = setSearchHistory(stateDir, live(), on);
+      config = wrote(setSearchHistory(stateDir, live(), on));
     },
     broadcast: (m) => broadcast.emit(m),
     port: () => port,
     cliPath: opts.searchCliPath,
     quiet: opts.quiet,
   });
-  registerSearch(router, search, uiGuard(uiKey), (ctx) => {
-    if (ctx.remote.forwarded) return false;
-    const over = opts.testDoor ? ctx.req.headers["x-spgui-test-remote"] : undefined;
-    return isThisMachine(typeof over === "string" && over ? over : ctx.remote.ip);
-  });
+  // Its POSTs act on this computer: Setup's rule (setup/local.ts actsHere).
+  registerSearch(router, search, uiGuard(uiKey), (ctx) => actsHere(ctx, uiKey(), opts.testDoor ?? false));
   // Workflows (server/orchestrate): runs across agents and machines, moved by control's
   // acks and a one-second clock, signed only by a browser; their frames ride the broadcast.
   const orchestrate = createOrchestrate({ stateDir, control, broadcast: (m) => broadcast.emit(m) });
@@ -510,14 +649,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       link: () => config.spacesheep,
       status: () => spacesheep?.status() ?? null,
       connect: (link) => {
-        config = setSpacesheep(stateDir, live(), link);
+        config = wrote(setSpacesheep(stateDir, live(), link));
         startSpacesheep(link);
-        broadcast.emit({ kind: "info" } as never);
+        broadcast.emit({ kind: "info" });
       },
       disconnect: () => {
         spacesheep?.stop();
         spacesheep = null;
-        config = setSpacesheep(stateDir, live(), undefined);
+        config = wrote(setSpacesheep(stateDir, live(), undefined));
         control.remote.drop("spacesheep");
         control.remote.account(null);
       },
@@ -536,7 +675,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     stateDir: path.join(stateDir, "themes-state"),
     onState: (id, etag) => broadcast.emit({ kind: "viewState", id, etag }),
     setDisabled: (id, off) => {
-      config = setDisabled(stateDir, live(), `view:${id}`, off);
+      config = wrote(setDisabled(stateDir, live(), `view:${id}`, off));
     },
   });
   registerPlugins(router, { host: plugins, uiAuth, demo: opts.demo === true });
@@ -580,7 +719,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     listener.setHttps(httpsServer);
     tls = m;
     rpId = chooseRpId();
-    config = setTlsPreference(stateDir, live(), true);
+    config = wrote(setTlsPreference(stateDir, live(), true));
     return m;
   };
   /** The setup page's "Use https://…" and "Stop using it": at runtime, remembered. */
@@ -588,7 +727,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     const next = url ? normalizePublicUrl(url) : undefined;
     publicUrl = next;
     rpId = chooseRpId();
-    config = setPublicUrl(stateDir, live(), next);
+    config = wrote(setPublicUrl(stateDir, live(), next));
   };
 
   const tailscale = createTailscaleProbe(execDefault, {
@@ -622,7 +761,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     tailscale,
     testDoor: opts.testDoor ?? false,
   });
-  router.fallback = staticFiles(opts.webDir ?? webDir(), { uiAuth, uiKey });
+  router.fallback = staticFiles(opts.webDir ?? webDir(), { uiAuth, uiKey, home });
 
   const host = opts.host ?? DEFAULT_HOST;
   port = await listen(listener, opts.port ?? DEFAULT_PORT, host);
@@ -634,6 +773,12 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // that form: the one main always gave, and the one the desktop's loopback check knows.
   if (typeof addr === "object" && addr && !WILDCARDS.has(addr.address))
     bound = addr.address.replace(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i, "$1");
+  // How `sessionpipe-gui key renew` reaches this receiver, whatever --host bound (localDoor.ts).
+  try {
+    door = openDoor(stateDir, port, [selfUrl()], home());
+  } catch (e) {
+    if (!opts.quiet) process.stderr.write(`[sessionpipe-gui] run/: ${(e as Error).message}\n`);
+  }
   // Plugins start once the port is known: their api names the URLs a message can carry.
   // Plugins can reach out of the machine (a Telegram bot, say). Demo mode exists to look
   // at the UI with synthetic sessions, so it never activates them: a throwaway server
@@ -676,7 +821,13 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     skins,
     search,
     orchestrate,
+    renewUiKey: renewKey,
+    keyLooked: keyWatch.looked,
     close: async () => {
+      keyWatch.close();
+      door?.close();
+      watcher?.close();
+      clearInterval(recheckTimer);
       await plugins.stop();
       setup.pairer.close();
       outbox?.stop();

@@ -52,6 +52,7 @@ import { accountMode, apiFetch, apiUrl } from "../lib/net";
 import { ControlError, controlApi } from "./api";
 import { b64url, sha256 } from "./bytes";
 import "./attachments.css";
+import { KEY_LOST } from "../lib/keyWords";
 
 // ---------- how a picture goes ----------
 
@@ -172,7 +173,7 @@ export async function uploadPicture(file: Blob, name: string, machineId?: string
   } catch (e) {
     if (!(e instanceof ControlError)) throw new Error("upload failed");
     if (e.status === 413) throw new Error(`too large: ${mb(file.size)}, limit ${mb(START_FILE_MAX_BYTES)}`);
-    if (e.status === 401) throw new Error("this board needs its key before it takes uploads");
+    if (e.status === 401) throw new Error(KEY_LOST);
     // The receiver's own sentence where it has one ("This file isn't the picture its type says.").
     throw new Error(e.detail ?? `upload failed (${e.reason})`);
   }
@@ -220,7 +221,7 @@ export async function uploadAttachment(file: Blob): Promise<Attachment> {
     const reason = typeof json.reason === "string" ? json.reason : `http_${res.status}`;
     if (reason === "too_large") throw new Error(`too large: ${mb(file.size)}, limit ${mb(ATTACHMENT_MAX_BYTES)}`);
     if (reason === "not_an_image" || reason === "unsupported_type") throw new Error("not an image we can send");
-    if (res.status === 401) throw new Error("this board needs its key before it takes uploads");
+    if (res.status === 401) throw new Error(KEY_LOST);
     throw new Error(`upload failed (${reason})`);
   }
   return json as unknown as Attachment;
