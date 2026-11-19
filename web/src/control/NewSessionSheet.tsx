@@ -17,6 +17,7 @@
 // idle (NewSession.tsx mounts it).
 import type { ControlActivity, MachineSummary, RunLevel, StartFile } from "@shared/api";
 import {
+  PICTURE_INPUT_MAX_BYTES,
   START_FILE_MAX_BYTES,
   START_FILES_MAX,
   START_FILES_TOTAL_BYTES,
@@ -49,6 +50,7 @@ import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { useNow } from "../lib/time";
 import { START, ThisPhone } from "../native/accountWords";
+import { pictureName } from "./Attachments";
 import { controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
@@ -76,6 +78,7 @@ import {
   rememberStart,
   saveDraft,
 } from "./newSessionState";
+import { HEIC_FILE_NOTE, pictureType, ShrinkRefused, type Shrunk, shrinkImage } from "./shrink";
 import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "./signer";
 import { machineBlocked, startGate } from "./startGate";
 import { notSentWords, PERMISSION_LABEL } from "./words";
@@ -121,6 +124,12 @@ interface FileItem {
   key: string;
   name: string;
   size: number;
+  /** The original's size, where a picture goes as a smaller redraw of it. */
+  was?: number;
+  /** A picture being made smaller (shrink.ts); its upload waits for that. */
+  shrinking?: boolean;
+  /** Goes as a file, but not as a picture the agent can look at (a HEIC this engine can't draw). */
+  note?: string;
   entry?: StartFile;
   error?: string;
 }
@@ -238,6 +247,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const [tap, setTap] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  /** `files` now, for a picture that finishes shrinking between renders. */
+  const filesNow = useRef(files);
+  filesNow.current = files;
 
   // Opened before the stream's first snapshot (`?new=1` on a fresh load): the machines
   // arrive a moment later, and the context is worked out then, once.
@@ -379,7 +391,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     }
     setNote(null);
     let count = files.length;
-    let total = files.reduce((n, f) => n + (f.error ? 0 : f.size), 0);
+    let total = files.reduce((n, f) => n + (f.error || f.shrinking ? 0 : f.size), 0);
     const add: FileItem[] = [];
     for (const f of list) {
       const key = `${f.name}:${f.size}:${Math.random().toString(36).slice(2)}`;
@@ -387,12 +399,26 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         setNote(`Up to ${START_FILES_MAX} files on a new session.`);
         break;
       }
-      if (f.size > START_FILE_MAX_BYTES) {
-        add.push({ key, name: f.name, size: f.size, error: "over 25 MB" });
-        continue;
-      }
       if (f.size === 0) {
         add.push({ key, name: f.name, size: f.size, error: "empty" });
+        continue;
+      }
+      // A picture is made smaller first, and held to the caps at the size it goes at.
+      if (pictureType(f.type, f.name)) {
+        if (f.size > PICTURE_INPUT_MAX_BYTES) {
+          add.push({ key, name: f.name, size: f.size, error: "over 50 MB" });
+          continue;
+        }
+        count++;
+        add.push({ key, name: f.name, size: f.size, shrinking: true });
+        shrinkImage(f, { name: f.name }).then(
+          (small) => shrunkFile(key, f, small),
+          (e) => shrunkFile(key, f, e instanceof ShrinkRefused ? "heic" : null),
+        );
+        continue;
+      }
+      if (f.size > START_FILE_MAX_BYTES) {
+        add.push({ key, name: f.name, size: f.size, error: "over 25 MB" });
         continue;
       }
       if (total + f.size > START_FILES_TOTAL_BYTES) {
@@ -402,12 +428,51 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       count++;
       total += f.size;
       add.push({ key, name: f.name, size: f.size });
-      controlApi.uploadFile(f).then(
-        (entry) => setFiles((prev) => prev.map((x) => (x.key === key ? { ...x, entry } : x))),
-        (e) => setFiles((prev) => prev.map((x) => (x.key === key ? { ...x, error: uploadWords(e) } : x))),
-      );
+      uploadOne(key, f);
     }
+    filesNow.current = [...filesNow.current, ...add];
     setFiles((prev) => [...prev, ...add]);
+  };
+  const patchFile = (key: string, patch: Partial<FileItem>) => {
+    filesNow.current = filesNow.current.map((x) => (x.key === key ? { ...x, ...patch } : x));
+    setFiles((prev) => prev.map((x) => (x.key === key ? { ...x, ...patch } : x)));
+  };
+  const uploadOne = (key: string, f: File) => {
+    controlApi.uploadFile(f).then(
+      (entry) => patchFile(key, { entry }),
+      (e) => patchFile(key, { error: uploadWords(e) }),
+    );
+  };
+  /** A picture made smaller (`small`), left as it was (null), or a HEIC this engine can't
+   *  draw ("heic", which goes as a file with a note): held to the caps, named, uploaded. */
+  const shrunkFile = (key: string, f: File, small: Shrunk | null | "heic") => {
+    // Taken back while it was being made smaller.
+    if (!filesNow.current.some((x) => x.key === key)) return;
+    const others = filesNow.current.filter((x) => x.key !== key && !x.error && !x.shrinking);
+    const shrunk = small && small !== "heic" ? small : null;
+    const size = shrunk ? shrunk.blob.size : f.size;
+    const done: Partial<FileItem> = { shrinking: false, size, ...(shrunk ? { was: f.size } : {}) };
+    if (size > START_FILE_MAX_BYTES) {
+      patchFile(key, { ...done, error: shrunk ? "over 25 MB after shrinking" : "over 25 MB" });
+      return;
+    }
+    if (others.reduce((n, x) => n + x.size, 0) + size > START_FILES_TOTAL_BYTES) {
+      patchFile(key, { ...done, error: "over 50 MB in all" });
+      return;
+    }
+    if (small === "heic") {
+      patchFile(key, { ...done, note: HEIC_FILE_NOTE });
+      uploadOne(key, f);
+      return;
+    }
+    const type = shrunk?.type ?? f.type;
+    const name = pictureName(
+      f.name,
+      type,
+      others.map((x) => x.name),
+    );
+    patchFile(key, { ...done, name });
+    uploadOne(key, new File([shrunk?.blob ?? f], name, { type }));
   };
   const onDrop = (e: DragEvent) => {
     if (!e.dataTransfer?.files?.length) return;
@@ -741,30 +806,46 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     </div>
   );
 
+  // A file that goes but is no picture the agent can look at is said once, under them all.
+  const fileNote = files.find((f) => f.note && !f.error)?.note;
   const chips = files.length > 0 && (
-    <ul className="ns-files" aria-label="Files">
-      {files.map((f) => (
-        <li
-          key={f.key}
-          className={`ns-file ${f.error ? "ns-file--err" : ""}`}
-          data-file-state={f.error ? "error" : f.entry ? "held" : "uploading"}
-        >
-          {!f.entry && !f.error && <span className="spinner" aria-hidden="true" />}
-          <span className="ns-file-name ellipsis">{f.name}</span>
-          <span className="ns-file-size num">{f.error ?? bytes(f.size)}</span>
-          <button
-            type="button"
-            className="icon-btn ns-file-x"
-            aria-label={`Remove ${f.name}`}
-            onClick={() => setFiles((prev) => prev.filter((x) => x.key !== f.key))}
+    <>
+      <ul className="ns-files" aria-label="Files">
+        {files.map((f) => (
+          <li
+            key={f.key}
+            className={`ns-file ${f.error ? "ns-file--err" : ""}`}
+            data-file-state={f.error ? "error" : f.entry ? "held" : f.shrinking ? "shrinking" : "uploading"}
+            title={
+              f.shrinking
+                ? "Making it smaller…"
+                : f.was && !f.error
+                  ? `${f.name} · ${bytes(f.size)} (was ${bytes(f.was)})`
+                  : (f.note ?? undefined)
+            }
           >
-            <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-              <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
-        </li>
-      ))}
-    </ul>
+            {!f.entry && !f.error && <span className="spinner" aria-hidden="true" />}
+            <span className="ns-file-name ellipsis">{f.name}</span>
+            <span className="ns-file-size num">{f.error ?? bytes(f.size)}</span>
+            <button
+              type="button"
+              className="icon-btn ns-file-x"
+              aria-label={`Remove ${f.name}`}
+              onClick={() => setFiles((prev) => prev.filter((x) => x.key !== f.key))}
+            >
+              <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+                <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {fileNote && (
+        <p className="ns-files-note" data-ns-files-note>
+          {fileNote}
+        </p>
+      )}
+    </>
   );
 
   const fileButton = takesFiles && (

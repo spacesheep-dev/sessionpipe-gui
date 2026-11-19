@@ -8,17 +8,20 @@
 // paperclip and answers a pasted or dropped picture under the field; a dropped file of any
 // kind never leaves the page. Against the second e2e instance (test door on, rp id
 // localhost), on the desktop and the phone projects. (A computer reached through spacesheep
-// is account.spec.ts's: it has the account.)
+// is account.spec.ts's: it has the account.) Every picture is made smaller before it goes
+// (web/src/control/shrink.ts): a big photo or screenshot goes as a WebP 2560 px on its long
+// edge, and a HEIC as a JPEG where the engine can draw one (WebKit), with words where not.
 // With ATT_SHOTS=<dir> it also writes the review screenshots, 1440, 834 and 390 wide.
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
-import { type BrowserContext, expect, type Page, type Route, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, type Route, test, webkit } from "@playwright/test";
 import {
   CONTROL_BASE,
   type FakeDaemon,
   fakeDaemon,
+  HEIC,
   passkeyPage,
   postSession,
   seenSetupHere,
@@ -74,6 +77,7 @@ const BIRCH = png(80, 60, [0xe8, 0xe2, 0xd0]);
 const ONYX = png(96, 54, [0x1c, 0x1c, 0x1e]);
 /** Seven more, each its own colour (and so its own hash). */
 const SEVEN = Array.from({ length: 7 }, (_, i) => png(40 + i, 30, [30 * i, 200 - 20 * i, 90 + 10 * i]));
+const HEIC_WORDS = "This browser can't open HEIC photos. Export it as JPEG (Photos › File › Export) and attach that.";
 const sha = (b: Buffer): string => createHash("sha256").update(b).digest("base64url");
 const entry = (name: string, b: Buffer) => ({ name, type: "image/png", size: b.length, sha256: sha(b) });
 
@@ -122,6 +126,52 @@ function drop(page: Page, files: Given[]): Promise<{ over: boolean; dropped: boo
     form.dispatchEvent(dropped);
     return { over: over.defaultPrevented, dropped: dropped.defaultPrevented, highlighted };
   }, files);
+}
+
+/** Paste a picture the page draws itself, `width`×`height` (a gradient with a little grain,
+ *  as a photo has), written as `type` and padded with zeros after its end to `padTo` bytes,
+ *  which every decoder reads past: a 13 MB photo without 13 MB through the test. */
+function pasteDrawn(
+  page: Page,
+  o: { name: string; type: "image/jpeg" | "image/png"; width: number; height: number; padTo: number },
+): Promise<number> {
+  return page.evaluate(async (o) => {
+    const cv = new OffscreenCanvas(o.width, o.height);
+    const cx = cv.getContext("2d")!;
+    const g = cx.createLinearGradient(0, 0, o.width, o.height);
+    g.addColorStop(0, "#2f6f4e");
+    g.addColorStop(1, "#d9c27a");
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, o.width, o.height);
+    for (let i = 0; i < 400; i++) {
+      cx.fillStyle = `hsl(${(i * 37) % 360} 40% 50% / 0.35)`;
+      cx.beginPath();
+      cx.arc((i * 7919) % o.width, (i * 104729) % o.height, 20 + (i % 60), 0, Math.PI * 2);
+      cx.fill();
+    }
+    const drawn = await cv.convertToBlob({ type: o.type, quality: 0.92 });
+    const file = new File([drawn, new Uint8Array(Math.max(0, o.padTo - drawn.size))], o.name, { type: o.type });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const ev = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
+    document.querySelector<HTMLTextAreaElement>(".ctl-ask textarea")!.dispatchEvent(ev);
+    return file.size;
+  }, o);
+}
+
+/** The size of every upload the page makes, in order. */
+function uploadSizes(page: Page): { bytes: number; type: string; name: string }[] {
+  const out: { bytes: number; type: string; name: string }[] = [];
+  page.on("request", (r) => {
+    const u = new URL(r.url());
+    if (r.method() !== "POST" || u.pathname !== "/api/ui/control/files") return;
+    out.push({
+      bytes: r.postDataBuffer()?.length ?? -1,
+      type: r.headers()["content-type"] ?? "",
+      name: u.searchParams.get("name") ?? "",
+    });
+  });
+  return out;
 }
 
 const daemons: FakeDaemon[] = [];
@@ -369,10 +419,8 @@ test("an upload that did not arrive whole, and a file that is not the picture it
   await shots(page, "4-a-picture-refused");
   // A kind of picture the composer does not take is refused before any upload.
   await tray(page).getByRole("button", { name: "Remove image" }).click();
-  await paste(page, [given("IMG_0412.heic", KIWI, "image/heic")]);
-  await expect(tray(page).locator(".att-meta")).toHaveText(
-    "not an image we can send (image/heic); PNG, JPEG, GIF or WebP",
-  );
+  await paste(page, [given("scan.tiff", KIWI, "image/tiff")]);
+  await expect(tray(page).locator(".att-meta")).toHaveText("Only PNG, JPEG, GIF, WebP or HEIC pictures can be sent.");
   await page.waitForTimeout(400);
   expect(prompts(d)).toHaveLength(0);
 });
@@ -437,5 +485,98 @@ test("a dropped file that is no picture never leaves the page, whatever the comp
   expect(await drop(page, [given("kiwi.png", KIWI)])).toEqual({ over: true, dropped: true, highlighted: false });
   await expect(tray(page)).toHaveCount(0);
   expect(page.url()).toBe(off);
+  expect(prompts(d)).toHaveLength(0);
+});
+
+test("a 13.5 MB photo is made smaller before it goes: a WebP of at most 3 MB, 2560 px on its long edge", async ({
+  context,
+  page,
+}) => {
+  const { d, uiKey } = await open(context, page, { takes: true, title: "A big photo" });
+  const uploads = uploadSizes(page);
+  const was = await pasteDrawn(page, {
+    name: "IMG_0412.jpg",
+    type: "image/jpeg",
+    width: 4032,
+    height: 3024,
+    padTo: 13_500_000,
+  });
+  expect(was).toBe(13_500_000);
+  await expect(tray(page)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+  // Under its new name, at its new size, with what it was.
+  await expect(tray(page)).toHaveAttribute("data-name", "IMG_0412.webp");
+  await expect(tray(page)).toHaveAttribute("title", /^IMG_0412\.webp · 2560×1920 · [\d.]+ (KB|MB) \(was 13 MB\)$/);
+  expect(uploads).toHaveLength(1);
+  expect(uploads[0]!.type).toBe("image/webp");
+  expect(uploads[0]!.bytes).toBeGreaterThan(0);
+  expect(uploads[0]!.bytes).toBeLessThanOrEqual(3 * 1024 * 1024);
+  await shots(page, "6-a-big-photo-made-smaller");
+
+  await send(page).click();
+  await expect.poll(() => prompts(d).length, { timeout: 20_000 }).toBe(1);
+  const cmd = prompts(d)[0]!;
+  expect(cmd.text).toBe("Look at the attached picture.");
+  expect(cmd.files).toEqual([
+    expect.objectContaining({ name: "IMG_0412.webp", type: "image/webp", size: uploads[0]!.bytes }),
+  ]);
+  nothingOfTheBoard(d.cmds[0]!, uiKey);
+  // The fake daemon notes a command before it fetches the command's files.
+  await expect.poll(() => d.fetched.length).toBe(1);
+  expect(d.fetched).toMatchObject([{ name: "IMG_0412.webp", ok: true, contentType: "image/webp" }]);
+});
+
+test("a 30 MB screenshot, over a file's 25 MB, is made smaller and sent", async ({ context, page }) => {
+  const { d } = await open(context, page, { takes: true, title: "A huge screenshot" });
+  const uploads = uploadSizes(page);
+  await pasteDrawn(page, { name: "image.png", type: "image/png", width: 3200, height: 3200, padTo: 30_700_000 });
+  await expect(tray(page)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+  await expect(tray(page)).toHaveAttribute("title", /^image\.webp · 2560×2560 · [\d.]+ (KB|MB) \(was 29 MB\)$/);
+  expect(uploads.map((u) => u.type)).toEqual(["image/webp"]);
+  expect(uploads[0]!.bytes).toBeLessThan(26_214_400);
+  await composer(page).fill("What does this screen say?");
+  await send(page).click();
+  await expect.poll(() => prompts(d).length, { timeout: 20_000 }).toBe(1);
+  // The fake daemon notes a command before it fetches the command's files.
+  await expect.poll(() => d.fetched.length).toBe(1);
+  expect(d.fetched).toMatchObject([{ name: "image.webp", ok: true, bytes: uploads[0]!.bytes }]);
+});
+
+test("a HEIC this browser can't draw is refused in words, before any upload", async ({ context, page }) => {
+  const { asked } = await open(context, page, { takes: true, title: "A HEIC photo" });
+  await paste(page, [given("IMG_0412.heic", HEIC, "image/heic")]);
+  await expect(tray(page)).toHaveAttribute("data-state", "error");
+  await expect(tray(page).locator(".att-meta")).toHaveText(HEIC_WORDS);
+  await shots(page, "7-a-heic-refused");
+  await tray(page).getByRole("button", { name: "Remove image" }).click();
+  // From Files or Finder a HEIC may come with no type at all: its name says what it is.
+  const dropped = await drop(page, [given("IMG_0413.HEIC", HEIC, "")]);
+  expect(dropped.dropped).toBe(true);
+  await expect(tray(page).locator(".att-meta")).toHaveText(HEIC_WORDS);
+  expect(asked.filter((a) => a.startsWith("POST /api/ui/control/files"))).toEqual([]);
+});
+
+test("in WebKit a HEIC is drawn and goes as a JPEG", async ({ context, page }, info) => {
+  test.skip(info.project.name !== "desktop", "one browser of its own is enough");
+  test.skip(process.platform !== "darwin" || !existsSync(webkit.executablePath()), "WebKit draws HEIC on macOS");
+  const { d } = await open(context, page, { takes: true, title: "A HEIC in WebKit" });
+  const url = page.url();
+  const state = await context.storageState();
+  const wk = await webkit.launch();
+  try {
+    const other = await wk.newContext({ storageState: state, locale: "en-US", timezoneId: "UTC" });
+    const p = await other.newPage();
+    const uploads = uploadSizes(p);
+    await p.goto(url);
+    await expect(composer(p)).toBeEnabled();
+    await expect(picker(p)).toBeEnabled();
+    await picker(p).setInputFiles({ name: "IMG_0412.heic", mimeType: "image/heic", buffer: HEIC });
+    await expect(tray(p)).toHaveAttribute("data-state", "ready", { timeout: 20_000 });
+    await expect(tray(p)).toHaveAttribute("data-name", "IMG_0412.jpg");
+    await expect(tray(p)).toHaveAttribute("title", /^IMG_0412\.jpg · 64×48 · /);
+    expect(uploads).toMatchObject([{ type: "image/jpeg", name: "IMG_0412.jpg" }]);
+    await other.close();
+  } finally {
+    await wk.close();
+  }
   expect(prompts(d)).toHaveLength(0);
 });

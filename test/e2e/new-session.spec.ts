@@ -16,6 +16,7 @@ import {
   CONTROL_BASE,
   type FakeDaemon,
   fakeDaemon,
+  HEIC,
   type PageKey,
   passkeyPage,
   postSession,
@@ -300,4 +301,56 @@ test("?new=1 with machine, harness and cwd opens prefilled, and leaves the addre
   await page.keyboard.press("Escape");
   await page.keyboard.press("c");
   await expect(sheet(page).locator("[data-ns-text]")).toHaveValue("Keep me.");
+});
+
+test("files on a new session: a big photo is made smaller first, a HEIC this browser can't draw stays a file with a note, others go as they are", async ({
+  page,
+}) => {
+  const m = await fakeDaemon(key, advertising(`ns-files-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}&cwd=/Users/e2e/code/billing`);
+  await expect(sheet(page).locator("input[data-ns-files]")).toBeAttached();
+  // A 13.5 MB photo the page draws itself (padded with zeros after its end), a HEIC and a text file.
+  await page.evaluate(async (heic) => {
+    const cv = new OffscreenCanvas(4032, 3024);
+    const cx = cv.getContext("2d")!;
+    const g = cx.createLinearGradient(0, 0, 4032, 3024);
+    g.addColorStop(0, "#2f6f4e");
+    g.addColorStop(1, "#d9c27a");
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, 4032, 3024);
+    const drawn = await cv.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+    const dt = new DataTransfer();
+    dt.items.add(new File([drawn, new Uint8Array(13_500_000 - drawn.size)], "IMG_0412.jpg", { type: "image/jpeg" }));
+    dt.items.add(
+      new File([Uint8Array.from(atob(heic), (c) => c.charCodeAt(0))], "IMG_0413.heic", { type: "image/heic" }),
+    );
+    dt.items.add(new File(["the date picker is off by one\n"], "notes.txt", { type: "text/plain" }));
+    const input = document.querySelector<HTMLInputElement>("input[data-ns-files]")!;
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, HEIC.toString("base64"));
+  const chips = sheet(page).locator(".ns-file");
+  await expect(chips).toHaveCount(3);
+  for (const i of [0, 1, 2]) await expect(chips.nth(i)).toHaveAttribute("data-file-state", "held", { timeout: 30_000 });
+  await expect(chips.nth(0).locator(".ns-file-name")).toHaveText("IMG_0412.webp");
+  await expect(chips.nth(0)).toHaveAttribute("title", /^IMG_0412\.webp · [\d.]+ (KB|MB) \(was 12\.9 MB\)$/);
+  await expect(chips.nth(1).locator(".ns-file-name")).toHaveText("IMG_0413.heic");
+  await expect(sheet(page).locator("[data-ns-files-note]")).toHaveText(
+    "The agent can't look at HEIC. Export it as JPEG to send it as a picture.",
+  );
+  await expect(chips.nth(2).locator(".ns-file-name")).toHaveText("notes.txt");
+
+  await sheet(page).locator("[data-ns-text]").fill("What is in these?");
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(page).toHaveURL(/\/s\/claude-code\/[0-9a-f-]{36}$/, { timeout: 15_000 });
+  await expect.poll(() => m.seen.filter((c) => c.kind === "start").length, { timeout: 15_000 }).toBe(1);
+  const files = m.seen.find((c) => c.kind === "start")!.files as { name: string; type: string; size: number }[];
+  expect(files.map((f) => [f.name, f.type])).toEqual([
+    ["IMG_0412.webp", "image/webp"],
+    ["IMG_0413.heic", "image/heic"],
+    ["notes.txt", "text/plain"],
+  ]);
+  expect(files[0]!.size).toBeLessThanOrEqual(3 * 1024 * 1024);
+  expect(files[1]!.size).toBe(HEIC.length);
 });

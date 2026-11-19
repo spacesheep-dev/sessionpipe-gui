@@ -47,10 +47,12 @@ import {
 } from "react";
 import { Redacted } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
+import { useTouchKeys } from "../lib/device";
 import { copyItem } from "../lib/menus";
 import { accountMode, apiFetch, apiUrl } from "../lib/net";
 import { ControlError, controlApi } from "./api";
 import { b64url, sha256 } from "./bytes";
+import { PICKER_DESK, PICKER_TOUCH, pictureType, refuseInput, shrinkImage, stillOverWords } from "./shrink";
 import "./attachments.css";
 import { KEY_LOST } from "../lib/keyWords";
 
@@ -89,7 +91,7 @@ export const NOT_WHOLE_WORDS = "The picture didn't arrive whole. Try again.";
 const UPLOADS_AT_ONCE = 2;
 /** CONTROL.md §3.1: a file's name is at most this long. */
 const NAME_MAX = 200;
-const PICTURE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
+const PICTURE_EXT_RE = /\.(png|jpe?g|gif|webp|heic|heif)$/i;
 
 /** A picture's name as the signed command gives it, which is the name the machine saves it
  *  under: NFC; every kind of space a plain one (a macOS screenshot's name has a narrow
@@ -274,6 +276,9 @@ export function useThisMachine(machine: string | undefined): boolean | null {
   return hostname === null ? null : isThisMachine(machine, hostname);
 }
 
+/** A file of an image type, or a HEIC that came with no type (from Files or Finder). */
+const isImage = (f: File): boolean => f.type.startsWith("image/") || (!f.type && !!pictureType("", f.name));
+
 /** Image files out of a paste or a drop (a pasted screenshot comes as one file item). */
 export function imageFiles(dt: DataTransfer | null): File[] {
   if (!dt) return [];
@@ -282,11 +287,11 @@ export function imageFiles(dt: DataTransfer | null): File[] {
     for (const it of Array.from(dt.items)) {
       if (it.kind !== "file") continue;
       const f = it.getAsFile();
-      if (f?.type.startsWith("image/")) out.push(f);
+      if (f && isImage(f)) out.push(f);
     }
   }
   if (out.length === 0 && dt.files?.length) {
-    for (const f of Array.from(dt.files)) if (f.type.startsWith("image/")) out.push(f);
+    for (const f of Array.from(dt.files)) if (isImage(f)) out.push(f);
   }
   return out;
 }
@@ -299,10 +304,15 @@ const carriesFiles = (dt: DataTransfer | null): boolean => Array.from(dt?.types 
 export interface PendingItem {
   /** Local key, for as long as it is in the tray. */
   key: string;
+  /** What goes: the shrunk picture once it is made (shrink.ts), else the original. */
   file: Blob;
   /** For the thumbnail (an object URL, revoked on remove). */
   preview: string;
   bytes: number;
+  /** The original's size, where what goes is a smaller redraw of it. */
+  was?: number;
+  /** It is being made smaller (one at a time on the page); its upload waits for that. */
+  shrinking?: boolean;
   /** The way it goes, as the session's machine took pictures when it was added. */
   via: "files" | "path";
   /** The name it goes under: a file's signed name (`pictureName`), else the file's own. */
@@ -316,13 +326,22 @@ export interface PendingItem {
   error?: string;
 }
 
-/** CONTROL.md §3.1: a command's files are at most 50 MiB together. A refused one is not sent. */
+/** CONTROL.md §3.1: a command's files are at most 50 MiB together. A refused one is not
+ *  sent, and one still being made smaller is counted once it is. */
 const overTogether = (list: readonly PendingItem[]): boolean =>
-  list.reduce((n, it) => n + (it.error ? 0 : it.bytes), 0) > START_FILES_TOTAL_BYTES;
+  list.reduce((n, it) => n + (it.error || it.shrinking ? 0 : it.bytes), 0) > START_FILES_TOTAL_BYTES;
 
 /** Where an item is on its way into the message. */
-export const itemState = (it: PendingItem): "error" | "ready" | "waiting" | "uploading" =>
-  it.error ? "error" : it.attachment || it.entry ? "ready" : it.waiting ? "waiting" : "uploading";
+export const itemState = (it: PendingItem): "error" | "ready" | "shrinking" | "waiting" | "uploading" =>
+  it.error
+    ? "error"
+    : it.attachment || it.entry
+      ? "ready"
+      : it.shrinking
+        ? "shrinking"
+        : it.waiting
+          ? "waiting"
+          : "uploading";
 
 export interface ComposeResult {
   /** The text to sign. */
@@ -338,7 +357,8 @@ export interface ComposeResult {
 
 export interface AttachmentsHandle {
   items: readonly PendingItem[];
-  /** An upload is in flight or waits its turn: the composer should hold Send. */
+  /** A picture is being made smaller, or its upload is in flight or waits its turn: the
+   *  composer should hold Send. */
   uploading: boolean;
   /** A file was refused or an upload failed, the pictures are too much together, or the
    *  text would be over the cap. */
@@ -422,6 +442,46 @@ export function useAttachments(o: {
     }
   }, [items, machineId, set]);
 
+  /** `patch` the item now (so the next one shrunk sees its name) and at the next render. */
+  const patchNow = useCallback(
+    (key: string, patch: Partial<PendingItem>) => {
+      itemsRef.current = itemsRef.current.map((p) => (p.key === key ? { ...p, ...patch } : p));
+      set(key, patch);
+    },
+    [set],
+  );
+
+  /** An item made smaller (`small`), or left as it was (null): held to its machine's cap
+   *  for one picture, named, and queued for its upload. */
+  const shrunk = useCallback(
+    (key: string, small: { blob: Blob } | null) => {
+      const it = itemsRef.current.find((p) => p.key === key);
+      // Taken back while it was being made smaller.
+      if (!it) return;
+      const file = small?.blob ?? it.file;
+      const limit = it.via === "files" ? START_FILE_MAX_BYTES : ATTACHMENT_MAX_BYTES;
+      const patch: Partial<PendingItem> = { shrinking: false, file, bytes: file.size };
+      if (small) {
+        patch.was = it.file.size;
+        patch.preview = URL.createObjectURL(file);
+        URL.revokeObjectURL(it.preview);
+      }
+      if (file.size > limit) {
+        patchNow(key, { ...patch, error: stillOverWords(limit, !!small) });
+        return;
+      }
+      if (it.via === "files") {
+        // The names this message's files already have: a file's name is its own in the message.
+        const taken = itemsRef.current
+          .filter((p) => p.key !== key && p.via === "files" && !p.error && !p.shrinking)
+          .map((p) => p.name);
+        patch.name = pictureName(it.name, file.type, taken);
+      }
+      patchNow(key, { ...patch, waiting: true });
+    },
+    [patchNow],
+  );
+
   const add = useCallback(
     (files: Iterable<Blob>) => {
       if (!enabled || !takes) return;
@@ -432,22 +492,33 @@ export function useAttachments(o: {
         setError(`${ATTACHMENTS_PER_MESSAGE} images per message at most`);
         list.length = Math.max(0, room);
       }
-      // The names this message's files already have: a file's name is its own in the message.
-      const taken = itemsRef.current.filter((it) => it.via === "files" && !it.error).map((it) => it.name);
       const added = list.map((file): PendingItem => {
-        const why = refuseFile(file, takes);
+        const why = refuseInput(file);
         const own = file instanceof File ? file.name : "";
-        const signed = takes === "files" && !why;
-        const name = signed ? pictureName(own, file.type, taken) : own;
-        if (signed) taken.push(name);
-        const item = { key: `p${++seq.current}`, file, preview: URL.createObjectURL(file), bytes: file.size, name };
-        return why ? { ...item, via: takes, error: why } : { ...item, via: takes, waiting: true };
+        const item = {
+          key: `p${++seq.current}`,
+          file,
+          preview: URL.createObjectURL(file),
+          bytes: file.size,
+          name: own,
+        };
+        return why ? { ...item, via: takes, error: why } : { ...item, via: takes, shrinking: true };
       });
-      // Now, not at the next render: a second add in the same tick sees these names and this count.
+      // Now, not at the next render: a second add in the same tick sees this count.
       itemsRef.current = [...itemsRef.current, ...added];
       setItems((prev) => [...prev, ...added]);
+      // Each made smaller in the tray's order (one at a time, shrink.ts), then named, then
+      // uploaded: the size a picture goes at is what its caps are held to.
+      for (const it of added) {
+        if (it.error) continue;
+        const own = it.file instanceof File ? it.file.name : "";
+        shrinkImage(it.file, { name: own }).then(
+          (small) => shrunk(it.key, small),
+          (e: Error) => patchNow(it.key, { shrinking: false, error: e.message }),
+        );
+      }
     },
-    [enabled, takes],
+    [enabled, takes, shrunk, patchNow],
   );
 
   const remove = useCallback((key: string) => {
@@ -470,7 +541,10 @@ export function useAttachments(o: {
     setError(null);
   }, []);
 
-  const uploading = items.some((it) => itemState(it) === "waiting" || itemState(it) === "uploading");
+  const uploading = items.some((it) => {
+    const s = itemState(it);
+    return s === "shrinking" || s === "waiting" || s === "uploading";
+  });
   // Too much together: said as soon as it is so, and until one is removed.
   const over = takes === "files" && overTogether(items);
 
@@ -590,6 +664,8 @@ export function AttachButton({
     e.target.value = "";
   };
   const full = att.items.length >= ATTACHMENTS_PER_MESSAGE;
+  // Under a finger the four an agent reads, so the iPhone's sheet hands over a HEIC as JPEG.
+  const touch = useTouchKeys();
   // Until it is known how this machine takes pictures, none is picked.
   const off = disabled || full || (att.mode !== "files" && att.mode !== "path");
   return (
@@ -597,7 +673,7 @@ export function AttachButton({
       <input
         ref={input}
         type="file"
-        accept="image/*"
+        accept={touch ? PICKER_TOUCH : PICKER_DESK}
         multiple
         disabled={off}
         onChange={onChange}
@@ -650,24 +726,26 @@ function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
   const name = it.name || (it.attachment ? `${it.attachment.id}.${it.attachment.ext}` : "");
   const px = it.attachment ?? it.entry;
   const size = state !== "ready" ? state : px?.width && px.height ? `${px.width}×${px.height}` : "";
+  const bytes = it.was ? `${mb(it.bytes)} (was ${mb(it.was)})` : mb(it.bytes);
+  const tip = state === "shrinking" ? "Making it smaller…" : [name, size, bytes].filter(Boolean).join(" · ");
   const menu = useContextMenu(() => [
     copyItem("Copy name", name),
     { sep: true },
     { label: "Remove", danger: true, run: onRemove },
   ]);
-  const busy = state === "waiting" || state === "uploading";
+  const busy = state === "shrinking" || state === "waiting" || state === "uploading";
   return (
     <li
       className={`att-item ${state === "error" ? "att-item--err" : ""} ${busy ? "att-item--busy" : ""}`}
       data-attachment={it.attachment?.id ?? it.entry?.sha256 ?? ""}
       data-state={state}
       data-name={name}
-      title={it.error ? undefined : [name, size, mb(it.bytes)].filter(Boolean).join(" · ")}
+      title={it.error ? undefined : tip}
       {...menu}
     >
       <span className="att-frame">
         <img className="att-thumb" src={it.preview} alt="" />
-        {state === "uploading" && <span className="spinner att-busy" aria-hidden="true" />}
+        {(state === "shrinking" || state === "uploading") && <span className="spinner att-busy" aria-hidden="true" />}
       </span>
       {it.error && (
         <span className="att-meta" title={it.error}>

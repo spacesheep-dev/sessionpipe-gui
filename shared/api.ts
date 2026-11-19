@@ -1392,6 +1392,15 @@ export const ATTACHMENT_TYPES: Record<AttachmentType, Attachment["ext"]> = {
   "image/gif": "gif",
   "image/webp": "webp",
 };
+/** What the composer and New session take as a picture before shrinking it
+ *  (web/src/control/shrink.ts): the four types above, and HEIC or HEIF, which are redrawn
+ *  as JPEG (a HEIC from Files or Finder may come with no type at all, and is known by its
+ *  name). */
+export const PICTURE_INPUT_TYPES: readonly string[] = [...Object.keys(ATTACHMENT_TYPES), "image/heic", "image/heif"];
+/** A picture is at most this big before it is shrunk; after, it is at most
+ *  START_FILE_MAX_BYTES where it goes as a file and ATTACHMENT_MAX_BYTES where the prompt
+ *  names its path. */
+export const PICTURE_INPUT_MAX_BYTES = 52_428_800;
 
 /** What a page needs to get a phone onto the https origin (ROUTES.trust explains the steps). */
 export interface TlsInfo {

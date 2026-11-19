@@ -216,6 +216,14 @@
   min-width: 0;
   min-height: 0;
 }
+/* A file that goes, but not as a picture the agent can look at: one line under them all. */
+.ns-files-note {
+  margin: -4px 0 0;
+  padding: 0 20px 10px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: var(--lh-tight);
+}
 
 /* ----- the footer: files, the options, the status and the actions ----- */
 
@@ -492,6 +500,10 @@
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
+}
+.ns-sheet--phone .ns-files-note {
+  margin: -8px 0 16px;
+  padding: 0;
 }
 .ns-sheet--phone .ns-files::-webkit-scrollbar {
   display: none;

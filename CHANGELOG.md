@@ -185,6 +185,16 @@ could not read.
   look up, and a `--port` this user may not open, stopped with Node's own message
   (`listen EADDRNOTAVAIL: …`, `getaddrinfo ENOTFOUND …`, `listen EACCES: …`). It now says
   which flag to change, as it already did for a port in use, and still exits 2.
+- **A picture is made smaller before it uploads.** In the message box and in New session,
+  a big photo or screenshot is redrawn at most 2560 px on its long edge, as WebP (JPEG
+  where the browser can't write WebP), the way spacesheep does it: a 13 MB phone photo
+  goes at about 2 MB, and a 30 MB screenshot goes at all. A picture may be 50 MB before
+  and 25 MB after (8 MB where the prompt names its path). A HEIC photo is sent as a JPEG
+  where the browser can open one (Safari, the apps on a Mac and an iPhone); elsewhere the
+  message box says how to export it, and New session sends it as a file with a note that
+  the agent can't look at it. A JPEG that says where it was taken is always redrawn, which
+  leaves the location behind. The thumbnail's tooltip says the size it goes at and the
+  size it was.
 
 ## [0.8.5] - 2026-11-18
 
