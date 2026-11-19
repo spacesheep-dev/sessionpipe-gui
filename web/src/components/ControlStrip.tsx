@@ -38,9 +38,13 @@ import { type Approval, type SendState, sendWords } from "../account/sendable";
 import {
   AttachButton,
   AttachmentTray,
+  type KeptPicture,
+  keptPictures,
+  type PendingItem,
   pictureMode,
   picturesOffWords,
   useAttachments,
+  usePageDrop,
   useThisMachine,
 } from "../control/Attachments";
 import type { AnswerOut } from "../control/answers";
@@ -177,6 +181,40 @@ function writeDraft(key: string, text: string): void {
   try {
     if (text) localStorage.setItem(DRAFT_KEY(key), text);
     else localStorage.removeItem(DRAFT_KEY(key));
+  } catch {
+    // this page only
+  }
+}
+
+/** The pictures of a session's draft, uploaded and checked: the receiver holds each a day
+ *  from its upload (server/control/files.ts), so they come back for as long. */
+const DRAFT_PICTURES_KEY = (key: string) => `sessionpipe-gui.draft-pictures:${key}`;
+const PICTURES_KEPT_MS = 24 * 3600_000;
+const keptOk = (p: unknown): p is KeptPicture => {
+  const k = p as KeptPicture;
+  return (
+    !!k &&
+    typeof k.name === "string" &&
+    typeof k.type === "string" &&
+    typeof k.size === "number" &&
+    typeof k.sha256 === "string" &&
+    /^[A-Za-z0-9_-]{43}$/.test(k.sha256) &&
+    typeof k.at === "number"
+  );
+};
+function readPictures(key: string, now = Date.now()): KeptPicture[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(DRAFT_PICTURES_KEY(key)) ?? "[]") as unknown;
+    return Array.isArray(list) ? list.filter(keptOk).filter((p) => now - p.at < PICTURES_KEPT_MS) : [];
+  } catch {
+    return [];
+  }
+}
+function writePictures(key: string, items: readonly PendingItem[]): void {
+  const kept = keptPictures(items);
+  try {
+    if (kept.length) localStorage.setItem(DRAFT_PICTURES_KEY(key), JSON.stringify(kept));
+    else localStorage.removeItem(DRAFT_PICTURES_KEY(key));
   } catch {
     // this page only
   }
@@ -454,7 +492,24 @@ export function ControlStrip({
     enabled,
     mode,
     onRefused: () => setRefusedAt(refusedKey),
+    initial: () => readPictures(session.key),
   });
+  // The pictures uploaded and checked are kept with the draft, as the words are, and come
+  // back with it; another session's strip takes that session's own. (Kept first: the items
+  // are written only under the session they belong to.)
+  const picturesOf = useRef(session.key);
+  const { restore } = att;
+  useEffect(() => {
+    if (picturesOf.current === session.key) writePictures(session.key, att.items);
+  }, [att.items, session.key]);
+  useEffect(() => {
+    if (picturesOf.current === session.key) return;
+    picturesOf.current = session.key;
+    restore(readPictures(session.key));
+  }, [session.key, restore]);
+  // A file dragged or dropped anywhere on the session's page comes to this composer.
+  const formRef = useRef<HTMLFormElement>(null);
+  usePageDrop(att, formRef);
   // A held message confirmed from its notice (control/HeldNotice.tsx) went: the composer
   // is clear, as after Send. Until then its words stayed here.
   const clearAtt = att.clear;
@@ -713,7 +768,9 @@ export function ControlStrip({
   ) : null;
   const canSend = review
     ? enabled && !busy && !!text.trim() && !tooLong && answers?.[review.attentionId]?.status !== "sent"
-    : enabled && !busy && !att.uploading && (!!text.trim() || att.items.length > 0);
+    : enabled && !busy && !att.failed && (!!text.trim() || att.items.length > 0);
+  // While a picture didn't upload nothing is sent: Send says what to do about it.
+  const sendBlocked = !review && enabled ? att.failed : null;
 
   const run = (id: string, action: ControlAction, after?: () => void) => {
     if (!enabled || busy) return;
@@ -771,6 +828,7 @@ export function ControlStrip({
 
   return (
     <form
+      ref={formRef}
       className={`ctl ${enabled ? "" : "ctl--off"} ${blocked ? "ctl--blocked" : ""} ${folded ? "ctl--folded" : ""} ${chat ? "ctl--chat" : ""} ${att.dragging ? "ctl--drop" : ""}`}
       aria-label="Control"
       {...att.handlers}
@@ -974,7 +1032,8 @@ export function ControlStrip({
               disabled={!canSend}
               aria-label={review ? "Keep planning" : "Send"}
               aria-busy={busy === "prompt" || undefined}
-              data-tip-keys={touch ? "⌘↩" : "↩"}
+              data-tip={sendBlocked ?? undefined}
+              data-tip-keys={sendBlocked ? undefined : touch ? "⌘↩" : "↩"}
             >
               {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
             </button>

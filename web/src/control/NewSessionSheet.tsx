@@ -45,13 +45,13 @@ import { useFocusTrap } from "../lib/focus";
 import "../lib/acp";
 import { bytes, harnessMark } from "../lib/format";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
-import { accountMode } from "../lib/net";
+import { accountMode, uploadProgress } from "../lib/net";
 import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { useNow } from "../lib/time";
 import { START, ThisPhone } from "../native/accountWords";
-import { pictureName } from "./Attachments";
-import { controlApi, wrongOriginHere } from "./api";
+import { pictureName, progressWords } from "./Attachments";
+import { controlApi, lastInfo, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
 import { folderChoices, machineHome, tildify, typedFolder, unnamedHere } from "./folders";
@@ -81,6 +81,7 @@ import {
 import { HEIC_FILE_NOTE, pictureType, ShrinkRefused, type Shrunk, shrinkImage } from "./shrink";
 import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "./signer";
 import { machineBlocked, startGate } from "./startGate";
+import { boardName, nounFor, uploadWords } from "./uploadWords";
 import { notSentWords, PERMISSION_LABEL } from "./words";
 import "./newSessionSheet.css";
 
@@ -130,8 +131,17 @@ interface FileItem {
   shrinking?: boolean;
   /** Goes as a file, but not as a picture the agent can look at (a HEIC this engine can't draw). */
   note?: string;
+  /** The bytes that go, for Retry; absent on one brought back from the draft (held already). */
+  file?: File;
   entry?: StartFile;
+  /** When it was held (ms): the receiver keeps it a day from then. */
+  at?: number;
+  /** Bytes of it sent so far, where that is counted (a browser). */
+  sent?: number;
+  /** In the chip: what is wrong with it, in a few words. */
   error?: string;
+  /** Why its upload failed, as a sentence (the status line says it), and whether Retry can mend it. */
+  failed?: { words: string; retry: boolean };
 }
 
 export function Sheet({ target, closing }: { target: NewSessionTarget; closing: boolean }) {
@@ -243,7 +253,21 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const [model, setModel] = useState(first.model ?? "");
   const [text, setText] = useState(target.text ?? initial.draft?.text ?? "");
   const [files, setFiles] = useState<FileItem[]>(() =>
-    (target.files ?? initial.draft?.files ?? []).map((f) => ({ key: f.sha256, name: f.name, size: f.size, entry: f })),
+    (target.files ?? initial.draft?.files ?? []).map((f) => ({
+      key: f.sha256,
+      name: f.name,
+      size: f.size,
+      entry: f,
+      at: (!target.files && initial.draft?.filesAt) || Date.now(),
+    })),
+  );
+  /** How each running upload is stopped, by file key. */
+  const stops = useRef(new Map<string, AbortController>());
+  useEffect(
+    () => () => {
+      for (const stop of stops.current.values()) stop.abort();
+    },
+    [],
   );
   const [busy, setBusy] = useState(false);
   const [tap, setTap] = useState(false);
@@ -341,7 +365,12 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       text,
       ...(permission ? { permission } : {}),
       ...(model ? { model } : {}),
-      ...(files.some((f) => f.entry) ? { files: files.flatMap((f) => (f.entry ? [f.entry] : [])) } : {}),
+      ...(files.some((f) => f.entry)
+        ? {
+            files: files.flatMap((f) => (f.entry ? [f.entry] : [])),
+            filesAt: Math.min(...files.flatMap((f) => (f.entry ? [f.at ?? Date.now()] : []))),
+          }
+        : {}),
     };
     saveDraft(d);
   }, [machine, harness, folder, text, permission, model, files]);
@@ -429,21 +458,38 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       }
       count++;
       total += f.size;
-      add.push({ key, name: f.name, size: f.size });
-      uploadOne(key, f);
+      add.push({ key, name: f.name, size: f.size, file: f });
+      upload(key, f);
     }
     filesNow.current = [...filesNow.current, ...add];
     setFiles((prev) => [...prev, ...add]);
   };
-  const patchFile = (key: string, patch: Partial<FileItem>) => {
-    filesNow.current = filesNow.current.map((x) => (x.key === key ? { ...x, ...patch } : x));
-    setFiles((prev) => prev.map((x) => (x.key === key ? { ...x, ...patch } : x)));
+  const patchFile = (key: string, p: Partial<FileItem>) => {
+    filesNow.current = filesNow.current.map((x) => (x.key === key ? { ...x, ...p } : x));
+    setFiles((prev) => prev.map((x) => (x.key === key ? { ...x, ...p } : x)));
   };
-  const uploadOne = (key: string, f: File) => {
-    controlApi.uploadFile(f).then(
-      (entry) => patchFile(key, { entry }),
-      (e) => patchFile(key, { error: uploadWords(e) }),
-    );
+  /** One file's upload: its progress where it is counted, stopped when it is removed. */
+  const upload = (key: string, f: File) => {
+    const stop = new AbortController();
+    stops.current.set(key, stop);
+    controlApi
+      .uploadFile(f, undefined, {
+        signal: stop.signal,
+        ...(uploadProgress() ? { onProgress: (sent: number) => patchFile(key, { sent }) } : {}),
+      })
+      .then(
+        (entry) => patchFile(key, { entry, at: Date.now() }),
+        (e) => {
+          if (stop.signal.aborted) return;
+          patchFile(key, {
+            error: "didn't upload",
+            failed: uploadWords(e, boardName(lastInfo()?.hostname), nounFor(f.type)),
+          });
+        },
+      )
+      .finally(() => {
+        if (stops.current.get(key) === stop) stops.current.delete(key);
+      });
   };
   /** A picture made smaller (`small`), left as it was (null), or a HEIC this engine can't
    *  draw ("heic", which goes as a file with a note): held to the caps, named, uploaded. */
@@ -463,8 +509,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       return;
     }
     if (small === "heic") {
-      patchFile(key, { ...done, note: HEIC_FILE_NOTE });
-      uploadOne(key, f);
+      patchFile(key, { ...done, note: HEIC_FILE_NOTE, file: f });
+      upload(key, f);
       return;
     }
     const type = shrunk?.type ?? f.type;
@@ -473,8 +519,20 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       type,
       others.map((x) => x.name),
     );
-    patchFile(key, { ...done, name });
-    uploadOne(key, new File([shrunk?.blob ?? f], name, { type }));
+    const goes = new File([shrunk?.blob ?? f], name, { type });
+    patchFile(key, { ...done, name, file: goes });
+    upload(key, goes);
+  };
+  const retry = (x: FileItem) => {
+    if (!x.file || !x.failed?.retry) return;
+    patchFile(x.key, { error: undefined, failed: undefined, sent: undefined });
+    upload(x.key, x.file);
+  };
+  const removeFile = (key: string) => {
+    stops.current.get(key)?.abort();
+    stops.current.delete(key);
+    filesNow.current = filesNow.current.filter((x) => x.key !== key);
+    setFiles((prev) => prev.filter((x) => x.key !== key));
   };
   const onDrop = (e: DragEvent) => {
     if (!e.dataTransfer?.files?.length) return;
@@ -602,6 +660,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const discard = () => {
     saveDraft(null);
     setText("");
+    for (const stop of stops.current.values()) stop.abort();
+    stops.current.clear();
     setFiles([]);
     setNote(null);
     setError(null);
@@ -620,12 +680,22 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     if (!harness) return { text: harnesses.length ? "Choose an agent" : `${m.name} hasn't said which agents it runs.` };
     if (!folderCheck.ok) return { text: folderCheck.reason };
     if (note) return { text: note };
+    const failedFile = files.find((f) => f.failed);
+    if (failedFile?.failed) return { text: failedFile.failed.words, tone: "err" };
     if (files.length && relayed)
       return { text: `Files can't be sent to ${m.name} through spacesheep yet. Remove them to start.` };
     if (files.length && !takesFiles)
       return { text: `${m.name} can't take files on a new session. Update sessionpipe there.` };
     if (model && !modelOk)
       return { text: `${model} isn't a model ${m.name} offers for ${harnessMark(harness).label}.` };
+    // A picture still being made smaller is counted once it is (its size is not known yet).
+    const going = files.filter((f) => !f.entry && !f.error && !f.shrinking);
+    if (going.length > 0) {
+      const whole = going.reduce((n, f) => n + f.size, 0);
+      return {
+        text: progressWords(whole, uploadProgress() ? going.reduce((n, f) => n + (f.sent ?? 0), 0) : undefined),
+      };
+    }
     // spacesheep holds a start a day (server/control/state.ts), this receiver an hour.
     if (c && !c.online)
       return {
@@ -829,11 +899,30 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
             {!f.entry && !f.error && <span className="spinner" aria-hidden="true" />}
             <span className="ns-file-name ellipsis">{f.name}</span>
             <span className="ns-file-size num">{f.error ?? bytes(f.size)}</span>
+            {f.failed?.retry && f.file && (
+              <button
+                type="button"
+                className="icon-btn ns-file-x"
+                aria-label={`Try ${f.name} again`}
+                data-tip="Try again"
+                onClick={() => retry(f)}
+              >
+                <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" fill="none">
+                  <path
+                    d="M9.6 6.6A3.7 3.7 0 1 1 8.4 3.2M9.4 1.6v2.3H7.1"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
             <button
               type="button"
               className="icon-btn ns-file-x"
               aria-label={`Remove ${f.name}`}
-              onClick={() => setFiles((prev) => prev.filter((x) => x.key !== f.key))}
+              onClick={() => removeFile(f.key)}
             >
               <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
                 <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -1230,12 +1319,4 @@ function landStart(from: { x: number; y: number }): void {
   });
   watch.observe(document.body, { childList: true, subtree: true });
   setTimeout(() => watch.disconnect(), 200);
-}
-
-function uploadWords(e: unknown): string {
-  const s = (e as { status?: number })?.status;
-  if (s === 413) return "over 25 MB";
-  if (s === 415) return "not a file type the machine can take";
-  if (s === 400) return "not a name a machine can save";
-  return "didn't upload";
 }

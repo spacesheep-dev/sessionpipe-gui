@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Images beside a prompt (control/Attachments.tsx): the paperclip inside the field, the
-   tray of 56 px thumbnails at the field's top (each one's size is its tooltip; only a
-   refusal is written under it), the drop highlight, and the thumbnails a sent
-   prompt shows in the activity list and the Session view, with a chip for a file that is
-   no picture or is kept no more. Fills and hairlines, no badges; the shared spinner while
-   one uploads. */
+   tray of 56 px thumbnails at the field's top (each one's size is its tooltip; one line
+   under the tray says a refusal or how far the uploads are), the drop highlight, and the
+   thumbnails a sent prompt shows in the activity list and the Session view, with a chip
+   for a file that is no picture or is kept no more. Fills and hairlines, no badges; the
+   shared spinner while one uploads. */
 
 /* The paperclip: an icon button in the field (a label around the hidden picker). */
 .att-btn {
@@ -92,27 +92,20 @@
 .att-item--busy .att-thumb {
   opacity: 0.45;
 }
+/* One that didn't upload: dimmed, in the error's colour; its words are the line under the tray. */
+.att-item--err .att-thumb {
+  opacity: 0.6;
+  outline-color: var(--err);
+}
+/* A picture brought back from a draft whose copy is no longer held: the frame alone. */
+.att-thumb[data-broken] {
+  visibility: hidden;
+}
 .att-busy {
   position: absolute;
   top: 50%;
   left: 50%;
   margin: -6px 0 0 -6px;
-}
-.att-meta {
-  display: flex;
-  flex-direction: column;
-  color: var(--fg-3);
-  font-size: var(--text-xs);
-  line-height: var(--lh-tight);
-  white-space: nowrap;
-}
-.att-meta > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.att-item--err .att-meta {
-  color: var(--err);
-  white-space: normal;
 }
 .att-x.icon-btn {
   position: absolute;
@@ -132,10 +125,19 @@
   position: absolute;
   inset: -3px;
 }
+/* Try again, beside × on one whose upload failed. */
+.att-retry.icon-btn {
+  right: 16px;
+}
 .att-note {
   margin: 4px 0 0;
   color: var(--err);
   font-size: var(--text-sm);
+}
+/* How far the uploads are, or that a send waits for them. */
+.att-note--info {
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Thumbnails of a sent prompt (activity row, Session view). */

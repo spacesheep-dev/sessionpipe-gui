@@ -138,11 +138,21 @@ export interface Draft {
   model?: string;
   /** Uploaded already (held here a day), so a restored draft can still send them. */
   files?: StartFile[];
+  /** When the first of `files` was uploaded (ms): a day on, they are no longer held. */
+  filesAt?: number;
 }
 
-export function readDraft(): Draft | null {
+/** A draft's files are held a day from their upload (server/control/files.ts). */
+const DRAFT_FILES_MS = 24 * 3600_000;
+
+export function readDraft(now = Date.now()): Draft | null {
   const d = read<Draft>(DRAFT_KEY);
-  return d && typeof d === "object" && typeof d.text === "string" ? d : null;
+  if (!d || typeof d !== "object" || typeof d.text !== "string") return null;
+  if (d.files && typeof d.filesAt === "number" && now - d.filesAt >= DRAFT_FILES_MS) {
+    const { files: _gone, filesAt: _at, ...rest } = d;
+    return rest;
+  }
+  return d;
 }
 export function saveDraft(d: Draft | null): void {
   const empty = !d || (!d.text.trim() && !d.files?.length);

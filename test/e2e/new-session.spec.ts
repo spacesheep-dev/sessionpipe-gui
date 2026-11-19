@@ -357,3 +357,25 @@ test("files on a new session: a big photo is made smaller first, a HEIC this bro
   expect(files[0]!.size).toBeLessThanOrEqual(3 * 1024 * 1024);
   expect(files[1]!.size).toBe(HEIC.length);
 });
+
+test("a file that didn't upload says why on the status line, and Try again sends it", async ({ page }) => {
+  const m = await fakeDaemon(key, advertising(`ns-up-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  const { hostname } = (await (await fetch(`${CONTROL_BASE}/api/ui/info`)).json()) as { hostname: string };
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}`);
+  await expect(rowValue(page, "machine")).toHaveAttribute("data-value", m.name);
+  await sheet(page).locator("[data-ns-text]").fill("Read the notes.");
+  await page.route("**/api/ui/control/files?*", (route) => route.abort("connectionrefused"));
+  await sheet(page)
+    .locator("input[data-ns-files]")
+    .setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("off by one\n") });
+  const chip = sheet(page).locator(".ns-file");
+  await expect(chip).toHaveAttribute("data-file-state", "error");
+  await expect(chip.locator(".ns-file-size")).toHaveText("didn't upload");
+  await expect(status(page)).toHaveText(`The file didn't upload: ${hostname} can't be reached. Try again.`);
+  await expect(sheet(page).locator("[data-ns-start]")).toBeDisabled();
+  await page.unroute("**/api/ui/control/files?*");
+  await chip.getByRole("button", { name: "Try notes.txt again" }).click();
+  await expect(chip).toHaveAttribute("data-file-state", "held");
+  await expect(status(page)).toHaveText(`${m.name} is listening.`);
+});

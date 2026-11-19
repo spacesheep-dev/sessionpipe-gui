@@ -53,6 +53,7 @@ import {
   createContext,
   type DragEvent,
   type ReactNode,
+  type RefObject,
   useCallback,
   useContext,
   useEffect,
@@ -64,12 +65,12 @@ import { Redacted } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { useTouchKeys } from "../lib/device";
 import { copyItem } from "../lib/menus";
-import { accountMode, apiFetch, apiUrl } from "../lib/net";
-import { ControlError, controlApi } from "./api";
+import { accountMode, apiFetch, apiUpload, apiUrl, uploadProgress } from "../lib/net";
+import { controlApi, uploadRefusal } from "./api";
 import { b64url, sha256 } from "./bytes";
 import { PICKER_DESK, PICKER_TOUCH, pictureType, refuseInput, shrinkImage, stillOverWords } from "./shrink";
+import { boardName, uploadWords } from "./uploadWords";
 import "./attachments.css";
-import { KEY_LOST } from "../lib/keyWords";
 
 // ---------- how a picture goes ----------
 
@@ -102,6 +103,15 @@ export function picturesOffWords(machine: string, relayed: boolean): string {
 export const TOGETHER_WORDS = "These pictures are over 50 MB together. Remove one.";
 /** The receiver's hash or size of an upload is not the page's own. */
 export const NOT_WHOLE_WORDS = "The picture didn't arrive whole. Try again.";
+/** Send is off while a picture in the tray failed: what to do about it. */
+export const FAILED_WORDS = "Remove or retry the picture that didn't upload.";
+/** The same, where trying again can't help (Retry isn't offered). */
+export const REMOVE_WORDS = "Remove the picture that didn't upload.";
+/** A file dropped on the session page that is no picture. */
+export const ONLY_PICTURES_WORDS = "Only pictures can be dropped here.";
+/** Send was pressed while pictures still upload: nothing goes until they are in. */
+export const waitingWords = (n: number): string =>
+  n === 1 ? "Waiting for 1 picture to finish uploading." : `Waiting for ${n} pictures to finish uploading.`;
 /** This many upload at once; the rest wait their turn in the tray. */
 const UPLOADS_AT_ONCE = 2;
 /** CONTROL.md §3.1: a file's name is at most this long. */
@@ -159,15 +169,55 @@ const mb = (n: number): string => {
   return `${m >= 10 ? Math.round(m) : Math.round(m * 10) / 10} MB`;
 };
 
+/** How far the uploads are, as the tray's line says it: "Uploading 1.2 of 2.1 MB…" where
+ *  the bytes sent are counted (`sent`, a browser), else "Uploading 2.1 MB…" (the apps).
+ *  Both numbers in the unit of the whole. */
+export function progressWords(total: number, sent?: number): string {
+  const whole = mb(total);
+  if (sent === undefined) return `Uploading ${whole}…`;
+  const mega = whole.endsWith("MB");
+  const part = Math.min(sent, total) / (mega ? 1024 * 1024 : 1024);
+  const tenths = mega && total < 10 * 1024 * 1024;
+  return `Uploading ${tenths ? (Math.floor(part * 10) / 10).toFixed(1) : Math.floor(part)} of ${whole}…`;
+}
+
 /** Why a file cannot be attached, in words; null when it can. Checked before any upload.
  *  One picture is at most what a command's file may be (25 MiB) where it goes as one, and
- *  ATTACHMENT_MAX_BYTES where the prompt names it by path. */
-export function refuseFile(file: Blob, mode: "files" | "path" = "path"): string | null {
+ *  ATTACHMENT_MAX_BYTES where the prompt names it by path. `board`: what takes it. */
+export function refuseFile(file: Blob, mode: "files" | "path" = "path", board = boardName(hostSeen)): string | null {
   if (!ACCEPT.includes(file.type))
-    return `not an image we can send (${file.type || "unknown type"}); PNG, JPEG, GIF or WebP`;
+    return file.type.startsWith("image/")
+      ? "That kind of picture can't be sent. Use PNG, JPEG, GIF or WebP."
+      : "That file isn't a picture.";
   const limit = mode === "files" ? START_FILE_MAX_BYTES : ATTACHMENT_MAX_BYTES;
-  if (file.size > limit) return `too large: ${mb(file.size)}, limit ${mb(limit)}`;
+  if (file.size > limit) return `That picture is too big for ${board}.`;
   return null;
+}
+
+/** An upload that didn't make it: its words, and whether Retry can help. */
+export class UploadFailed extends Error {
+  constructor(
+    message: string,
+    readonly retry: boolean,
+  ) {
+    super(message);
+    this.name = "UploadFailed";
+  }
+}
+
+/** What an upload threw, as the tray says it; a stop (the picture was removed) as it is.
+ *  The board is named as its Info says, once that is in. */
+async function failed(e: unknown): Promise<Error> {
+  if (e instanceof UploadFailed || (e instanceof DOMException && e.name === "AbortError")) return e;
+  await hostInfo().catch(() => undefined);
+  const f = uploadWords(e, boardName(hostSeen));
+  return new UploadFailed(f.words, f.retry);
+}
+
+/** How one upload is stopped, and hears how far it got. */
+export interface UploadOpts {
+  signal?: AbortSignal;
+  onProgress?: (sent: number, total: number) => void;
 }
 
 /** A picture as a signed command's file names it, with its pixels where the receiver read them. */
@@ -176,25 +226,26 @@ export type PictureEntry = UploadedFile;
 /** Upload one picture as a file a prompt will carry, under `name`, and check it arrived
  *  whole: the page hashes the very bytes it sent, and an answer with another hash or size
  *  is refused, so what is signed is the page's own word on the bytes. Throws the words. */
-export async function uploadPicture(file: Blob, name: string, machineId?: string): Promise<PictureEntry> {
+export async function uploadPicture(
+  file: Blob,
+  name: string,
+  machineId?: string,
+  opts: UploadOpts = {},
+): Promise<PictureEntry> {
   const why = refuseFile(file, "files");
-  if (why) throw new Error(why);
+  if (why) throw new UploadFailed(why, false);
   const buf = await file.arrayBuffer();
   let held: UploadedFile;
   let hash: string;
   try {
     [hash, held] = await Promise.all([
       sha256(new Uint8Array(buf)).then(b64url),
-      controlApi.uploadFile(new File([buf], name, { type: file.type }), machineId),
+      controlApi.uploadFile(new File([buf], name, { type: file.type }), machineId, opts),
     ]);
   } catch (e) {
-    if (!(e instanceof ControlError)) throw new Error("upload failed");
-    if (e.status === 413) throw new Error(`too large: ${mb(file.size)}, limit ${mb(START_FILE_MAX_BYTES)}`);
-    if (e.status === 401) throw new Error(KEY_LOST);
-    // The receiver's own sentence where it has one ("This file isn't the picture its type says.").
-    throw new Error(e.detail ?? `upload failed (${e.reason})`);
+    throw await failed(e);
   }
-  if (held.sha256 !== hash || held.size !== buf.byteLength) throw new Error(NOT_WHOLE_WORDS);
+  if (held.sha256 !== hash || held.size !== buf.byteLength) throw new UploadFailed(NOT_WHOLE_WORDS, true);
   const entry: PictureEntry = { name, type: file.type, size: buf.byteLength, sha256: hash };
   if (typeof held.width === "number" && typeof held.height === "number") {
     entry.width = held.width;
@@ -220,28 +271,21 @@ export function composeFiles(
 
 /** POST the image as the raw body, for a prompt that names it by path (also the theme
  *  api's control.attach); the server validates the bytes and reads the size. */
-export async function uploadAttachment(file: Blob): Promise<Attachment> {
+export async function uploadAttachment(file: Blob, opts: UploadOpts = {}): Promise<Attachment> {
   const why = refuseFile(file);
-  if (why) throw new Error(why);
-  const res = await apiFetch(ROUTES.ui.attachments, {
-    method: "POST",
-    headers: { "content-type": file.type, accept: "application/json" },
-    body: file,
-  });
-  let json: Record<string, unknown> = {};
+  if (why) throw new UploadFailed(why, false);
+  let res: Response;
   try {
-    json = (await res.json()) as Record<string, unknown>;
-  } catch {
-    // no body
+    res = await apiUpload(ROUTES.ui.attachments, {
+      headers: { "content-type": file.type, accept: "application/json" },
+      body: await file.arrayBuffer(),
+      ...opts,
+    });
+    if (!res.ok) throw await uploadRefusal(res);
+  } catch (e) {
+    throw await failed(e);
   }
-  if (!res.ok) {
-    const reason = typeof json.reason === "string" ? json.reason : `http_${res.status}`;
-    if (reason === "too_large") throw new Error(`too large: ${mb(file.size)}, limit ${mb(ATTACHMENT_MAX_BYTES)}`);
-    if (reason === "not_an_image" || reason === "unsupported_type") throw new Error("not an image we can send");
-    if (res.status === 401) throw new Error(KEY_LOST);
-    throw new Error(`upload failed (${reason})`);
-  }
-  return json as unknown as Attachment;
+  return (await res.json().catch(() => ({}))) as Attachment;
 }
 
 /** Take back an upload that was not sent. Best effort: the daily prune catches strays. */
@@ -252,11 +296,17 @@ export function deleteAttachment(a: Pick<Attachment, "id" | "ext">): Promise<voi
 }
 
 let infoPromise: Promise<Info> | null = null;
+/** The receiver's machine, once its Info came: the name an upload's words give the board. */
+let hostSeen: string | undefined;
 /** Info, read once per page: `hostname` says which machine the paths mean something on. */
 function hostInfo(): Promise<Info> {
   if (!infoPromise)
     infoPromise = apiFetch(ROUTES.ui.info, { headers: { accept: "application/json" } })
       .then((r) => r.json() as Promise<Info>)
+      .then((i) => {
+        hostSeen = i.hostname || undefined;
+        return i;
+      })
       .catch((e) => {
         infoPromise = null;
         throw e;
@@ -319,9 +369,11 @@ const carriesFiles = (dt: DataTransfer | null): boolean => Array.from(dt?.types 
 export interface PendingItem {
   /** Local key, for as long as it is in the tray. */
   key: string;
-  /** What goes: the shrunk picture once it is made (shrink.ts), else the original. */
+  /** What goes: the shrunk picture once it is made (shrink.ts), else the original; kept
+   *  for Retry. Empty for a picture brought back from a draft. */
   file: Blob;
-  /** For the thumbnail (an object URL, revoked on remove). */
+  /** For the thumbnail: an object URL (revoked on remove), or the receiver's copy of a
+   *  picture brought back from a draft. */
   preview: string;
   bytes: number;
   /** The original's size, where what goes is a smaller redraw of it. */
@@ -334,11 +386,25 @@ export interface PendingItem {
   name: string;
   /** Its upload has not begun: two run at a time. */
   waiting?: boolean;
+  /** Bytes of it sent so far, where that is counted (a browser). */
+  sent?: number;
   /** Uploaded, where the prompt names it by path. */
   attachment?: Attachment;
   /** Uploaded and checked, where it goes as a file: what the command signs of it. */
   entry?: PictureEntry;
+  /** When its upload was checked (ms): the receiver holds it a day from then. */
+  at?: number;
+  /** Brought back from the session's draft: `preview` is no object URL. */
+  restored?: boolean;
   error?: string;
+  /** Its upload failed in a way trying again can mend: Retry is offered. */
+  retry?: boolean;
+}
+
+/** A picture kept with a session's draft: what the command signs of it, and when it was
+ *  uploaded. */
+export interface KeptPicture extends PictureEntry {
+  at: number;
 }
 
 /** CONTROL.md §3.1: a command's files are at most 50 MiB together. A refused one is not
@@ -358,6 +424,15 @@ export const itemState = (it: PendingItem): "error" | "ready" | "shrinking" | "w
           ? "waiting"
           : "uploading";
 
+/** The receiver's copy of a picture it holds (the thumbnail of one brought back from a draft). */
+export const heldPictureUrl = (sha: string): string => apiUrl(`${ROUTES.ui.control}/files/${sha}`);
+
+/** The tray's pictures a draft keeps: each one uploaded as a file and checked. */
+export const keptPictures = (items: readonly PendingItem[]): KeptPicture[] =>
+  items.flatMap((it) =>
+    it.via === "files" && it.entry && !it.error ? [{ ...it.entry, at: it.at ?? Date.now() }] : [],
+  );
+
 export interface ComposeResult {
   /** The text to sign. */
   text: string;
@@ -375,9 +450,15 @@ export interface AttachmentsHandle {
   /** A picture is being made smaller, or its upload is in flight or waits its turn: the
    *  composer should hold Send. */
   uploading: boolean;
+  /** A picture in the tray failed: Send is off until it is removed or retried, and says
+   *  so in these words (`FAILED_WORDS`, or `REMOVE_WORDS` where none can be retried). */
+  failed: string | null;
   /** A file was refused or an upload failed, the pictures are too much together, or the
    *  text would be over the cap. */
   error: string | null;
+  /** The tray's one line: `error`, else what an upload is doing (how far it is, or that a
+   *  send waits for it). */
+  note: { text: string; tone: "err" | "info" } | null;
   /** A file is being dragged over the drop zone, and would be taken. */
   dragging: boolean;
   /** How pictures go to this session's machine; undefined while not known. */
@@ -386,10 +467,14 @@ export interface AttachmentsHandle {
   offered: boolean;
   add(files: Iterable<Blob>): void;
   remove(key: string): void;
+  /** Upload a failed one again, from the bytes it kept. */
+  retry(key: string): void;
   clear(): void;
+  /** Put these pictures in the tray in place of what is there (a session's draft). */
+  restore(kept: readonly KeptPicture[]): void;
   /** What to sign: `message` and the pictures, the way this machine takes them. Null (and
-   *  `error` set) when nothing can go: an upload is still running or failed, the pictures
-   *  are too much together, or the text is over the cap. */
+   *  the line set) when nothing can go: an upload is still running (the line says Send
+   *  waits for it) or failed, the pictures are too much together, or the text is over the cap. */
   compose(message: string): ComposeResult | null;
   /** Spread onto the drop zone element (the form) and the textarea. */
   handlers: {
@@ -398,23 +483,55 @@ export interface AttachmentsHandle {
     onDragLeave(e: DragEvent): void;
     onDrop(e: DragEvent): void;
   };
+  /** The same for a drag or a drop anywhere on the page (`usePageDrop`). */
+  page: {
+    over(e: globalThis.DragEvent): void;
+    drop(e: globalThis.DragEvent): void;
+    leave(): void;
+  };
 }
 
 /** `mode`: how this session's machine takes pictures (`pictureMode`); `machineId`: the
  *  machine an upload is for. `onRefused`: a picture was pasted or dropped where none can be
- *  sent ("off"), so the composer says why (`picturesOffWords`); nothing is swallowed. */
+ *  sent ("off"), so the composer says why (`picturesOffWords`); nothing is swallowed.
+ *  `initial`: the pictures the tray opens with (a session's draft). */
 export function useAttachments(o: {
   machineId?: string;
   enabled?: boolean;
   mode?: PictureMode;
   onRefused?: () => void;
+  initial?: () => readonly KeptPicture[];
 }): AttachmentsHandle {
-  const [items, setItems] = useState<PendingItem[]>([]);
+  const seq = useRef(0);
+  const fromKept = useCallback(
+    (kept: readonly KeptPicture[]): PendingItem[] =>
+      kept.map((k) => {
+        const { at, ...entry } = k;
+        return {
+          key: `p${++seq.current}`,
+          file: new Blob([], { type: entry.type }),
+          preview: heldPictureUrl(entry.sha256),
+          bytes: entry.size,
+          via: "files",
+          name: entry.name,
+          entry,
+          at,
+          restored: true,
+        };
+      }),
+    [],
+  );
+  const [items, setItems] = useState<PendingItem[]>(() => fromKept(o.initial?.() ?? []));
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const seq = useRef(0);
+  /** Send was pressed while pictures upload: the line says so until they are in. */
+  const [held, setHeld] = useState(false);
+  /** The uploads have run a moment: their progress is worth a line. */
+  const [slow, setSlow] = useState(false);
   /** The items whose upload began (its key), so none begins twice. */
   const started = useRef(new Set<string>());
+  /** How each running upload is stopped, by item key. */
+  const stops = useRef(new Map<string, AbortController>());
   const { mode, machineId } = o;
   const takes = mode === "files" || mode === "path" ? mode : null;
   /** The composer is on; `enabled`: and its machine takes pictures. */
@@ -425,10 +542,11 @@ export function useAttachments(o: {
   const onRefused = useRef(o.onRefused);
   onRefused.current = o.onRefused;
 
-  // Object URLs of what was never sent are let go with the composer.
+  // Object URLs of what was never sent are let go with the composer, and its uploads stop.
   useEffect(
     () => () => {
-      for (const it of itemsRef.current) URL.revokeObjectURL(it.preview);
+      for (const it of itemsRef.current) if (!it.restored) URL.revokeObjectURL(it.preview);
+      for (const stop of stops.current.values()) stop.abort();
     },
     [],
   );
@@ -439,21 +557,34 @@ export function useAttachments(o: {
 
   // Two uploads at a time, in the tray's order; the rest wait.
   useEffect(() => {
-    let busy = items.filter((it) => started.current.has(it.key) && itemState(it) !== "ready" && !it.error).length;
+    let busy = items.filter((it) => started.current.has(it.key) && itemState(it) === "uploading").length;
     for (const it of items) {
       if (busy >= UPLOADS_AT_ONCE) break;
       if (!it.waiting || it.error || started.current.has(it.key)) continue;
       started.current.add(it.key);
       busy++;
-      set(it.key, { waiting: false });
+      set(it.key, { waiting: false, sent: 0 });
+      const stop = new AbortController();
+      stops.current.set(it.key, stop);
+      const opts: UploadOpts = {
+        signal: stop.signal,
+        ...(uploadProgress() ? { onProgress: (sent: number) => set(it.key, { sent }) } : {}),
+      };
       const going: Promise<Partial<PendingItem>> =
         it.via === "files"
-          ? uploadPicture(it.file, it.name, machineId).then((entry) => ({ entry }))
-          : uploadAttachment(it.file).then((attachment) => ({ attachment }));
+          ? uploadPicture(it.file, it.name, machineId, opts).then((entry) => ({ entry, at: Date.now() }))
+          : uploadAttachment(it.file, opts).then((attachment) => ({ attachment }));
       going.then(
         (done) => set(it.key, done),
-        (e: Error) => set(it.key, { error: e.message }),
+        (e: Error) => {
+          // Removed while it went: nothing is left to say it to.
+          if (stop.signal.aborted) return;
+          set(it.key, { error: e.message, retry: e instanceof UploadFailed && e.retry });
+        },
       );
+      void going.finally(() => {
+        if (stops.current.get(it.key) === stop) stops.current.delete(it.key);
+      });
     }
   }, [items, machineId, set]);
 
@@ -504,7 +635,7 @@ export function useAttachments(o: {
       const list = Array.from(files);
       const room = ATTACHMENTS_PER_MESSAGE - itemsRef.current.length;
       if (list.length > room) {
-        setError(`${ATTACHMENTS_PER_MESSAGE} images per message at most`);
+        setError(`${ATTACHMENTS_PER_MESSAGE} pictures per message at most.`);
         list.length = Math.max(0, room);
       }
       const added = list.map((file): PendingItem => {
@@ -536,43 +667,91 @@ export function useAttachments(o: {
     [enabled, takes, shrunk, patchNow],
   );
 
-  const remove = useCallback((key: string) => {
-    setItems((prev) => {
-      const it = prev.find((p) => p.key === key);
-      if (it) {
-        URL.revokeObjectURL(it.preview);
-        if (it.attachment) void deleteAttachment(it.attachment);
-      }
-      return prev.filter((p) => p.key !== key);
-    });
+  /** Lets an item go: its upload stops, its thumbnail's URL is revoked, a path upload is taken back. */
+  const letGo = useCallback((it: PendingItem) => {
+    stops.current.get(it.key)?.abort();
+    stops.current.delete(it.key);
+    started.current.delete(it.key);
+    if (!it.restored) URL.revokeObjectURL(it.preview);
+    if (it.attachment) void deleteAttachment(it.attachment);
+  }, []);
+
+  const remove = useCallback(
+    (key: string) => {
+      const it = itemsRef.current.find((p) => p.key === key);
+      if (it) letGo(it);
+      itemsRef.current = itemsRef.current.filter((p) => p.key !== key);
+      setItems((prev) => prev.filter((p) => p.key !== key));
+      setError(null);
+    },
+    [letGo],
+  );
+
+  const retry = useCallback(
+    (key: string) => {
+      const it = itemsRef.current.find((p) => p.key === key);
+      if (!it?.error || !it.retry) return;
+      started.current.delete(key);
+      setError(null);
+      set(key, { error: undefined, retry: undefined, waiting: true, sent: undefined });
+    },
+    [set],
+  );
+
+  const clear = useCallback(() => {
+    for (const it of itemsRef.current) {
+      stops.current.get(it.key)?.abort();
+      if (!it.restored) URL.revokeObjectURL(it.preview);
+    }
+    stops.current.clear();
+    started.current.clear();
+    itemsRef.current = [];
+    setItems([]);
     setError(null);
   }, []);
 
-  const clear = useCallback(() => {
-    setItems((prev) => {
-      for (const it of prev) URL.revokeObjectURL(it.preview);
-      return [];
-    });
-    setError(null);
-  }, []);
+  const restore = useCallback(
+    (kept: readonly KeptPicture[]) => {
+      for (const it of itemsRef.current) letGo(it);
+      const next = fromKept(kept);
+      itemsRef.current = next;
+      setItems(next);
+      setError(null);
+    },
+    [fromKept, letGo],
+  );
 
   const uploading = items.some((it) => {
     const s = itemState(it);
     return s === "shrinking" || s === "waiting" || s === "uploading";
   });
+  const failedOne = items.find((it) => it.error);
   // Too much together: said as soon as it is so, and until one is removed.
   const over = takes === "files" && overTogether(items);
+
+  // The line that Send waits goes once the last upload settled; progress is said once the
+  // uploads have run a moment (a quick one is never more than its spinner).
+  useEffect(() => {
+    if (!uploading) {
+      setHeld(false);
+      setSlow(false);
+      return;
+    }
+    const t = window.setTimeout(() => setSlow(true), 400);
+    return () => window.clearTimeout(t);
+  }, [uploading]);
 
   const compose = useCallback(
     (message: string): ComposeResult | null => {
       const cur = itemsRef.current;
       // One that failed, or one uploaded the way this machine no longer takes pictures.
       if (cur.some((it) => it.error || it.via !== takes)) {
-        setError("remove the image that could not be attached, or try it again");
+        setError(cur.some((it) => it.error && it.retry) ? FAILED_WORDS : REMOVE_WORDS);
         return null;
       }
       if (cur.some((it) => itemState(it) !== "ready")) {
-        setError("still uploading…");
+        setError(null);
+        setHeld(true);
         return null;
       }
       if (takes === "files" && overTogether(cur)) return null;
@@ -590,7 +769,7 @@ export function useAttachments(o: {
       }
       if (out.text.length > PROMPT_MAX_CHARS) {
         setError(
-          `too long: ${out.text.length.toLocaleString()} chars${out.lines.length ? " with the image lines" : ""}, the limit is ${PROMPT_MAX_CHARS.toLocaleString()}`,
+          `too long: ${out.text.length.toLocaleString()} chars${out.lines.length ? " with the picture lines" : ""}, the limit is ${PROMPT_MAX_CHARS.toLocaleString()}`,
         );
         return null;
       }
@@ -599,6 +778,23 @@ export function useAttachments(o: {
       return out;
     },
     [takes],
+  );
+
+  /** A drop of files, wherever it lands: pictures go to the tray (or are answered where none
+   *  can go); anything else is said to be no picture. Never left to the browser, which
+   *  would open the file in the page's place. */
+  const dropped = useCallback(
+    (dt: DataTransfer | null) => {
+      if (!active) return;
+      const files = imageFiles(dt);
+      const others = (dt?.files?.length ?? 0) > files.length;
+      if (files.length > 0) {
+        if (mode === "off") onRefused.current?.();
+        else add(files);
+      }
+      if (others && (files.length === 0 || mode !== "off")) setError(ONLY_PICTURES_WORDS);
+    },
+    [active, add, mode],
   );
 
   const handlers = useMemo<AttachmentsHandle["handlers"]>(
@@ -635,29 +831,110 @@ export function useAttachments(o: {
         setDragging(false);
         if (!carriesFiles(e.dataTransfer)) return;
         e.preventDefault();
-        if (!active) return;
-        const files = imageFiles(e.dataTransfer);
-        if (files.length === 0) return;
-        if (mode === "off") onRefused.current?.();
-        else add(files);
+        dropped(e.dataTransfer);
       },
     }),
-    [add, enabled, active, mode, takes],
+    [add, dropped, enabled, active, mode, takes],
   );
+
+  const page = useMemo<AttachmentsHandle["page"]>(
+    () => ({
+      over(e) {
+        if (!carriesFiles(e.dataTransfer)) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = active && (takes || mode === "off") ? "copy" : "none";
+        if (enabled) setDragging(true);
+      },
+      drop(e) {
+        setDragging(false);
+        if (!carriesFiles(e.dataTransfer)) return;
+        e.preventDefault();
+        dropped(e.dataTransfer);
+      },
+      leave() {
+        setDragging(false);
+      },
+    }),
+    [dropped, enabled, active, mode, takes],
+  );
+
+  // The tray's one line: what is wrong first, then what the uploads are doing.
+  // One still being made smaller is waited for too, and counted in the uploads' size once it is.
+  const busyOnes = items.filter((it) => itemState(it) === "waiting" || itemState(it) === "uploading");
+  const wrong = error ?? failedOne?.error ?? (over ? TOGETHER_WORDS : null);
+  const doing = !uploading
+    ? null
+    : held
+      ? waitingWords(busyOnes.length + items.filter((it) => itemState(it) === "shrinking").length)
+      : slow && busyOnes.length > 0
+        ? progressWords(
+            busyOnes.reduce((n, it) => n + it.bytes, 0),
+            uploadProgress() ? busyOnes.reduce((n, it) => n + (it.sent ?? 0), 0) : undefined,
+          )
+        : null;
+  const note = wrong ? { text: wrong, tone: "err" as const } : doing ? { text: doing, tone: "info" as const } : null;
 
   return {
     items,
     uploading,
+    failed: failedOne ? (items.some((it) => it.error && it.retry) ? FAILED_WORDS : REMOVE_WORDS) : null,
     error: over ? TOGETHER_WORDS : error,
+    note,
     dragging,
     mode,
     offered: mode !== "off",
     add,
     remove,
+    retry,
     clear,
+    restore,
     compose,
     handlers,
+    page,
   };
+}
+
+/** The session page takes a file dragged or dropped anywhere on it, as its composer
+ *  would (`att.page`), with the composer's drop highlight: no file dropped there is ever
+ *  opened by the browser in the page's place. `form`: the composer. Where two sessions
+ *  are side by side each takes what lands on its own view; what lands outside every
+ *  session's view (the sidebar, the title bar) is the first composer's. A drop already
+ *  taken (the composer's own field, a sheet open over the page) is left alone. */
+export function usePageDrop(att: AttachmentsHandle, form: RefObject<HTMLElement | null>): void {
+  const page = att.page;
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const mine = (e: globalThis.DragEvent): boolean => {
+      const el = form.current;
+      if (!el || e.defaultPrevented) return false;
+      const at = e.target instanceof Element ? e.target : null;
+      // A sheet or a dialog over the page has its own way with a drop.
+      if (at?.closest("[role=dialog]")) return false;
+      const view = at?.closest(".page.session");
+      if (view) return view.contains(el);
+      return document.querySelector("form.ctl") === el;
+    };
+    let leave: number | undefined;
+    const over = (e: globalThis.DragEvent) => {
+      if (!mine(e)) return;
+      page.over(e);
+      // A drag that leaves the window says nothing on the way out: the highlight goes
+      // once the drag stops passing over.
+      window.clearTimeout(leave);
+      leave = window.setTimeout(page.leave, 200);
+    };
+    const drop = (e: globalThis.DragEvent) => {
+      window.clearTimeout(leave);
+      if (mine(e)) page.drop(e);
+    };
+    document.addEventListener("dragover", over);
+    document.addEventListener("drop", drop);
+    return () => {
+      window.clearTimeout(leave);
+      document.removeEventListener("dragover", over);
+      document.removeEventListener("drop", drop);
+    };
+  }, [page, form]);
 }
 
 // ---------- the pieces a composer places ----------
@@ -667,7 +944,7 @@ export function useAttachments(o: {
 export function AttachButton({
   att,
   disabled,
-  title = "Attach images",
+  title = "Attach pictures",
 }: {
   att: AttachmentsHandle;
   disabled?: boolean;
@@ -711,40 +988,50 @@ export function AttachButton({
 }
 
 /** The thumbnails at the top of the field: each with a spinner while uploading (two at a
- *  time; the rest wait, dimmed), the error under it when refused, and × to take it back.
+ *  time; the rest wait, dimmed), ↻ beside × on one whose upload failed in a way trying
+ *  again can mend, and × to take it back. Under them one line: what is wrong (a refusal, a
+ *  failed upload's words), else how far the uploads are or that a send waits for them.
  *  Nothing when there is none. */
 export function AttachmentTray({ att }: { att: AttachmentsHandle }) {
-  if (att.items.length === 0 && !att.error) return null;
+  if (att.items.length === 0 && !att.note) return null;
   return (
     <div className="att" data-attachments={att.items.length}>
       {att.items.length > 0 && (
-        <ul className="att-tray" aria-label="Images to send">
+        <ul className="att-tray" aria-label="Pictures to send">
           {att.items.map((it) => (
-            <TrayItem key={it.key} it={it} onRemove={() => att.remove(it.key)} />
+            <TrayItem key={it.key} it={it} onRemove={() => att.remove(it.key)} onRetry={() => att.retry(it.key)} />
           ))}
         </ul>
       )}
-      {att.error && (
-        <p className="att-note" role="alert">
-          {att.error}
-        </p>
-      )}
+      {att.note &&
+        (att.note.tone === "err" ? (
+          <p className="att-note" role="alert">
+            {att.note.text}
+          </p>
+        ) : (
+          <p className="att-note att-note--info" role="status" data-upload-line>
+            {att.note.text}
+          </p>
+        ))}
     </div>
   );
 }
 
-/** One image waiting to go: the thumbnail, its name and size the tooltip (a refusal is
- *  written under it); its menu copies its name or takes it back. Dimmed until it is
- *  uploaded, with the spinner while its own upload runs. */
-function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
+/** One picture waiting to go: the thumbnail, its name and size the tooltip (its refusal's
+ *  words where it was refused, said once under the tray); its menu copies its name, tries
+ *  it again or takes it back. Dimmed until it is uploaded, with the spinner while its own
+ *  upload runs. */
+function TrayItem({ it, onRemove, onRetry }: { it: PendingItem; onRemove: () => void; onRetry: () => void }) {
   const state = itemState(it);
   const name = it.name || (it.attachment ? `${it.attachment.id}.${it.attachment.ext}` : "");
   const px = it.attachment ?? it.entry;
   const size = state !== "ready" ? state : px?.width && px.height ? `${px.width}×${px.height}` : "";
   const bytes = it.was ? `${mb(it.bytes)} (was ${mb(it.was)})` : mb(it.bytes);
   const tip = state === "shrinking" ? "Making it smaller…" : [name, size, bytes].filter(Boolean).join(" · ");
+  const again = state === "error" && !!it.retry;
   const menu = useContextMenu(() => [
     copyItem("Copy name", name),
+    ...(again ? [{ label: "Try again", run: onRetry }] : []),
     { sep: true },
     { label: "Remove", danger: true, run: onRemove },
   ]);
@@ -755,19 +1042,33 @@ function TrayItem({ it, onRemove }: { it: PendingItem; onRemove: () => void }) {
       data-attachment={it.attachment?.id ?? it.entry?.sha256 ?? ""}
       data-state={state}
       data-name={name}
-      title={it.error ? undefined : tip}
+      data-restored={it.restored ? "" : undefined}
+      title={it.error ? `${name} · ${it.error}` : tip}
       {...menu}
     >
       <span className="att-frame">
-        <img className="att-thumb" src={it.preview} alt="" />
+        <img
+          className="att-thumb"
+          src={it.preview}
+          alt=""
+          onError={(e) => e.currentTarget.setAttribute("data-broken", "")}
+        />
         {(state === "shrinking" || state === "uploading") && <span className="spinner att-busy" aria-hidden="true" />}
       </span>
-      {it.error && (
-        <span className="att-meta" title={it.error}>
-          {it.error}
-        </span>
+      {again && (
+        <button type="button" className="icon-btn att-x att-retry" onClick={onRetry} aria-label="Try again">
+          <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" fill="none">
+            <path
+              d="M9.6 6.6A3.7 3.7 0 1 1 8.4 3.2M9.4 1.6v2.3H7.1"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
       )}
-      <button type="button" className="icon-btn att-x" onClick={onRemove} aria-label="Remove image">
+      <button type="button" className="icon-btn att-x" onClick={onRemove} aria-label="Remove picture">
         <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
           <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>

@@ -2,7 +2,7 @@
 // The New session sheet's state (newSessionState.ts): which machine a plain "New session…"
 // means, a remembered choice pruned to what the machine still advertises, the alias window.
 import type { ControlActivity, LimitsEntry, MachineControl, MachinePool } from "@shared/api";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentLeft,
   aliasHidden,
@@ -200,6 +200,23 @@ describe("storage without localStorage", () => {
   it("reads nothing and writes nowhere, without throwing", () => {
     expect(() => saveDraft({ text: "keep me" })).not.toThrow();
     expect(readDraft()).toBeNull();
+  });
+});
+
+describe("a draft's files", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("come back for the day the receiver holds them, and not after", () => {
+    const m = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    });
+    const at = Date.parse("2026-11-18T09:00:00Z");
+    const files = [{ name: "kiwi.png", type: "image/png", size: 32, sha256: "A".repeat(43) }];
+    saveDraft({ text: "Look at this", files, filesAt: at });
+    expect(readDraft(at + 23 * 3600_000)).toEqual({ text: "Look at this", files, filesAt: at });
+    expect(readDraft(at + 24 * 3600_000)).toEqual({ text: "Look at this" });
   });
 });
 

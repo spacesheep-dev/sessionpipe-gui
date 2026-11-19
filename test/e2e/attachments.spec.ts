@@ -77,6 +77,28 @@ function png(width: number, height: number, rgb: [number, number, number]): Buff
   ]);
 }
 const KIWI = png(64, 48, [0xd9, 0x3a, 0x2b]);
+/** A PNG of noise, 1.4 MB that do not shrink: long enough on a slow link to be seen going. */
+function noisePng(width: number, height: number): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  let x = 0x2545f491;
+  const rows = Buffer.alloc(height * (1 + width * 3));
+  for (let i = 0; i < rows.length; i++) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    rows[i] = i % (1 + width * 3) === 0 ? 0 : x & 0xff;
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(rows, { level: 0 })),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
 const BIRCH = png(80, 60, [0xe8, 0xe2, 0xd0]);
 const ONYX = png(96, 54, [0x1c, 0x1c, 0x1e]);
 /** Seven more, each its own colour (and so its own hash). */
@@ -189,7 +211,7 @@ async function open(
   context: BrowserContext,
   page: Page,
   o: { takes: boolean; title: string; saves?: boolean; script?: StartScript },
-): Promise<{ d: FakeDaemon; uiKey: string; asked: string[] }> {
+): Promise<{ d: FakeDaemon; uiKey: string; asked: string[]; board: string }> {
   await seenSetupHere(context);
   const key = await passkeyPage(context, page);
   const d = await fakeDaemon(
@@ -205,7 +227,7 @@ async function open(
   );
   daemons.push(d);
   const s = await postSession(await sinkToken(), { machine: d.name, cwd: CWD, title: o.title });
-  const info = (await (await fetch(`${CONTROL_BASE}/api/ui/info`)).json()) as { uiKey: string };
+  const info = (await (await fetch(`${CONTROL_BASE}/api/ui/info`)).json()) as { uiKey: string; hostname: string };
   /** Every request the page makes from here on, by path and query. */
   const asked: string[] = [];
   page.on("request", (r) => {
@@ -214,7 +236,8 @@ async function open(
   });
   await page.goto(`${CONTROL_BASE}${sessionUrl(s.harness, s.id)}`);
   await expect(composer(page)).toBeEnabled();
-  return { d, uiKey: info.uiKey, asked };
+  // The board an upload's words name: the receiver's machine, as its Info says it.
+  return { d, uiKey: info.uiKey, asked, board: info.hostname };
 }
 
 const tray = (page: Page) => page.locator(".att-item");
@@ -342,7 +365,6 @@ test("three at once, then seven: six are kept and the cap is said; two upload at
   // Two go, the third waits its turn; Send waits for all of them.
   await expect(page.locator(".att-item[data-state=uploading]")).toHaveCount(2);
   await expect(page.locator(".att-item[data-state=waiting]")).toHaveCount(1);
-  await expect(send(page)).toBeDisabled();
   await shots(page, "3-two-uploading-one-waiting");
   await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(3);
   await expect(send(page)).toBeEnabled();
@@ -358,7 +380,7 @@ test("three at once, then seven: six are kept and the cap is said; two upload at
     SEVEN.map((b) => given("image.png", b)),
   );
   await expect(tray(page)).toHaveCount(6);
-  await expect(page.locator(".att-note")).toHaveText("6 images per message at most");
+  await expect(page.locator(".att-note")).toHaveText("6 pictures per message at most.");
   await expect(picker(page)).toBeDisabled();
   await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(6, { timeout: 20_000 });
   expect(most).toBe(2);
@@ -410,12 +432,15 @@ test("an upload that did not arrive whole, and a file that is not the picture it
   });
   await picker(page).setInputFiles({ name: "kiwi.png", mimeType: "image/png", buffer: KIWI });
   await expect(tray(page)).toHaveAttribute("data-state", "error");
-  await expect(tray(page).locator(".att-meta")).toHaveText("The picture didn't arrive whole. Try again.");
-  // Nothing is signed with it: Send says to take it out.
+  await expect(page.locator(".att-note")).toHaveText("The picture didn't arrive whole. Try again.");
+  // Nothing is signed with it: Send is off and says to take it out or try it again.
   await composer(page).fill("try anyway");
-  await send(page).click();
-  await expect(page.locator(".att-note")).toHaveText("remove the image that could not be attached, or try it again");
-  await tray(page).getByRole("button", { name: "Remove image" }).click();
+  await expect(send(page)).toBeDisabled();
+  await expect(send(page)).toHaveAttribute("data-tip", "Remove or retry the picture that didn't upload.");
+  // ⌘↩ (or Ctrl+Return) sends from the keyboard on a touch screen too.
+  await composer(page).press("ControlOrMeta+Enter");
+  await expect(page.locator(".att-note")).toHaveText("Remove or retry the picture that didn't upload.");
+  await tray(page).getByRole("button", { name: "Remove picture" }).click();
   await expect(tray(page)).toHaveCount(0);
   await page.unroute("**/api/ui/control/files?*");
 
@@ -426,12 +451,14 @@ test("an upload that did not arrive whole, and a file that is not the picture it
     buffer: Buffer.from("these are words, not pixels"),
   });
   await expect(tray(page)).toHaveAttribute("data-state", "error");
-  await expect(tray(page).locator(".att-meta")).toHaveText("This file isn't the picture its type says.");
+  await expect(page.locator(".att-note")).toHaveText("That file isn't a picture.");
+  // Trying the same bytes again would only be refused again: no Retry.
+  await expect(tray(page).getByRole("button", { name: "Try again" })).toHaveCount(0);
   await shots(page, "4-a-picture-refused");
   // A kind of picture the composer does not take is refused before any upload.
-  await tray(page).getByRole("button", { name: "Remove image" }).click();
+  await tray(page).getByRole("button", { name: "Remove picture" }).click();
   await paste(page, [given("scan.tiff", KIWI, "image/tiff")]);
-  await expect(tray(page).locator(".att-meta")).toHaveText("Only PNG, JPEG, GIF, WebP or HEIC pictures can be sent.");
+  await expect(page.locator(".att-note")).toHaveText("Only PNG, JPEG, GIF, WebP or HEIC pictures can be sent.");
   await page.waitForTimeout(400);
   expect(prompts(d)).toHaveLength(0);
 });
@@ -482,7 +509,7 @@ test("a dropped file that is no picture never leaves the page, whatever the comp
   // The browser's own answer to a file let fall is to open it in the page's place.
   expect(await drop(page, [notes])).toEqual({ over: true, dropped: true, highlighted: true });
   await expect(tray(page)).toHaveCount(0);
-  await expect(page.locator(".att-note")).toHaveCount(0);
+  await expect(page.locator(".att-note")).toHaveText("Only pictures can be dropped here.");
   expect(page.url()).toBe(here);
   await expect(composer(page)).toBeEnabled();
 
@@ -556,13 +583,13 @@ test("a HEIC this browser can't draw is refused in words, before any upload", as
   const { asked } = await open(context, page, { takes: true, title: "A HEIC photo" });
   await paste(page, [given("IMG_0412.heic", HEIC, "image/heic")]);
   await expect(tray(page)).toHaveAttribute("data-state", "error");
-  await expect(tray(page).locator(".att-meta")).toHaveText(HEIC_WORDS);
+  await expect(page.locator(".att-note")).toHaveText(HEIC_WORDS);
   await shots(page, "7-a-heic-refused");
-  await tray(page).getByRole("button", { name: "Remove image" }).click();
+  await tray(page).getByRole("button", { name: "Remove picture" }).click();
   // From Files or Finder a HEIC may come with no type at all: its name says what it is.
   const dropped = await drop(page, [given("IMG_0413.HEIC", HEIC, "")]);
   expect(dropped.dropped).toBe(true);
-  await expect(tray(page).locator(".att-meta")).toHaveText(HEIC_WORDS);
+  await expect(page.locator(".att-note")).toHaveText(HEIC_WORDS);
   expect(asked.filter((a) => a.startsWith("POST /api/ui/control/files"))).toEqual([]);
 });
 
@@ -765,4 +792,239 @@ test("the row of a message that went to a copy of the session shows its pictures
   await expect(row.locator("[data-sent-picture]")).toHaveCount(1);
   await row.scrollIntoViewIfNeeded();
   await expect.poll(() => drawn(row)).toEqual([64]);
+});
+
+const FILES_ROUTE = "**/api/ui/control/files?*";
+const line = (page: Page) => page.locator(".att-note");
+const retryOf = (page: Page) => tray(page).getByRole("button", { name: "Try again" });
+
+test("an upload that fails says why in words; Retry sends the same bytes again; Send is off until then", async ({
+  context,
+  page,
+}) => {
+  const { d, board } = await open(context, page, { takes: true, title: "Uploads that fail" });
+  expect(board.length).toBeGreaterThan(0);
+  // The network fails: the receiver can't be reached.
+  await page.route(FILES_ROUTE, (route) => route.abort("connectionrefused"));
+  await paste(page, [given("image.png", KIWI)]);
+  await expect(tray(page)).toHaveAttribute("data-state", "error");
+  await expect(line(page)).toHaveText(`The picture didn't upload: ${board} can't be reached. Try again.`);
+  await composer(page).fill("What colour is it?");
+  await expect(send(page)).toBeDisabled();
+  await expect(send(page)).toHaveAttribute("data-tip", "Remove or retry the picture that didn't upload.");
+  await shots(page, "6-upload-failed-retry");
+  // Retry, now that it can be reached: the same picture, under the same name.
+  await page.unroute(FILES_ROUTE);
+  await retryOf(page).click();
+  await expect(tray(page)).toHaveAttribute("data-state", "ready");
+  await expect(line(page)).toHaveCount(0);
+  await expect(send(page)).toBeEnabled();
+  await send(page).click();
+  await expect.poll(() => prompts(d).length, { timeout: 20_000 }).toBe(1);
+  expect(prompts(d)[0]!.files).toEqual([entry("image.png", KIWI)]);
+
+  // The receiver's answers, each in its words; Retry only where trying again can help.
+  const answers: { status: number; json: object; headers?: Record<string, string>; words: string; retry: boolean }[] = [
+    { status: 500, json: { reason: "internal" }, words: `${board} couldn't save the picture. Try again.`, retry: true },
+    {
+      status: 507,
+      json: { reason: "full", error: "Too many files are held here; try again tomorrow." },
+      words: `${board} has no room for more files today.`,
+      retry: false,
+    },
+    {
+      status: 429,
+      json: { reason: "rate_limited" },
+      headers: { "retry-after": "300" },
+      words: "That's a lot of pictures in a short time. Try again in 5 minutes.",
+      retry: true,
+    },
+  ];
+  for (const a of answers) {
+    await page.route(FILES_ROUTE, (route) =>
+      route.fulfill({ status: a.status, json: a.json, ...(a.headers ? { headers: a.headers } : {}) }),
+    );
+    await paste(page, [given("image.png", BIRCH)]);
+    await expect(tray(page)).toHaveAttribute("data-state", "error");
+    await expect(line(page)).toHaveText(a.words);
+    await expect(retryOf(page)).toHaveCount(a.retry ? 1 : 0);
+    // Send says what to do: retry only where Retry is there.
+    await expect(send(page)).toHaveAttribute(
+      "data-tip",
+      a.retry ? "Remove or retry the picture that didn't upload." : "Remove the picture that didn't upload.",
+    );
+    await tray(page).getByRole("button", { name: "Remove picture" }).click();
+    await expect(tray(page)).toHaveCount(0);
+    await page.unroute(FILES_ROUTE);
+  }
+  expect(prompts(d)).toHaveLength(1);
+});
+
+test("Send while a picture uploads says it waits for it, and the line goes once the upload is in", async ({
+  context,
+  page,
+}) => {
+  const { d } = await open(context, page, { takes: true, title: "Send while it uploads" });
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  await page.route(FILES_ROUTE, async (route) => {
+    await held;
+    await route.fulfill({ response: await route.fetch() });
+  });
+  await paste(page, [given("image.png", KIWI), given("image.png", BIRCH)]);
+  await expect(page.locator(".att-item[data-state=uploading]")).toHaveCount(2);
+  await composer(page).fill("Here are two");
+  // Send is there to press: it waits for the uploads, and says so.
+  await expect(send(page)).toBeEnabled();
+  await send(page).click();
+  await expect(page.locator("[data-upload-line]")).toHaveText("Waiting for 2 pictures to finish uploading.");
+  await shots(page, "7-send-waits-for-uploads");
+  release();
+  await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(2, { timeout: 20_000 });
+  await expect(page.locator("[data-upload-line]")).toHaveCount(0);
+  await expect(line(page)).toHaveCount(0);
+  // Nothing went while they uploaded; the words are still there to send.
+  expect(prompts(d)).toHaveLength(0);
+  await expect(composer(page)).toHaveValue("Here are two");
+  // Removing one while it uploads stops its upload.
+  let aborted = false;
+  await page.route(FILES_ROUTE, async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      await route.fulfill({ response: await route.fetch() });
+    } catch {
+      aborted = true;
+    }
+  });
+  page.on("requestfailed", (r) => {
+    if (r.url().includes("/api/ui/control/files")) aborted = true;
+  });
+  await paste(page, [given("image.png", ONYX)]);
+  await expect(page.locator(".att-item[data-state=uploading]")).toHaveCount(1);
+  await page.locator(".att-item[data-state=uploading]").getByRole("button", { name: "Remove picture" }).click();
+  await expect(tray(page)).toHaveCount(2);
+  await expect.poll(() => aborted, { timeout: 5_000 }).toBe(true);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
+test("a file dropped anywhere on the session's page comes to the composer; one that is no picture never opens", async ({
+  context,
+  page,
+}) => {
+  const { d } = await open(context, page, { takes: true, title: "Dropped on the conversation" });
+  const here = page.url();
+  /** Drag over the conversation (outside the composer), then drop there. */
+  const onPage = (files: Given[]) =>
+    page.evaluate(async (list) => {
+      const dt = new DataTransfer();
+      for (const f of list) {
+        const bytes = Uint8Array.from(atob(f.base64), (c) => c.charCodeAt(0));
+        dt.items.add(new File([bytes], f.name, { type: f.type }));
+      }
+      const at = document.querySelector<HTMLElement>(".page.session .sess-title, .page.session h1, .page.session")!;
+      const form = document.querySelector<HTMLFormElement>("form.ctl")!;
+      if (form.contains(at)) throw new Error("not outside the composer");
+      const over = new DragEvent("dragover", { dataTransfer: dt, bubbles: true, cancelable: true });
+      at.dispatchEvent(over);
+      await new Promise((r) => setTimeout(r, 80));
+      const highlighted = form.classList.contains("ctl--drop");
+      const dropped = new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true });
+      at.dispatchEvent(dropped);
+      return { over: over.defaultPrevented, dropped: dropped.defaultPrevented, highlighted };
+    }, files);
+  expect(await onPage([given("kiwi.png", KIWI)])).toEqual({ over: true, dropped: true, highlighted: true });
+  await expect(page.locator("form.ctl")).not.toHaveClass(/ctl--drop/);
+  await expect(tray(page)).toHaveCount(1);
+  await expect(tray(page)).toHaveAttribute("data-state", "ready");
+  await expect(tray(page)).toHaveAttribute("data-name", "kiwi.png");
+  // A text file: taken from the browser, which would open it, and said to be no picture.
+  const notes = given("notes.txt", Buffer.from("the date picker is off by one\n"), "text/plain");
+  expect(await onPage([notes])).toEqual({ over: true, dropped: true, highlighted: true });
+  await expect(line(page)).toHaveText("Only pictures can be dropped here.");
+  await expect(tray(page)).toHaveCount(1);
+  expect(page.url()).toBe(here);
+  await shots(page, "8-only-pictures-dropped");
+  expect(prompts(d)).toHaveLength(0);
+});
+
+test("a reload keeps the pictures of the draft with its words, and they still go", async ({ context, page }) => {
+  // Two page loads and a send.
+  test.slow();
+  const { d } = await open(context, page, { takes: true, title: "A draft with pictures" });
+  await paste(page, [given("image.png", KIWI), given("image.png", BIRCH)]);
+  await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(2);
+  await composer(page).fill("Which one is lighter?");
+  // The words are kept 300 ms after the last key, the pictures once they are in.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const kept = (prefix: string) =>
+          Object.keys(localStorage)
+            .filter((k) => k.startsWith(prefix))
+            .map((k) => localStorage.getItem(k));
+        return {
+          words: kept("sessionpipe-gui.draft:"),
+          pictures: kept("sessionpipe-gui.draft-pictures:").map((v) => (JSON.parse(v ?? "[]") as unknown[]).length),
+        };
+      }),
+    )
+    .toEqual({ words: ["Which one is lighter?"], pictures: [2] });
+  await page.reload();
+  await expect(composer(page)).toBeEnabled();
+  await expect(composer(page)).toHaveValue("Which one is lighter?");
+  await expect(tray(page)).toHaveCount(2);
+  for (const i of [0, 1]) {
+    await expect(tray(page).nth(i)).toHaveAttribute("data-state", "ready");
+    await expect(tray(page).nth(i)).toHaveAttribute("data-restored", "");
+  }
+  await expect(tray(page).nth(0)).toHaveAttribute("data-name", "image.png");
+  await expect(tray(page).nth(1)).toHaveAttribute("data-name", "image-2.png");
+  // Each thumbnail is the receiver's copy, by its hash.
+  await expect(tray(page).nth(0).locator("img")).toHaveAttribute("src", `/api/ui/control/files/${sha(KIWI)}`);
+  await shots(page, "9-draft-kept-after-reload");
+  await send(page).click();
+  await expect.poll(() => prompts(d).length, { timeout: 20_000 }).toBe(1);
+  expect(prompts(d)[0]!.text).toBe("Which one is lighter?");
+  expect(prompts(d)[0]!.files).toEqual([entry("image.png", KIWI), entry("image-2.png", BIRCH)]);
+  // The machine fetches them after it took the command: both, whole.
+  await expect.poll(() => d.fetched.map((f) => f.ok)).toEqual([true, true]);
+  // Sent: the draft is gone, pictures and all.
+  await expect(tray(page)).toHaveCount(0);
+  await page.waitForTimeout(400);
+  await page.reload();
+  await expect(composer(page)).toBeEnabled();
+  await expect(tray(page)).toHaveCount(0);
+});
+
+test("on a slow link (2 Mbit/s) the tray says how far the upload is", async ({ context, page }) => {
+  // 1.4 MB at 2 Mbit/s is six seconds by itself.
+  test.slow();
+  const { d } = await open(context, page, { takes: true, title: "A slow link" });
+  const big = noisePng(700, 680);
+  expect(big.length).toBeGreaterThan(1_300_000);
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Network.enable");
+  await cdp.send("Network.emulateNetworkConditions", {
+    offline: false,
+    latency: 40,
+    downloadThroughput: 250_000,
+    uploadThroughput: 250_000,
+  });
+  await picker(page).setInputFiles({ name: "noise.png", mimeType: "image/png", buffer: big });
+  const going = page.locator("[data-upload-line]");
+  await expect(going).toHaveText(/^Uploading \d\.\d of 1\.\d MB…$/);
+  const first = await going.textContent();
+  await shots(page, "10-upload-progress");
+  await expect.poll(async () => (await going.textContent()) ?? "", { timeout: 15_000 }).not.toBe(first);
+  await expect(tray(page)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+  await expect(going).toHaveCount(0);
+  await cdp.send("Network.emulateNetworkConditions", {
+    offline: false,
+    latency: 0,
+    downloadThroughput: -1,
+    uploadThroughput: -1,
+  });
+  expect(prompts(d)).toHaveLength(0);
 });

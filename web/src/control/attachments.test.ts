@@ -23,12 +23,15 @@ import {
   pictureMode,
   pictureName,
   picturesOffWords,
+  progressWords,
   refuseFile,
   SentFilesRows,
   savedFileSha,
   shownFiles,
   TOGETHER_WORDS,
+  type UploadFailed,
   uploadPicture,
+  waitingWords,
 } from "./Attachments";
 import { b64url, sha256 } from "./bytes";
 import { commandString } from "./command";
@@ -170,13 +173,13 @@ describe("how a picture goes to a session's machine", () => {
     const sized = (size: number, type = "image/png") => ({ size, type }) as Blob;
     expect(refuseFile(sized(26_214_400), "files")).toBeNull();
     expect(refuseFile(sized(26_214_401), "files")).not.toBeNull();
-    expect(refuseFile(sized(30 * 1024 * 1024), "files")).toBe("too large: 30 MB, limit 25 MB");
+    expect(refuseFile(sized(30 * 1024 * 1024), "files", "studio-mac")).toBe("That picture is too big for studio-mac.");
     expect(refuseFile(sized(9 * 1024 * 1024), "files")).toBeNull();
-    expect(refuseFile(sized(9 * 1024 * 1024), "path")).toBe("too large: 9 MB, limit 8 MB");
-    expect(refuseFile(sized(9 * 1024 * 1024))).toBe("too large: 9 MB, limit 8 MB");
+    expect(refuseFile(sized(9 * 1024 * 1024), "path", "studio-mac")).toBe("That picture is too big for studio-mac.");
     expect(refuseFile(sized(10, "image/heic"), "files")).toBe(
-      "not an image we can send (image/heic); PNG, JPEG, GIF or WebP",
+      "That kind of picture can't be sent. Use PNG, JPEG, GIF or WebP.",
     );
+    expect(refuseFile(sized(10, "text/plain"), "files")).toBe("That file isn't a picture.");
     expect(TOGETHER_WORDS).toBe("These pictures are over 50 MB together. Remove one.");
   });
 });
@@ -241,19 +244,69 @@ describe("uploading a picture as a prompt's file", () => {
     expect(NOT_WHOLE_WORDS).toBe("The picture didn't arrive whole. Try again.");
   });
 
-  it("says the receiver's own sentence for a file that is not the picture its type says", async () => {
+  it("says why in words (uploadWords), with Retry only where trying again can help", async () => {
+    const failure = (p: Promise<unknown>) =>
+      p.then(
+        () => null,
+        (e: UploadFailed) => ({ words: e.message, retry: e.retry }),
+      );
     receiver(() => ({
       status: 415,
       body: { reason: "not_an_image", error: "This file isn't the picture its type says." },
     }));
-    await expect(uploadPicture(file(), "kiwi.png", M)).rejects.toThrow("This file isn't the picture its type says.");
+    expect(await failure(uploadPicture(file(), "kiwi.png", M))).toEqual({
+      words: "That file isn't a picture.",
+      retry: false,
+    });
     receiver(() => ({
       status: 507,
       body: { reason: "full", error: "Too many files are held here; try again tomorrow." },
     }));
-    await expect(uploadPicture(file(), "kiwi.png", M)).rejects.toThrow("Too many files are held here");
+    expect(await failure(uploadPicture(file(), "kiwi.png", M))).toEqual({
+      words: "127.0.0.1 has no room for more files today.",
+      retry: false,
+    });
     receiver(() => ({ status: 502, body: {} }));
-    await expect(uploadPicture(file(), "kiwi.png", M)).rejects.toThrow("upload failed (http_502)");
+    expect(await failure(uploadPicture(file(), "kiwi.png", M))).toEqual({
+      words: "The picture didn't reach 127.0.0.1. Try again.",
+      retry: true,
+    });
+    // The app's hub gives up on a slow receiver in plain text.
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response("the receiver didn't answer", { status: 504, headers: { "content-type": "text/plain" } }),
+    );
+    expect(await failure(uploadPicture(file(), "kiwi.png", M))).toEqual({
+      words: "The picture didn't finish uploading: the connection is slow. Try again, or use Wi-Fi.",
+      retry: true,
+    });
+    // A busy receiver's Retry-After is the minutes said.
+    vi.stubGlobal("fetch", async () =>
+      Response.json({ reason: "rate_limited" }, { status: 429, headers: { "retry-after": "120" } }),
+    );
+    expect(await failure(uploadPicture(file(), "kiwi.png", M))).toEqual({
+      words: "That's a lot of pictures in a short time. Try again in 2 minutes.",
+      retry: true,
+    });
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    expect(await failure(uploadPicture(file(), "kiwi.png", M))).toEqual({
+      words: "The picture didn't upload: 127.0.0.1 can't be reached. Try again.",
+      retry: true,
+    });
+  });
+
+  it("a stop is no failure: an upload whose picture was removed ends as it was stopped", async () => {
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      throw new DOMException("stopped", "AbortError");
+    });
+    const stop = new AbortController();
+    await expect(uploadPicture(file(), "kiwi.png", M, { signal: stop.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    });
   });
 });
 
@@ -628,5 +681,21 @@ describe("a prompt's words for a one-line preview", () => {
     expect(promptWords("  Just words, with an Images attached mention.  ")).toBe(
       "Just words, with an Images attached mention.",
     );
+  });
+});
+
+describe("what the tray's line says while pictures upload", () => {
+  it("how far they are where the bytes are counted (a browser), else their size (the apps)", () => {
+    const MB = 1024 * 1024;
+    expect(progressWords(2.1 * MB, 1.25 * MB)).toBe("Uploading 1.2 of 2.1 MB…");
+    expect(progressWords(2.1 * MB, 0)).toBe("Uploading 0.0 of 2.1 MB…");
+    expect(progressWords(2.1 * MB, 3 * MB)).toBe("Uploading 2.1 of 2.1 MB…");
+    expect(progressWords(12.4 * MB, 5.6 * MB)).toBe("Uploading 5 of 12 MB…");
+    expect(progressWords(640 * 1024, 300 * 1024)).toBe("Uploading 300 of 640 KB…");
+    expect(progressWords(2.1 * MB)).toBe("Uploading 2.1 MB…");
+  });
+  it("that a send waits for them, counted", () => {
+    expect(waitingWords(1)).toBe("Waiting for 1 picture to finish uploading.");
+    expect(waitingWords(3)).toBe("Waiting for 3 pictures to finish uploading.");
   });
 });

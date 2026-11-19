@@ -377,7 +377,7 @@ test("a pasted screenshot becomes a thumbnail; the sent text ends with the block
   await expect(page.locator(".ctl-foot[data-reason=passkey] .ctl-hint")).toHaveText(
     "The first send today asks for your passkey.",
   );
-  await expect(page.getByLabel("Attach images")).toBeAttached();
+  await expect(page.getByLabel("Attach pictures")).toBeAttached();
 
   await box.fill("Make the header look like this");
   await paste(page, [{ name: "Screenshot.png", type: "image/png", base64: SCREEN }]);
@@ -442,7 +442,7 @@ test("dropped files highlight the composer and attach; × takes one back; images
   const kept = await items.nth(1).getAttribute("data-attachment");
   await shot(page, "composer-two-thumbnails-desktop", ".sess-ctl");
 
-  await items.nth(0).getByRole("button", { name: "Remove image" }).click();
+  await items.nth(0).getByRole("button", { name: "Remove picture" }).click();
   await expect(items).toHaveCount(1);
   await expect.poll(async () => (await fetch(`${base}/attachments/${dropped}.png`)).status).toBe(404);
   expect((await fetch(`${base}/attachments/${kept}.png`)).status).toBe(200);
@@ -471,20 +471,20 @@ test("a 9 MB picture is made smaller first, and one that can't be is refused bef
   const held = await fetch(`${base}/attachments/${small}.webp`);
   expect(held.status).toBe(200);
   expect((await held.arrayBuffer()).byteLength).toBeLessThan(1024 * 1024);
-  await item.getByRole("button", { name: "Remove image" }).click();
+  await item.getByRole("button", { name: "Remove picture" }).click();
   await expect(item).toHaveCount(0);
 
   // A GIF is never redrawn (it may be animated): over 8 MB, it can't go where the prompt names its path.
   await paste(page, [{ name: "huge.gif", type: "image/gif", base64: GIF, padTo: 9 * 1024 * 1024 }]);
   await expect(item).toHaveAttribute("data-state", "error");
-  await expect(item.locator(".att-meta")).toHaveText("That picture is over 8 MB.");
+  await expect(page.locator(".att-note")).toHaveText("That picture is over 8 MB.");
   // Nothing was uploaded for it, and Send will not take it.
   const before = (await (await fetch(`${base}/api/ui/info`)).json()) as { storage: { attachments: number } };
   await composer(page).fill("try anyway");
   await composer(page).press("Enter");
-  await expect(page.locator(".att-note")).toContainText("remove the image that could not be attached");
+  await expect(page.locator(".att-note")).toHaveText("Remove the picture that didn't upload.");
   expect(await daemon.poll(0)).toEqual([]);
-  await item.getByRole("button", { name: "Remove image" }).click();
+  await item.getByRole("button", { name: "Remove picture" }).click();
   await expect(item).toHaveCount(0);
   await composer(page).fill("");
 
@@ -552,7 +552,7 @@ test("a 390 px phone composes with the native picker and the same thumbnails", a
   await composer(p).fill("From the phone");
   await shot(p, "composer-thumbnail-phone", ".sess-ctl");
   await shot(p, "session-phone");
-  await item.getByRole("button", { name: "Remove image" }).click();
+  await item.getByRole("button", { name: "Remove picture" }).click();
   await expect(item).toHaveCount(0);
   await phone.close();
 });
