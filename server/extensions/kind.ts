@@ -7,6 +7,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { withoutBom } from "../config.js";
 
 export type ExtensionKindName = "view" | "skin" | "plugin";
 
@@ -59,7 +60,7 @@ export function readManifestOf<M extends BaseManifest>(kind: ExtensionKind<M>, d
   if (!existsSync(file)) throw new Error(`no ${kind.manifestFile}`);
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(file, "utf8"));
+    raw = JSON.parse(withoutBom(readFileSync(file, "utf8")));
   } catch (e) {
     throw new Error(`${kind.manifestFile} is not valid JSON: ${(e as Error).message}`);
   }

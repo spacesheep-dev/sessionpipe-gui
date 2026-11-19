@@ -19,6 +19,7 @@ import path from "node:path";
 import { ulid } from "sessionpipe-core";
 import type { ControlCommand, SignedCommand } from "sessionpipe-core/control";
 import type { Applied, ControlActivity, ControlOutcome, MachineControl, TrustedKey } from "../../shared/api.js";
+import { ConfigError, withoutBom } from "../config.js";
 import { FileStore } from "./files.js";
 import { type AckIn, type Hello, isFinal, MACHINE_RE } from "./parse.js";
 import { type RemoteJobWord, RemoteSlice } from "./remote.js";
@@ -122,10 +123,47 @@ function writeAtomic(file: string, data: unknown): void {
 
 function readJson<T>(file: string): T | null {
   try {
-    return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as T) : null;
+    return existsSync(file) ? (JSON.parse(withoutBom(readFileSync(file, "utf8"))) as T) : null;
   } catch {
     return null;
   }
+}
+
+const MACHINES_HOLD =
+  "it holds every machine paired with this receiver, and the queued sends of a machine missing from it are deleted. " +
+  "Fix it, or move it aside to start fresh (machines then pair again), then run this again.";
+
+/** What machines.json holds: null when it is missing (no machine paired yet). One with a
+ *  byte-order mark is read past it; one that cannot be read, is empty (the receiver never
+ *  writes one), does not parse or holds no machines list throws a ConfigError and is left as it is, like
+ *  config.json (config.ts): reading it as "no machines" would delete every machine's
+ *  queued sends at start, and the next pairing or hello would write over every pairing.
+ *  The message names the file but never quotes it. */
+function readMachinesFile(file: string): MachinesFile | null {
+  let text: string;
+  try {
+    text = withoutBom(readFileSync(file, "utf8"));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    throw new ConfigError(`${file} could not be read (${code}), so it was not written over: ${MACHINES_HOLD}`);
+  }
+  if (!text.trim()) throw new ConfigError(`${file} is empty, so it was not written over: ${MACHINES_HOLD}`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    const m = (e as Error).message;
+    const at = (/line \d+ column \d+/.exec(m) ?? /position \d+/.exec(m))?.[0];
+    throw new ConfigError(
+      `${file} is not valid JSON${at ? ` at ${at}` : ""}, so it was not written over: ${MACHINES_HOLD}`,
+    );
+  }
+  // The receiver always writes { v: 1, machines: [...] }; an object without that list
+  // would be read as "no machines" just the same.
+  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as Partial<MachinesFile>).machines))
+    throw new ConfigError(`${file} holds no list of machines, so it was not written over: ${MACHINES_HOLD}`);
+  return parsed as MachinesFile;
 }
 
 type Waiter = { resolve: (messages: MessageRow[]) => void; timer: NodeJS.Timeout };
@@ -167,7 +205,7 @@ export class ControlState {
 
   constructor(readonly dir: string) {
     this.files = new FileStore(path.join(dir, "files"));
-    const mf = readJson<MachinesFile>(this.machinesFile);
+    const mf = readMachinesFile(this.machinesFile);
     for (const m of mf?.machines ?? []) if (m && typeof m.id === "string") this.machinesById.set(m.id, m);
     const qdir = path.join(dir, "queue");
     if (existsSync(qdir))
