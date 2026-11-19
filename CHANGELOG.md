@@ -32,6 +32,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   the picture was missing from it, and the daily clean-up did not see it in the stored
   events, so a picture a session still named was removed once it was 30 days old. Both now
   read either slash.
+- A session's "missing events" flag waits 30 s from when each hole opened. When an older
+  hole filled while a newer one was still open, the newer one kept the older one's time,
+  so it was flagged at once, with a "since" from before it opened.
 
 ## [0.8.5] - 2026-11-18
 
