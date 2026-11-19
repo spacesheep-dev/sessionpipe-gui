@@ -224,7 +224,8 @@ export interface ThemeApi {
   };
 
   /** The host's React and ReactDOM, for themes that want them without bundling their
-   *  own. A theme built with JSX can map `react` and `react-dom` to these. */
+   *  own. A theme built with JSX can map `react` and `react-dom` to these. React 19 (18
+   *  up to 0.8.5; `React.version` says which): no `ReactDOM.render` or `findDOMNode`. */
   react?: { React: unknown; ReactDOM: unknown; createRoot: unknown };
 
   /** Shared helpers the host already has: relative time, durations, titles. */

@@ -23,7 +23,7 @@ client against a receiver you can see into.
 |---|---|---|
 | Runtime | Node ≥ 20, ESM, TypeScript, `node:http` | Same floor as sessionpipe; nothing to install beyond `npx` |
 | Deps | `sessionpipe-core` (types, `filterEvent`, `Outbox`, control verifier), `qrcode`. Nothing else at runtime | Keep it as light as the client |
-| Web | React 18 + Vite, hand-written CSS with design tokens, no component library | Distinctive, fast, small |
+| Web | React 19 + Vite, hand-written CSS with design tokens, no component library | Distinctive, fast, small |
 | Live updates | SSE `GET /api/ui/stream`: a snapshot first, then deltas | Works through any proxy, reconnects by itself |
 | Storage | `~/.local/state/sessionpipe-gui/events/<harness>/<session>.jsonl` (append-only, full events) + an index rebuilt at boot | No DB; `forget` deletes one file |
 | Memory | Index holds summaries and *slim* events (tool `input`/`output` cut to a 2 KB preview, `output` kept as length + preview; 280 chars once an event is older than `--keep-days`, default 14); full data is read back from the file by byte offset on demand. Boot streams each file line by line and keeps only the slim copy, so a 150 MB session file never sits in memory | 100k events must fit |
