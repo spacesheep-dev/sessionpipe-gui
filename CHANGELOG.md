@@ -169,6 +169,10 @@ answers: a browser on its own pages, a proxy's visitor by the proxy's own word, 
 pairing link that carries the board's key only for a pairing the sink token started.
 
 ### Changed
+- **Sessions opened one after another beside the page share one tab.** A plain open beside
+  the page reuses one preview tab, its title in italics; typing in it, a double-click on the
+  tab or a drag keeps it, and an open holding ⌘ adds a kept tab. Answering keeps nothing, so
+  going down the Inbox leaves one tab.
 - **On a computer, the notifications hold still under your hand.** Prompts sit nearest the
   corner, newest first, with a failed turn, Delivered and "Hidden · Undo" under them, so a
   passing card never pushes a prompt's Allow down. While the pointer or focus is on them,

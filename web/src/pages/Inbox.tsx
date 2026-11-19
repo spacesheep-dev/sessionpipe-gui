@@ -405,7 +405,9 @@ function InboxRow({
   // Below tier 1 the message and the tool stay on the sending machine.
   const a = lens === 0 ? { ...raw, message: undefined, tool: undefined } : raw;
   const ref = useRef<HTMLLIElement>(null);
-  const open = (background = false) => openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background });
+  // A plain click is a preview, which the next one replaces; ⌘-click a kept background tab.
+  const open = (background = false) =>
+    openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background, preview: !background });
   const answerMenu = useRef<MenuList>([]);
   const menu = useContextMenu(
     () => [

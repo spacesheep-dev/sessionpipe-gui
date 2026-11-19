@@ -234,7 +234,8 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   };
   useShortcut("list.down", () => (hrefs.length ? move(1) : false), { enabled });
   useShortcut("list.up", () => (hrefs.length ? move(-1) : false), { enabled });
-  const open = (mode: "page" | "beside" | "background", at = cursor) => {
+  /** `preview`: a plain open (↵, Space, ⌘1–9), whose tab the next one replaces (lib/split.ts). */
+  const open = (mode: "page" | "beside" | "background", at = cursor, preview = false) => {
     const href = hrefs[at];
     if (!href) return false;
     if (opts.open) return opts.open(at);
@@ -246,17 +247,18 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
           document.querySelector(`[data-cursor="${at}"]`) ?? root().querySelectorAll("[data-nav-item]")[at]
         )?.getBoundingClientRect(),
         background: mode === "background",
+        preview,
       });
     } else navigate(href);
     return true;
   };
   // ↵ opens the way Settings says, ⇧↵ the other way, ⌘↵ in a background tab (lib/split.ts
   // openWay), so each does what the row's menu shows beside it.
-  useShortcut("list.open", () => open(openWay("primary")), { enabled });
+  useShortcut("list.open", () => open(openWay("primary"), cursor, true), { enabled });
   useShortcut("list.beside", () => open(openWay("other")), { enabled });
   useShortcut("list.background", () => open(openWay("background")), { enabled });
   // Space: the row beside the page, the focus staying on the list (Quick Look).
-  useShortcut(opts.peek ?? "board.peek", () => (opts.peek && keys?.[cursor] ? open("beside") : false), {
+  useShortcut(opts.peek ?? "board.peek", () => (opts.peek && keys?.[cursor] ? open("beside", cursor, true) : false), {
     enabled: enabled && !!opts.peek,
   });
   // `.`: the row's own right-click menu, under the row, the keyboard's way in.
@@ -295,7 +297,7 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   // ⌘1–9, the installed app only: the nth row of the list as it stands.
   const jump = (i: number) => () => {
     if (!installedApp() || inPanel() || !hrefs[i]) return false;
-    return open(openWay("primary"), i);
+    return open(openWay("primary"), i, true);
   };
   useShortcut("list.jump1", jump(0), { enabled });
   useShortcut("list.jump2", jump(1), { enabled });

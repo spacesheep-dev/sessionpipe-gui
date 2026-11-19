@@ -17,18 +17,24 @@ import { cleanTitle, plainTitle, repoShort } from "../lib/format";
 import { copyItem, openOutside } from "../lib/menus";
 import { navigate, sessionPath } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit } from "../lib/split";
+import { type OpenSplitOptions, openSplit } from "../lib/split";
 import { ago, clock, durCoarse, useNow } from "../lib/time";
 
 const DAY_MS = 86_400_000;
 
 /** Opens a session beside the page at one of its rows: the panel reads `#seq-N` once
- *  (components/SessionView.tsx) and scrolls there instead of to the latest turn. */
-function openAt(key: string, seq: number | undefined, from?: DOMRect) {
-  openSplit(key, { from });
+ *  (components/SessionView.tsx) and scrolls there instead of to the latest turn. A row's
+ *  click is a preview (lib/split.ts); a menu's Open beside keeps its tab. */
+function openAt(key: string, seq: number | undefined, opts: OpenSplitOptions = {}) {
+  openSplit(key, opts);
   if (seq === undefined) return;
   history.replaceState(null, "", `${location.pathname}${location.search}#seq-${seq}`);
   window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+/** A row's click: plain, a preview; holding ⌘ (Ctrl), a kept tab in the background. */
+function rowOpen(e: { metaKey: boolean; ctrlKey: boolean }): OpenSplitOptions {
+  return e.metaKey || e.ctrlKey ? { background: true } : { preview: true };
 }
 
 /** The browser's local day as YYYY-MM-DD, and its UTC offset in minutes (getTimezoneOffset's sign). */
@@ -261,7 +267,7 @@ function PathRow({ p, repo, now }: { p: FilesPage["repos"][number]["paths"][numb
             type="button"
             className="rv-sess"
             title={`Open ${titleOf(s.title)}`}
-            onClick={() => openAt(s.key, undefined)}
+            onClick={(e) => openAt(s.key, undefined, rowOpen(e))}
           >
             <LabelDot session={s.key} />
             {titleOf(s.title)}
@@ -454,7 +460,12 @@ function DayRow({ s }: { s: Digest["sessions"][number] }) {
         <span className="rv-cell">
           <HarnessGlyph name={s.harness} size="sm" />
           <LabelDot session={s.key} />
-          <button type="button" className="rv-link" title={`Open ${title}`} onClick={() => openAt(s.key, undefined)}>
+          <button
+            type="button"
+            className="rv-link"
+            title={`Open ${title}`}
+            onClick={(e) => openAt(s.key, undefined, rowOpen(e))}
+          >
             {title}
           </button>
           <span className="rv-span num">

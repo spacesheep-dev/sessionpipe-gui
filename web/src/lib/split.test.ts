@@ -1,11 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
-// The side panel's state as the URL and its mirror carry it, and the phone's exception:
-// there a session opens as its page, nothing is mirrored and nothing is restored.
+// The side panel's state as the URL and its mirror carry it, the one preview tab a plain
+// open replaces, and the phone's exception: there a session opens as its page, nothing is
+// mirrored and nothing is restored.
 import "../native/test-env";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PHONE_QUERY } from "./device";
 import { setSettings } from "./settings";
-import { agentTabKey, type OpenHow, openSplit, openWay, parseSplit, restoreSplit, tabPath } from "./split";
+import {
+  agentTabKey,
+  closeTab,
+  keepTab,
+  moveTab,
+  type OpenHow,
+  openSplit,
+  openWay,
+  parseSplit,
+  previewTab,
+  restoreSplit,
+  tabPath,
+} from "./split";
 
 const g = globalThis as Record<string, unknown>;
 const KEY_TABS = "sessionpipe-gui.splitTabs";
@@ -63,6 +76,105 @@ describe("on a desktop", () => {
     at("/machines");
     restoreSplit();
     expect(where()).toBe("/machines?s=claude-code%3Aabc");
+  });
+});
+
+describe("preview tabs: a plain open replaces the one preview tab instead of adding one", () => {
+  const tabs = () => parseSplit(new URL(where(), "http://x/").searchParams.get("s"), null).tabs;
+  const active = () => {
+    const q = new URL(where(), "http://x/").searchParams;
+    return parseSplit(q.get("s"), q.get("t")).tabs[Number(q.get("t") ?? 0)];
+  };
+  beforeEach(() => {
+    phone(false);
+    restoreSplit();
+  });
+  it("a plain open replaces the preview, in place, and switches to a session already open", () => {
+    openSplit("claude-code:a", { preview: true });
+    expect(previewTab()).toBe("claude-code:a");
+    openSplit("claude-code:b", { preview: true });
+    openSplit("claude-code:c", { preview: true });
+    expect(tabs()).toEqual(["claude-code:c"]);
+    expect(previewTab()).toBe("claude-code:c");
+    // Beside a kept tab the preview is swapped where it stands, and becomes the active one.
+    openSplit("claude-code:k");
+    openSplit("claude-code:d", { preview: true });
+    expect(tabs()).toEqual(["claude-code:d", "claude-code:k"]);
+    expect(active()).toBe("claude-code:d");
+    openSplit("claude-code:k", { preview: true });
+    expect(active()).toBe("claude-code:k");
+    expect(tabs()).toEqual(["claude-code:d", "claude-code:k"]);
+    expect(previewTab()).toBe("claude-code:d");
+  });
+
+  it("a kept tab is never replaced: an explicit open, a drag, or a closed preview leave none", () => {
+    openSplit("claude-code:a");
+    expect(previewTab()).toBeNull();
+    openSplit("claude-code:b", { preview: true });
+    // Opened explicitly while it is the preview: kept.
+    openSplit("claude-code:b");
+    expect(previewTab()).toBeNull();
+    openSplit("claude-code:c", { preview: true });
+    expect(tabs()).toEqual(["claude-code:a", "claude-code:b", "claude-code:c"]);
+    moveTab(2, 0);
+    expect(previewTab()).toBeNull();
+    openSplit("claude-code:d", { preview: true });
+    expect(tabs()).toEqual(["claude-code:c", "claude-code:a", "claude-code:b", "claude-code:d"]);
+    closeTab(3);
+    expect(previewTab()).toBeNull();
+    // The same session opened again explicitly is not taken for a preview.
+    openSplit("claude-code:d");
+    expect(previewTab()).toBeNull();
+    openSplit("claude-code:e", { preview: true });
+    expect(tabs()).toHaveLength(5);
+    // An agent's tab opened beside the preview session keeps the session's, so the pair holds.
+    openSplit(agentTabKey("claude-code:e", "ag1"));
+    expect(previewTab()).toBeNull();
+    openSplit("claude-code:f", { preview: true });
+    expect(tabs()).toEqual([
+      "claude-code:c",
+      "claude-code:a",
+      "claude-code:b",
+      "claude-code:d",
+      "claude-code:e",
+      agentTabKey("claude-code:e", "ag1"),
+      "claude-code:f",
+    ]);
+  });
+
+  it("⌘-open adds a kept background tab, and leaves the preview where it is", () => {
+    openSplit("claude-code:a", { preview: true });
+    openSplit("claude-code:b", { background: true, preview: true });
+    expect(tabs()).toEqual(["claude-code:a", "claude-code:b"]);
+    expect(active()).toBe("claude-code:a");
+    expect(previewTab()).toBe("claude-code:a");
+    openSplit("claude-code:c", { preview: true });
+    expect(tabs()).toEqual(["claude-code:c", "claude-code:b"]);
+  });
+
+  it("typing keeps the tab, an agent's too, and no other", () => {
+    openSplit("claude-code:a", { preview: true });
+    keepTab("claude-code:other");
+    expect(previewTab()).toBe("claude-code:a");
+    keepTab("claude-code:a");
+    expect(previewTab()).toBeNull();
+    openSplit(agentTabKey("claude-code:b", "ag1"), { preview: true });
+    keepTab("claude-code:b");
+    expect(previewTab()).toBeNull();
+    // Answering keeps nothing: test/e2e/inbox.spec.ts answers in the preview and opens the next.
+  });
+
+  it("a reload restores every tab and drops the preview mark", async () => {
+    openSplit("claude-code:a");
+    openSplit("claude-code:b", { preview: true });
+    vi.resetModules();
+    const fresh = await import("./split");
+    at("/inbox");
+    fresh.restoreSplit();
+    expect(tabs()).toEqual(["claude-code:a", "claude-code:b"]);
+    expect(fresh.previewTab()).toBeNull();
+    fresh.openSplit("claude-code:c", { preview: true });
+    expect(tabs()).toEqual(["claude-code:a", "claude-code:b", "claude-code:c"]);
   });
 });
 

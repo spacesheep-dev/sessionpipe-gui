@@ -549,6 +549,79 @@ test.describe("inbox: Allow only beside a whole request", () => {
   });
 });
 
+test.describe("inbox: one preview tab", () => {
+  test("row clicks one after another reuse one italic tab; an answer leaves it, typing and a double-click keep it", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `preview-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const prompts = await Promise.all(
+      ["First", "Second", "Third", "Fourth", "Fifth"].map((title, i) =>
+        postPrompt(token, {
+          machine: d.name,
+          title: `${title} preview`,
+          agoMs: 3_000 + i * 1_000,
+          message: "npm test",
+        }),
+      ),
+    );
+    const [a, b, c, e, f] = prompts;
+    if (!a || !b || !c || !e || !f) throw new Error("five prompts");
+    const answers = () => d.seen.filter((x) => x.kind === "permission.answer").map((x) => x.for);
+    const panel = page.locator("aside.panel");
+    const tabs = panel.locator("[role='tablist'] [role='tab']");
+    const italic = (l: Locator) => l.evaluate((el) => getComputedStyle(el).fontStyle);
+    const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
+      for (const p of [a, b, c]) {
+        await row(p).locator(".inbox-main").click();
+        await expect(panel).toHaveAttribute("data-split", p.key);
+      }
+      // Three clicks, one tab: the preview, in italics. Alone it is the head's title.
+      await expect(tabs).toHaveCount(1);
+      await expect(tabs.first()).toHaveClass(/tab--preview/);
+      await expect(panel.getByRole("heading", { name: "Third preview, preview" })).toBeVisible();
+      expect(await italic(panel.locator(".panel-title"))).toBe("italic");
+      // The head is the window's drag region, where a double-click zooms: it keeps nothing.
+      await panel.locator(".panel-title").dblclick();
+      await expect(tabs.first()).toHaveClass(/tab--preview/);
+      // Triage: an answer in it does not keep it, the next click still takes its place.
+      const body = panel.locator(".panel-body:not(.panel-body--off)");
+      await body.locator(".ctl .btn--allow").click();
+      await expect.poll(answers, { timeout: 15_000 }).toEqual([c.attention]);
+      await row(e).locator(".inbox-main").click();
+      await expect(panel).toHaveAttribute("data-split", e.key);
+      await expect(tabs).toHaveCount(1);
+      // Typing in its message field keeps it: upright, and the next click adds a tab.
+      await body.locator(".ctl textarea").fill("Run the tests again");
+      await expect(tabs.first()).not.toHaveClass(/tab--preview/);
+      expect(await italic(panel.locator(".panel-title"))).toBe("normal");
+      await expect(panel.getByRole("heading", { name: "Fourth preview", exact: true })).toBeVisible();
+      await row(f).locator(".inbox-main").click();
+      await expect(tabs).toHaveCount(2);
+      await expect(tabs.nth(1)).toHaveClass(/tab--preview/);
+      await expect(tabs.nth(1)).toHaveAccessibleName("Fifth preview, preview");
+      await expect(tabs.nth(0)).toHaveAccessibleName("Fourth preview");
+      expect(await italic(tabs.nth(1).locator(".tab-title"))).toBe("italic");
+      expect(await italic(tabs.nth(0).locator(".tab-title"))).toBe("normal");
+      // A double-click on the tab keeps it.
+      await tabs.nth(1).dblclick();
+      await expect(tabs.nth(1)).not.toHaveClass(/tab--preview/);
+      await row(a).locator(".inbox-main").click();
+      await expect(tabs).toHaveCount(3);
+    } finally {
+      for (const p of prompts) await p.clear();
+      await d.stop();
+    }
+  });
+});
+
 test.describe("installable", () => {
   test("the manifest and the install-only service worker are served", async ({ page, request }) => {
     await openPage(page, "/");

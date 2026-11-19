@@ -8,10 +8,13 @@
 // session opened as a page leaves it, the other tabs staying beside that page. It shows
 // beside the pages that list sessions (and a session's page, and Settings, a window over
 // the board); on the others (Setup, Connect, /phone, a missing page) it steps aside, its
-// tabs kept for the way back. On the phone there is no beside: a session opened "beside"
-// is its page, pushed over the list (lib/transitions.ts), a session's page carries no
-// tabs, and nothing of the panel is restored on the next launch (a modal sheet over every
-// page is not how a phone wakes up).
+// tabs kept for the way back. A plain open is a preview (italic): the next plain open
+// takes its place instead of adding a tab, until the person keeps it (keepTab); which tab
+// that is lives here, not in the URL, so a reload keeps every tab and drops the mark. On
+// the phone there is no beside: a session opened "beside" is its page, pushed over the
+// list (lib/transitions.ts), a session's page carries no tabs, and nothing of the panel
+// is restored on the next launch (a modal sheet over every page is not how a phone wakes
+// up).
 import { type SessionKey, splitKey } from "@shared/api";
 import { useMemo, useSyncExternalStore } from "react";
 import { phoneLayout } from "./device";
@@ -179,6 +182,50 @@ export interface OpenSplitOptions {
   from?: Rect;
   /** Add the tab without switching to it (unless the panel was closed). */
   background?: boolean;
+  /** A plain open (a click, ↵, Space, a toast): it takes the preview tab's place, if
+   *  there is one, instead of adding a tab. Without it the tab is kept. */
+  preview?: boolean;
+}
+
+// ----- the preview tab -----
+
+/** The one tab a plain open may replace, by its key; null when every tab is kept. */
+let preview: SessionKey | null = null;
+const previewListeners = new Set<() => void>();
+function setPreview(key: SessionKey | null): void {
+  if (preview === key) return;
+  preview = key;
+  for (const l of previewListeners) l();
+}
+// A preview tab that left the strip (closed, opened as its page, Back) is no longer one.
+onLocation(() => {
+  if (preview && !current().tabs.includes(preview)) setPreview(null);
+});
+
+/** The preview tab's key, or null. */
+export function previewTab(): SessionKey | null {
+  return preview && current().tabs.includes(preview) ? preview : null;
+}
+
+/** Keeps the tab from now on: the next plain open adds its own. For a key that is no
+ *  tab's, or a kept one, nothing. A session's key keeps its agents' tab too, as typing
+ *  in the session's composer does. */
+export function keepTab(key: SessionKey): void {
+  if (preview && (preview === key || parseTab(preview).session === key)) setPreview(null);
+}
+
+/** The preview tab's key, live (null when every tab is kept). */
+export function usePreviewTab(): SessionKey | null {
+  return useSyncExternalStore(
+    (l) => {
+      previewListeners.add(l);
+      return () => {
+        previewListeners.delete(l);
+      };
+    },
+    () => preview,
+    () => preview,
+  );
 }
 
 /** The page a tab opens as on the phone: the session's, on its agent for an agent tab. */
@@ -189,22 +236,37 @@ export function tabPath(tab: SessionKey): string {
 }
 
 /** Opens `key` beside the page. On the phone that is its page, pushed (a row opens its
- *  detail, with the list behind the back button); `background` has no meaning there. */
+ *  detail, with the list behind the back button); `background` and `preview` have no
+ *  meaning there. A session already open is switched to (an explicit open keeps it).
+ *  Otherwise a preview open takes the preview tab's place, in the same history entry,
+ *  or adds a preview tab when there is none; any other open adds a kept tab. */
 export function openSplit(key: SessionKey, opts: OpenSplitOptions = {}): void {
   if (phoneLayout()) {
     navigate(tabPath(key));
     return;
   }
   const st = current();
+  const asPreview = !!opts.preview && !opts.background;
   const i = st.tabs.indexOf(key);
   if (i >= 0) {
+    if (!asPreview && preview === key) setPreview(null);
     if (!opts.background && i !== st.active) commit({ ...st, active: i }, { replace: true });
+    return;
+  }
+  const was = previewTab();
+  if (asPreview && was) {
+    const tabs = st.tabs.map((k) => (k === was ? key : k));
+    setPreview(key);
+    commit({ tabs, active: tabs.indexOf(key) }, { replace: true });
     return;
   }
   if (st.tabs.length === 0) pendingFrom = opts.from ?? null;
   const at = insertAt(st.tabs, key);
   const tabs = [...st.tabs.slice(0, at), key, ...st.tabs.slice(at)];
   const kept = st.tabs[st.active];
+  if (asPreview) setPreview(key);
+  // An agent's tab opened beside its session keeps the session's: the pair stays together.
+  else if (preview && preview === parseTab(key).session) setPreview(null);
   commit({ tabs, active: opts.background && kept ? tabs.indexOf(kept) : at });
 }
 
@@ -242,6 +304,8 @@ export function moveTab(from: number, to: number): void {
   const tabs = [...st.tabs];
   const [k] = tabs.splice(from, 1);
   tabs.splice(to, 0, k!);
+  // A tab moved by hand is one the person means to keep.
+  if (preview === k) setPreview(null);
   const activeKey = st.tabs[st.active]!;
   commit({ tabs, active: tabs.indexOf(activeKey) }, { replace: true });
 }

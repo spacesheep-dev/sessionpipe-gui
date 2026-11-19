@@ -223,8 +223,8 @@ export const SessionCard = memo(function SessionCard({
   const slow = !!tool && s.state === "working" && !!s.flags?.some((f) => f.kind === "slow_tool");
   const attnTool = attention?.tool && showTools ? attention.tool : undefined;
   const ref = useRef<HTMLElement>(null);
-  const beside = (o: { background: boolean } = { background: false }) =>
-    openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background: o.background });
+  const beside = (o: { background?: boolean; preview?: boolean } = {}) =>
+    openSplit(s.key, { from: ref.current?.getBoundingClientRect(), ...o });
   // ⇧-click goes the other way from a plain click, ⌘-click to a background tab (lib/split.ts).
   const modClick = (o: { background: boolean }) => {
     const way = openWay(o.background ? "background" : "other");
@@ -354,7 +354,7 @@ export const SessionCard = memo(function SessionCard({
           className="card-link"
           title={tip}
           modClick={modClick}
-          plainClick={openBeside ? () => beside() : undefined}
+          plainClick={openBeside ? () => beside({ preview: true }) : undefined}
           data-nav-item=""
           onKeyDown={
             agents.length > 0

@@ -9,8 +9,11 @@
 // head have their own menus. A dragged tab rides under the pointer while its neighbours
 // slide out of its way; a reordered tab slides to its place and a new one fades in; an
 // overflowing strip fades at the edge that has more. Opening from a rectangle morphs a
-// ghost of it into the panel. Pages that list no sessions (Setup, Connect, /phone,
-// Settings) don't show it.
+// ghost of it into the panel. A preview tab (a plain open, lib/split.ts) has its title in
+// italics, the head's too while it is the only tab; typing in it, a double-click on its
+// tab or a drag keeps it. The head is not double-clicked to keep: it is the window's drag
+// region, where a double-click zooms the window (shell.ts). Pages that list no sessions
+// (Setup, Connect, /phone, Settings) don't show it.
 import type { AgentRun, SessionKey, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
 import {
@@ -43,6 +46,7 @@ import {
   closeSplit,
   closeTab,
   cycleTab,
+  keepTab,
   MOUNTED_MAX,
   moveTab,
   openSplit,
@@ -52,6 +56,7 @@ import {
   setSplitWidth,
   takeFrom,
   usePanelHere,
+  usePreviewTab,
   useSplit,
   useSplitWidth,
 } from "../lib/split";
@@ -155,6 +160,7 @@ function tabLabels(
 
 export function SessionPanel({ phone }: { phone: boolean }) {
   const { tabs, active } = useSplit();
+  const preview = usePreviewTab();
   useHistoryTitles();
   const activeKey = tabs[active] ?? null;
   const width = useSplitWidth();
@@ -364,6 +370,7 @@ export function SessionPanel({ phone }: { phone: boolean }) {
       if (!moved && Math.abs(ev.clientX - startX) < 6) return;
       if (!moved) {
         moved = true;
+        keepTab(key);
         setDragging(key);
       }
       const x = ev.clientX;
@@ -421,6 +428,8 @@ export function SessionPanel({ phone }: { phone: boolean }) {
   // Where it runs, as the title's tooltip: the panel keeps one bar.
   const where = s ? [s.machine, repoShort(s.repo) || undefined].filter(Boolean).join(" · ") : "";
   const bodies = open ? mounted : [];
+  // One tab is the head itself: a preview's title is italic there, and says so.
+  const headPreview = shown.length < 2 && !!activeKey && activeKey === preview;
   const store = useStore();
   const { mode } = useAppSettings();
   const lens = useLens() ?? 3;
@@ -534,7 +543,8 @@ export function SessionPanel({ phone }: { phone: boolean }) {
           )
         )}
         <h2
-          className="panel-title ellipsis"
+          className={`panel-title ellipsis ${headPreview ? "panel-title--preview" : ""}`}
+          aria-label={headPreview ? `${title}, preview` : undefined}
           title={where ? `${title} · ${where}` : title}
           data-tip={where ? `${title} · ${where}` : title}
           data-tip-side="bottom"
@@ -618,6 +628,7 @@ export function SessionPanel({ phone }: { phone: boolean }) {
             agent={parseTab(k).agent ? (agentOf(summary(k), k) ?? null) : undefined}
             paired={!!parseTab(k).agent && i > 0 && parseTab(shown[i - 1]!).session === parseTab(k).session}
             active={k === activeKey}
+            preview={k === preview}
             dragging={dragging === k}
             onPointerDown={(e) => onTabDown(e, i)}
             onAuxClick={(e) => onTabAux(e, i)}
@@ -691,6 +702,7 @@ function PanelTab({
   agent,
   paired,
   active,
+  preview,
   dragging,
   onPointerDown,
   onAuxClick,
@@ -707,6 +719,8 @@ function PanelTab({
   /** An agent tab right after its session's tab: the two read as a pair. */
   paired?: boolean;
   active: boolean;
+  /** A plain open's tab, which the next plain open replaces: its title in italics. */
+  preview: boolean;
   dragging: boolean;
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
   onAuxClick: (e: ReactMouseEvent<HTMLDivElement>) => void;
@@ -719,18 +733,20 @@ function PanelTab({
   });
   return (
     <div
-      className={`tab ${active ? "tab--active" : ""} ${dragging ? "tab--dragging" : ""} ${agent !== undefined ? "tab--agent" : ""} ${paired ? "tab--paired" : ""}`}
+      className={`tab ${active ? "tab--active" : ""} ${preview ? "tab--preview" : ""} ${dragging ? "tab--dragging" : ""} ${agent !== undefined ? "tab--agent" : ""} ${paired ? "tab--paired" : ""}`}
       role="tab"
       aria-selected={active}
       aria-setsize={count}
       aria-posinset={index + 1}
       tabIndex={active ? 0 : -1}
       data-tab-key={k}
+      aria-label={preview ? `${label}, preview` : label}
       title={label}
       data-tip={label}
       data-tip-side="bottom"
       onPointerDown={onPointerDown}
       onAuxClick={onAuxClick}
+      onDoubleClick={() => keepTab(k)}
       onKeyDown={onKeyDown}
       {...props}
     >

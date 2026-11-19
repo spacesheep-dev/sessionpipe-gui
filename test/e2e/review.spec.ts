@@ -48,4 +48,27 @@ test.describe("review", () => {
     await expect(page.locator(".rv-day")).toHaveText("Today");
     await expect(rows.first()).toBeVisible();
   });
+
+  test("a row's click opens one preview tab that the next replaces; holding ⌘ adds a kept tab behind", async ({
+    page,
+  }) => {
+    await openPage(page, "/review");
+    await page.getByRole("tab", { name: "Day" }).click();
+    const links = page.locator("table.rv-table tbody tr button.rv-link");
+    await expect(links.nth(2)).toBeVisible({ timeout: 30_000 });
+    const panel = page.locator("aside.panel");
+    const tabs = panel.locator("[role='tablist'] [role='tab']");
+    await links.nth(0).click();
+    const first = await panel.getAttribute("data-split");
+    await links.nth(1).click();
+    await expect(panel).not.toHaveAttribute("data-split", first ?? "");
+    const second = await panel.getAttribute("data-split");
+    await expect(tabs).toHaveCount(1);
+    await expect(tabs.first()).toHaveClass(/tab--preview/);
+    await links.nth(2).click({ modifiers: [process.platform === "darwin" ? "Meta" : "Control"] });
+    await expect(tabs).toHaveCount(2);
+    await expect(panel).toHaveAttribute("data-split", second ?? "");
+    await expect(tabs.nth(0)).toHaveClass(/tab--preview/);
+    await expect(tabs.nth(1)).not.toHaveClass(/tab--preview/);
+  });
 });

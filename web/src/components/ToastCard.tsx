@@ -33,16 +33,17 @@ export function ToastCard({
   control: (machine: string) => MachineControl | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const open = () => {
+  // A click is a plain open, a preview tab (lib/split.ts); the menu's Open beside keeps it.
+  const open = (preview = true) => {
     if (!t.session) return;
-    openSplit(t.session, { from: ref.current?.getBoundingClientRect() });
+    openSplit(t.session, { from: ref.current?.getBoundingClientRect(), preview });
     dismissToast(t.id);
   };
   const attention = t.attentionId ? session?.openAttentions.find((a) => a.attentionId === t.attentionId) : undefined;
   const answerMenu = useRef<MenuList>([]);
   const menu = useContextMenu(
     () => [
-      t.session && { label: "Open beside", run: open },
+      t.session && { label: "Open beside", run: () => open(false) },
       ...answerMenu.current,
       { sep: true },
       { label: "Copy", items: [copyItem("Title", t.title), copyItem("Message", t.body)] },
@@ -76,7 +77,7 @@ export function ToastCard({
       <button
         type="button"
         className="toast-main"
-        onClick={open}
+        onClick={() => open()}
         disabled={!t.session}
         title={t.session ? "Open the session beside this page" : undefined}
       >
@@ -118,7 +119,7 @@ export function ToastCard({
           control={session.machine ? control(session.machine) : undefined}
           into={answerMenu}
           whole={whole}
-          onOpen={open}
+          onOpen={() => open()}
         />
       )}
     </div>

@@ -114,6 +114,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A preview tab (a plain open, which the next one replaces) has its title in italics, as
+   in Xcode and VS Code; while it is the only tab, the head is the tab. */
+.tab--preview .tab-title,
+.panel-title--preview {
+  font-style: italic;
+}
 /* The tab's close: a 24 px pointer target (WCAG 2.2 2.5.8), shown on hover and on the
    active tab. */
 .tab-close {

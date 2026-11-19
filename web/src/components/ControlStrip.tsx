@@ -67,6 +67,7 @@ import { Link } from "../lib/router";
 import { useLens } from "../lib/settings";
 import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
+import { keepTab } from "../lib/split";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { ActionButton, Spinner, StateDot, WithName } from "./bits";
 import "../control/control.css";
@@ -951,7 +952,11 @@ export function ControlStrip({
             <textarea
               ref={field}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                // Typed in, a preview tab beside the page is kept (lib/split.ts); an answer is not.
+                keepTab(session.key);
+              }}
               onKeyDown={onKey}
               placeholder={named}
               disabled={!enabled}

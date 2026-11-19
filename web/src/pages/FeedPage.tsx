@@ -764,7 +764,7 @@ const FeedRow = memo(function FeedRow({
           className="ev-session ellipsis"
           data-nav-item=""
           title={`${title} · ${e.session.id}`}
-          plainClick={beside ? () => openSplit(key, { from: rect() }) : undefined}
+          plainClick={beside ? () => openSplit(key, { from: rect(), preview: true }) : undefined}
           modClick={(o) => {
             const way = openWay(o.background ? "background" : "other");
             if (way === "page") navigate(path);

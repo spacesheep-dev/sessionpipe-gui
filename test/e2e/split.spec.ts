@@ -876,6 +876,58 @@ test.describe("split panel", () => {
         await expect(page.locator("h1.sess-title")).toBeVisible();
       });
 
+      test("plain clicks reuse one italic preview tab; ⌘-click and a double-click keep theirs; ⌘2 and a close keep the rule", async ({
+        page,
+      }) => {
+        await openBoard(page);
+        await holdBoard(page);
+        const meta: Modifier = process.platform === "darwin" ? "Meta" : "Control";
+        const seen: string[] = [];
+        /** Clicks a card on the board now that no click here has opened yet; its key. */
+        const open = async (modifiers: Modifier[] = []) => {
+          const href = (await another(page, seen).getAttribute("href"))!;
+          seen.push(href);
+          await click(page, href, modifiers);
+          return keyOf(href);
+        };
+        const preview = panel(page).locator(".tab--preview");
+        await open();
+        const b = await open();
+        await expect.poll(() => where(page)).toEqual({ path: "/", s: b, t: null });
+        await expect(tabs(page)).toHaveCount(1);
+        await expect(preview).toHaveCount(1);
+        await expect(panel(page).locator(".panel-title")).toHaveCSS("font-style", "italic");
+        // ⌘-click: a kept tab in the background; the preview stays the active one.
+        const c = await open([meta]);
+        await expect.poll(() => tabKeys(page)).toEqual([b, c]);
+        await expect.poll(() => activeKey(page)).toBe(b);
+        await expect(tabs(page).nth(0)).toHaveClass(/tab--preview/);
+        await expect(tabs(page).nth(0).locator(".tab-title")).toHaveCSS("font-style", "italic");
+        await expect(tabs(page).nth(1).locator(".tab-title")).toHaveCSS("font-style", "normal");
+        // ⌘2 goes to the kept tab; the next plain open still takes the preview's place.
+        await page.keyboard.press(`${meta}+2`);
+        await expect.poll(() => activeKey(page)).toBe(c);
+        const d = await open();
+        await expect.poll(() => tabKeys(page)).toEqual([d, c]);
+        await expect.poll(() => activeKey(page)).toBe(d);
+        // A double-click keeps it; the next plain open adds a preview at the end.
+        await tabs(page).nth(0).dblclick();
+        await expect(preview).toHaveCount(0);
+        const e = await open();
+        await expect.poll(() => tabKeys(page)).toEqual([d, c, e]);
+        await expect(tabs(page).nth(2)).toHaveClass(/tab--preview/);
+        // Closed, the preview is gone: the next plain open adds a tab of its own.
+        await tabs(page).nth(2).locator(".tab-close").click();
+        await expect(tabs(page)).toHaveCount(2);
+        const f = await open();
+        await expect.poll(() => tabKeys(page)).toEqual([d, c, f]);
+        // A reload keeps every tab and drops the mark.
+        await page.reload();
+        await live(page);
+        await expect(tabs(page)).toHaveCount(3);
+        await expect(preview).toHaveCount(0);
+      });
+
       test("what ⇧ does is said as the other way, in Settings and on the row's button", async ({ page }) => {
         await openBoard(page);
         await holdBoard(page);
