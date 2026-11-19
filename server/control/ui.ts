@@ -6,7 +6,6 @@
 // trusts signs a `key.add` for it, CONTROL.md §2). Every route needs the UI's own auth (loopback, or the UI key cookie).
 // Documented route by route in README.md beside this file.
 import { randomBytes } from "node:crypto";
-import * as core from "sessionpipe-core/control";
 import {
   type Assertion,
   b64url,
@@ -18,20 +17,30 @@ import {
   verifyCommand,
   verifyEnrollment,
 } from "sessionpipe-core/control";
-import { type ControlActivity, START_FILE_MAX_BYTES, type StartFile, type TrustedKey } from "../../shared/api.js";
+import {
+  ATTACHMENT_TYPES,
+  type ControlActivity,
+  START_FILE_MAX_BYTES,
+  type TrustedKey,
+  type UploadedFile,
+} from "../../shared/api.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { HttpError } from "../http/router.js";
+import { sniffImage } from "../ui/attachments.js";
 import { MEDIA_TYPE_RE } from "./files.js";
 import { CODE_RE, MACHINE_RE, SESSION_REF } from "./parse.js";
 import { looksLikePool, verifyPoolCommand } from "./pool.js";
 import { filesProblem, precheck, type Refusal } from "./precheck.js";
+import { forwardRemoteSend, RELAY_FILES, type RemoteSend, SendRefused, SPACESHEEP_UNAUTHORIZED } from "./remote.js";
 import { requestOrigin } from "./routes.js";
 import {
   type ControlState,
   type DeviceRequestRow,
+  isPaired,
   type MachineRow,
   type PairingRow,
   type Proof,
+  pairedMachine,
   toActivity,
 } from "./state.js";
 
@@ -44,6 +53,9 @@ export interface UiRouteDeps {
   base: string;
   /** Device keys are taken (devicekeys.ts); off, a device key or signature is a 400. */
   device: boolean;
+  /** A send for a machine paired on spacesheep (docs/rfcs/08): the signed body goes to
+   *  spacesheep's jobs route as this account; the answer is its job id, or why not. */
+  remoteSend?: RemoteSend;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -87,11 +99,17 @@ const keyShape = (device: boolean) => (device ? "key: {id, alg, spki[, type, sto
 const proofShape = (device: boolean) =>
   device ? "proof: {cred, ad, cd, sig} or {cred, sig}" : "proof: {cred, ad, cd, sig}";
 
+/** The harness name of the machine's own pseudo-sessions: `sessionpipe:keys`, which a
+ *  `key.add` names, and `sessionpipe:pool` (POOL_SESSION). Neither is a coding session. */
+const OWN_HARNESS = "sessionpipe:";
+
 /** The second look at a handoff (CONTROL.md §3.1 `reply_to`, DESIGN §2.3), before
  *  precheck.ts sees the command: `reply_to` rides only on a `prompt` or a `start`, names a
- *  `<harness>:<id>` on the same machine, and goes only to a machine whose hello said
- *  `handoff` (a daemon that predates it would refuse the whole command `bad_fields`, or
- *  worse, ignore the relay). Null when there is nothing to refuse. */
+ *  `<harness>:<id>` on the same machine, a coding session and never the machine's own key
+ *  store or pool (an answer is a message for a model; the verifier takes any well-formed
+ *  ref there), and goes only to a machine whose hello said `handoff` (a daemon that
+ *  predates it would refuse the whole command `bad_fields`, or worse, ignore the relay).
+ *  Null when there is nothing to refuse. */
 export function replyToProblem(cmd: Record<string, unknown>, facts: { handoff?: boolean }): Refusal | null {
   if (!Object.hasOwn(cmd, "reply_to")) return null;
   if (cmd.kind !== "prompt" && cmd.kind !== "start")
@@ -99,33 +117,11 @@ export function replyToProblem(cmd: Record<string, unknown>, facts: { handoff?: 
   if (typeof cmd.reply_to !== "string" || !SESSION_REF.test(cmd.reply_to))
     return { code: "bad_fields", why: "reply_to is a session, <harness>:<id>" };
   if (cmd.reply_to === cmd.session) return { code: "bad_fields", why: "reply_to is another session, not this one" };
+  if (cmd.reply_to.startsWith(OWN_HARNESS))
+    return { code: "bad_fields", why: "reply_to is a coding session, not the machine's own keys or pool" };
   if (!facts.handoff)
     return { code: "handoff", why: "this machine did not say it takes handoffs; the answer would not come back" };
   return null;
-}
-
-/** Does this receiver's own sessionpipe-core take `reply_to` on a prompt? Its verifier runs
- *  on every command before the second look, and a core from before `ask` (0.10.0) refuses
- *  the field `bad_fields` there, so until the core is bumped no handoff is queued through
- *  this receiver, whatever the machine's hello says. Feature detection, as tilde.ts does:
- *  the core's own parser is asked. */
-export function coreTakesReplyTo(c: Pick<typeof core, "parseCommand" | "COMMAND_TYPE"> = core): boolean {
-  const cmd = {
-    v: 1,
-    t: c.COMMAND_TYPE,
-    machine: `m_${"a".repeat(22)}`,
-    kind: "prompt",
-    session: "claude-code:00000000-0000-4000-8000-000000000000",
-    text: "x",
-    reply_to: "codex:00000000-0000-4000-8000-000000000001",
-    nonce: "A".repeat(22),
-    iat: 1_700_000_000,
-  };
-  try {
-    return c.parseCommand(JSON.stringify(cmd)).ok === true;
-  } catch {
-    return false;
-  }
 }
 
 /** The command without `reply_to`, for the closed field lists that predate it. */
@@ -261,9 +257,8 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
   if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
   if (body.confirm && typeof body.confirm === "object") signed.confirm = body.confirm as SignedCommand["confirm"];
   const opts = { machine: m.id, rpId: d.rpId(), trusted: m.keys, now: Date.now(), maxAgeMs: RECEIVER_MAX_AGE_MS };
-  // A `pool` command (DESIGN §2.3) is verified by pool.ts: the same checks on the core's
-  // own primitives, since this core's parseCommand closes the kind set before it looks
-  // at a signature. Everything else is the core's word.
+  // A `pool` command (CONTROL.md §6 `pool`) goes through pool.ts: the core's verdict, held
+  // to the fresh confirm some of its actions take. Everything else is the core's word alone.
   const verdict = looksLikePool(signed.cmd) ? await verifyPoolCommand(signed, opts) : await verifyCommand(signed, opts);
   if (!verdict.ok) throw new HttpError(422, { reason: verdict.why, code: verdict.code });
   // The second look: what this machine's hello advertised (precheck.ts). The same
@@ -279,6 +274,24 @@ export async function verifySend(d: Pick<UiRouteDeps, "state" | "rpId">, raw: un
     cmd: verdict.cmd as unknown as ControlCommand,
     opts: { ...(ttl ? { expiresInMs: ttl } : {}), ...(typeof body.from === "string" ? { from: body.from } : {}) },
   };
+}
+
+export { RELAY_FILES, SPACESHEEP_UNAUTHORIZED };
+
+/** A send for a machine paired on spacesheep (remote.ts forwardRemoteSend): its row as the
+ *  page reads one, or spacesheep's refusal in the shape the page already reads (422 + code). */
+async function forwardSend(
+  state: ControlState,
+  m: MachineRow,
+  body: Record<string, unknown>,
+  remoteSend: UiRouteDeps["remoteSend"],
+): Promise<Reply> {
+  try {
+    return { status: 201, json: toActivity(await forwardRemoteSend(state, m, body, remoteSend)) };
+  } catch (e) {
+    if (e instanceof SendRefused) throw new HttpError(e.status, e.body);
+    throw e;
+  }
 }
 
 /** Queue a verified command for its machine (synchronous): the activity row as the page reads it. */
@@ -453,14 +466,24 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
   router.post(
     `${base}/send`,
     guarded(async (ctx): Promise<Reply> => {
-      const verified = await verifySend({ state, rpId }, await ctx.json<unknown>(SEND_BODY_MAX));
+      const raw = await ctx.json<unknown>(SEND_BODY_MAX);
+      const target =
+        raw && typeof raw === "object"
+          ? state.machine(String((raw as { machineId?: unknown }).machineId ?? ""))
+          : undefined;
+      if (target?.remote) return forwardSend(state, target, raw as Record<string, unknown>, d.remoteSend);
+      const verified = await verifySend({ state, rpId }, raw);
       return { status: 201, json: queueSend(state, verified) };
     }),
   );
 
-  // One file a start will carry (CONTROL.md §3.1, HTTP.md §3): the raw bytes, the file's
-  // media type as content-type, its name in `?name=`. Held a day under its SHA-256 (files.ts);
-  // the answer is the entry the signed command names. Nothing about it is in the text.
+  // One file a start or a prompt will carry (CONTROL.md §3.1, HTTP.md §3): the raw bytes,
+  // the file's media type as content-type, its name in `?name=`. Held a day under its
+  // SHA-256 (files.ts); the answer is the entry the signed command names. Nothing about it
+  // is in the text. A file sent as one of the four picture types is held to its own bytes
+  // (the composer's pictures come this way): what the agent is told is a PNG is one, and
+  // the answer says how many pixels it has. `?machine=` (the machine it is for) is taken
+  // and not read: every file is held here, whichever machine fetches it.
   router.post(
     `${base}/files`,
     guarded(async (ctx): Promise<Reply> => {
@@ -475,13 +498,18 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       if (!bytes.length) throw new HttpError(400, { reason: "empty", error: "The file is empty." });
       const bad = filesProblem([{ name, type, size: bytes.length, sha256: "A".repeat(43) }]);
       if (bad) throw new HttpError(400, { reason: "bad_name", error: bad });
+      const picture = type in ATTACHMENT_TYPES ? sniffImage(bytes) : null;
+      if (type in ATTACHMENT_TYPES && picture?.type !== type)
+        throw new HttpError(415, { reason: "not_an_image", error: "This file isn't the picture its type says." });
       let held: { sha256: string; size: number };
       try {
         held = state.files.put(bytes, type);
       } catch {
         throw new HttpError(507, { reason: "full", error: "Too many files are held here; try again tomorrow." });
       }
-      return { status: 201, json: { name, type, size: held.size, sha256: held.sha256 } satisfies StartFile };
+      const entry: UploadedFile = { name, type, size: held.size, sha256: held.sha256 };
+      if (picture) Object.assign(entry, { width: picture.width, height: picture.height });
+      return { status: 201, json: entry };
     }),
   );
 
@@ -502,13 +530,8 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
         json: {
           machines: state
             .allMachines()
-            .filter((m) => m.tokenHash || m.keys.length)
-            .map((m) => ({
-              name: m.name,
-              createdAt: m.createdAt,
-              ...(m.pairedAt ? { pairedAt: m.pairedAt } : {}),
-              ...state.machineControl(m),
-            })),
+            .filter(isPaired)
+            .map((m) => pairedMachine(m, state.machineControl(m))),
         },
       }),
     ),

@@ -1,0 +1,31 @@
+{
+  "name": "model-bad-char",
+  "description": "A model id with a space and a semicolon (`sonnet; rm -rf ~`).",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"start\",\"session\":\"claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b\",\"text\":\"What's wrong here?\",\"nonce\":\"B7NX-JmFWcktglcrpsgJGA\",\"iat\":1790800000000,\"cwd\":\"/Users/misha/spacesheep\",\"model\":\"sonnet; rm -rf ~\"}",
+      "csig": "CbauUkv0x5Q-OVbWkg-ek_ZL-p6TdJ5QOEnjS2a4YbqHXYkpo0ltrbE9NOVems_JFW0D0jd3BxpYqRRYXMutDA",
+      "grant": {
+        "cred": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiV3VNUUpFYTZPMFIxRjg3MzFHLWhheVlNa3RpUTRXcWRUMjh2eHpxeTBlOCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIQCGeUKodMUf8ssjHhFL0Oaa4FiFQ7FGAYCeuskCtLfAqQIgbSXi4defuBBErveCbzAhXpLGVgo3jvX87KzU5sTByhA",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEp5HQwvAkp-apR6WkrQdF7RplNelBCtZ6_wCaAZJs7wrxsAIT_vlyLqZYbvXj1qMDM7iJPtE3fZMwiO-eUzo1Xw\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4887MC68Vfbb2iYIKfVZ3p-757sPNy-3vpRc-Xu6dKn6CfbemFsJ9IXCiSYcyd9rqfkFC4G-ADShR-8dbNYjqA"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

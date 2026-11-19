@@ -1,0 +1,23 @@
+{
+  "name": "enroll-key-swap",
+  "description": "The receiver hands over one key with another key's proof.",
+  "input": {
+    "machine": "m_testmachine0000000001",
+    "code": "K7Q2-9XMV",
+    "key": {
+      "id": "8R-nRBXP7SjgOqJMDsnUeMYFuCVtscyh",
+      "alg": -7,
+      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEehhqq4BuIdSR14uVQ2gokAmL_b5kkf6l_mBqvHc-K-XWT125nvirxMINJ-iZmqbdoGH2q11eHtQgK_9W1uXDBQ"
+    },
+    "proof": {
+      "cred": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+      "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+      "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiUHlBYzEtVUl1Vi1SUDluTklRNjZXMU9ubnlJcndpai1WZ0ZHWW9qTl90MCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+      "sig": "MEYCIQCuEC72DwiaCwpFdyrKs15pcKPGyxfFWU8Ts2JWerBh0gIhAKjBwzw9uZxKtku8YhxjkxyfvvTr2CK6Jd4SGeuaL8Ma"
+    },
+    "rp_id": "receiver.example"
+  },
+  "expect": {
+    "ok": false
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "enroll-other-code",
+  "description": "A proof made for another pairing code.",
+  "input": {
+    "machine": "m_testmachine0000000001",
+    "code": "K7Q2-9XMV",
+    "key": {
+      "id": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+      "alg": -7,
+      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6-lmO3JqCG-_5N3JNsB8iUax3_uanPDsgI59MfrVdaS4NVnpXNvOdLp09PSFZ9nFlyG_iFwKgGy13d7vNrzvtQ"
+    },
+    "proof": {
+      "cred": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+      "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+      "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiMEc3VWhlWWZWUmVzT3RUM25QTTMteEFSOEJKV0plLUpwS0RQQWk5R0FXZyIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+      "sig": "MEUCIBhPJWud1LAUgjr9Ixr2tJIlWoteJzQflwONHPnXj6U7AiEA3X4KqXHGTxTVsV7z9N-VlbB095bYeEehZLfTmjUJkyY"
+    },
+    "rp_id": "receiver.example"
+  },
+  "expect": {
+    "ok": false
+  }
+}

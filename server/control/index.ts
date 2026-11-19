@@ -14,7 +14,6 @@ import {
   type ControlActivity,
   type KeyType,
   type MachineControl,
-  type MachineSummary,
   ROUTES,
   type StreamMessage,
 } from "../../shared/api.js";
@@ -22,9 +21,19 @@ import type { Ctx, Router } from "../http/router.js";
 import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import type { Hello } from "./parse.js";
 import { registerMachineRoutes } from "./routes.js";
-import { ControlState, type DemoStart, type DeviceRequestRow, toActivity, WAIT_MAX_S } from "./state.js";
+import {
+  ControlState,
+  type DemoStart,
+  type DeviceRequestRow,
+  isPaired,
+  machineFrame,
+  type RemoteMachine,
+  toActivity,
+  WAIT_MAX_S,
+} from "./state.js";
 import { registerTestDoor } from "./testdoor.js";
 import { coreTakesTilde } from "./tilde.js";
+import type { UiRouteDeps } from "./ui.js";
 import { queueSend, registerUiRoutes, type VerifiedSend, verifySend } from "./ui.js";
 
 export interface ControlDeps {
@@ -44,6 +53,12 @@ export interface ControlDeps {
   deviceKeys?: boolean;
   /** Queue starts with a `~/…` folder (tilde.ts); by default only when this core takes one. */
   tilde?: boolean;
+  /** The browser origins passkeys work on (routes.ts pairUrlFor): the pairing link names one. */
+  origins?: () => string[];
+  /** The UI key (routes.ts pairUrlFor): the link of a pairing the sink token started carries it. */
+  uiKey?: () => string;
+  /** A send for a machine paired on spacesheep (ui.ts forwardSend, docs/rfcs/08). */
+  remoteSend?: UiRouteDeps["remoteSend"];
 }
 
 export interface Control {
@@ -52,6 +67,34 @@ export interface Control {
   register(router: Router): void;
   /** Paired machines, keyed by the daemon's `name` (the same name events carry in session.machine). */
   machines(): Map<string, MachineControl>;
+  remote: {
+    upsert: (list: RemoteMachine[], remote: { via: "spacesheep"; origin: string; rpId: string }) => void;
+    drop: (via: "spacesheep") => void;
+    /** The account read through from now, or null: other accounts' sends settle as untracked. */
+    account: (account: { origin: string; email: string } | null) => void;
+    /** The unsettled job ids of the connected account, lowest first. */
+    pending: () => number[];
+    /** How soon the jobs are worth reading again (state.remoteJobsCadence). */
+    cadence: () => "fast" | "slow" | "none";
+    /** The relay brought events for these sessions (`harness:id`). */
+    eventsSeen: (keys: Iterable<string>) => void;
+    /** spacesheep refused the key (true), or not any more. */
+    revoked: (on: boolean) => void;
+    /** Who reads the jobs at once when one is worth reading now. */
+    onKick: (f: () => void) => void;
+    applyJobs: (
+      jobs: Array<{
+        id: number;
+        status: string;
+        note: string | null;
+        code?: string | null;
+        done_at: number | null;
+        created_at: number;
+      }>,
+      through?: number,
+      serverNow?: number,
+    ) => number;
+  };
   activity(limit?: number): ControlActivity[];
   /** One command by its id, from whichever queue holds it (a workflow step's ack, found
    *  without a walk through the newest N). */
@@ -111,17 +154,8 @@ export function createControl(deps: ControlDeps): Control {
     machinesTimer = setTimeout(() => {
       machinesTimer = null;
       for (const m of state.allMachines()) {
-        if (!m.tokenHash && !m.keys.length) continue;
-        const control = state.machineControl(m);
-        const machine: MachineSummary = {
-          name: m.name,
-          lastAt: control.lastPollAt ?? control.lastHelloAt ?? new Date().toISOString(),
-          harnesses: Object.fromEntries((control.harnesses ?? []).map((h) => [h, undefined])),
-          sessions: 0,
-          working: 0,
-          needsYou: 0,
-          control,
-        };
+        if (!isPaired(m)) continue;
+        const machine = machineFrame(m.name, state.machineControl(m));
         for (const l of listeners)
           try {
             l({ kind: "machine", machine });
@@ -142,13 +176,40 @@ export function createControl(deps: ControlDeps): Control {
   return {
     keyTypes,
     register(router) {
-      registerMachineRoutes(router, { state, sinkToken: deps.sinkToken, base: ROUTES.control });
-      registerUiRoutes(router, { state, rpId, uiAuth: deps.uiAuth, base: ROUTES.ui.control, device });
+      registerMachineRoutes(router, {
+        state,
+        sinkToken: deps.sinkToken,
+        base: ROUTES.control,
+        ...(deps.uiKey ? { uiKey: deps.uiKey } : {}),
+        ...(deps.origins ? { origins: deps.origins } : {}),
+      });
+      registerUiRoutes(router, {
+        state,
+        rpId,
+        uiAuth: deps.uiAuth,
+        base: ROUTES.ui.control,
+        device,
+        ...(deps.remoteSend ? { remoteSend: deps.remoteSend } : {}),
+      });
       if (deps.testDoor) registerTestDoor(router, { state, rpId, base: ROUTES.control, device });
+    },
+    /** The relay's machines (docs/rfcs/08): rows in memory, their sends settled by job status. */
+    remote: {
+      upsert: (list, remote) => state.upsertRemoteMachines(list, remote),
+      drop: (via) => state.dropRemoteMachines(via),
+      account: (account) => state.setRemoteAccount(account),
+      pending: () => state.pendingRemoteJobs(),
+      cadence: () => state.remoteJobsCadence(),
+      eventsSeen: (keys) => state.remoteEventsSeen(keys),
+      revoked: (on) => state.setRemoteRevoked(on),
+      onKick: (f) => {
+        state.onRemoteKick = f;
+      },
+      applyJobs: (jobs, through, serverNow) => state.applyRemoteJobs(jobs, through, serverNow),
     },
     machines() {
       const out = new Map<string, MachineControl>();
-      for (const m of state.allMachines()) if (m.tokenHash || m.keys.length) out.set(m.name, state.machineControl(m));
+      for (const m of state.allMachines()) if (isPaired(m)) out.set(m.name, state.machineControl(m));
       return out;
     },
     activity: (limit) => state.activity(limit),

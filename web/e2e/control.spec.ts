@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Browser, type BrowserContext, type CDPSession, expect, type Page, test } from "@playwright/test";
+import { composer } from "../../test/e2e/helpers.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const CONTROL = "/api/sessionpipe/v1/control";
@@ -338,7 +339,7 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
     events.ev("turn.ended", { reason: "stop", ms: 1200 }),
   );
   await page.goto(`/s/claude-code/${SID}`);
-  const box = page.getByLabel("Message for the next turn");
+  const box = composer(page);
   await expect(box).toBeEnabled();
   // Ready, with the one line under the field: the day grant's (paired, trusted, online,
   // no grant yet today), and Unlock now to take it ahead.
@@ -346,6 +347,43 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   await expect(foot.locator(".ctl-hint")).toHaveText("The first send today asks for your passkey.");
   await expect(foot.getByRole("button", { name: "Unlock now" })).toBeVisible();
   await shot(page, "strip-ready-desktop");
+  // A desktop's line stays quiet: its way on is graphite at 500 (a phone's is the tint at
+  // 600, mobile.spec.ts), at the caption's size; and Return sends.
+  const quiet = await foot.getByRole("button", { name: "Unlock now" }).evaluate((el) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--fg-2)";
+    el.parentElement!.append(probe);
+    const fg2 = getComputedStyle(probe).color;
+    probe.remove();
+    const s = getComputedStyle(el);
+    return { color: s.color === fg2, weight: s.fontWeight, size: getComputedStyle(el.parentElement!).fontSize };
+  });
+  expect(quiet).toEqual({ color: true, weight: "500", size: "12px" });
+  await expect(box).toHaveAttribute("enterkeyhint", "send");
+  /** The next passkey prompt ends with `name` instead of a passkey. */
+  const failNext = (name: string, message: string) =>
+    page.evaluate(
+      ([name, message]) => {
+        const real = navigator.credentials.get.bind(navigator.credentials);
+        navigator.credentials.get = () => {
+          navigator.credentials.get = real;
+          return Promise.reject(new DOMException(message, name));
+        };
+      },
+      [name, message],
+    );
+  // Unlock now, and the prompt closed: the line is as it was, Unlock now with it, no refusal.
+  await failNext("NotAllowedError", "The operation either timed out or was not allowed.");
+  await foot.getByRole("button", { name: "Unlock now" }).click();
+  await expect(foot.locator(".ctl-hint")).toHaveText("The first send today asks for your passkey.");
+  await expect(foot.getByRole("button", { name: "Unlock now" })).toBeVisible();
+  await expect(page.getByText(/not sent|dismissed/i)).toHaveCount(0);
+  // Unlock now refused: said as a refusal, until a send takes the day grant.
+  await failNext("NotSupportedError", "x");
+  await foot.getByRole("button", { name: "Unlock now" }).click();
+  await expect(page.locator(".ctl-foot[data-reason=error] .ctl-hint")).toHaveText(
+    "Not sent: This browser cannot make a passkey of a kind the machine accepts.",
+  );
 
   await box.fill("Add the Oct 8 row");
   await box.press("Shift+Enter");
@@ -397,12 +435,13 @@ test("a prompt from the Session page reaches the daemon signed, and its reply co
   await expect(page.locator(REPLY).last()).toContainText("14 tests pass");
   await shot(page, "strip-delivered-desktop");
 
-  // The second send of the day signs by itself: no passkey line, same grant.
-  await expect(page.locator(".ctl-foot[data-reason=passkey]")).toHaveCount(0);
+  // The second send of the day signs by itself: no passkey line, same grant; and the
+  // refused Unlock now is no longer said.
+  await expect(page.locator(".ctl-foot[data-reason]")).toHaveCount(0);
 });
 
 test("a delivered prompt becomes its turn in the chat, with no row of its own; one that went to a copy links both ways", async () => {
-  const box = page.getByLabel("Message for the next turn");
+  const box = composer(page);
   await box.fill("What is the coolest feature?");
   await box.press("Enter");
   const msg = await daemon.next();
@@ -507,12 +546,20 @@ test("Allow on an open permission sends a permission.answer naming the attention
     decision: "allow",
   });
   expect(msg.cmd).not.toHaveProperty("text");
-  // On its way, the answer has its row under the composer; delivered, it is done and goes.
-  const row = page.locator(`li[data-message="${msg.id}"]`);
-  await expect(row).toContainText("answer");
-  await expect(row).toContainText("allow");
+  // On its way, the card says which answer went and what it waits for, in the pair's place,
+  // and nothing under the composer says it again.
+  const receipt = answer.locator(".ctl-answer-receipt");
+  await expect(receipt).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  await expect(answer).toHaveAttribute("data-answer", "sent");
+  await expect(answer.getByRole("button")).toHaveCount(0);
+  await expect(page.locator(`li[data-message="${msg.id}"]`)).toHaveCount(0);
+  // Delivered, it stays said until the prompt clears: nothing to answer twice.
   await daemon.ack(msg.id, "delivered", { mode: "waiter" });
-  await expect(row).toHaveCount(0);
+  await expect(receipt).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  // A reload knows it too, from the answer's row.
+  await page.reload();
+  await expect(answer.locator(".ctl-answer-receipt")).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  await expect(answer.getByRole("button")).toHaveCount(0);
 });
 
 test("Cancel on a working turn sends a cancel", async () => {
@@ -538,34 +585,151 @@ test("a refused no_attention closes the prompt here: the pair goes, the words st
   await answer.getByRole("button", { name: "Allow" }).click();
   const msg = await daemon.next();
   expect(msg.cmd).toMatchObject({ kind: "permission.answer", for: "perm-2", decision: "allow" });
-  // While the answer is out the pair stays, disabled, and a second click goes nowhere.
+  // While the answer is out the receipt stands in the pair's place: nothing to press twice.
   await expect(answer).toHaveAttribute("data-answer", "sent");
-  await expect(answer.getByRole("button", { name: "Allow" })).toBeDisabled();
-  await expect(answer).toContainText("answer sent");
+  await expect(answer.getByRole("button")).toHaveCount(0);
+  await expect(answer.locator(".ctl-answer-receipt")).toHaveText(`Allowed · waiting for ${MACHINE}`);
   // The terminal had answered first: the daemon says the prompt is no longer open.
   await daemon.ack(msg.id, "refused", { code: "no_attention" });
   await expect(answer).toHaveAttribute("data-answer", "closed");
   await expect(answer.getByRole("button")).toHaveCount(0);
-  await expect(answer).toContainText("answered in the terminal, or expired");
-  await expect(page.locator(`li[data-message="${msg.id}"]`)).toContainText("no longer open");
+  await expect(answer).toContainText("already answered, or timed out");
+  await expect(page.locator(`li[data-message="${msg.id}"]`)).toHaveCount(0);
   expect(await daemon.poll(0)).toEqual([]);
   await events.post(events.ev("attention.cleared", { attention_id: "perm-2", how: "answered" }));
   await expect(answer).toHaveCount(0);
 });
 
-test("a prompt raised before the daemon's hello cannot be answered here; a tier-0 copy still has a label", async () => {
-  // Raised an hour ago, long before this daemon said hello; and with no tool or message.
+test("an answer the machine refused for another reason gives the pair back, and says why", async () => {
+  await events.post(
+    events.ev("attention.needed", { attention_id: "perm-4", kind: "permission", tool: "Bash", message: "make" }),
+  );
+  const answer = page.locator('.ctl-answer[data-attention="perm-4"]');
+  await answer.getByRole("button", { name: "Deny" }).click();
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({ kind: "permission.answer", for: "perm-4", decision: "deny" });
+  await expect(answer.locator(".ctl-answer-receipt")).toHaveText(`Denied · waiting for ${MACHINE}`);
+  await daemon.ack(msg.id, "refused", { code: "nonce_store" });
+  await expect(answer).toHaveAttribute("data-answer", "open");
+  await expect(answer.getByRole("button", { name: "Allow" })).toBeEnabled();
+  await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveText(
+    "Not sent: the machine could not record the nonce, so it did not run it",
+  );
+  await events.post(events.ev("attention.cleared", { attention_id: "perm-4", how: "answered" }));
+  await expect(answer).toHaveCount(0);
+  await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveCount(0);
+});
+
+test("against a receiver whose rows do not say which prompt they answer, the page that pressed still knows", async () => {
+  // A receiver from before ControlActivity.answer: none on the stream's frames, on GET
+  // /activity or on the send's own answer. The frames it strips are counted by id.
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem("e2e-older-receiver")) return;
+    const seen: string[] = [];
+    (window as unknown as { olderFrames: string[] }).olderFrames = seen;
+    const Real = window.EventSource;
+    window.EventSource = class extends Real {
+      addEventListener(kind: string, fn: EventListenerOrEventListenerObject, o?: boolean | AddEventListenerOptions) {
+        if (kind !== "control" || typeof fn !== "function") return super.addEventListener(kind, fn, o);
+        return super.addEventListener(
+          kind,
+          (e: Event) => {
+            const m = JSON.parse((e as MessageEvent).data);
+            if (m.message?.answer) {
+              delete m.message.answer;
+              seen.push(`${m.message.id}:${m.message.outcome ?? ""}`);
+            }
+            fn(new MessageEvent(e.type, { data: JSON.stringify(m), lastEventId: (e as MessageEvent).lastEventId }));
+          },
+          o,
+        );
+      }
+    } as typeof EventSource;
+  });
+  const strip = (x: unknown): unknown => {
+    if (Array.isArray(x)) for (const y of x) strip(y);
+    else if (x && typeof x === "object") {
+      delete (x as { answer?: unknown }).answer;
+      for (const y of Object.values(x)) strip(y);
+    }
+    return x;
+  };
+  let sends = 0;
+  await page.route("**/api/ui/control/activity**", async (r) => {
+    const res = await r.fetch();
+    await r.fulfill({ response: res, json: strip(await res.json()) });
+  });
+  await page.route("**/api/ui/control/send", async (r) => {
+    sends++;
+    const res = await r.fetch();
+    await r.fulfill({ response: res, json: strip(await res.json()) });
+  });
+  await page.evaluate(() => sessionStorage.setItem("e2e-older-receiver", "1"));
+  await page.reload();
+  const frames = (id: string) =>
+    expect.poll(() => page.evaluate(() => (window as unknown as { olderFrames: string[] }).olderFrames), {
+      message: `the stream's frames for ${id}`,
+    });
+
+  await events.post(
+    events.ev("attention.needed", { attention_id: "perm-5", kind: "permission", tool: "Bash", message: "make deploy" }),
+  );
+  const answer = page.locator('.ctl-answer[data-attention="perm-5"]');
+  await expect(answer).toHaveAttribute("data-answer", "open");
+  await answer.getByRole("button", { name: "Allow" }).click();
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({ kind: "permission.answer", for: "perm-5", decision: "allow" });
+  const receipt = answer.locator(".ctl-answer-receipt");
+  await expect(receipt).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  // Its row on the stream says nothing of perm-5: this page reads it as its own press's.
+  await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  await frames(msg.id).toContain(`${msg.id}:delivered`);
+  await expect(receipt).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  await expect(answer).toHaveAttribute("data-answer", "sent");
+  await expect(answer.getByRole("button")).toHaveCount(0);
+  // Nothing to press twice: Deny's key finds no Deny, and no second answer goes.
+  await page.keyboard.press("d");
+  expect(await daemon.poll(1)).toEqual([]);
+  expect(sends).toBe(1);
+
+  // Refused for a reason of its own: the pair back, and why.
+  await events.post(
+    events.ev("attention.needed", { attention_id: "perm-6", kind: "permission", tool: "Bash", message: "make" }),
+  );
+  const other = page.locator('.ctl-answer[data-attention="perm-6"]');
+  await other.getByRole("button", { name: "Deny" }).click();
+  const refused = await daemon.next();
+  await expect(other.locator(".ctl-answer-receipt")).toHaveText(`Denied · waiting for ${MACHINE}`);
+  await daemon.ack(refused.id, "refused", { code: "nonce_store" });
+  await frames(refused.id).toContain(`${refused.id}:refused`);
+  await expect(other).toHaveAttribute("data-answer", "open");
+  await expect(other.getByRole("button", { name: "Allow" })).toBeEnabled();
+  await expect(page.locator(".ctl-foot[data-reason='error']")).toHaveText(
+    "Not sent: the machine could not record the nonce, so it did not run it",
+  );
+
+  await events.post(
+    events.ev("attention.cleared", { attention_id: "perm-5", how: "answered" }),
+    events.ev("attention.cleared", { attention_id: "perm-6", how: "answered" }),
+  );
+  await expect(page.locator(".ctl-answer")).toHaveCount(0);
+  await page.unrouteAll();
+  await page.evaluate(() => sessionStorage.removeItem("e2e-older-receiver"));
+  await page.reload();
+});
+
+test("a prompt its hook stopped waiting on cannot be answered here, and offers nothing; a tier-0 copy still has a label", async () => {
+  // Raised an hour ago, long past the 125 s Claude Code's hook waits; and with no tool or message.
   const old = events.ev("attention.needed", { attention_id: "perm-3", kind: "permission" });
   old.time = new Date(Date.now() - 3600_000).toISOString();
   await events.post(old);
   const answer = page.locator('.ctl-answer[data-attention="perm-3"]');
   await expect(answer).toBeVisible();
-  await expect(answer).toHaveAttribute("data-answer", "pre-hello");
+  await expect(answer).toHaveAttribute("data-answer", "late");
   await expect(answer).toContainText("Allow this?");
   await expect(answer).toContainText("a permission request");
-  await expect(answer.getByRole("button", { name: "Allow" })).toBeDisabled();
-  await expect(answer.getByRole("button", { name: "Deny" })).toBeDisabled();
-  await expect(answer).toContainText("raised before this machine was paired; answer it in its terminal");
+  await expect(answer.getByRole("button")).toHaveCount(0);
+  await expect(answer).toContainText(`Too late to answer from here; answer it on ${MACHINE}.`);
   expect(await daemon.poll(0)).toEqual([]);
   await events.post(events.ev("attention.cleared", { attention_id: "perm-3", how: "answered" }));
   await expect(answer).toHaveCount(0);
@@ -723,9 +887,11 @@ test("a phone adds its own passkey: the paired browser approves with a key.add, 
 
   // The phone now sends a prompt itself, under a grant its own passkey signs.
   await phone.goto(`/s/claude-code/${SID}`);
-  const box = phone.getByLabel("Message for the next turn");
+  const box = composer(phone);
   await expect(box).toBeEnabled();
   await expect(phone.locator(".ctl-foot[data-reason=untrusted]")).toHaveCount(0);
+  // 390 wide with no touch screen (a narrow window): Return sends, as on any keyboard.
+  await expect(box).toHaveAttribute("enterkeyhint", "send");
   await box.fill("From the phone");
   await box.press("Enter");
   const sent = await daemon.next();
@@ -768,7 +934,7 @@ test("over plain LAN http every control affordance says passkeys need https or l
   // ?k= sets the cookie and redirects; the origin is a LAN ip, so isSecureContext is false.
   await p.goto(`${lan}/s/claude-code/${SID}?k=${info.uiKey}`);
   expect(await p.evaluate(() => window.isSecureContext)).toBe(false);
-  await expect(p.getByLabel("Message for the next turn")).toBeDisabled();
+  await expect(composer(p)).toBeDisabled();
   await expect(p.locator(".ctl-hint")).toContainText(/passkeys need https or localhost/i);
   await shot(p, "strip-insecure-desktop");
   const renewed = await daemon.pair();
@@ -790,7 +956,7 @@ test("a 390 px phone sees the same pages", async ({ browser }: { browser: Browse
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL: base, isMobile: true });
   const p = await phone.newPage();
   await p.goto(`/s/claude-code/${SID}`);
-  await expect(p.getByLabel("Message for the next turn")).toBeEnabled();
+  await expect(composer(p)).toBeEnabled();
   await expect(p.locator(".page.session ol.timeline > li.turn").first()).toBeVisible();
   await shot(p, "strip-phone");
   // A renewed code from the same terminal: the pair page at phone width.

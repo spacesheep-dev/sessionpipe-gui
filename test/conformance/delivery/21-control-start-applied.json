@@ -1,0 +1,66 @@
+{
+  "name": "control-start-applied",
+  "spec": "CONTROL.md \u00a76 start, Options; \u00a710",
+  "capability": "control",
+  "note": "A start that asked for a level and a model is acked taken and then delivered, each with applied: what it ran with. The receiver keeps applied with the message and shows it, never what was asked.",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": {
+          "session": "claude-code:{uuid}",
+          "kind": "start",
+          "cwd": "/tmp/conformance",
+          "text": "applied probe",
+          "permission": "read",
+          "model": "sonnet"
+        },
+        "expires_in_s": 60
+      }
+    },
+    {
+      "poll": {
+        "machine": "{machine}",
+        "wait": 1
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "ack": {
+        "outcome": "taken",
+        "applied": {
+          "permission": "read",
+          "model": "sonnet"
+        }
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "ack": {
+        "outcome": "delivered",
+        "mode": "resume",
+        "reply": "Read it; nothing changed.",
+        "applied": {
+          "permission": "read",
+          "model": "sonnet"
+        }
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "poll": {
+        "machine": "{machine}",
+        "wait": 1
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}

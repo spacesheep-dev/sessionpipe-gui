@@ -73,7 +73,7 @@ Install it, then Reload on the Views page (or restart):
 
 ```sh
 sessionpipe-gui plugin add ./needs-you-log      # copies the folder
-sessionpipe-gui plugin link ./needs-you-log     # or: symlink it while you work on it
+sessionpipe-gui plugin link ./needs-you-log     # or: link it while you work on it
 ```
 
 ## The manifest
@@ -128,7 +128,7 @@ everything in it: subscriptions, timers, waits.
 | `events.snapshot()` | The current `Snapshot`: every session, machine, the stats, open suggestions. |
 | `sessions.get(key)` | One `SessionSummary` or `undefined`. |
 | `sessions.url(key)` | The session page a phone can open: the https origin with TLS mode on, else the first LAN URL; with the UI key. |
-| `suggest({ session, attentionId, decision, by, note? })` | Advice on an open, answerable permission. Streamed to every page, shown beside the prompt, dropped when the attention closes. Throws when the attention is not open, is not a permission, or is a notification twin nobody can answer. |
+| `suggest({ session, attentionId, decision, by, note? })` | Advice on an open, answerable permission. Streamed to every page, shown beside the prompt, dropped when the attention closes. Throws when the attention is not open, is not a permission, is a notification twin nobody can answer, or is Claude Code's question (`AskUserQuestion`), answered on its computer. |
 | `storage.get()` / `storage.set(value)` | One JSON document per plugin under `<stateDir>/plugins-storage/`, at most 256 KB. `get()` is `null` until the first `set`. |
 | `fetch` | The host's `fetch`. |
 
@@ -183,7 +183,7 @@ sessionpipe-gui plugin add ./my-plugin                 # a folder: copied
 sessionpipe-gui plugin add my-plugin-0.1.0.tgz         # an archive: extracted
 sessionpipe-gui plugin add @you/sessionpipe-plugin-x   # an npm package name
 sessionpipe-gui plugin add https://github.com/you/x.git
-sessionpipe-gui plugin link ./my-plugin                # a symlink, for development
+sessionpipe-gui plugin link ./my-plugin                # a link (a symlink, or a junction on Windows), for development
 sessionpipe-gui plugin list
 sessionpipe-gui plugin remove my-plugin
 ```

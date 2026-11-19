@@ -1,0 +1,37 @@
+{
+  "name": "device-grant-tampered-cmd",
+  "description": "The text was changed after the day key signed it under a device grant.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"rm -rf ~\",\"nonce\":\"kJ_jrVwP0D8QfH5U3qgu8Q\",\"iat\":1790800000000}",
+      "csig": "DO0xRZLvf2Mc1bzT3gOIbduL7bB0xRhtnnNl7xHwDZUtR275znYG8DkfSSMKvMsfgFgOF5yPILFrxjQlWep1oA",
+      "grant": {
+        "cred": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "sig": "3GXZggEKp2Ijo_rl5EGnkwFz9NlTGXl-_swvXNITfYU7H8Tv-zIe4ouE0sVruE85ma4Tyl4snS0293wXErbu8Q",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4lrecDEerGRu-OqPHkl4nxvfdteUDFSjP7O4JlW4gPKMxK3F2BLw8OACnCy7wxa-F2Z8J81xTm-JasGu3_JIrw\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "-XI3B3JNIS6D9Ft-nSQ9nzDMQdIQzjCB",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEnBYOZ9CSzoMtBlJ-WUR6uE2Hwtrt6r_7d9YkrKFQvDLp6uHGzGrVGRG0gP7UrdEkfnK4VYXJD3MizA7AOsabLg"
+      },
+      {
+        "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+        "type": "device",
+        "store": "hardware",
+        "uv": "each-use"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_csig"
+  }
+}

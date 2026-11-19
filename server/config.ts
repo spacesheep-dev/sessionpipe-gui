@@ -3,7 +3,7 @@
 // makes on first run: the sink token (what senders present) and the UI key (what a
 // phone presents). Both live in <stateDir>/config.json, mode 0600.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,31 @@ export interface GuiConfig {
   /** Session search reads this machine's own agent history (Claude Code, Codex,
    *  Antigravity, Gemini CLI logs), read-only. Absent = on; Settings ▸ Data turns it off. */
   searchHistory?: boolean;
+  /** A spacesheep account used as a backend (server/sources/spacesheep.ts, RFC 08): the
+   *  relay's origin, the `gui` key it minted for this install, and who. Absent = off. */
+  spacesheep?: SpacesheepLink;
+}
+
+export interface SpacesheepLink {
+  origin: string;
+  key: string;
+  email: string;
+  connectedAt: string;
+}
+
+/** The link as it is kept, or undefined when the record is not one. */
+export function readSpacesheepLink(v: unknown): SpacesheepLink | undefined {
+  const r = v as Partial<SpacesheepLink> | null;
+  if (!r || typeof r !== "object") return undefined;
+  if (typeof r.origin !== "string" || !/^https?:\/\/[^/\s]+$/.test(r.origin)) return undefined;
+  if (typeof r.key !== "string" || !/^ss_[A-Za-z0-9_-]{8,}$/.test(r.key)) return undefined;
+  if (typeof r.email !== "string" || !r.email) return undefined;
+  return {
+    origin: r.origin,
+    key: r.key,
+    email: r.email,
+    connectedAt: typeof r.connectedAt === "string" ? r.connectedAt : new Date().toISOString(),
+  };
 }
 
 export function defaultStateDir(): string {
@@ -40,17 +65,57 @@ export function defaultStateDir(): string {
 export const newSinkToken = (): string => `spg_${randomBytes(24).toString("base64url")}`;
 export const newUiKey = (): string => randomBytes(12).toString("base64url");
 
-/** Read the config, making it (or any missing secret) on first run. */
+/** config.json holds something readGuiConfig cannot read, and was left as it is. */
+export class ConfigError extends Error {
+  readonly name = "ConfigError";
+}
+
+/** `text` without a leading UTF-8 byte-order mark. PowerShell 5's `UTF8` encoding and
+ *  older Windows editors write one, and JSON.parse refuses it. */
+export const withoutBom = (text: string): string => (text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+
+const WHAT_IT_HOLDS =
+  "it holds the sink token every sender presents and the UI key every phone and browser holds. " +
+  "Fix it, or move it aside to start fresh (senders and phones then pair again), then run this again.";
+
+/** What config.json holds: undefined when it is missing (the first run). A file that
+ *  cannot be read (a folder of that name, no permission), is empty (a write that died
+ *  before its first byte: the GUI never writes one) or does not parse throws a
+ *  ConfigError, saying where but never quoting the text, which can be part of the sink
+ *  token: writing fresh secrets over a cut-short, mistyped or unreadable file would lock
+ *  out every sender and phone paired with the old ones. */
+export function readConfigFile(f: string): Partial<GuiConfig> | undefined {
+  let text: string;
+  try {
+    text = withoutBom(readFileSync(f, "utf8"));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return undefined;
+    throw new ConfigError(`${f} could not be read (${code}), so it was not written over: ${WHAT_IT_HOLDS}`);
+  }
+  if (!text.trim()) throw new ConfigError(`${f} is empty, so it was not written over: ${WHAT_IT_HOLDS}`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    const m = (e as Error).message;
+    const at = (/line \d+ column \d+/.exec(m) ?? /position \d+/.exec(m))?.[0];
+    throw new ConfigError(
+      `${f} is not valid JSON${at ? ` at ${at}` : ""}, so it was not written over: ${WHAT_IT_HOLDS}`,
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new ConfigError(`${f} is not a JSON object, so it was not written over: ${WHAT_IT_HOLDS}`);
+  return parsed as Partial<GuiConfig>;
+}
+
+/** Read the config, making it (or any missing secret) on first run. A file that cannot be
+ *  read or does not parse throws a ConfigError and is left byte for byte as it was; one
+ *  with a byte-order mark is read past it (and written back without one, the GUI's own
+ *  format). A file it reads is also brought to mode 0600 if it is looser (tightenMode). */
 export function readGuiConfig(dir: string): GuiConfig {
   const f = path.join(dir, "config.json");
-  let cfg: Partial<GuiConfig> = {};
-  if (existsSync(f)) {
-    try {
-      cfg = JSON.parse(readFileSync(f, "utf8")) as Partial<GuiConfig>;
-    } catch {
-      cfg = {};
-    }
-  }
+  const cfg = readConfigFile(f) ?? {};
   const complete = typeof cfg.sinkToken === "string" && cfg.sinkToken && typeof cfg.uiKey === "string" && cfg.uiKey;
   const full: GuiConfig = {
     sinkToken: typeof cfg.sinkToken === "string" && cfg.sinkToken ? cfg.sinkToken : newSinkToken(),
@@ -62,13 +127,42 @@ export function readGuiConfig(dir: string): GuiConfig {
   if (Array.isArray(cfg.disabled)) full.disabled = cfg.disabled.filter((d): d is string => typeof d === "string");
   if (Array.isArray(cfg.enabled)) full.enabled = cfg.enabled.filter((d): d is string => typeof d === "string");
   if (typeof cfg.searchHistory === "boolean") full.searchHistory = cfg.searchHistory;
+  const link = readSpacesheepLink(cfg.spacesheep);
+  if (link) full.spacesheep = link;
   if (!complete) writeGuiConfig(dir, full);
+  else tightenMode(f);
   return full;
 }
 
 export function writeGuiConfig(dir: string, cfg: GuiConfig): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(path.join(dir, "config.json"), `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
+  const f = path.join(dir, "config.json");
+  // Before the write, so a secret never lands in a file others can read; a new file is
+  // made at 0600 by the write itself.
+  tightenMode(f);
+  writeFileSync(f, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Take the group and other bits off config.json. A write's `mode` applies only when the
+ *  file is made, so one that already existed (saved by an editor at its own umask,
+ *  restored from a backup) keeps its bits. Nothing to do for a file that is not there yet,
+ *  nor on Windows, where the mode bits are not the file's access rules. A chmod that fails
+ *  (a share that refuses it, a file owned by someone else) warns, once per file in this
+ *  process, and goes on: the secrets are already in the file either way. */
+const warnedMode = new Set<string>();
+export function tightenMode(f: string, platform: NodeJS.Platform = process.platform): void {
+  if (platform === "win32") return;
+  try {
+    const mode = statSync(f).mode & 0o777;
+    if ((mode & 0o077) === 0) return;
+    chmodSync(f, mode & 0o700);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT" || warnedMode.has(f)) return;
+    warnedMode.add(f);
+    process.stderr.write(
+      `sessionpipe-gui: could not take the group and other bits off ${f} (${(e as Error).message}); it holds the sink token and the UI key, so make it readable by you alone\n`,
+    );
+  }
 }
 
 /** A new sink token, written; the old one stops working at once. */
@@ -96,6 +190,15 @@ export function setPublicUrl(dir: string, cfg: GuiConfig, url: string | undefine
 }
 
 /** Session search's history setting (`POST /api/ui/search/settings`), remembered. */
+/** Connect to, or disconnect from, a spacesheep account; written at once. */
+export function setSpacesheep(dir: string, cfg: GuiConfig, link: SpacesheepLink | undefined): GuiConfig {
+  const next = { ...cfg };
+  if (link) next.spacesheep = link;
+  else delete next.spacesheep;
+  writeGuiConfig(dir, next);
+  return next;
+}
+
 export function setSearchHistory(dir: string, cfg: GuiConfig, on: boolean): GuiConfig {
   if ((cfg.searchHistory !== false) === on) return cfg;
   const next = { ...cfg, searchHistory: on };
@@ -133,8 +236,7 @@ export function setEnabled(dir: string, cfg: GuiConfig, key: string, on: boolean
   return next;
 }
 
-/** This package's version, from package.json beside dist/ (or the repo root from source). */
-export function packageVersion(): string {
+function readPackageVersion(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   for (const c of [path.join(here, "..", "package.json"), path.join(here, "..", "..", "package.json")]) {
     try {
@@ -143,4 +245,15 @@ export function packageVersion(): string {
     } catch {}
   }
   return "0.0.0";
+}
+
+/** Read once, when the code is loaded: the version this process runs. Read again on every
+ *  call (as it was up to 0.8.0), a receiver whose package `npm i -g` replaced under it
+ *  answered /api/ui/info with the new version while it still ran the old code. */
+const VERSION = readPackageVersion();
+
+/** This package's version, from package.json beside dist/ (or the repo root from source),
+ *  as it was when this process loaded it. */
+export function packageVersion(): string {
+  return VERSION;
 }

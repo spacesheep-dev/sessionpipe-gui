@@ -32,7 +32,7 @@ listed); yours are listed under *Installed* beside them.
 
 ```sh
 sessionpipe-gui skin add ./mint     # copies the folder under <stateDir>/skins/mint
-sessionpipe-gui skin link ./mint    # or: symlink it while you work on it
+sessionpipe-gui skin link ./mint    # or: link it while you work on it
 ```
 
 Open the appearance popover and pick **Mint**. No restart: the server re-reads the
@@ -159,7 +159,7 @@ sessionpipe-gui skin add my-skin-0.1.0.tgz         # an archive: extracted (tar 
 sessionpipe-gui skin add https://…/my-skin.zip     # downloaded, then extracted
 sessionpipe-gui skin add sessionpipe-skin-mint     # an npm package name (npm install, then copied)
 sessionpipe-gui skin add https://github.com/you/mint.git
-sessionpipe-gui skin link ./my-skin                # a symlink: edits show on the next open of the popover
+sessionpipe-gui skin link ./my-skin                # a link (a symlink, or a junction on Windows): edits show on the next open of the popover
 sessionpipe-gui skin list
 sessionpipe-gui skin remove mint
 ```

@@ -1,0 +1,62 @@
+{
+  "name": "control-hello-start",
+  "spec": "CONTROL.md \u00a72 hello",
+  "capability": "control",
+  "note": "A hello with start (per harness: permissions, permission, models, any_model) fits control-hello.json and is accepted. The receiver stores it per machine and drops the entry for gemini-cli, which isn't in harnesses: a receiver offers options only for a harness the machine can start. (What the receiver stored is its own to check; this scenario holds it to accepting the hello.)",
+  "steps": [
+    {
+      "hello": {
+        "machine": "{machine}",
+        "body": {
+          "name": "conformance",
+          "harnesses": [
+            "claude-code",
+            "codex"
+          ],
+          "modes": [
+            "resume",
+            "fork"
+          ],
+          "keys": [],
+          "version": "0.10.0",
+          "mode": "auto",
+          "files": true,
+          "start": {
+            "claude-code": {
+              "permissions": [
+                "read",
+                "safe",
+                "edits",
+                "auto"
+              ],
+              "permission": "auto",
+              "any_model": true
+            },
+            "codex": {
+              "permissions": [
+                "read",
+                "safe",
+                "auto"
+              ],
+              "permission": "auto",
+              "any_model": true,
+              "models": [
+                "gpt-6-astra",
+                "gpt-5.6-sol"
+              ]
+            },
+            "gemini-cli": {
+              "permissions": [
+                "safe"
+              ],
+              "permission": "safe"
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}

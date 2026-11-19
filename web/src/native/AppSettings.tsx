@@ -7,6 +7,7 @@ import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
 import { ActionButton, Toggle } from "../components/bits";
 import { Select } from "../components/Select";
 import { Group, Row } from "../components/SettingsWindow";
+import { accountMode } from "../lib/net";
 import {
   loadNotify,
   loadReceivers,
@@ -41,6 +42,8 @@ const signingModule = Object.values(
   import.meta.glob<{ default: ComponentType<{ receiverId: string }> }>("../control/DeviceKeySettings.tsx"),
 )[0];
 const Signing = signingModule ? lazy(signingModule) : null;
+/** The account this window shows, when it shows one (account/AccountSettings.tsx). */
+const AccountGroup = accountMode() ? lazy(() => import("../account/AccountSettings")) : null;
 
 const KINDS: { kind: string; label: string }[] = [
   { kind: "permission", label: "Permission requests" },
@@ -130,9 +133,16 @@ export default function AppSettings() {
 
       {f.has("notifications") && <NotificationsGroup s={s} set={set} />}
 
+      {AccountGroup && (
+        <Suspense fallback={null}>
+          <AccountGroup />
+        </Suspense>
+      )}
+
       <ReceiversGroup current={info?.receiver?.id ?? null} />
 
-      {Signing && info?.receiver && f.has("signer") && (
+      {/* On an account this phone's key is the account group's row ("Approve this iPhone"). */}
+      {Signing && info?.receiver && f.has("signer") && !accountMode() && (
         <Suspense fallback={null}>
           <Signing receiverId={info.receiver.id} />
         </Suspense>
@@ -240,12 +250,15 @@ function ReceiversGroup({ current }: { current: string | null }) {
       if (!isCancel(e)) setError(e instanceof Error ? e.message : String(e));
     }
   };
+  // The account this window shows has its own group above: it is not listed twice.
+  const shown = (list ?? []).filter((r) => !(r.kind === "spacesheep" && r.id === current));
   return (
     <Group label="Receivers" note={error ?? "The window shows one receiver at a time; switching reloads it."}>
-      {(list ?? []).map((r) => (
+      {shown.map((r) => (
         <Row
           key={r.id}
-          label={r.name}
+          // A spacesheep account in the list is named by whose it is.
+          label={r.name || r.email || r.origin}
           hint={`${r.origin}${r.connected === false ? " · not connected" : ""}${r.id === current ? " · this window" : ""}`}
         >
           {r.id !== current && (
@@ -253,20 +266,24 @@ function ReceiversGroup({ current }: { current: string | null }) {
               <ActionButton className="btn btn--sm" onClick={() => invoke("rx_select", { id: r.id })}>
                 Switch
               </ActionButton>
-              <ActionButton
-                className="btn btn--sm btn--ghost"
-                onClick={async () => {
-                  await invoke("rx_remove", { id: r.id });
-                  await loadReceivers();
-                }}
-              >
-                Remove
-              </ActionButton>
+              {/* An account is not removed from here: it is disconnected, in its own window's
+                  group above, where what that removes is said. */}
+              {r.kind !== "spacesheep" && (
+                <ActionButton
+                  className="btn btn--sm btn--ghost"
+                  onClick={async () => {
+                    await invoke("rx_remove", { id: r.id });
+                    await loadReceivers();
+                  }}
+                >
+                  Remove
+                </ActionButton>
+              )}
             </>
           )}
         </Row>
       ))}
-      {list && list.length === 0 && <Row label="No receivers yet" />}
+      {list && shown.length === 0 && <Row label="No receivers yet" />}
       {adding ? (
         <Row label="Address">
           <form
@@ -366,7 +383,9 @@ function HotkeyRecorder({ value, disabled }: { value: string | null; disabled?: 
         className="btn btn--sm app-settings-key"
         data-recording={recording || undefined}
         disabled={disabled}
-        aria-label={value ? `New session shortcut: ${hotkeyLabel(value)}. Click to record another` : "Record shortcut"}
+        aria-label={
+          value ? `New session shortcut: ${hotkeyLabel(value, platform())}. Click to record another` : "Record shortcut"
+        }
         onClick={() => setRecording((r) => !r)}
         onBlur={() => setRecording(false)}
         onKeyDown={(e) => {
@@ -384,7 +403,7 @@ function HotkeyRecorder({ value, disabled }: { value: string | null; disabled?: 
           onChange(h);
         }}
       >
-        {recording ? "Type a shortcut…" : value ? hotkeyLabel(value) : "Record Shortcut"}
+        {recording ? "Type a shortcut…" : value ? hotkeyLabel(value, platform()) : "Record Shortcut"}
       </button>
       {value && !recording && (
         <button type="button" className="btn btn--sm btn--ghost" disabled={disabled} onClick={() => onChange(null)}>

@@ -12,9 +12,10 @@
 // rows slide there (lib/motion.ts). With nothing on it yet the board is a listening
 // state that names this machine and its hooked agents, and dissolves into the first row.
 // While the stream is down the rows stay, quiet, their clocks stopped.
-import type { ControlActivity, SessionState, SessionSummary } from "@shared/api";
-import { SESSION_STATES, splitKey } from "@shared/api";
+import type { ControlActivity, Info, SessionState, SessionSummary } from "@shared/api";
+import { isEmptySession, ROUTES, SESSION_STATES, splitKey } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useBehind, useCatchingUp } from "../account/current";
 import {
   ChipSelect,
   CommandWell,
@@ -30,7 +31,7 @@ import { type MenuList, MoreButton, useContextMenu } from "../components/Context
 import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { OfflineLine } from "../components/OfflineLine";
-import { PageBar } from "../components/PageBar";
+import { BarStatus, PageBar } from "../components/PageBar";
 import {
   BesideButton,
   cardHides,
@@ -58,7 +59,7 @@ import {
   useStreamDown,
   useUnreadKeys,
 } from "../data/hooks";
-import { agentMatches } from "../lib/agents";
+import { agentFound } from "../lib/agents";
 import { foldsAway, nestDelegated } from "../lib/delegated";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import {
@@ -76,11 +77,13 @@ import { focusSearch, inPanel, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { isUnread, setUnread } from "../lib/marks";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
+import { accountMode, apiFetch } from "../lib/net";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
 import { useNow } from "../lib/time";
+import { NEW_WORDS as N } from "../native/accountWords";
 import { useSetupStatus } from "../setup/api";
 
 const isStart = (a: ControlActivity) => a.kind === "start";
@@ -88,10 +91,7 @@ const isStart = (a: ControlActivity) => a.kind === "start";
 const PENDING_MAX_MS = 3600_000;
 
 /** Whether a search finds one of a session's agents (their type or what they were asked). */
-const agentsMatch = (s: SessionSummary, q: string): boolean => {
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  return words.length > 0 && (s.agents ?? []).some((a) => words.every((w) => agentMatches(a, w)));
-};
+const agentsMatch = (s: SessionSummary, q: string): boolean => (s.agents ?? []).some((a) => agentFound(a, q));
 
 const matches = (s: SessionSummary, q: string) => {
   if (!q) return true;
@@ -204,6 +204,9 @@ export function Board() {
   const { all } = tree;
   const { snapshotAt } = useAppState();
   const firstLoad = useFirstLoad();
+  // An account reading its history: the board it has stays as it is until the history is in.
+  const behind = useBehind();
+  const catchingUp = useCatchingUp();
   const [q, setQ] = useState("");
   const [machine, setMachine] = useState("");
   const [harness, setHarness] = useState("");
@@ -245,19 +248,28 @@ export function Board() {
   const { sessions } = useAppState();
   const recentStart = starts.some((a) => Date.now() - Date.parse(a.at) < ALIAS_WINDOW_MS);
   const now = useNow(recentStart ? "fine" : "coarse");
+  // A start's session takes over from its row once the list shows it: at its first turn,
+  // not at its bare start (useSessionTree leaves an empty session out).
+  const listed = useCallback(
+    (key: string | undefined) => {
+      const s = key ? sessions.get(key) : undefined;
+      return !!s && !isEmptySession(s);
+    },
+    [sessions],
+  );
   const pending = useMemo(
     () =>
       starts.filter(
         (a) =>
           !!a.session &&
-          !sessions.has(a.session) &&
-          !(a.ackSession && sessions.has(a.ackSession)) &&
+          !listed(a.session) &&
+          !listed(a.ackSession) &&
           !isFinal(a) &&
           now - Date.parse(a.at) < PENDING_MAX_MS &&
           (!machine || paired.find((m) => m.control?.machineId === a.machineId)?.name === machine) &&
           (!harness || splitKey(a.session).harness === harness),
       ),
-    [starts, sessions, now, machine, harness, paired],
+    [starts, listed, now, machine, harness, paired],
   );
   const aliased = useCallback(
     (s: SessionSummary) =>
@@ -316,7 +328,12 @@ export function Board() {
   );
 
   // Held still under the hand: rows keep their place and section; new ones wait.
-  const hold = useListHold(listRef, { idle: false });
+  const listHold = useListHold(listRef, { idle: false });
+  // A filter is an explicit change: apply it even while focus holds the old rows.
+  const filterKey = JSON.stringify([q, machine, harness, label]);
+  const heldFilter = useRef(filterKey);
+  const hold = listHold && heldFilter.current === filterKey;
+  heldFilter.current = filterKey;
   const heldAll = useHeldOrder(visible, keyOf, hold, stateOf);
   const known = useRef<Set<string>>(new Set());
   // Held, new rows wait; but a list that has shown nothing yet (a first snapshot, a tree
@@ -422,8 +439,12 @@ export function Board() {
   const hiddenMenu = useContextMenu(() => [{ label: "Show hidden sessions", checked: showHidden, run: toggleHidden }]);
 
   const doneCount = groups.get("done")!.length;
-  const loaded = !!snapshotAt;
-  const empty = loaded && all.length === 0 && pending.length === 0;
+  const none = all.length === 0 && pending.length === 0;
+  // A board an account drew empty before any of its history came (its first read was
+  // refused), with history coming now: still loading, not the first run.
+  const filling = !!snapshotAt && behind && none;
+  const loaded = !!snapshotAt && !filling;
+  const empty = loaded && none;
   // The listening state leaves over 160 ms before the first row comes in.
   const emptyShown = usePresence(empty, EMPTY_EXIT_MS);
   const [witnessed, setWitnessed] = useState(false);
@@ -449,7 +470,7 @@ export function Board() {
         openBeside={beside}
         open={s.key === openKey}
         openTab={s.agents?.length ? openKey : null}
-        agentsMatch={!!lq.rest && agentsMatch(s, lq.rest)}
+        agentsMatch={lq.rest && agentsMatch(s, lq.rest) ? lq.rest : undefined}
         onlyMachine={setMachine}
         onlyHarness={setHarness}
         gone={h.gone}
@@ -481,6 +502,7 @@ export function Board() {
     >
       <PageBar
         title="Board"
+        meta={catchingUp ? <BarStatus>{N.catchingUp}</BarStatus> : undefined}
         tools={
           // Not before the first snapshot: the filters it decides would push the search
           // over as they arrive (the layout shift the board had on every load).
@@ -540,8 +562,14 @@ export function Board() {
       )}
       <LensNote lens={lens} hidden={hiddenByLens} />
 
-      {firstLoad === "loading" ? (
-        <div className="skeleton board-skeleton" role="status" aria-label="Loading sessions">
+      {firstLoad === "loading" || filling ? (
+        // While the page bar says "Catching up…", it is the one that says so.
+        <div
+          className="skeleton board-skeleton"
+          role="status"
+          aria-label={behind ? N.catchingUpSpoken : "Loading sessions"}
+          aria-hidden={catchingUp || undefined}
+        >
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="skeleton-row" />
           ))}
@@ -563,7 +591,7 @@ export function Board() {
       ) : null}
       {emptyShown.mounted && (
         <div className="board-empty" data-closing={emptyShown.closing ? "" : undefined}>
-          <FirstRun paired={paired[0]?.name} />
+          {accountMode() ? <AccountFirstRun paired={paired[0]?.name} /> : <FirstRun paired={paired[0]?.name} />}
         </div>
       )}
       {noMatch && (
@@ -812,6 +840,58 @@ function FirstRun({ paired }: { paired?: string }) {
         </>
       )}
       <Listening>{(hooked.length ? hooked : names).join(", ")}</Listening>
+    </EmptyState>
+  );
+}
+
+/** The first run on a spacesheep account. Nothing on this phone listens for a terminal,
+ *  there are no hooks of its own to install, and it has no sample board to put in its
+ *  place: the wait, and the one way on there is (a session on a paired computer, or the
+ *  machines of the account). */
+function AccountFirstRun({ paired }: { paired?: string }) {
+  // How the account's relay stands, asked of the page's own backend while the board is empty.
+  const [relay, setRelay] = useState<string | null>(null);
+  useEffect(() => {
+    let off = false;
+    const read = () =>
+      void apiFetch(ROUTES.ui.info)
+        .then((r) => r.json() as Promise<Info>)
+        .then((i) => {
+          if (!off) setRelay(i.sources?.spacesheep?.state ?? null);
+        })
+        .catch(() => {});
+    read();
+    const t = window.setInterval(read, 2000);
+    return () => {
+      off = true;
+      window.clearInterval(t);
+    };
+  }, []);
+  // spacesheep asked this app to wait before the account was read once: an empty board says
+  // nothing of whether there are sessions. The words are the ones Settings has for this state.
+  if (relay === "limited")
+    return (
+      <EmptyState center title="This app is reading too often for spacesheep">
+        It catches up by itself.
+      </EmptyState>
+    );
+  return (
+    <EmptyState
+      center
+      title="Waiting for your first session"
+      actions={
+        paired ? (
+          <button type="button" className="btn" onClick={() => openNewSession({ machine: paired })}>
+            Start a session on {paired}
+          </button>
+        ) : (
+          <Link to="/machines" className="btn">
+            Machines
+          </Link>
+        )
+      }
+    >
+      Start an agent on a computer paired with this account and it appears here.
     </EmptyState>
   );
 }

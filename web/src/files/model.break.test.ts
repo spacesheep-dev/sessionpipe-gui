@@ -247,6 +247,26 @@ describe("paths", () => {
     expect(files).toHaveLength(1);
   });
 
+  // Claude Code on Windows names a file by absolute path, by relative path, or with the
+  // drive in another case: one file, one row, as on a Mac.
+  it("a Windows file under the session's folder is one row however it is spelled", () => {
+    seq = 0;
+    const cwd = "C:\\Users\\dev\\code\\acme";
+    const files = indexFiles(
+      [
+        ...tool("Read", { file_path: "C:\\Users\\dev\\code\\acme\\src\\index.ts" }, numbered(["a"])),
+        ...tool("Edit", { file_path: "src\\index.ts", old_string: "a", new_string: "b" }, "ok"),
+        ...tool(
+          "Edit",
+          { file_path: "c:\\users\\dev\\code\\acme\\src\\index.ts", old_string: "b", new_string: "c" },
+          "ok",
+        ),
+      ],
+      cwd,
+    );
+    expect(files.map((f) => f.path)).toEqual(["src/index.ts"]);
+  });
+
   // A Windows path has no "/" to split on: the whole path becomes the name, the folder "".
   it("a Windows path splits on its own separator", () => {
     seq = 0;

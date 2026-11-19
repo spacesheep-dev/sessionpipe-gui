@@ -9,7 +9,7 @@ import { useContextMenu } from "../components/ContextMenu";
 import { Select } from "../components/Select";
 import { useMachines } from "../data/hooks";
 import { ms, useNow } from "../lib/time";
-import { ControlError, controlApi, type DeviceRequest } from "./api";
+import { ControlError, controlApi, type DeviceRequest, httpsPath } from "./api";
 import { sendCommand } from "./command";
 import { useControlActivity, useGrant, useRpId } from "./hooks";
 import { deviceKeyLabel, sentence } from "./PendingDevices";
@@ -238,6 +238,24 @@ function DeviceRow({
           No passkey prompt? The passkey {m?.name ?? "the machine"} trusts may be in another browser or on your phone:
           approve there. Or run <code>sessionpipe control pair</code> on {m?.name ?? "the machine"} and approve that
           instead.
+        </span>
+      )}
+      {signerKind() === "device" && (d.key.type === "device" || /doesn't trust/.test(err ?? "")) && (
+        <span className="pending-meta pending-wide" role="status" data-hand-off>
+          {/* The app can't vouch for its own key: the first approval comes from a browser
+              that holds a passkey the machine trusts (CONTROL.md §2). The link carries the
+              board's key and the https origin, so that browser lands on this request. */}
+          {/doesn't trust/.test(err ?? "")
+            ? "This app can't approve itself. "
+            : "If this is this app's own key, it can't approve itself. "}
+          Approve it once from the browser or phone that holds the passkey:{" "}
+          {httpsPath("/machines") ? (
+            <a href={httpsPath("/machines") ?? undefined} target="_blank" rel="noreferrer">
+              open Machines there →
+            </a>
+          ) : (
+            <>open Machines there and tap Approve on these digits.</>
+          )}
         </span>
       )}
       {err ? (

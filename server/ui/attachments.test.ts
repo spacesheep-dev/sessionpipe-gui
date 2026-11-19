@@ -4,7 +4,7 @@ import path from "node:path";
 import { deflateSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ATTACHMENT_MAX_BYTES, type Attachment, type Info, ROUTES, UI_KEY_COOKIE } from "../../shared/api.js";
-import { composePrompt, splitAttachments } from "../../shared/attachments.js";
+import { attachmentLines, composePrompt, REMOTE_HEADING, splitAttachments } from "../../shared/attachments.js";
 import { Session, tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
 import type { Ctx } from "../http/router.js";
@@ -169,7 +169,7 @@ describe("attachments API", () => {
       body: bytes(buf),
     });
 
-  it("uploads, serves and deletes an image; the reference names path, URL and size", async () => {
+  it("uploads, serves and deletes an image; the reference names its path here, the board's own path to it, and its size", async () => {
     const res = await upload(png(1440, 900));
     expect(res.status).toBe(201);
     const a = (await res.json()) as Attachment;
@@ -178,8 +178,10 @@ describe("attachments API", () => {
     expect(a.path).toBe(path.join(tmp.dir, "attachments", `${a.id}.png`));
     expect(existsSync(a.path)).toBe(true);
     const info = app.info();
-    const base = info.urls.lan[0] ?? info.urls.local;
-    expect(a.url).toBe(`${base}/attachments/${a.id}.png?k=${info.uiKey}`);
+    // A path on this board, for its own pages: no origin, and no key in it.
+    expect(a.url).toBe(`/attachments/${a.id}.png`);
+    expect(a.url).not.toContain("?k=");
+    expect(a.url).not.toContain("://");
     expect(a.bytes).toBeGreaterThan(100);
 
     const got = await fetch(`${app.url}/attachments/${a.id}.png`);
@@ -201,6 +203,49 @@ describe("attachments API", () => {
     expect((await fetch(`${app.url}/attachments/${a.id}.png`)).status).toBe(404);
     expect((await fetch(`${app.url}/attachments/${a.id}.png`, { method: "DELETE" })).status).toBe(404);
     expect(app.info().storage.attachments).toBe(0);
+  });
+
+  it("takes an upload and a delete from its own page; one from another origin stores and removes nothing", async () => {
+    const other = { origin: "https://other.example", "sec-fetch-site": "cross-site" };
+    const dir = path.join(tmp.dir, "attachments");
+    const held = () => (existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".png")).length : 0);
+    const before = held();
+    // An image by itself, and as the one part of a form.
+    const direct = await fetch(`${app.url}${ROUTES.ui.attachments}`, {
+      method: "POST",
+      headers: { "content-type": "image/png", ...other },
+      body: bytes(png(8, 8)),
+    });
+    expect(direct.status).toBe(403);
+    expect(await direct.json()).toMatchObject({ reason: "cross_site" });
+    const form = new FormData();
+    form.append("file", new Blob([bytes(png(8, 8))], { type: "image/png" }), "a.png");
+    const multipart = await fetch(`${app.url}${ROUTES.ui.attachments}`, { method: "POST", headers: other, body: form });
+    expect(multipart.status).toBe(403);
+    expect(held()).toBe(before);
+
+    const a = (await (await upload(png(8, 8))).json()) as Attachment;
+    expect(existsSync(a.path)).toBe(true);
+    for (const headers of [other, { origin: "https://other.example" }, { origin: "null" }]) {
+      const del = await fetch(`${app.url}/attachments/${a.id}.png`, { method: "DELETE", headers });
+      expect(del.status).toBe(403);
+      expect(existsSync(a.path)).toBe(true);
+    }
+    // The page's own requests: the browser says same-origin, or names this server in Origin.
+    const again = new FormData();
+    again.append("file", new Blob([bytes(png(8, 8))], { type: "image/png" }), "a.png");
+    const own = await fetch(`${app.url}${ROUTES.ui.attachments}`, {
+      method: "POST",
+      headers: { origin: app.url, "sec-fetch-site": "same-origin" },
+      body: again,
+    });
+    expect(own.status).toBe(201);
+    const b = (await own.json()) as Attachment;
+    const del = (id: string, headers: Record<string, string>) =>
+      fetch(`${app.url}/attachments/${id}.png`, { method: "DELETE", headers });
+    expect((await del(a.id, { "sec-fetch-site": "same-origin" })).status).toBe(204);
+    expect((await del(b.id, { origin: app.url })).status).toBe(204);
+    expect(held()).toBe(before);
   });
 
   it("reads the size of every format and stores each under its own extension", async () => {
@@ -290,16 +335,15 @@ describe("attachments API", () => {
 
   it("prunes files past the retention unless a stored event still names them", async () => {
     const store = AttachmentStore.for(tmp.dir);
-    const info = app.info();
-    const kept = store.save(png(4, 4), info);
-    const gone = store.save(png(5, 5), info);
-    const young = store.save(png(6, 6), info);
+    const kept = store.save(png(4, 4));
+    const gone = store.save(png(5, 5));
+    const young = store.save(png(6, 6));
     const old = new Date(Date.now() - (ATTACHMENT_RETENTION_DAYS + 1) * 86400_000);
     utimesSync(kept.path, old, old);
     utimesSync(gone.path, old, old);
     // The prompt that named `kept` was framed into the session: its transcript holds the block.
     const s = new Session("with-image");
-    const text = composePrompt("Make the header look like this", [kept], true);
+    const text = composePrompt("Make the header look like this", [kept]);
     app.store.ingest(
       [
         s.ev("session.started", { source: "startup" }),
@@ -337,34 +381,42 @@ describe("the text block", () => {
     type: "image/png",
     ext: "png",
     path: `/Users/m/.local/state/sessionpipe-gui/attachments/${id}.png`,
-    url: `https://mac.local:7373/attachments/${id}.png?k=abc`,
+    url: `/attachments/${id}.png`,
     width: w,
     height: h,
     bytes: 1,
   });
   const A = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
   const B = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
+  /** The block as it was written for a session on another machine, before nothing was. */
+  const oldRemote = (id: string, w: number, h: number) =>
+    `${REMOTE_HEADING}\n- https://studio-mac.local:7373/attachments/${id}.png?k=uik_test_old (${w}×${h})`;
 
-  it("is the message, a blank line and one block; paths here, URLs elsewhere", () => {
-    expect(composePrompt("Fix this ", [a(A, 1440, 900)], true)).toBe(
+  it("is the message, a blank line and one block of paths on this machine", () => {
+    expect(composePrompt("Fix this ", [a(A, 1440, 900)])).toBe(
       `Fix this\n\nAttached images (open them with your file-reading tool):\n- /Users/m/.local/state/sessionpipe-gui/attachments/${A}.png (1440×900)`,
     );
-    expect(composePrompt("", [a(A, 1, 2), a(B, 3, 4)], false)).toBe(
-      `Attached images (fetch them; they are on the board you were messaged from):\n- https://mac.local:7373/attachments/${A}.png?k=abc (1×2)\n- https://mac.local:7373/attachments/${B}.png?k=abc (3×4)`,
+    expect(composePrompt("", [a(A, 1, 2), a(B, 3, 4)])).toBe(
+      `Attached images (open them with your file-reading tool):\n- /Users/m/.local/state/sessionpipe-gui/attachments/${A}.png (1×2)\n- /Users/m/.local/state/sessionpipe-gui/attachments/${B}.png (3×4)`,
     );
-    expect(composePrompt("Just words", [], true)).toBe("Just words");
+    expect(composePrompt("Just words", [])).toBe("Just words");
   });
 
-  it("reads back the body and the images from either form", () => {
-    const local = splitAttachments(composePrompt("Fix this", [a(A, 1440, 900), a(B, 10, 10)], true));
+  it("reads back the body and the images, also from the block of URLs older versions wrote", () => {
+    const local = splitAttachments(composePrompt("Fix this", [a(A, 1440, 900), a(B, 10, 10)]));
     expect(local.body).toBe("Fix this");
     expect(local.items).toEqual([
       { id: A, ext: "png", src: `/attachments/${A}.png`, width: 1440, height: 900 },
       { id: B, ext: "png", src: `/attachments/${B}.png`, width: 10, height: 10 },
     ]);
-    const remote = splitAttachments(composePrompt("", [a(A, 1, 2)], false));
+    const remote = splitAttachments(oldRemote(A, 1, 2));
     expect(remote.body).toBe("");
     expect(remote.items).toEqual([{ id: A, ext: "png", src: `/attachments/${A}.png`, width: 1, height: 2 }]);
+    const said = splitAttachments(`Look\n\n${oldRemote(B, 3, 4)}`);
+    expect(said).toEqual({
+      body: "Look",
+      items: [{ id: B, ext: "png", src: `/attachments/${B}.png`, width: 3, height: 4 }],
+    });
     const plain = splitAttachments("Nothing attached here");
     expect(plain).toEqual({ body: "Nothing attached here", items: [] });
     const winAttachment: Attachment = {
@@ -374,6 +426,48 @@ describe("the text block", () => {
     const win = splitAttachments(composePrompt("Windows path", [winAttachment], true));
     expect(win.body).toBe("Windows path");
     expect(win.items).toEqual([{ id: A, ext: "png", src: `/attachments/${A}.png`, width: 800, height: 600 }]);
+  });
+});
+
+// The board's UI key opens the whole board, and a prompt's text goes to the model and to
+// every sink that takes prompts. So nothing an upload answers with, and nothing the block
+// can be made of, holds the key, an address of this board, or a link to the file.
+describe("no key and no address of the board in a prompt", () => {
+  it("an upload's answer and every text made of it hold neither the UI key, an origin, nor a URL", async () => {
+    const res = await fetch(`${app.url}${ROUTES.ui.attachments}`, {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: new Uint8Array(png(8, 8)),
+    });
+    expect(res.status).toBe(201);
+    const a = (await res.json()) as Attachment;
+    const info = app.info();
+    expect(info.uiKey.length).toBeGreaterThan(8);
+    const origins = [info.urls.local, ...info.urls.lan, ...(info.urls.https ? [info.urls.https] : [])];
+    // Whatever a caller asks for: the older signature took a third argument, `false` for
+    // "the session is on another machine", and wrote a URL.
+    const compose = composePrompt as (message: string, items: Attachment[], local?: boolean) => string;
+    const lines = attachmentLines as (items: Attachment[], local?: boolean) => string[];
+    const texts = [
+      JSON.stringify(a),
+      compose("Look at this", [a]),
+      compose("Look at this", [a], true),
+      compose("Look at this", [a], false),
+      compose("", [a], false),
+      ...lines([a]),
+      ...lines([a], false),
+    ];
+    for (const text of texts) {
+      expect(text).not.toContain(info.uiKey);
+      expect(text).not.toContain("?k=");
+      expect(text).not.toContain("://");
+      for (const o of origins) expect(text).not.toContain(new URL(o).host);
+    }
+    // The one place a file is named in a text is its path on this disk.
+    expect(compose("Look at this", [a], false)).toBe(
+      `Look at this\n\nAttached images (open them with your file-reading tool):\n- ${a.path} (8×8)`,
+    );
+    expect(a.url).toBe(`/attachments/${a.id}.png`);
   });
 });
 

@@ -105,7 +105,9 @@ export function Banner({ toast: t, closing }: { toast: Toast; closing: boolean }
   return (
     <div
       ref={ref}
-      className={`toast toast--banner toast--${t.kind}`}
+      // The app's own notice (something a person is told, not a session's news) is read
+      // whole: its two sentences wrap. Every other banner is one line, as it was.
+      className={`toast toast--banner toast--${t.kind}${t.label === "notice" && !t.session ? " toast--told" : ""}`}
       data-toast={t.kind}
       data-session={t.session}
       data-attention={t.attentionId}

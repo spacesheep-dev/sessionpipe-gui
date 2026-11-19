@@ -1,0 +1,31 @@
+{
+  "name": "pool-order-repeats",
+  "description": "An order that names an account twice.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"pool\",\"session\":\"sessionpipe:pool\",\"nonce\":\"-zkVFrRNhl2d7zieoxbBTg\",\"iat\":1790800000000,\"pool_action\":\"order\",\"pool_order\":[\"b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d\",\"7a1e2f3b-9c4d-4e5f-a6b7-c8d9e0f1a2b3\",\"b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d\"]}",
+      "csig": "fxE0hTO90rIRrvlnjyLjNVdDuc7eU-f9x-C_3xc-eyH-DCepLIH-LQq5iChnbpqO4qJ3sy0RzMTqAyz1_EYGXw",
+      "grant": {
+        "cred": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiaGVBUjh4c21ScjM0MmJ5QXM2RUdtMjFWcU5xX2ctSWgycl9ReHR1VExnWSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIFXj4jLj3M8KQ67-gxkFK0PJHRvHh_g475jIhG56XXOTAiEAje8rn9IcyZH1XQY8uzCKkO3wAvwVGXfvEPYwbJR_VdQ",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3LRphQ8Tu3hwfO3l10QT-ymYuFMqIXM4NZ3qYUa8uuQcQGT1R-m4le19ttipt0maUgg6UC-j6TRO821MsozEBA\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2U3x1j5ZGN8EVblGBeu875Wx5uTrMdyAsI4SehypmilhtnYsCBuPwkDLH7UH1L0U6C11cpV-G2dJkzNuIp29XQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

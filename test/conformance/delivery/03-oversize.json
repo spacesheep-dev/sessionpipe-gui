@@ -1,0 +1,22 @@
+{
+  "name": "oversize",
+  "spec": "HTTP.md §2 Errors",
+  "steps": [
+    {
+      "send": {
+        "events": "{max_events+1 events}"
+      },
+      "expect": {
+        "status": 413
+      }
+    },
+    {
+      "send": {
+        "events": "{one batch over max_bytes}"
+      },
+      "expect": {
+        "status": 413
+      }
+    }
+  ]
+}

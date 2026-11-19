@@ -2,8 +2,9 @@
 // Envelope validation by hand (PROTOCOL.md §2–3). sessionpipe-core/schema would do it
 // with zod, which is not a dependency here. One event at a time: a bad event is
 // rejected with a reason, the batch goes on (HTTP.md §2).
-import { isUlid, TYPE_TIER } from "sessionpipe-core";
+
 import type { ProtocolEvent, Tier } from "../../shared/api.js";
+import { isUlid, TYPE_TIER } from "./core-copy.js";
 
 export const MAX_TIER: Tier = 3;
 
@@ -31,7 +32,7 @@ export function eventProblem(e: unknown): string | null {
     return "bad_harness";
   if (!isObject(e.session) || typeof e.session.id !== "string" || !SESSION_ID_RE.test(e.session.id))
     return "bad_session";
-  if (!Number.isInteger(e.session.seq) || (e.session.seq as number) < 0) return "bad_seq";
+  if (!Number.isSafeInteger(e.session.seq) || (e.session.seq as number) < 0) return "bad_seq";
   if (!isObject(e.privacy) || !Array.isArray(e.privacy.rulesets) || typeof e.privacy.pii !== "boolean")
     return "bad_privacy";
   if (!isObject(e.data)) return "bad_data";

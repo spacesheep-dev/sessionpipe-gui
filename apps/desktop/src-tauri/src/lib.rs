@@ -121,12 +121,14 @@ pub fn run() {
             };
             let dev_url = app.config().build.dev_url.as_ref().map(|u| u.to_string());
             let hub = Hub::new(HubConfig {
-                home: home.clone(),
-                keys,
                 env_receiver_url: std::env::var("SP_RECEIVER_URL").ok(),
                 allowed_origins: sp_receivers::proxy::default_allowed_origins(dev_url.as_deref()),
                 status: StatusFile::from_env(&version),
                 user_agent: format!("sessionpipe-desktop/{version}"),
+                // The rest as a Hub has it unasked. In particular no spacesheep accounts:
+                // on a desktop the server connects one (server/ui/spacesheep.ts); the
+                // Hub's own account mode is the phones'.
+                ..HubConfig::new(home.clone(), keys)
             });
             let s = settings::load(&home);
             app.manage(Shell {

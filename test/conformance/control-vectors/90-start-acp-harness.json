@@ -1,0 +1,32 @@
+{
+  "name": "start-acp-harness",
+  "description": "A new session of an agent driven through ACP (goose): the harness name is the row in ADAPTERS.md, and whether this machine can start it is the daemon's to say (its hello's `harnesses`), never the verifier's.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"start\",\"session\":\"goose:0199a\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"FUSnp0Z116ZYAjHfXh8u-w\",\"iat\":1790800000000,\"cwd\":\"/tmp\"}",
+      "csig": "p73RmU0iL8gJsYRpuhja77J1FkLa6jCZq1uroHKaJEGZ5eB9-EDiPp1ZX_FUDeLnfySHESH81eAf_z4Vw07mfQ",
+      "grant": {
+        "cred": "wZR8lJi7gtqLFmc4LzzihqHT38DYXsh8",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiMGdrUkh4SUJtdWQyR1E2OGxXTF9BdGI5Qm1RRE1RR0gyZFJvOTQ3TDR6byIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCID58DDu9MDjA1QCxrqi8QdJYayBRnxgPRzLs5QjeKQFAAiEAp7e1Oz_1TiIoZqzTjAAwBrrbGEmexQebmAyzZMfPtbc",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEoJAjUczqFEWwL4d6jS70PF-M83Hh1gg71fUl0SIsCaWnm6SpbsCFclV19A_0OKj9yp1giCjfkcOvKJzRAXRhqQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "wZR8lJi7gtqLFmc4LzzihqHT38DYXsh8",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWEt43DwarF8MYXFLh8iWZ0O9RVKeYJIU-ZsXrn4ulzHdxZRQ4AwdCr-MtZx1ez615LGIoHHEK26QMNiejPW36A"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "grant",
+    "kind": "start"
+  }
+}

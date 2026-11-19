@@ -6,6 +6,7 @@ import type { MachineControl } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import { ControlError } from "../../control/api";
 import { commandString } from "../../control/command";
+import { sendErrorWords } from "../../control/words";
 import {
   askableSessions,
   askOff,
@@ -201,15 +202,31 @@ describe("the entry points", () => {
     expect(canAskFrom(me, control({ handoff: true }), sessions, NOW)).toBe(true);
     expect(canAskFrom(me, control(), [], NOW)).toBe(false);
   });
-  it("handoffRefusalWords: the two refusals only a handoff meets", () => {
-    expect(handoffRefusalWords(new ControlError(422, "refused", "handoff"), "lab-mac", true)).toBe(
+  it("handoffRefusalWords: the one refusal only a handoff meets", () => {
+    expect(handoffRefusalWords(new ControlError(422, "refused", "handoff"), "lab-mac")).toBe(
       "Not sent: lab-mac didn't say it brings answers back. Turn the switch off to ask without that.",
     );
-    expect(handoffRefusalWords(new ControlError(422, "refused", "bad_fields"), "lab-mac", true)).toMatch(
-      /^Not sent: this receiver's sessionpipe is older/,
-    );
-    expect(handoffRefusalWords(new ControlError(422, "refused", "bad_fields"), "lab-mac", false)).toBeNull();
-    expect(handoffRefusalWords(new ControlError(422, "refused", "folder"), "lab-mac", true)).toBeNull();
-    expect(handoffRefusalWords(new Error("x"), "lab-mac", true)).toBeNull();
+    expect(handoffRefusalWords(new ControlError(422, "refused", "folder"), "lab-mac")).toBeNull();
+    expect(handoffRefusalWords(new Error("x"), "lab-mac")).toBeNull();
+  });
+  it("a bad_fields with the answer asked back is the command's, and reads as on any send", () => {
+    // What the sheet shows (HandoffSheet.tsx): its own words, else the words of every send.
+    const shown = (e: unknown) =>
+      handoffRefusalWords(e, "lab-mac") ?? sendErrorWords(e).replace(/^not sent · /, "Not sent: ");
+    // The receiver's verifier takes `reply_to` (sessionpipe-core 0.13), so what it refuses
+    // `bad_fields` with one on board is the command: these are its reasons, as it words them.
+    for (const reason of [
+      "a claude-code session id is a UUID",
+      "a reply_to can't name the command's own session",
+      "a model is 1 to 100 letters, digits and ._:/@[]-, not starting with a dash",
+      // A remote machine's command, refused by the relay it goes through (server/control/ui.ts forwardSend).
+      "spacesheep did not take it",
+    ]) {
+      const e = new ControlError(422, reason, "bad_fields");
+      expect(handoffRefusalWords(e, "lab-mac"), reason).toBeNull();
+      expect(shown(e), reason).toBe("Not sent: a field is missing or does not belong to this kind");
+      // Never the line that blamed an old receiver.
+      expect(shown(e)).not.toMatch(/older than bringing answers back/);
+    }
   });
 });

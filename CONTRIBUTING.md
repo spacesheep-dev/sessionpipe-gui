@@ -35,6 +35,26 @@ npm run build
 npm run test:e2e        # playwright: a built server in demo mode on :7311 / :7312, desktop and phone
 ```
 
+`npm test` holds the receiver to sessionpipe's own conformance fixtures (its control
+vectors and delivery scenarios), from the copy in `test/conformance/`. They are the
+fixtures of one version, so `package.json` pins `sessionpipe-core` to that version exactly,
+no range: a range would let an install with no lockfile run a verifier the vectors were
+never run against. **Moving the pin means syncing the fixtures in the same change**:
+`npm run conformance:sync` (a sessionpipe checkout beside this repo, or `-- --from <path>`),
+and commit what it wrote. Nothing there is edited by hand.
+
+Two checks hold the copy to that, and they cover different things:
+
+- `test/conformance.test.ts`, part of `npm test`, needs nothing but this repo. It fails
+  when the pin is a range, when the pin, the lockfile, `node_modules` and the copy's
+  `manifest.json` name different versions, and when a fixture was edited, removed or added
+  without the manifest. It trusts the manifest: a vector edited together with its hash, or
+  removed together with its line, passes it.
+- `npm run conformance:sync -- --check` compares the copy and the manifest with
+  sessionpipe's own tag, which is what catches those. It needs a sessionpipe checkout, so
+  CI runs it against a clone at the pinned tag (`.github/workflows/ci.yml`); run it
+  yourself after a sync, or when you review a PR that touches `test/conformance/`.
+
 The e2e suite never touches :7373, so it runs beside a GUI you have open. The control
 e2e (`npx playwright test -c web/e2e/playwright.config.ts`) boots its own server on a
 free port. `SHOTS=1 npx playwright test screenshots` writes the README screenshots from

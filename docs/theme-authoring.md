@@ -51,7 +51,7 @@ Install it and open `/t/tally`:
 
 ```sh
 sessionpipe-gui view add ./tally        # copies the folder
-sessionpipe-gui view link ./tally       # or: symlink it while you work on it
+sessionpipe-gui view link ./tally       # or: link it while you work on it
 ```
 
 ## The manifest
@@ -318,7 +318,7 @@ sessionpipe-gui view add my-theme-0.1.0.tgz       # an archive: extracted (tar /
 sessionpipe-gui view add https://…/my-theme.zip   # downloaded, then extracted
 sessionpipe-gui view add sessionpipe-theme-tally  # an npm package name (npm install, then copied)
 sessionpipe-gui view add https://github.com/you/tally.git
-sessionpipe-gui view link ./my-theme              # a symlink: edits show on the next visit
+sessionpipe-gui view link ./my-theme              # a link (a symlink, or a junction on Windows): edits show on the next visit
 sessionpipe-gui view list
 sessionpipe-gui view remove tally
 ```

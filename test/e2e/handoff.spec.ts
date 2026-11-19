@@ -4,9 +4,8 @@
 // control strip, from a reply's menu and from the palette, on a machine whose hello says
 // `ask` and `handoff`; the rows it fills from the session (From, the agent that is not its
 // own harness, the session's folder), the switch that brings the answer back, and Ask: a
-// signed `start` the fake daemon takes, `from` on the activity, and the row the asking
-// session shows at once. The switch is turned off before sending: this receiver's
-// sessionpipe-core (0.10.0) refuses `reply_to` ahead of the machine, and the sheet says so.
+// signed `start` the fake daemon takes with `reply_to` naming the asking session, `from`
+// and `replyTo` on the activity, and the row the asking session shows at once.
 // An older machine's session gets the disabled item with its reason and no strip button.
 // Against the second e2e instance (test door on, rp id localhost) through fake daemons.
 import { randomUUID } from "node:crypto";
@@ -124,35 +123,27 @@ test("the strip's Ask another agent…: the sheet, its rows, and a start the mac
   await expect(text).toHaveValue(/---\nThe rounding happens in `prorate\(\)`: it floors cents\.$/);
   await expect(sheet(page).locator(".ns-status")).toHaveText(`${name} is listening.`);
 
-  // The switch is on by default (the hello says handoff). This receiver's core predates
-  // `reply_to`, so sending with it on is refused before the machine, with the way out.
+  // The switch is on by default (the hello says handoff): the answer is asked back here.
   const back = sheet(page).locator("[data-hs-row=back] [role=switch]");
   await expect(back).toHaveAttribute("aria-checked", "true");
   await text.fill("Review the rounding fix for off-by-one cents.");
   await page.keyboard.press("ControlOrMeta+Enter");
-  await expect(sheet(page).locator(".ns-status")).toHaveText(
-    "Not sent: this receiver's sessionpipe is older than bringing answers back. Turn the switch off, or update it.",
-    { timeout: 15_000 },
-  );
-  await expect(sheet(page)).toBeVisible();
-  await back.click();
-  await expect(back).toHaveAttribute("aria-checked", "false");
-  await page.keyboard.press("ControlOrMeta+Enter");
   await expect(sheet(page)).toHaveCount(0, { timeout: 15_000 });
 
-  // The machine took a start of codex in the session's folder, without reply_to.
+  // The machine took a start of codex in the session's folder, and inside the signed bytes
+  // the session its answer goes back to: the one that asked.
   await expect.poll(() => m.seen.find((c) => c.kind === "start"), { timeout: 15_000 }).toBeTruthy();
   const cmd = m.seen.find((c) => c.kind === "start")!;
   expect(cmd).toMatchObject({ cwd: "/Users/e2e/code", text: "Review the rounding fix for off-by-one cents." });
   expect(cmd.session).toMatch(/^codex:/);
-  expect(cmd.reply_to).toBeUndefined();
-  // The activity remembers which page sent it, unsigned.
+  expect(cmd.reply_to).toBe(`${s.harness}:${s.id}`);
+  // The activity says where the answer goes, as signed, and which page sent it, unsigned.
   const act = (await (await fetch(`${CONTROL_BASE}/api/ui/control/activity?limit=5`)).json()) as {
     activity: { kind: string; from?: string; replyTo?: string }[];
   };
   const row = act.activity.find((a) => a.kind === "start")!;
   expect(row.from).toBe(`${s.harness}:${s.id}`);
-  expect(row.replyTo).toBeUndefined();
+  expect(row.replyTo).toBe(`${s.harness}:${s.id}`);
   // The asking session shows the row at once, from the activity.
   await expect(page.locator(".ask").first()).toContainText("You asked Codex");
 });

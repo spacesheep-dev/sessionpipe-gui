@@ -5,7 +5,7 @@
 import type { KeyType } from "@shared/api";
 import "../native/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resetInfoCache, rpId } from "./api";
+import { ControlError, resetInfoCache, rpId } from "./api";
 import { commandString } from "./command";
 import { keyTypesOf, refresh } from "./nativeSigner";
 import {
@@ -15,20 +15,26 @@ import {
   deviceWords,
   dropGrant,
   grantExpiry,
+  isCancel,
   machineTakes,
   NoGrantError,
   nativeErrorWords,
   nativeSigner,
+  ownKeyFailed,
+  ownKeyKnown,
   ownKeys,
+  rereadOwnKeys,
   setupLabel,
   setupWords,
   sign,
   signerKind,
   signerLabel,
   signHint,
+  tapWords,
   unlock,
   updateWords,
 } from "./signer";
+import { notSentWords } from "./words";
 
 const g = globalThis as Record<string, unknown>;
 const DEVICE = {
@@ -109,6 +115,58 @@ describe("the device's words", () => {
     // The <html> mark shell.ts sets wins over the flag once it is there.
     (document.documentElement as unknown as { dataset: Record<string, string> }).dataset.shell = "macos";
     expect(setupLabel()).toBe("Approve this Mac");
+  });
+});
+
+describe("the words while a prompt is up, and a prompt closed", () => {
+  it("name what confirms here: Face ID on the iPhone, Touch ID on the Mac, the passkey in a browser", () => {
+    expect(tapWords()).toBe("Confirm with your passkey…");
+    inShell(() => null, ["signer"], { platform: "ios" });
+    expect(signerLabel()).toBe("Face ID");
+    expect(tapWords()).toBe("Confirm with Face ID…");
+    inShell(() => null, ["signer"], { platform: "macos" });
+    expect(tapWords()).toBe("Confirm with Touch ID…");
+  });
+
+  it("a prompt closed, or one already up, is no refusal; anything else is", () => {
+    const dom = (name: string, message = "The operation either timed out or was not allowed.") =>
+      new DOMException(message, name);
+    const table: [unknown, boolean][] = [
+      // The app's signer, in its own codes.
+      [{ code: "cancelled", message: "Cancelled." }, true],
+      [{ code: "busy", message: "A prompt is up." }, true],
+      [{ code: "lockout", message: "Locked." }, false],
+      [{ code: "rate_limited", message: "Slow down." }, false],
+      // A browser's passkey prompt: dismissed or timed out, aborted.
+      [dom("NotAllowedError"), true],
+      [dom("AbortError", "The operation was aborted."), true],
+      // The browser refused it for the page's certificate: that wants fixing.
+      [dom("NotAllowedError", "WebAuthn is not supported on sites with TLS certificate errors."), false],
+      [dom("InvalidStateError"), false],
+      // A refusal from a machine or spacesheep that happens to carry the word.
+      [new ControlError(422, "refused", "cancelled"), false],
+      [new Error("cancelled"), false],
+      ["cancelled", false],
+      [null, false],
+      [undefined, false],
+    ];
+    for (const [e, cancel] of table) expect([e, isCancel(e)]).toEqual([e, cancel]);
+  });
+
+  it("a locked Face ID says how to unlock it in a sentence of its own", async () => {
+    inShell(() => null, ["signer"], { platform: "ios" });
+    await nativeSigner();
+    expect(nativeErrorWords({ code: "lockout", message: "x" })).toBe(
+      "Face ID is locked. Unlock it with your passcode, then try again.",
+    );
+    // Under the field: one colon, then the two sentences.
+    expect(notSentWords({ code: "lockout", message: "x" })).toBe(
+      "Not sent: Face ID is locked. Unlock it with your passcode, then try again.",
+    );
+    inShell(() => null, ["signer"], { platform: "macos" });
+    expect(nativeErrorWords({ code: "lockout", message: "x" })).toBe(
+      "Touch ID is locked. Unlock it with your password, then try again.",
+    );
   });
 });
 
@@ -289,6 +347,34 @@ describe("the native adapter (mocked invoke)", () => {
     expect(calls.at(-1)?.args).toMatchObject({ cmd: add, mode: "confirm" });
   });
 
+  it("says Touch ID will ask only when it will: a confirm, a fresh grant, or no grant held", async () => {
+    let exp: number | null = Date.now() + 3_600_000;
+    inShell((cmd, args) =>
+      cmd === "plugin:identity|status"
+        ? { available: true, key: DEVICE, grantExp: exp }
+        : cmd === "plugin:identity|sign"
+          ? { cmd: args.cmd, csig: "c", grant: { cred: DEVICE.id, sig: "s", str: "{}" } }
+          : null,
+    );
+    const cmd = commandString(MACHINE, { kind: "prompt", session: "claude-code:x", text: "hi" });
+    let tapped = 0;
+    const onTap = () => tapped++;
+    // A grant held: the day key signs, no sheet comes, nothing says Touch ID.
+    await sign("localhost", cmd, { onTap });
+    expect(tapped).toBe(0);
+    await sign("localhost", cmd, { onTap, confirm: true });
+    expect(tapped).toBe(1);
+    await sign("localhost", cmd, { onTap, fresh: true });
+    expect(tapped).toBe(2);
+    // The grant ended, or none was taken today: Touch ID asks for one.
+    exp = Date.now() - 1;
+    await sign("localhost", cmd, { onTap });
+    expect(tapped).toBe(3);
+    exp = null;
+    await sign("localhost", cmd, { onTap });
+    expect(tapped).toBe(4);
+  });
+
   it("a grant a machine refused reads as gone in the app until a fresh one is taken", async () => {
     const exp = Date.now() + 3_600_000;
     const calls = inShell((cmd, args) =>
@@ -326,6 +412,57 @@ describe("the native adapter (mocked invoke)", () => {
     expect(await refresh("localhost")).toEqual(DEVICE);
     expect(ownKeys("localhost")).toEqual([DEVICE]);
     expect(calls.map((c) => c.cmd)).toEqual(["plugin:identity|status"]);
+  });
+
+  it("a key made where the page did not see it is read again: after the ask, and back in front", async () => {
+    // Rust holds no key yet: that is known, and the page asks nothing more by itself.
+    let made = false;
+    const calls = inShell(() => ({ available: true, ...(made ? { key: DEVICE } : {}), grantExp: null }));
+    await nativeSigner();
+    expect(await refresh("made.example")).toBeNull();
+    expect(ownKeyKnown("made.example")).toBe(true);
+    expect(ownKeys("made.example")).toEqual([]);
+    // The hub's ask makes the key natively; read again, it is there.
+    made = true;
+    await rereadOwnKeys("made.example");
+    expect(ownKeys("made.example")).toEqual([DEVICE]);
+    // Another rp id with no key: the app coming to the front reads it again, by itself.
+    made = false;
+    await refresh("front.example");
+    made = true;
+    const before = calls.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => expect(ownKeys("front.example")).toEqual([DEVICE]));
+    // Only what held no key was read again, not what is known.
+    expect(calls.slice(before).map((c) => c.args.rp)).toEqual(["front.example"]);
+  });
+
+  it("a read that fails is not kept as 'no key': not known, not asked again by every draw, read again in front", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let fail = true;
+    const calls = inShell((cmd) => {
+      if (cmd === "plugin:identity|status" && fail) throw new Error("the plugin is not ready");
+      return { available: true, key: DEVICE, grantExp: null };
+    });
+    await nativeSigner();
+    expect(await refresh("fail.example")).toBeNull();
+    expect(ownKeyKnown("fail.example")).toBe(false);
+    expect(ownKeyFailed("fail.example")).toMatch(/not ready/);
+    // Each draw reads ownKeys: none of them asks again (or the page would loop).
+    const before = calls.length;
+    expect(ownKeys("fail.example")).toEqual([]);
+    expect(ownKeys("fail.example")).toEqual([]);
+    expect(calls.length).toBe(before);
+    // Said once in the log, however often it fails.
+    await refresh("fail.example");
+    expect(warn).toHaveBeenCalledTimes(1);
+    // Back in front it reads again, and now it answers.
+    fail = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => expect(ownKeys("fail.example")).toEqual([DEVICE]));
+    expect(ownKeyKnown("fail.example")).toBe(true);
+    expect(ownKeyFailed("fail.example")).toBeNull();
+    warn.mockRestore();
   });
 
   it("a plugin refusal reads as words; anything else is not one", async () => {

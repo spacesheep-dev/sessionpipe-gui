@@ -66,10 +66,14 @@ export function parseAddress(raw: string): string | null {
 
 // ----- the first-run sheet -----
 
-/** Where a permission is changed: the Mac's System Settings, the phone's Settings. */
+/** Where a permission is changed: the Mac's System Settings, Windows' and the phone's Settings. */
 export const SETTINGS_APP = "System Settings";
 export const settingsApp = (platform: string | null): string =>
-  platform === "ios" || platform === "android" ? "Settings" : SETTINGS_APP;
+  platform === "ios" || platform === "android" || platform === "windows" ? "Settings" : SETTINGS_APP;
+
+/** Where the tray icon lives: the Mac's menu bar, the system tray on Windows and Linux. */
+export const trayPlace = (platform: string | null): string =>
+  platform === "windows" || platform === "linux" ? "system tray" : "menu bar";
 
 export const FIRST_RUN_KEY = "sessionpipe-gui.native.firstRun";
 
@@ -125,11 +129,35 @@ export function hotkeyFrom(e: {
   return [...mods, key.length === 1 ? key.toUpperCase() : key === "space" ? "Space" : key.toUpperCase()].join("+");
 }
 
-/** An accelerator ("Control+Alt+N", "CmdOrCtrl+Shift+K") as the Mac writes it: ⌃⌥N. */
-export function hotkeyLabel(h: string | null): string {
+/** An accelerator ("Control+Alt+N", "CmdOrCtrl+Shift+K") as the computer writes it: ⌃⌥N
+ *  on a Mac, Ctrl+Alt+N on Windows and Linux, where ⌃⌥ means nothing (the order and the
+ *  names are formatChord's in lib/shortcuts.ts). */
+export function hotkeyLabel(h: string | null, platform: string | null = "macos"): string {
   if (!h) return "";
   const parts = h.split("+");
   const key = (parts.pop() ?? "").replace(/^Key(?=[A-Z]$)|^Digit(?=[0-9]$)/, "");
+  const last = key.toLowerCase() === "space" ? "Space" : key.toUpperCase();
+  if (platform === "windows" || platform === "linux") {
+    // Command and Super are the Windows key (Super on Linux); CmdOrCtrl is Ctrl off a Mac.
+    const meta = platform === "windows" ? "Win" : "Super";
+    const word: Record<string, string> = {
+      control: "Ctrl",
+      ctrl: "Ctrl",
+      cmdorctrl: "Ctrl",
+      commandorcontrol: "Ctrl",
+      alt: "Alt",
+      option: "Alt",
+      shift: "Shift",
+      command: meta,
+      cmd: meta,
+      super: meta,
+    };
+    const order = ["Ctrl", "Alt", "Shift", meta];
+    const mods = [...new Set(parts.map((p) => word[p.toLowerCase()] ?? ""))]
+      .filter(Boolean)
+      .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    return [...mods, last].join("+");
+  }
   const sym: Record<string, string> = {
     control: "⌃",
     ctrl: "⌃",
@@ -147,7 +175,7 @@ export function hotkeyLabel(h: string | null): string {
     .map((p) => sym[p.toLowerCase()] ?? "")
     .sort((a, b) => order.indexOf(a) - order.indexOf(b))
     .join("");
-  return mods + (key.toLowerCase() === "space" ? "Space" : key.toUpperCase());
+  return mods + last;
 }
 
 /** A rejection the person caused (Cancel in the shell's own sheet): not an error to show. */

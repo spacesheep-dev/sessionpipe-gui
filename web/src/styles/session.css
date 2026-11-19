@@ -25,6 +25,24 @@ html:has(.main > .session) {
   scroll-padding-top: calc(var(--bar) + var(--safe-top, env(safe-area-inset-top)) + 28px);
   scroll-padding-bottom: calc(var(--sess-ctl-h, 120px) + 8px);
 }
+/* The stream is down (data/hooks.ts useStreamMark), or the session's computer is offline:
+   what the session is doing is not known while nothing arrives. Its rings stop where they
+   are, one quiet tier, and its clocks stand with them (lib/time.ts ClockHold), as the
+   board's rows do; the shell's footer, the phone's pill and the line under the composer
+   say why. With the computer offline the docked control still works (an answer or a
+   message waits for it), so its own rings, a press under way and the prompt's disc, are
+   left as they are. */
+[data-stream="down"] .session :is(.dot, .spinner),
+.session[data-machine="offline"] :is(.dot, .spinner):not(.sess-ctl *) {
+  animation-play-state: paused;
+  opacity: 0.55;
+}
+/* A session's events keep coming while its computer is offline (lib/offline.ts), so a
+   glyph that changes still settles in or draws its check, its first animation (shared.css
+   `.dot--arrive`); only a ring's turn stands. */
+.session[data-machine="offline"] .dot--arrive:not(.sess-ctl *) {
+  animation-play-state: running, paused;
+}
 .session {
   /* Where a row's text starts: a 16 px glyph, then 8 px. When a row happened is its turn
      head's (on hover) and its menu's, not a column on every row. */
@@ -281,6 +299,35 @@ html:has(.main > .session) {
   line-height: var(--lh);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+/* A long message folds its words to eight lines (the last one ends in "…") until "Show
+   all" opens them in place; the pictures it carried and the lines under it stay in sight. */
+.prompt-words {
+  display: block;
+}
+.prompt-words.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* "Show all" under the words, and "Show more" under a reply cut short: plain text at the
+   words' leading edge. */
+.prompt-more,
+.reply-more {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--text-sm);
+  text-align: start;
+  white-space: normal;
+}
+/* 44 px to a finger (narrow.css), the same quiet line to the eye: the height it gains
+   reaches into the space around it instead of adding to it. */
+@media (pointer: coarse) {
+  .prompt-more,
+  .reply-more {
+    margin: -8px 0;
+  }
 }
 /* Where a message sent through sessionpipe came from, under its words. */
 .prompt-via {
@@ -608,7 +655,7 @@ html:has(.main > .session) {
   }
 }
 .sess-ctl--arrive {
-  animation: ctl-arrive var(--dur-slow) var(--ease-out) both;
+  animation: ctl-arrive var(--dur-slow) var(--ease-out) backwards;
 }
 /* "3 new": what landed below while the person reads above; it hides at the bottom. */
 .sess-new {

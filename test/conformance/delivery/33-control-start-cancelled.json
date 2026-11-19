@@ -1,0 +1,25 @@
+{
+  "name": "control-start-cancelled",
+  "spec": "CONTROL.md §6 cancel, §10 failed/cancelled",
+  "capability": "control",
+  "note": "A start the person stopped before the machine had begun its process (it was still checking the harness's login, fetching the start's files, or waiting for a free slot). Nothing was started and no session exists, so the start is acked `failed` with code `cancelled`, never `delivered`. The receiver's part is to end the session it registered for that start: it must not be left showing as at work, and a message to it would be refused `no_session`.",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": { "session": "claude-code:{uuid}", "kind": "start", "cwd": "~/project", "text": "build the thing" },
+        "expires_in_s": 60
+      }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 200 } },
+    {
+      "ack": {
+        "outcome": "failed",
+        "code": "cancelled",
+        "detail": "stopped before it started, as asked: no session was created"
+      },
+      "expect": { "status": 202 }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 204 } }
+  ]
+}

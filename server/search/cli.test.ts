@@ -2,7 +2,7 @@
 // Owned by: search-service. `sessionpipe-gui search` / `index` over a fake backend (the
 // oracle as the reader): flags into tokens, the printed page, --json, exit codes, and
 // `index` asking a running server instead of fighting it for the LOCK.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -161,21 +161,78 @@ describe("sessionpipe-gui search", () => {
     expect(r.code).toBe(0);
   });
 
+  it("builds the index first with history off and a history/ left over, and still answers", async () => {
+    built = false;
+    writeFileSync(path.join(tmp.dir, "config.json"), JSON.stringify({ searchHistory: false }));
+    mkdirSync(path.join(tmp.dir, "search", "history"), { recursive: true });
+    const r = await run(runSearchCli, ["webhook", "--json"]);
+    expect(ran).toHaveLength(1);
+    expect(r.err).not.toMatch(/still on disk/);
+    expect((JSON.parse(r.out) as SessionSearchPage).index.history).toBe(false);
+  });
+
   it("honours history off in config.json", async () => {
     writeFileSync(path.join(tmp.dir, "config.json"), JSON.stringify({ searchHistory: false }));
     const r = await run(runSearchCli, ["webhook", "--json"]);
     expect(r.code).toBe(1);
     expect((JSON.parse(r.out) as SessionSearchPage).index.history).toBe(false);
   });
+
+  it("reads history off past a byte-order mark in config.json", async () => {
+    writeFileSync(path.join(tmp.dir, "config.json"), `\uFEFF${JSON.stringify({ searchHistory: false })}`);
+    const r = await run(runSearchCli, ["webhook", "--json"]);
+    expect(r.code).toBe(1);
+    expect((JSON.parse(r.out) as SessionSearchPage).index.history).toBe(false);
+  });
+
+  it("stops on a config.json the GUI refuses to read, rather than read it as history on or off", async () => {
+    // A cut-short write: the GUI itself stops on this file rather than write over it.
+    const cut = '{"searchHistory": false, "sinkToken": "spg_';
+    writeFileSync(path.join(tmp.dir, "config.json"), cut);
+    built = false;
+    const r = await run(runSearchCli, ["webhook", "--json"]);
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/config\.json is not valid JSON/);
+    expect(r.err).not.toContain("spg_");
+    expect(r.out).toBe("");
+    expect(ran).toHaveLength(0);
+    expect(readFileSync(path.join(tmp.dir, "config.json"), "utf8")).toBe(cut);
+  });
 });
 
 describe("sessionpipe-gui index", () => {
+  it("stops on a config.json the GUI refuses to read: no indexer runs, so no history index is deleted", async () => {
+    writeFileSync(path.join(tmp.dir, "config.json"), '{"sinkToken": "spg_');
+    const r = await run(runIndexCli, ["--rebuild"]);
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/config\.json is not valid JSON/);
+    expect(ran).toHaveLength(0);
+  });
+
   it("indexes in the foreground when no GUI is running", async () => {
     const r = await run(runIndexCli, ["--rebuild"]);
     expect(r.code).toBe(0);
     expect(ran).toHaveLength(1);
     expect(ran[0]).toMatchObject({ mode: "once", rebuild: true });
     expect(r.err).toMatch(/Indexed 2 sessions \(3 messages\)/);
+  });
+
+  it("with history off, a history/ the run could not delete is said, and exit 1", async () => {
+    writeFileSync(path.join(tmp.dir, "config.json"), JSON.stringify({ searchHistory: false }));
+    const left = path.join(tmp.dir, "search", "history");
+    mkdirSync(left, { recursive: true });
+    const r = await run(runIndexCli, []);
+    expect(ran[0]).toMatchObject({ mode: "once", history: false });
+    expect(r.err).toMatch(/^Indexed \d+ sessions/m);
+    expect(r.err).toContain(
+      `sessionpipe-gui: history search is off, but its index is still on disk: ${left} could not be deleted. It is tried again on the next sessionpipe-gui index.\n`,
+    );
+    expect(r.code).toBe(1);
+    // deleted (the next run's try worked): nothing to say
+    rmSync(left, { recursive: true, force: true });
+    const again = await run(runIndexCli, []);
+    expect(again.err).not.toMatch(/still on disk/);
+    expect(again.code).toBe(0);
   });
 
   it("asks a running GUI (server.json) instead, and waits for ready", async () => {

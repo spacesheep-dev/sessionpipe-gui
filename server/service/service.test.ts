@@ -2,23 +2,52 @@
 // `service install|uninstall|status` against a temp HOME and a fake launchctl / systemctl
 // (a shell script that logs its arguments): nothing here reaches the real session.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeRunFile } from "../runfile.js";
 import {
+  EXIT_NOT_RUNNING,
+  EXIT_NOTHING_DONE,
   installedOptions,
+  isCheckout,
   isOurs,
+  lockPath,
   type Probe,
   processEnv,
   runService,
   SERVICE_LABEL,
   type ServiceEnv,
   servicePath,
+  serviceTools,
+  takeLock,
 } from "./index.js";
 import { launchAgentPath, launchAgentPlist, parseLaunchctlPrint, plistArgv } from "./launchd.js";
 import { parseSystemctlShow, systemdUnit, unitArgv, unitPath } from "./systemd.js";
+import {
+  isReceiverCommandLine,
+  parseTaskQuery,
+  processQueryScript,
+  TASK_RUNNING,
+  taskArguments,
+  taskArgv,
+  taskFolderRemoveScript,
+  taskName,
+  taskQueryScript,
+  taskXml,
+  unsafeWord,
+} from "./windows.js";
 
 let dir: string;
 let home: string;
@@ -51,6 +80,76 @@ exit 0
   return p;
 }
 
+/** A fake schtasks: logs "schtasks <argv>"; /Create keeps the XML (read from UTF-16), /Query
+ *  prints it as the real one does to a pipe (/XML with every non-ASCII byte a "?"; else a
+ *  CSV row with the status in German), /Run and /End flip the status (/End of a
+ *  task that isn't running fails, as the real one does), /Delete forgets it; $FAKE_FAIL
+ *  names a verb (/Create, /Run …) that exits 1. A fake taskkill that only logs. And a fake
+ *  powershell that answers windows.ts's two scripts: the task's state, and its definition
+ *  written as Out-File does (UTF-8 with a byte-order mark) from what the fake schtasks
+ *  keeps; and a process's command line from the file proc.<pid> (no file: no such process).
+ *  $FAKE_FAIL=powershell makes it fail, $FAKE_FAIL=process only the process question.
+ *  The \\sessionpipe\\ folder is the file task.folder, there from the first /Create. The
+ *  fake powershell answers the folder script as Task Scheduler would: "kept" while a task is
+ *  in the folder (ours, or the file task.other: another label's); else the folder goes, logged
+ *  as "powershell DeleteFolder sessionpipe"; no folder is an error, and $FAKE_FAIL=folder
+ *  refuses the COM object as constrained language mode does. */
+function fakeSchtasks(): string {
+  const p = path.join(dir, "schtasks");
+  writeFileSync(
+    p,
+    `#!/bin/sh
+echo "schtasks $*" >> "${log}"
+[ -n "$FAKE_FAIL" ] && [ "$1" = "$FAKE_FAIL" ] && { echo "ERROR: Access is denied." >&2; exit 1; }
+t="${dir}/task.xml"; st="${dir}/task.status"
+case "$1" in
+  /Create) iconv -f UTF-16 -t UTF-8 "$5" > "$t"; echo Ready > "$st"; touch "${dir}/task.folder";;
+  /Query) [ -f "$t" ] || { echo "ERROR: The system cannot find the file specified." >&2; exit 1; }
+    if [ "$4" = "/XML" ]; then LC_ALL=C sed 's/[^ -~]/?/g' "$t"; else printf '"HOST","%s","N/A","%s"\\r\\n' "$3" "$([ "$(cat "$st")" = Running ] && echo Wird_ausgefuehrt || echo Bereit)"; fi;;
+  /Run) echo Running > "$st";;
+  /End) [ "$(cat "$st" 2>/dev/null)" = Running ] || { echo "ERROR: The task is not running." >&2; exit 1; }; echo Ready > "$st";;
+  /Delete) rm -f "$t" "$st";;
+esac
+exit 0
+`,
+  );
+  chmodSync(p, 0o755);
+  return p;
+}
+function fakeTaskkill(): string {
+  const p = path.join(dir, "taskkill");
+  writeFileSync(p, `#!/bin/sh\necho "taskkill $*" >> "${log}"\n`);
+  chmodSync(p, 0o755);
+  return p;
+}
+
+function fakePowershell(): string {
+  const p = path.join(dir, "powershell");
+  writeFileSync(
+    p,
+    `#!/bin/sh
+[ "$FAKE_FAIL" = powershell ] && { echo "powershell: this system has scripts turned off." >&2; exit 1; }
+t="${dir}/task.xml"; st="${dir}/task.status"
+file=$(printf '%s' "$4" | sed -n "s/.*-LiteralPath '\\([^']*\\)'.*/\\1/p")
+case "$4" in
+  *Schedule.Service*) echo asked >> "${dir}/folder.asked"; [ "$FAKE_FAIL" = folder ] && { echo "New-Object : Cannot create type. Only core types are supported in this language mode." >&2; exit 1; }
+    if [ -f "$t" ] || [ -f "${dir}/task.other" ]; then echo kept; exit 0; fi
+    [ -f "${dir}/task.folder" ] || { echo "Exception calling DeleteFolder: The system cannot find the file specified." >&2; exit 1; }
+    rm -f "${dir}/task.folder"; echo "powershell DeleteFolder sessionpipe" >> "${log}"; echo removed;;
+  *Get-ScheduledTask*) [ -f "$t" ] || { echo none; exit 0; }
+    { printf '\\357\\273\\277'; cat "$t"; printf '\\r\\n'; } > "$file"
+    if [ "$(cat "$st" 2>/dev/null)" = Running ]; then echo 4; else echo 3; fi;;
+  *Win32_Process*) [ "$FAKE_FAIL" = process ] && { echo "Get-CimInstance : Access denied" >&2; exit 1; }
+    pid=$(printf '%s' "$4" | sed -n 's/.*ProcessId=\\([0-9]*\\).*/\\1/p')
+    [ -f "${dir}/proc.$pid" ] && { printf '\\357\\273\\277'; cat "${dir}/proc.$pid"; printf '\\r\\n'; } > "$file";;
+esac
+exit 0
+`,
+  );
+  chmodSync(p, 0o755);
+  return p;
+}
+
 type Version = string | undefined;
 /** `probe` and `running` answer from their lists in turn, repeating the last answer. */
 function env(over: Partial<ServiceEnv> = {}, probe: Probe | Probe[] = null, running: Version | Version[] = undefined) {
@@ -63,6 +162,10 @@ function env(over: Partial<ServiceEnv> = {}, probe: Probe | Probe[] = null, runn
     label: SERVICE_LABEL,
     launchctl: fakeTool("launchctl"),
     systemctl: fakeTool("systemctl"),
+    schtasks: fakeSchtasks(),
+    taskkill: fakeTaskkill(),
+    powershell: fakePowershell(),
+    user: "CONNOR-PC\\connor",
     node: "/opt/homebrew/Cellar/node/23.6.1/bin/node",
     cli: "/opt/homebrew/lib/node_modules/sessionpipe-gui/dist/cli.js",
     defaultState: path.join(home, ".local", "state", "sessionpipe-gui"),
@@ -83,9 +186,91 @@ function env(over: Partial<ServiceEnv> = {}, probe: Probe | Probe[] = null, runn
     ...over,
   } satisfies ServiceEnv;
 }
+/** Who answers on the port, as the fake manager's starts and stops leave it: what the tests
+ *  state instead of a script of answers. `answer` puts a receiver there: the service's own
+ *  (its run.json names this process's pid, which the fake manager reports as the job's)
+ *  or, with `owned: false`, one that isn't (run.json names another live pid). A start by
+ *  the manager brings up `world.starts` after `world.delay` looks (none: the new receiver
+ *  never answers); a stop takes the service's own away. */
+const world = {
+  answering: undefined as string | undefined,
+  info: undefined as string | undefined,
+  owned: false,
+  starts: undefined as string | undefined,
+  delay: 0,
+  state: "",
+  port: 0,
+  /** The port a start brings it up on (default: the one it had). */
+  startPort: 0,
+  platform: "darwin" as NodeJS.Platform,
+};
+const FOREIGN_PID = process.ppid;
+function managerSays(platform: NodeJS.Platform, pid: number | undefined): void {
+  if (platform === "darwin")
+    writeFileSync(path.join(dir, "print"), pid ? `\tstate = running\n\tpid = ${pid}\n` : "\tstate = waiting\n");
+  else if (platform === "linux")
+    writeFileSync(
+      path.join(dir, "print"),
+      pid
+        ? `LoadState=loaded\nActiveState=active\nMainPID=${pid}\n`
+        : "LoadState=loaded\nActiveState=inactive\nMainPID=0\n",
+    );
+}
+function answer(
+  version: string,
+  o: { state: string; port: number; owned?: boolean; info?: string; platform?: NodeJS.Platform; cli?: string },
+): void {
+  const owned = o.owned ?? true;
+  const platform = o.platform ?? "darwin";
+  Object.assign(world, { answering: version, info: o.info, owned, state: o.state, port: o.port, platform });
+  const pid = owned ? process.pid : FOREIGN_PID;
+  writeRunFile(o.state, { port: o.port, pid, version, url: `http://127.0.0.1:${o.port}`, startedAt: "x" });
+  if (platform === "win32") {
+    if (owned)
+      writeFileSync(path.join(dir, `proc.${pid}`), `"node" ${o.cli ?? ""} --port ${o.port} --state ${o.state} --quiet`);
+  } else managerSays(platform, owned ? process.pid : undefined);
+}
+let looks = 0;
+/** env() whose probe and running read the world, and whose manager starts and stops it. */
+function liveEnv(over: Partial<ServiceEnv> = {}) {
+  const base = env(over);
+  const stop = () => {
+    if (!world.owned) return;
+    world.answering = undefined;
+    world.info = undefined;
+    rmSync(path.join(world.state, "run.json"), { force: true });
+    managerSays(world.platform, undefined);
+  };
+  const start = () => {
+    looks = 0;
+    const port = world.startPort || world.port;
+    if (world.starts) answer(world.starts, { state: world.state, port, platform: world.platform, cli: base.cli });
+  };
+  return {
+    ...base,
+    exec: (cmd: string, args: string[]) => {
+      const r = base.exec(cmd, args);
+      const verb = args[0] === "--user" ? args[1] : args[0];
+      if (r.code === 0 && (verb === "bootout" || verb === "/End" || cmd === base.taskkill)) stop();
+      if (r.code === 0 && verb === "restart") stop();
+      if (r.code === 0 && (verb === "bootstrap" || verb === "restart" || verb === "enable" || verb === "/Run")) start();
+      return r;
+    },
+    probe: async (port: number) => (world.answering && port === world.port ? ("gui" as const) : null),
+    running: async (port: number) => {
+      if (!world.answering || port !== world.port) return undefined;
+      return looks++ < world.delay ? undefined : (world.info ?? world.answering);
+    },
+  } satisfies ServiceEnv;
+}
 let failVerb = "";
 let slowBootout = false;
-const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
+const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : []);
+/** How many times the fake powershell was asked to remove the task folder, whatever it answered. */
+const folderAsked = () => {
+  const f = path.join(dir, "folder.asked");
+  return existsSync(f) ? readFileSync(f, "utf8").trim().split("\n").length : 0;
+};
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(os.tmpdir(), "spgui-service-"));
@@ -95,6 +280,15 @@ beforeEach(() => {
   errs = [];
   failVerb = "";
   slowBootout = false;
+  Object.assign(world, {
+    answering: undefined,
+    info: undefined,
+    owned: false,
+    starts: undefined,
+    delay: 0,
+    startPort: 0,
+  });
+  looks = 0;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -218,15 +412,26 @@ describe("service install (macOS)", () => {
     expect(existsSync(launchAgentPath(home, SERVICE_LABEL))).toBe(false);
   });
 
-  it("says a slow receiver is still starting (exit 0), and one that isn't running keeps trying", async () => {
+  it("says a slow receiver is still starting (exit 0); an upgrade whose receiver never comes back fails (exit 4)", async () => {
     writeFileSync(path.join(dir, "print"), "\tstate = running\n\tpid = 4242\n");
     const e = env({ waitMs: 300 });
-    expect(await runService({ verb: "install", port: 7829, state: path.join(dir, "s") }, e)).toBe(0);
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
     expect(out.join("\n")).toContain("starting on :7829… a big board takes a minute");
     expect(out.at(-1)).toMatch(/^still starting on :7829 after 0 s; it keeps going \(.*service\.log\)$/);
+    // Installed, not running, nothing answering: the restart is an upgrade's, the old
+    // receiver is gone, and the new one never answers: a failure, said on stderr.
     writeFileSync(path.join(dir, "print"), "\tstate = waiting\n\tlast exit code = 1\n");
     out = [];
-    expect(await runService({ verb: "install", port: 7829, state: path.join(dir, "s") }, e)).toBe(0);
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(EXIT_NOT_RUNNING);
+    expect(errs.at(-1)).toBe(
+      `0.6.0 isn't running on :7829 after 0 s, and the old receiver was stopped for the update: see ${path.join(state, "service.log")}`,
+    );
+    // A first install that doesn't answer has stopped nothing: it keeps trying, exit 0.
+    rmSync(launchAgentPath(home, SERVICE_LABEL));
+    rmSync(path.join(dir, "loaded"));
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
     expect(out.at(-1)).toContain("not answering on :7829 after 0 s; it keeps trying");
   });
 
@@ -237,16 +442,20 @@ describe("service install (macOS)", () => {
     expect(errs.join("\n")).toMatch(/bootstrap gui\/501 failed: boom: bootstrap \(nothing installed\)/);
   });
 
-  it("uses the label from SP_SERVICE_LABEL and the tools from SP_LAUNCHCTL / SP_SYSTEMCTL", () => {
+  it("uses the label from SP_SERVICE_LABEL and the tools from SP_LAUNCHCTL / SP_SYSTEMCTL / SP_SCHTASKS / SP_TASKKILL / SP_POWERSHELL", () => {
     const saved = { ...process.env };
     try {
       process.env.SP_SERVICE_LABEL = "dev.spacesheep.sessionpipe-gui.test-7829";
       process.env.SP_LAUNCHCTL = "/fake/launchctl";
       process.env.SP_SYSTEMCTL = "/fake/systemctl";
+      process.env.SP_SCHTASKS = "/fake/schtasks";
+      process.env.SP_TASKKILL = "/fake/taskkill";
+      process.env.SP_POWERSHELL = "/fake/powershell";
       const e = processEnv("/d");
       expect(e.label).toBe("dev.spacesheep.sessionpipe-gui.test-7829");
       expect(e.launchctl).toBe("/fake/launchctl");
       expect(e.systemctl).toBe("/fake/systemctl");
+      expect([e.schtasks, e.taskkill, e.powershell]).toEqual(["/fake/schtasks", "/fake/taskkill", "/fake/powershell"]);
       expect(e.node).toBe(process.execPath);
     } finally {
       process.env = saved;
@@ -313,7 +522,9 @@ describe("service install upgrades a service of ours in place", () => {
     writeFileSync(path.join(state, "events", "claude-code", "a.jsonl"), "");
     writeFileSync(path.join(state, "events", "claude-code", "b.jsonl"), "");
     const file = oldPlist(["--port", "7373", "--state", state, "--quiet", "--demo"], state);
-    const e = env({ waitMs: 3000 }, "gui", ["0.4.1", undefined, "0.4.1", "0.6.0"]);
+    answer("0.4.1", { state, port: 7373 });
+    Object.assign(world, { starts: "0.6.0", delay: 2 });
+    const e = liveEnv({ waitMs: 3000 });
     expect(await runService({ verb: "install", port: 7373 }, e)).toBe(0);
     expect(plistArgv(readFileSync(file, "utf8"))).toEqual([
       e.node,
@@ -333,7 +544,38 @@ describe("service install upgrades a service of ours in place", () => {
     );
     expect(out).toContain("starting on :7373… 2 sessions to load; a big board takes a minute");
     expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7373 · state ${state}`);
+    expect(world.answering).toBe("0.6.0");
     expect(errs).toEqual([]);
+  });
+
+  it("a receiver that crashes at boot under KeepAlive is not 'still starting': its pid moves between looks (exit 4)", async () => {
+    const state = path.join(dir, "state");
+    oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    answer("0.4.1", { state, port: 7373 });
+    const e = liveEnv({ waitMs: 300 });
+    const exec = e.exec;
+    let pid = 5000;
+    // After the restart, every look finds it running under a new pid (restarted again).
+    e.exec = (cmd, args) => {
+      const r = exec(cmd, args);
+      if (args[0] === "print" && calls().some((c) => c.startsWith("bootstrap")))
+        return { ...r, stdout: `\tstate = running\n\tpid = ${pid++}\n` };
+      return r;
+    };
+    expect(await runService({ verb: "install" }, e)).toBe(EXIT_NOT_RUNNING);
+    expect(errs.at(-1)).toContain("isn't running on :7373 after 0 s, and the old receiver was stopped");
+  });
+
+  it("an upgrade whose new receiver never answers says so and exits 4: the old one was stopped", async () => {
+    const state = path.join(dir, "state");
+    oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    answer("0.4.1", { state, port: 7373 });
+    expect(await runService({ verb: "install" }, liveEnv({ waitMs: 400 }))).toBe(EXIT_NOT_RUNNING);
+    expect(out).toContain(`updating ${SERVICE_LABEL}: 0.4.1 → 0.6.0`);
+    expect(world.answering).toBeUndefined();
+    expect(errs).toEqual([
+      `0.6.0 isn't running on :7373 after 0 s, and the old receiver was stopped for the update: see ${path.join(state, "service.log")}`,
+    ]);
   });
 
   it("takes the old version from run.json when the old receiver isn't answering, and flags over the old options", async () => {
@@ -372,6 +614,384 @@ describe("service install upgrades a service of ours in place", () => {
     expect(out).toEqual(["already running 0.6.0 on http://127.0.0.1:7829"]);
     expect(readFileSync(file, "utf8")).toBe(before);
     expect(calls().filter((l) => l.startsWith("bootout"))).toEqual([]);
+  });
+
+  it("restarts the same service when it answers with another version (the package was replaced under it), and waits for this one", async () => {
+    // Installed by this cli at this path; then `npm i -g` put 0.6.0 over 0.5.0 there, and
+    // the old process still runs: the same file, another version answering.
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    const file = launchAgentPath(home, SERVICE_LABEL);
+    const before = readFileSync(file, "utf8");
+    answer("0.5.0", { state, port: 7829 });
+    world.starts = "0.6.0";
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv({ waitMs: 3000 }))).toBe(0);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([
+      `bootout gui/501/${SERVICE_LABEL}`,
+      `bootstrap gui/501 ${file}`,
+    ]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(out).toContain(`updated ${SERVICE_LABEL}: 0.5.0 → 0.6.0 (~/Library/LaunchAgents/${SERVICE_LABEL}.plist)`);
+    expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7829 · state ${state}`);
+    expect(errs).toEqual([]);
+    // A newer version answering from the same file is as stale: the files there are this
+    // CLI (an older one put back over it), so a plain install restarts it, with no order.
+    answer("0.9.0", { state, port: 7829 });
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv({ waitMs: 2000 }))).toBe(0);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.9.0 → 0.6.0`);
+    expect(world.answering).toBe("0.6.0");
+  });
+
+  it("leaves a receiver that isn't the service's alone: one started by hand on the port while the service is down", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    rmSync(path.join(dir, "loaded")); // installed, not loaded (or crashed)
+    answer("0.5.0", { state, port: 7829, owned: false });
+    world.starts = "0.6.0";
+    writeFileSync(log, "");
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv({ waitMs: 2000 }))).toBe(1);
+    expect(errs).toEqual([
+      `a sessionpipe-gui 0.5.0 answers on :7829, and it isn't ${SERVICE_LABEL}'s receiver (the service isn't running): left as it is. Stop that one, then \`service install\` again`,
+    ]);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+    expect(world.answering).toBe("0.5.0");
+    // The service up under another pid than the one that answers: the same.
+    writeFileSync(path.join(dir, "loaded"), "");
+    writeFileSync(path.join(dir, "print"), "\tstate = running\n\tpid = 4242\n");
+    errs = [];
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv())).toBe(1);
+    expect(errs[0]).toContain("isn't dev.spacesheep.sessionpipe-gui's receiver (the service's is pid 4242)");
+  });
+
+  it("takes the running version from the service's run.json, which a receiver writes once when it starts: up to 0.8.0 its info read package.json anew", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    // Its info says 0.6.0 (the files under it are 0.6.0 now); it started as 0.5.0.
+    answer("0.5.0", { state, port: 7829, info: "0.6.0" });
+    world.starts = "0.6.0";
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv({ waitMs: 2000 }))).toBe(0);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(calls().filter((l) => l.startsWith("bootout") || l.startsWith("bootstrap")).length).toBe(2);
+    // A run.json whose live pid isn't the job's (a reused pid, a file left by another run)
+    // says nothing about who answers: the current receiver's info stands, and nothing restarts.
+    answer("0.5.0", { state, port: 7829, owned: false, info: "0.6.0" });
+    writeFileSync(path.join(dir, "print"), `\tstate = running\n\tpid = ${process.pid}\n`);
+    out = [];
+    writeFileSync(log, "");
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv())).toBe(0);
+    expect(out).toEqual(["already running 0.6.0 on http://127.0.0.1:7829"]);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+  });
+
+  it("--dry-run says it would restart a stale one, and touches nothing", async () => {
+    const state = path.join(dir, "s");
+    await runService({ verb: "install", port: 7829, state }, env());
+    answer("0.5.0", { state, port: 7829 });
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state, dryRun: true }, liveEnv())).toBe(0);
+    expect(out.at(-1)).toBe(
+      `dry run: nothing written or restarted; it would update ${SERVICE_LABEL}: 0.5.0 → 0.6.0 on http://127.0.0.1:7829`,
+    );
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+    expect(world.answering).toBe("0.5.0");
+  });
+
+  it("an older CLI leaves a newer service that runs from elsewhere alone, unless --downgrade", async () => {
+    const state = path.join(dir, "state");
+    const file = oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    const before = readFileSync(file, "utf8");
+    // The service runs 0.9.0 from another path; this CLI is 0.6.0.
+    answer("0.9.0", { state, port: 7373 });
+    expect(await runService({ verb: "install" }, liveEnv())).toBe(1);
+    expect(errs).toEqual([
+      `${SERVICE_LABEL} runs 0.9.0, newer than this sessionpipe-gui (0.6.0): left as it is. \`service install\` from 0.9.0 or later keeps it; --downgrade puts 0.6.0 in its place`,
+    ]);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+    // The same with a port change and a dry run.
+    errs = [];
+    expect(await runService({ verb: "install", port: 7374, dryRun: true }, liveEnv())).toBe(1);
+    expect(errs[0]).toMatch(/^would refuse: .* runs 0\.9\.0, newer than this sessionpipe-gui \(0\.6\.0\)/);
+    // Asked for: it is replaced, and the line says which way it went.
+    out = [];
+    errs = [];
+    world.starts = "0.6.0";
+    const e = liveEnv({ waitMs: 2000 });
+    expect(await runService({ verb: "install", downgrade: true }, e)).toBe(0);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.9.0 → 0.6.0`);
+    expect(plistArgv(readFileSync(file, "utf8")).slice(0, 2)).toEqual([e.node, e.cli]);
+    expect(errs).toEqual([]);
+  });
+
+  it("knows what an installed file runs from the package.json beside its cli, also when nothing answers", async () => {
+    // A newer service from elsewhere, stopped (or still loading), its run.json gone.
+    const pkg = path.join(dir, "global", "lib", "node_modules", "sessionpipe-gui");
+    mkdirSync(path.join(pkg, "dist"), { recursive: true });
+    writeFileSync(path.join(pkg, "dist", "cli.js"), "");
+    writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "sessionpipe-gui", version: "0.9.2" }));
+    const state = path.join(dir, "state");
+    const file = launchAgentPath(home, SERVICE_LABEL);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      launchAgentPlist({
+        label: SERVICE_LABEL,
+        argv: [OLD_NODE, path.join(pkg, "dist", "cli.js"), "--port", "7373", "--state", state, "--quiet"],
+        env: {},
+        logPath: path.join(state, "service.log"),
+        workingDirectory: state,
+      }),
+    );
+    expect(await runService({ verb: "install" }, env())).toBe(1);
+    expect(errs[0]).toContain(`${SERVICE_LABEL} runs 0.9.2, newer than this sessionpipe-gui (0.6.0): left as it is.`);
+    // And --if-installed (the app) never moves it back: said, exit 0.
+    errs = [];
+    expect(await runService({ verb: "install", ifInstalled: true }, env())).toBe(EXIT_NOTHING_DONE);
+    expect(out.at(-1)).toBe(`${SERVICE_LABEL} runs 0.9.2, newer than this sessionpipe-gui (0.6.0): left as it is`);
+    expect(errs).toEqual([]);
+  });
+
+  it("the same CLI over a newer stale process is no downgrade, whatever flags change (npm i -g of an older version at the same path)", async () => {
+    const pkg = path.join(dir, "g", "node_modules", "sessionpipe-gui");
+    mkdirSync(path.join(pkg, "dist"), { recursive: true });
+    writeFileSync(path.join(pkg, "dist", "cli.js"), "");
+    writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "sessionpipe-gui", version: "0.6.0" }));
+    const cli = realpathSync(path.join(pkg, "dist", "cli.js"));
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7373, state }, env({ cli }))).toBe(0);
+    answer("0.9.0", { state, port: 7373 });
+    Object.assign(world, { starts: "0.6.0", startPort: 7374 });
+    expect(await runService({ verb: "install", port: 7374 }, liveEnv({ cli, waitMs: 2000 }))).toBe(0);
+    expect(errs).toEqual([]);
+    expect(out).toContain(`updating ${SERVICE_LABEL}: 0.9.0 → 0.6.0`);
+    expect(installedOptions(plistArgv(readFileSync(launchAgentPath(home, SERVICE_LABEL), "utf8"))).port).toBe(7374);
+  });
+
+  it("leaves a service that runs a developer's checkout alone, unless the installer is that checkout", async () => {
+    const checkout = path.join(dir, "src", "sessionpipe-gui");
+    mkdirSync(path.join(checkout, "dist"), { recursive: true });
+    mkdirSync(path.join(checkout, "server"), { recursive: true });
+    writeFileSync(path.join(checkout, "dist", "cli.js"), "");
+    writeFileSync(path.join(checkout, "server", "cli.ts"), "");
+    const cli = realpathSync(path.join(checkout, "dist", "cli.js"));
+    // isOurs says it is ours (the folder is named sessionpipe-gui); it is still a checkout.
+    expect(isOurs([OLD_NODE, cli])).toBe(true);
+    expect(isCheckout(cli)).toBe(true);
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env({ cli }))).toBe(0);
+    writeFileSync(log, "");
+    expect(await runService({ verb: "install", ifInstalled: true }, env({ version: "0.9.0" }))).toBe(1);
+    expect(errs[0]).toMatch(/runs a development checkout \(.*src\/sessionpipe-gui\): left as it is/);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+    // The checkout itself installing again is its own business.
+    errs = [];
+    expect(await runService({ verb: "install", port: 7830, state }, env({ cli }))).toBe(0);
+    expect(errs).toEqual([]);
+    // An npm install is never a checkout.
+    expect(isCheckout(path.join(dir, "g", "node_modules", "sessionpipe-gui", "dist", "cli.js"))).toBe(false);
+  });
+
+  it("a re-install with other --port/--state/--host by the same version, or a newer one, is not a downgrade", async () => {
+    const state = path.join(dir, "state");
+    const file = oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
+    // Another cli at the same version (an npx cache and a global install of one release).
+    answer("0.6.0", { state, port: 7373 });
+    expect(await runService({ verb: "install", port: 7374, host: "0.0.0.0" }, liveEnv())).toBe(0);
+    expect(plistArgv(readFileSync(file, "utf8"))).toContain("7374");
+    // And a newer CLI over it, with a state change.
+    const other = path.join(dir, "other");
+    answer("0.6.0", { state, port: 7374 });
+    expect(await runService({ verb: "install", state: other }, liveEnv({ version: "0.7.0", cli: OLD_CLI }))).toBe(0);
+    expect(plistArgv(readFileSync(file, "utf8"))).toContain(other);
+    expect(errs).toEqual([]);
+  });
+
+  it("--if-installed upgrades a service of ours, installs none, and never moves one back", async () => {
+    // Nothing installed: nothing written, nothing run, exit 0, whatever answers on the port.
+    expect(await runService({ verb: "install", ifInstalled: true }, env({}, "gui", "0.5.0"))).toBe(EXIT_NOTHING_DONE);
+    expect(out).toEqual([`no service ${SERVICE_LABEL} installed: nothing to do`]);
+    expect(existsSync(launchAgentPath(home, SERVICE_LABEL))).toBe(false);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+    // Ours there, older: upgraded as by a plain install, on the port and state it had.
+    const state = path.join(dir, "state");
+    const file = oldPlist(["--port", "7380", "--state", state, "--quiet"], state);
+    answer("0.5.0", { state, port: 7380 });
+    world.starts = "0.6.0";
+    out = [];
+    expect(await runService({ verb: "install", ifInstalled: true }, liveEnv({ waitMs: 2000 }))).toBe(0);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(installedOptions(plistArgv(readFileSync(file, "utf8")))).toMatchObject({ port: 7380, state });
+    // The same file, a newer stale process: a plain install restarts it (see above), the
+    // app's --if-installed leaves it.
+    answer("0.9.0", { state, port: 7380 });
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install", ifInstalled: true }, liveEnv())).toBe(EXIT_NOTHING_DONE);
+    expect(out).toEqual([`${SERVICE_LABEL} runs 0.9.0, newer than this sessionpipe-gui (0.6.0): left as it is`]);
+    expect(calls().filter((l) => !l.startsWith("print"))).toEqual([]);
+    // Someone else's plist under our label: still refused.
+    const theirs = launchAgentPlist({
+      label: SERVICE_LABEL,
+      argv: ["/usr/bin/python3", "/Users/m/own/server.py"],
+      env: {},
+      logPath: "/tmp/x.log",
+      workingDirectory: "/tmp",
+    });
+    writeFileSync(file, theirs);
+    expect(await runService({ verb: "install", ifInstalled: true }, env())).toBe(1);
+    expect(readFileSync(file, "utf8")).toBe(theirs);
+  });
+
+  it("one install at a time: a second one is refused while the first holds the lock; a dead holder's lock is taken over", async () => {
+    const state = path.join(dir, "s");
+    const e = env();
+    const lock = lockPath(e);
+    mkdirSync(path.dirname(lock), { recursive: true });
+    writeFileSync(lock, `${FOREIGN_PID} 2026-11-12T00:00:00.000Z\n`);
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(1);
+    expect(errs).toEqual([
+      `another \`service install\` or \`uninstall\` for ${SERVICE_LABEL} is running (pid ${FOREIGN_PID}); try again when it is done`,
+    ]);
+    expect(existsSync(launchAgentPath(home, SERVICE_LABEL))).toBe(false);
+    // A dry run takes no lock and changes nothing.
+    expect(await runService({ verb: "install", port: 7829, state, dryRun: true }, e)).toBe(0);
+    // Its holder is gone: taken over, and released after.
+    writeFileSync(lock, "999999 2026-11-12T00:00:00.000Z\n");
+    errs = [];
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(errs).toEqual([]);
+    expect(existsSync(lock)).toBe(false);
+    // Two at once: one of them waits its turn by being refused.
+    errs = [];
+    const slow = liveEnv({ waitMs: 1500 });
+    answer("0.5.0", { state, port: 7829 });
+    Object.assign(world, { starts: "0.6.0", delay: 3 });
+    const [a, b] = await Promise.all([
+      runService({ verb: "install", port: 7829, state }, slow),
+      runService({ verb: "install", port: 7829, state }, env()),
+    ]);
+    expect([a, b].sort()).toEqual([0, 1]);
+    expect(errs.some((l) => l.startsWith("another `service install`"))).toBe(true);
+  });
+
+  it("two installs that both find a stale lock: exactly one takes it over", async () => {
+    const e = env();
+    const lock = lockPath(e);
+    mkdirSync(path.dirname(lock), { recursive: true });
+    writeFileSync(lock, "999999 2026-11-12T00:00:00.000Z\n");
+    const stale = () => writeFileSync(lock, "999999 2026-11-12T00:00:00.000Z\n");
+    const race = (stage: "seen" | "takingOver") => {
+      stale();
+      let b: (() => void) | string = "";
+      const a = takeLock(e, (at) => {
+        if (at === stage && !b) b = takeLock(e);
+      });
+      const held = [a, b].filter((x): x is () => void => typeof x === "function");
+      const refused = [a, b].filter((x): x is string => typeof x === "string");
+      expect(held).toHaveLength(1);
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toMatch(
+        /^another `service install` or `uninstall` for .* is running( \(pid \d+\))?; try again when it is done$/,
+      );
+      expect(readFileSync(lock, "utf8")).toMatch(new RegExp(`^${process.pid} `));
+      expect(existsSync(`${lock}.takeover`)).toBe(false);
+      held[0]!();
+      expect(existsSync(lock)).toBe(false);
+      return typeof a === "function" ? "A" : "B";
+    };
+    // B runs all the way while A holds the takeover lock: B is refused, A holds.
+    expect(race("takingOver")).toBe("A");
+    // B runs all the way after A saw the stale lock, before A's takeover: B holds, and A,
+    // re-reading under the takeover lock, leaves B's fresh lock and is refused.
+    expect(race("seen")).toBe("B");
+    // A takeover lock a crash left behind is cleared after 10 s, not honoured for ever.
+    writeFileSync(lock, "999999 2026-11-12T00:00:00.000Z\n");
+    writeFileSync(`${lock}.takeover`, "999999");
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(`${lock}.takeover`, old, old);
+    const c = takeLock(e);
+    expect(typeof c).toBe("function");
+    (c as () => void)();
+  });
+
+  it("uninstall takes the same lock", async () => {
+    const state = path.join(dir, "s");
+    const e = env();
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    writeFileSync(lockPath(e), `${FOREIGN_PID} ${new Date().toISOString()}\n`);
+    expect(await runService({ verb: "uninstall" }, e)).toBe(1);
+    expect(errs.at(-1)).toContain(`for ${SERVICE_LABEL} is running (pid ${FOREIGN_PID})`);
+    expect(existsSync(launchAgentPath(home, SERVICE_LABEL))).toBe(true);
+    rmSync(lockPath(e));
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(existsSync(lockPath(e))).toBe(false);
+  });
+
+  it("a service whose receiver couldn't write run.json is still its own: the manager says it runs", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    answer("0.5.0", { state, port: 7829 });
+    rmSync(path.join(state, "run.json"));
+    world.starts = "0.6.0";
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv({ waitMs: 2000 }))).toBe(0);
+    expect(errs).toEqual([]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    // And with the manager saying it isn't running, an answer with no run.json isn't the service's.
+    answer("0.5.0", { state, port: 7829 });
+    rmSync(path.join(state, "run.json"));
+    writeFileSync(path.join(dir, "print"), "\tstate = waiting\n");
+    expect(await runService({ verb: "install", port: 7829, state }, liveEnv())).toBe(1);
+    expect(errs.at(-1)).toContain("isn't dev.spacesheep.sessionpipe-gui's receiver (the service isn't running)");
+  });
+
+  it("asks the manager once more before calling the receiver another's (a KeepAlive restart between the looks)", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    answer("0.5.0", { state, port: 7829 });
+    world.starts = "0.6.0";
+    // The first look sees the previous pid; the second the pid run.json names.
+    writeFileSync(path.join(dir, "print"), "\tstate = running\n\tpid = 4242\n");
+    const e = liveEnv({ waitMs: 2000 });
+    const exec = e.exec;
+    let prints = 0;
+    e.exec = (cmd, args) => {
+      if (args[0] === "print" && ++prints === 2)
+        writeFileSync(path.join(dir, "print"), `\tstate = running\n\tpid = ${process.pid}\n`);
+      return exec(cmd, args);
+    };
+    out = [];
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(errs).toEqual([]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+  });
+
+  it("a bootout launchd answers with 'No such process' counts as stopped when the job is gone", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env())).toBe(0);
+    answer("0.5.0", { state, port: 7829 });
+    world.starts = "0.6.0";
+    // The job went between the look and the bootout (another installer, a crash).
+    const e = liveEnv({ waitMs: 1000 });
+    const exec = e.exec;
+    e.exec = (cmd, args) => {
+      if (args[0] === "bootout") {
+        rmSync(path.join(dir, "loaded"), { force: true });
+        return { code: 3, stdout: "", stderr: "Boot-out failed: 3: No such process" };
+      }
+      return exec(cmd, args);
+    };
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(errs).toEqual([]);
+    expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7829 · state ${state}`);
   });
 
   it("leaves the same service alone while it is still starting, and waits for it", async () => {
@@ -416,7 +1036,8 @@ describe("service install upgrades a service of ours in place", () => {
     const state = path.join(dir, "state");
     const file = oldPlist(["--port", "7373", "--state", state, "--quiet"], state);
     const before = readFileSync(file, "utf8");
-    const e = env({}, "gui", "0.4.1");
+    answer("0.4.1", { state, port: 7373 });
+    const e = liveEnv();
     expect(await runService({ verb: "install", dryRun: true }, e)).toBe(0);
     expect(readFileSync(file, "utf8")).toBe(before);
     const text = out.join("\n");
@@ -430,7 +1051,7 @@ describe("service install upgrades a service of ours in place", () => {
   });
 
   it("on Linux: the unit is rewritten, then daemon-reload and restart", async () => {
-    const e = env({ platform: "linux" }, "gui", ["0.4.1", "0.6.0"]);
+    const e = liveEnv({ platform: "linux" });
     const state = path.join(dir, "state");
     const file = unitPath(home, SERVICE_LABEL);
     mkdirSync(path.dirname(file), { recursive: true });
@@ -453,6 +1074,8 @@ describe("service install upgrades a service of ours in place", () => {
       }),
     );
     writeFileSync(path.join(dir, "loaded"), "");
+    answer("0.4.1", { state, port: 7373, platform: "linux" });
+    world.starts = "0.6.0";
     expect(await runService({ verb: "install" }, { ...e, waitMs: 1000 })).toBe(0);
     expect(unitArgv(readFileSync(file, "utf8"))).toEqual([
       e.node,
@@ -470,6 +1093,23 @@ describe("service install upgrades a service of ours in place", () => {
     expect(out).toContain(
       "updated dev.spacesheep.sessionpipe-gui: 0.4.1 → 0.6.0 (~/.config/systemd/user/dev.spacesheep.sessionpipe-gui.service)",
     );
+  });
+
+  it("on Linux: the same unit answering with another version is restarted", async () => {
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, env({ platform: "linux" }))).toBe(0);
+    writeFileSync(log, "");
+    out = [];
+    answer("0.5.0", { state, port: 7829, platform: "linux" });
+    world.starts = "0.6.0";
+    const e = liveEnv({ platform: "linux", waitMs: 2000 });
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(calls().filter((c) => !c.startsWith("--user show"))).toEqual([
+      "--user daemon-reload",
+      `--user restart ${SERVICE_LABEL}.service`,
+    ]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7829 · state ${state}`);
   });
 });
 
@@ -559,8 +1199,585 @@ describe("service on Linux and Windows", () => {
     expect(calls()).toContain(`--user disable --now ${SERVICE_LABEL}.service`);
   });
 
-  it("says Windows is not yet supported", async () => {
-    expect(await runService({ verb: "install" }, env({ platform: "win32" }))).toBe(1);
-    expect(errs[0]).toContain("not here yet");
+  it("says a platform with no service manager here is not supported", async () => {
+    expect(await runService({ verb: "install" }, env({ platform: "freebsd" }))).toBe(1);
+    expect(errs[0]).toContain("on freebsd is not here yet");
+  });
+});
+
+describe("the Windows scheduled task", () => {
+  const spec = {
+    description: "sessionpipe-gui",
+    user: "CONNOR-PC\\connor",
+    argv: [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Users\\Connor B\\AppData\\Roaming\\npm\\node_modules\\sessionpipe-gui\\dist\\cli.js",
+      "--port",
+      "7828",
+      "--state",
+      "C:\\Users\\Connor B\\sp state",
+      "--quiet",
+    ],
+    logPath: "C:\\Users\\Connor B\\sp state\\service.log",
+    workingDirectory: "C:\\Users\\Connor B\\sp state",
+  };
+
+  it("starts at this user's logon, as this user, with no window and no time limit, and logs to the state dir", () => {
+    const text = taskXml(spec);
+    expect(text).toMatch(/<LogonTrigger>\s*<Enabled>true<\/Enabled>\s*<UserId>CONNOR-PC\\connor<\/UserId>/);
+    expect(text).toContain("<LogonType>InteractiveToken</LogonType>");
+    expect(text).toContain("<RunLevel>LeastPrivilege</RunLevel>");
+    expect(text).toContain("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>");
+    expect(text).toContain("<Command>conhost.exe</Command>");
+    expect(text).toContain("<WorkingDirectory>C:\\Users\\Connor B\\sp state</WorkingDirectory>");
+    // The redirect first: cmd /c would drop the first and last quote of a line starting with one.
+    expect(taskArguments(spec)).toBe(
+      '--headless cmd.exe /d /v:off /c >> "C:\\Users\\Connor B\\sp state\\service.log" 2>&1 "C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Connor B\\AppData\\Roaming\\npm\\node_modules\\sessionpipe-gui\\dist\\cli.js" --port 7828 --state "C:\\Users\\Connor B\\sp state" --quiet',
+    );
+  });
+
+  it("carries a !NAME! in a path as it is: cmd runs with /v:off, so it puts no variable there where the registry turns delayed expansion on", () => {
+    const bang = {
+      argv: ["C:\\n\\node.exe", "C:\\n\\cli.js", "--state", "C:\\Users\\wow!\\!OS!"],
+      logPath: "C:\\Users\\wow!\\!OS!\\service.log",
+    };
+    expect(unsafeWord([...bang.argv, bang.logPath])).toBeUndefined();
+    expect(taskArguments(bang)).toBe(
+      "--headless cmd.exe /d /v:off /c >> C:\\Users\\wow!\\!OS!\\service.log 2>&1 C:\\n\\node.exe C:\\n\\cli.js --state C:\\Users\\wow!\\!OS!",
+    );
+    expect(taskArgv(taskXml({ ...spec, ...bang }))).toEqual(bang.argv);
+  });
+
+  it("reads the receiver's argv back from its own task, and any other task's action as it is", () => {
+    expect(taskArgv(taskXml(spec))).toEqual(spec.argv);
+    expect(isOurs(taskArgv(taskXml(spec)))).toBe(true);
+    // The task 0.8.0 installed: the same line with no /v:off. It is still ours.
+    const v080 = taskXml(spec).replace("cmd.exe /d /v:off /c", "cmd.exe /d /c");
+    expect(v080).toContain("<Arguments>--headless cmd.exe /d /c &gt;&gt; &quot;C:");
+    expect(taskXml(spec)).toContain("<Arguments>--headless cmd.exe /d /v:off /c &gt;&gt; &quot;C:");
+    expect(taskArgv(v080)).toEqual(spec.argv);
+    expect(isOurs(taskArgv(v080))).toBe(true);
+    const other = "<Exec><Command>C:\\x\\backup.exe</Command><Arguments>--all &quot;D:\\a b&quot;</Arguments></Exec>";
+    expect(taskArgv(other)).toEqual(["C:\\x\\backup.exe", "--all", "D:\\a b"]);
+    expect(isOurs(taskArgv(other))).toBe(false);
+  });
+
+  it("names schtasks, taskkill and PowerShell in full under %SystemRoot%\\System32, never by a bare name", () => {
+    const under = (root: string) => ({
+      schtasks: `${root}\\System32\\schtasks.exe`,
+      taskkill: `${root}\\System32\\taskkill.exe`,
+      powershell: `${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+    });
+    expect(serviceTools({ SystemRoot: "D:\\WINNT", windir: "E:\\other" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    // A backslash at the end, and forward slashes.
+    expect(serviceTools({ SystemRoot: "C:\\Windows\\" }, "win32")).toMatchObject(under("C:\\Windows"));
+    expect(serviceTools({ SystemRoot: "c:/windows" }, "win32")).toMatchObject(under("c:\\windows"));
+    // No %SystemRoot%: %windir%, and with neither C:\Windows.
+    expect(serviceTools({ windir: "D:\\WINNT" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    // A copied environment, or Git Bash's, spells the names in another case.
+    expect(serviceTools({ SYSTEMROOT: "D:\\WINNT" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    expect(serviceTools({ systemroot: "relative", WINDIR: "D:\\WINNT" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    expect(serviceTools({}, "win32")).toMatchObject(under("C:\\Windows"));
+    // Only a full path on a drive counts: anything else would be looked for from the working
+    // directory, which is what naming them in full is there to stop.
+    for (const root of [
+      "",
+      "Windows",
+      ".\\Windows",
+      "C:Windows",
+      "\\Windows",
+      "\\\\server\\share\\Windows",
+      "%SystemRoot%",
+    ]) {
+      expect(serviceTools({ SystemRoot: root }, "win32")).toMatchObject(under("C:\\Windows"));
+      expect(serviceTools({ SystemRoot: root, windir: "D:\\WINNT" }, "win32")).toMatchObject(under("D:\\WINNT"));
+    }
+    // A stand-in named by SP_* is still the one run; off Windows nothing changes.
+    const standIns = {
+      SP_SCHTASKS: "/fake/schtasks",
+      SP_TASKKILL: "/fake/taskkill",
+      SP_POWERSHELL: "/fake/powershell",
+    };
+    expect(serviceTools({ SystemRoot: "D:\\WINNT", ...standIns }, "win32")).toMatchObject({
+      schtasks: "/fake/schtasks",
+      taskkill: "/fake/taskkill",
+      powershell: "/fake/powershell",
+    });
+    for (const platform of ["darwin", "linux"] as const) {
+      expect(serviceTools({ SystemRoot: "D:\\WINNT" }, platform)).toEqual({
+        launchctl: "launchctl",
+        systemctl: "systemctl",
+        schtasks: "schtasks",
+        taskkill: "taskkill",
+        powershell: "powershell.exe",
+      });
+    }
+  });
+
+  it("names a word conhost and cmd can't carry as it is", () => {
+    expect(unsafeWord(spec.argv)).toBeUndefined();
+    for (const w of ['a"b', "a&b", "a|b", "a<b", "a>b", "a^b", "%TEMP%", ""]) expect(unsafeWord(["x", w])).toBe(w);
+  });
+
+  it("asks for the task's state as a number and its definition in a file, with no pattern and no .NET call in the script", () => {
+    expect(parseTaskQuery("4\r\n")).toBe(TASK_RUNNING);
+    expect(parseTaskQuery("3\r\n")).toBe(3);
+    expect(parseTaskQuery("none\r\n")).toBeNull();
+    expect(() => parseTaskQuery("")).toThrow("unexpected answer: nothing");
+    expect(() => parseTaskQuery("Running\r\n")).toThrow("unexpected answer: Running");
+    // The label and the file go in single quotes, a quote in them doubled; the name is
+    // compared, not matched, so a * in a label is no pattern.
+    const script = taskQueryScript("dev.o'x*", "C:\\Users\\Zoë's\\answer.txt");
+    expect(script).toContain("Where-Object{$_.TaskName -eq 'dev.o''x*'}");
+    expect(script).toContain("-LiteralPath 'C:\\Users\\Zoë''s\\answer.txt'");
+    expect(script).not.toContain("-TaskName");
+    const process = processQueryScript(4242, "C:\\t\\answer.txt");
+    expect(process).toContain("-Filter 'ProcessId=4242'");
+    // Constrained language mode refuses method calls on .NET types.
+    for (const text of [script, process]) expect(text).not.toMatch(/\]::/);
+  });
+
+  it("removes the \\sessionpipe\\ folder only after listing it and finding no task in it", () => {
+    const script = taskFolderRemoveScript();
+    const listed = script.indexOf("$t=Get-ScheduledTask -TaskPath '\\sessionpipe\\'}catch{");
+    const kept = script.indexOf("if($t){'kept';exit 0}");
+    const removed = script.indexOf("$s.GetFolder('\\').DeleteFolder('sessionpipe',0)");
+    expect(listed).toBeGreaterThan(0);
+    expect(kept).toBeGreaterThan(listed);
+    expect(removed).toBeGreaterThan(kept);
+    // "No such folder" is the only error read as empty; any other fails the script before the delete.
+    expect(script).toContain("-notlike 'CmdletizationQuery_NotFound*'){throw}");
+    expect(script.startsWith("$ErrorActionPreference='Stop';")).toBe(true);
+    // One argument to powershell -Command: no double quote for node to escape.
+    expect(script).not.toContain('"');
+  });
+
+  it("knows the receiver by its command line: the task's cli on the task's state dir", () => {
+    const [node, cli, , , , state] = spec.argv as [string, string, string, string, string, string];
+    const line = `"${node}" "${cli}" --port 7828 --state "${state}" --quiet`;
+    expect(isReceiverCommandLine(line, cli, state)).toBe(true);
+    // Windows paths compare whatever the case.
+    expect(isReceiverCommandLine(line.toUpperCase(), cli, state)).toBe(true);
+    // Another program that got the pid; the same cli on another state dir; the cli's indexer child.
+    expect(isReceiverCommandLine("C:\\Windows\\System32\\notepad.exe", cli, state)).toBe(false);
+    expect(isReceiverCommandLine(line.replace("sp state", "other state"), cli, state)).toBe(false);
+    expect(isReceiverCommandLine(`"${node}" "${cli}" index --ipc`, cli, state)).toBe(false);
+    expect(isReceiverCommandLine("", cli, state)).toBe(false);
+    expect(isReceiverCommandLine(line, "", state)).toBe(false);
+  });
+});
+
+describe("service on Windows", () => {
+  const win = (
+    over: Partial<ServiceEnv> = {},
+    probe: Probe | Probe[] = null,
+    running: Version | Version[] = undefined,
+  ) =>
+    env(
+      {
+        platform: "win32",
+        node: "C:\\Program Files\\nodejs\\node.exe",
+        cli: "C:\\Users\\connor\\AppData\\Roaming\\npm\\node_modules\\sessionpipe-gui\\dist\\cli.js",
+        ...over,
+      },
+      probe,
+      running,
+    );
+  const name = taskName(SERVICE_LABEL);
+  /** What the fake powershell says the process with that pid is. */
+  const proc = (pid: number, line: string) => writeFileSync(path.join(dir, `proc.${pid}`), line);
+  const receiverLine = (e: ServiceEnv, state: string, port = 7829) =>
+    `"${e.node}" ${e.cli} --port ${port} --state ${state} --quiet`;
+
+  it("creates the task from a UTF-16 definition, runs it, and leaves no file behind", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([
+      `schtasks /Create /TN ${name} /XML ${path.join(state, "service-task.xml")} /F`,
+      `schtasks /Run /TN ${name}`,
+    ]);
+    expect(existsSync(path.join(state, "service-task.xml"))).toBe(false);
+    expect(taskArgv(readFileSync(path.join(dir, "task.xml"), "utf8"))).toEqual([
+      e.node,
+      e.cli,
+      "--port",
+      "7829",
+      "--state",
+      state,
+      "--quiet",
+    ]);
+    expect(readFileSync(path.join(dir, "task.xml"), "utf8")).toContain("<UserId>CONNOR-PC\\connor</UserId>");
+    expect(out.join("\n")).toContain(`installed ${SERVICE_LABEL} (task ${name})`);
+  });
+
+  it("status reads Task Scheduler and run.json; uninstall ends the task, kills the receiver's tree and deletes it", async () => {
+    const e = win({}, null, "0.6.0");
+    const state = path.join(dir, "s");
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeRunFile(state, {
+      port: 7829,
+      pid: process.pid,
+      version: "0.6.0",
+      url: "http://127.0.0.1:7829",
+      startedAt: "now",
+    });
+    proc(process.pid, receiverLine(e, state));
+    out = [];
+    expect(await runService({ verb: "status" }, e)).toBe(0);
+    expect(out[0]).toBe(`service   ${SERVICE_LABEL} (Task Scheduler) · running · 0.6.0`);
+    expect(out).toContain(`task      ${name}`);
+    expect(out).toContain(`run.json  pid ${process.pid} · 0.6.0 · since now`);
+    writeFileSync(log, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([
+      `schtasks /End /TN ${name}`,
+      `taskkill /PID ${process.pid} /T /F`,
+      `schtasks /Delete /TN ${name} /F`,
+      "powershell DeleteFolder sessionpipe",
+    ]);
+    expect(out.at(-1)).toContain("won't start at login");
+    // The killed receiver never removed its run.json; uninstall did.
+    expect(existsSync(path.join(state, "run.json"))).toBe(false);
+    expect(await runService({ verb: "status" }, e)).toBe(3);
+    writeFileSync(log, "");
+    const asked = folderAsked();
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(out.at(-1)).toContain("nothing to do");
+    expect(readFileSync(log, "utf8")).toBe("");
+    // Nothing of ours to remove, but the folder an 0.8.0 uninstall left is asked about once,
+    // and removed when it is there and empty; a dry run asks nothing.
+    expect(folderAsked()).toBe(asked + 1);
+    writeFileSync(path.join(dir, "task.folder"), "");
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(folderAsked()).toBe(asked + 1);
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(calls()).toEqual(["powershell DeleteFolder sessionpipe"]);
+    expect(existsSync(path.join(dir, "task.folder"))).toBe(false);
+  });
+
+  it("uninstall takes the \\sessionpipe\\ folder out of Task Scheduler with its last task, and only then", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    const folder = path.join(dir, "task.folder");
+    const removals = () => calls().filter((c) => c.startsWith("powershell"));
+    const done = `removed ${SERVICE_LABEL}: stopped, and it won't start at login`;
+    // Another label's task is in the folder (SP_SERVICE_LABEL): the folder stays.
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeFileSync(path.join(dir, "task.other"), "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(existsSync(path.join(dir, "task.xml"))).toBe(false);
+    expect(existsSync(folder)).toBe(true);
+    expect(removals()).toEqual([]);
+    expect(out.at(-1)).toBe(done);
+    rmSync(path.join(dir, "task.other"));
+    // The folder can't be removed (constrained language mode refuses the COM object): the task
+    // is gone, uninstall has not failed, and nothing is said about it.
+    await runService({ verb: "install", port: 7829, state }, e);
+    failVerb = "folder";
+    out = [];
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(existsSync(path.join(dir, "task.xml"))).toBe(false);
+    expect(existsSync(folder)).toBe(true);
+    expect(out).toEqual([done]);
+    expect(errs).toEqual([]);
+    failVerb = "";
+    // --dry-run shows the script it would run, and runs nothing.
+    await runService({ verb: "install", port: 7829, state }, e);
+    out = [];
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(out).toEqual([
+      `$ ${e.schtasks} /End /TN ${name}`,
+      `$ ${e.schtasks} /Delete /TN ${name} /F`,
+      `$ ${e.powershell} -NoProfile -NonInteractive -Command ${taskFolderRemoveScript()}`,
+      "dry run: nothing stopped or removed",
+    ]);
+    expect(existsSync(folder)).toBe(true);
+    expect(removals()).toEqual([]);
+    // Ours was the last task: the folder goes after it, once.
+    writeFileSync(log, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([
+      `schtasks /End /TN ${name}`,
+      `schtasks /Delete /TN ${name} /F`,
+      "powershell DeleteFolder sessionpipe",
+    ]);
+    expect(existsSync(folder)).toBe(false);
+    expect(errs).toEqual([]);
+    // A task under our name that runs something else is removed by uninstall as before, and
+    // the folder with it.
+    writeFileSync(path.join(dir, "task.xml"), "<Exec><Command>C:\\x\\backup.exe</Command></Exec>");
+    writeFileSync(path.join(dir, "task.status"), "Ready");
+    writeFileSync(folder, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(existsSync(folder)).toBe(false);
+    // Still loaded (the delete failed): the folder is not asked about.
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeFileSync(log, "");
+    failVerb = "/Delete";
+    const asked = folderAsked();
+    expect(await runService({ verb: "uninstall" }, e)).toBe(1);
+    expect(removals()).toEqual([]);
+    expect(folderAsked()).toBe(asked);
+    expect(existsSync(folder)).toBe(true);
+  });
+
+  it("deletes the task again when it won't run, and says nothing is installed", async () => {
+    failVerb = "/Run";
+    expect(await runService({ verb: "install", state: path.join(dir, "s") }, win())).toBe(1);
+    expect(calls()).toContain(`schtasks /Delete /TN ${name} /F`);
+    expect(existsSync(path.join(dir, "task.xml"))).toBe(false);
+    // The folder the task was created in goes with it.
+    expect(calls().at(-1)).toBe("powershell DeleteFolder sessionpipe");
+    expect(existsSync(path.join(dir, "task.folder"))).toBe(false);
+    expect(errs[0]).toContain("Access is denied.");
+    expect(errs[0]).toContain("(nothing installed)");
+  });
+
+  it("upgrades a task of ours: the new definition, the old receiver stopped, the task run again", async () => {
+    const state = path.join(dir, "s");
+    const old = win({ cli: "C:\\old\\node_modules\\sessionpipe-gui\\dist\\cli.js" });
+    await runService({ verb: "install", port: 7829, state }, old);
+    writeRunFile(state, {
+      port: 7829,
+      pid: process.pid,
+      version: "0.5.0",
+      url: "http://127.0.0.1:7829",
+      startedAt: "now",
+    });
+    proc(process.pid, receiverLine(old, state));
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install" }, win({}, "gui", ["0.5.0", "0.6.0"]))).toBe(0);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([
+      `schtasks /Create /TN ${name} /XML ${path.join(state, "service-task.xml")} /F`,
+      `schtasks /End /TN ${name}`,
+      `taskkill /PID ${process.pid} /T /F`,
+      `schtasks /Run /TN ${name}`,
+    ]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(taskArgv(readFileSync(path.join(dir, "task.xml"), "utf8"))[1]).toContain("AppData");
+  });
+
+  it("restarts the same task when its receiver answers with another version: the old receiver stopped, the task run again", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    await runService({ verb: "install", port: 7829, state }, e);
+    answer("0.5.0", { state, port: 7829, platform: "win32", cli: e.cli });
+    world.starts = "0.6.0";
+    writeFileSync(log, "");
+    out = [];
+    expect(await runService({ verb: "install" }, liveEnv({ ...win(), waitMs: 2000 }))).toBe(0);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([
+      `schtasks /Create /TN ${name} /XML ${path.join(state, "service-task.xml")} /F`,
+      `schtasks /End /TN ${name}`,
+      `taskkill /PID ${process.pid} /T /F`,
+      `schtasks /Run /TN ${name}`,
+    ]);
+    expect(out[0]).toBe(`updating ${SERVICE_LABEL}: 0.5.0 → 0.6.0`);
+    expect(out.at(-1)).toBe(`running 0.6.0 on http://127.0.0.1:7829 · state ${state}`);
+    expect(world.answering).toBe("0.6.0");
+  });
+
+  it("knows the task 0.8.0 installed (no /v:off) as ours: left alone while it answers with the same options, rewritten with /v:off when install next changes it", async () => {
+    const e = win({ version: "0.8.0" }, "gui", "0.8.0");
+    const state = path.join(dir, "s");
+    const argv = [e.node, e.cli, "--port", "7829", "--state", state, "--quiet"];
+    const v080 = taskXml({
+      description: "d",
+      user: e.user,
+      argv,
+      logPath: path.join(state, "service.log"),
+      workingDirectory: state,
+    }).replace("cmd.exe /d /v:off /c", "cmd.exe /d /c");
+    expect(v080).toContain("<Arguments>--headless cmd.exe /d /c &gt;&gt; ");
+    writeFileSync(path.join(dir, "task.xml"), v080);
+    writeFileSync(path.join(dir, "task.status"), "Running");
+    // The same node, cli and options, and it answers: nothing to do, the task is not touched.
+    expect(await runService({ verb: "install" }, e)).toBe(0);
+    expect(out).toEqual(["already running 0.8.0 on http://127.0.0.1:7829"]);
+    expect(readFileSync(path.join(dir, "task.xml"), "utf8")).toBe(v080);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([]);
+    // Its options are read (status), and the next change (a port here; a new node or cli path
+    // does the same) rewrites it with /v:off, on the state dir it had.
+    out = [];
+    expect(await runService({ verb: "status" }, e)).toBe(0);
+    expect(out).toContain("port      7829");
+    expect(await runService({ verb: "install", port: 7830 }, win({ version: "0.8.0" }, null))).toBe(0);
+    const now = readFileSync(path.join(dir, "task.xml"), "utf8");
+    expect(now).toContain("<Arguments>--headless cmd.exe /d /v:off /c &gt;&gt; ");
+    expect(taskArgv(now)).toEqual([e.node, e.cli, "--port", "7830", "--state", state, "--quiet"]);
+  });
+
+  it("leaves the pid in run.json alone when it is another program's by now, or nobody's", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    await runService({ verb: "install", port: 7829, state }, e);
+    const stale = { port: 7829, version: "0.6.0", url: "http://127.0.0.1:7829", startedAt: "now" };
+    const stops = () => calls().filter((c) => c.startsWith("taskkill") || c.includes("/End"));
+    for (const line of [
+      "C:\\Windows\\System32\\notepad.exe C:\\notes.txt", // the pid was reused
+      receiverLine(e, path.join(dir, "another state")), // another receiver, not this task's
+      undefined, // no such process
+    ]) {
+      writeRunFile(state, { ...stale, pid: 4242 });
+      rmSync(path.join(dir, "proc.4242"), { force: true });
+      if (line) proc(4242, line);
+      writeFileSync(log, "");
+      expect(await runService({ verb: "install", port: 7830, state }, e)).toBe(0);
+      expect(stops()).toEqual([`schtasks /End /TN ${name}`]);
+      expect(JSON.parse(readFileSync(path.join(state, "run.json"), "utf8")).pid).toBe(4242);
+      await runService({ verb: "install", port: 7829, state }, e);
+    }
+    writeRunFile(state, { ...stale, pid: 4242 });
+    proc(4242, "C:\\Windows\\System32\\notepad.exe");
+    writeFileSync(log, "");
+    out = [];
+    errs = [];
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(stops()).toEqual([`schtasks /End /TN ${name}`]);
+    // pid 4242 isn't alive here, so nothing was left running and nothing is said about it.
+    expect(out.at(-1)).toContain("stopped, and it won't start at login");
+    expect(errs).toEqual([]);
+    // And --dry-run shows the same: no taskkill line for a pid that isn't the receiver.
+    await runService({ verb: "install", port: 7829, state }, e);
+    out = [];
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(out.join("\n")).not.toContain("taskkill");
+  });
+
+  it('keeps a state dir under a non-ASCII folder: install again is "already running", and the receiver there is the one stopped', async () => {
+    const state = path.join(dir, "Zoë 日本", "sp state");
+    const e = win({}, [null, "gui"], "0.6.0");
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    out = [];
+    expect(await runService({ verb: "install" }, e)).toBe(0);
+    expect(out).toEqual(["already running 0.6.0 on http://127.0.0.1:7829"]);
+    out = [];
+    expect(await runService({ verb: "status" }, e)).toBe(0);
+    expect(out).toContain(`state     ${state.replace(home, "~")}`);
+    writeRunFile(state, { port: 7829, pid: 4243, version: "0.6.0", url: "http://127.0.0.1:7829", startedAt: "now" });
+    proc(4243, receiverLine(e, `"${state}"`));
+    writeFileSync(log, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(calls()).toContain("taskkill /PID 4243 /T /F");
+  });
+
+  it("says so when a live pid in run.json can't be told to be the receiver, and doesn't call it stopped", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    const run = { port: 7829, pid: process.pid, version: "0.6.0", url: "http://127.0.0.1:7829", startedAt: "now" };
+    const said = `pid ${process.pid} (${path.join(state, "run.json").replace(home, "~")}) is running, and its command line doesn't show it to be this service's receiver: left alone.`;
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeRunFile(state, run);
+    // Its command line can't be read (the process question fails): not killed, and said.
+    failVerb = "process";
+    writeFileSync(log, "");
+    errs = [];
+    expect(await runService({ verb: "install", port: 7830, state }, e)).toBe(0);
+    expect(calls().some((c) => c.startsWith("taskkill"))).toBe(false);
+    expect(errs[0]).toContain(said);
+    // It is another program (or a receiver of another task): the same, on uninstall.
+    failVerb = "";
+    proc(process.pid, "C:\\Windows\\System32\\notepad.exe");
+    out = [];
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(out.join("\n")).toContain(said);
+    out = [];
+    errs = [];
+    writeFileSync(log, "");
+    expect(await runService({ verb: "uninstall" }, e)).toBe(0);
+    expect(calls().some((c) => c.startsWith("taskkill"))).toBe(false);
+    expect(out.at(-1)).toBe(`removed ${SERVICE_LABEL}: it won't start at login`);
+    expect(errs[0]).toContain(said);
+    expect(existsSync(path.join(state, "run.json"))).toBe(true);
+  });
+
+  it("says so and touches nothing when Task Scheduler can't be read", async () => {
+    const e = win();
+    const state = path.join(dir, "s");
+    await runService({ verb: "install", port: 7829, state }, e);
+    writeFileSync(log, "");
+    failVerb = "powershell";
+    for (const verb of ["install", "uninstall", "status"] as const) {
+      errs = [];
+      expect(await runService({ verb }, e)).toBe(1);
+      expect(errs[0]).toContain("can't read Task Scheduler through");
+      expect(errs[0]).toContain("scripts turned off");
+    }
+    expect(readFileSync(log, "utf8")).toBe("");
+    expect(existsSync(path.join(dir, "task.xml"))).toBe(true);
+  });
+
+  it("refuses a task under our name that runs something else", async () => {
+    writeFileSync(path.join(dir, "task.xml"), "<Exec><Command>C:\\x\\backup.exe</Command></Exec>");
+    writeFileSync(path.join(dir, "task.status"), "Ready");
+    expect(await runService({ verb: "install" }, win())).toBe(1);
+    expect(errs[0]).toContain("it isn't sessionpipe-gui's: it runs C:\\x\\backup.exe");
+  });
+
+  it("refuses a state dir or option the task's command line can't carry, and creates nothing", async () => {
+    expect(await runService({ verb: "install", state: path.join(dir, "R&D") }, win())).toBe(1);
+    expect(errs[0]).toContain("can't carry");
+    expect(errs[0]).toContain("R&D");
+    expect(
+      await runService({ verb: "install", state: path.join(dir, "s"), extra: ["--public-url", "%X%"] }, win()),
+    ).toBe(1);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([]);
+  });
+
+  it("--dry-run prints the definition and the commands and creates nothing", async () => {
+    expect(await runService({ verb: "install", state: path.join(dir, "s"), dryRun: true }, win())).toBe(0);
+    expect(out.join("\n")).toContain("<Command>conhost.exe</Command>");
+    expect(out).toContain(`$ ${path.join(dir, "schtasks")} /Run /TN ${name}`);
+    expect(calls().filter((c) => !c.includes("/Query"))).toEqual([]);
+  });
+
+  it("runs the tools by their full paths and shows those in --dry-run; a message names them by file name", async () => {
+    // Windows as it is: the three tools under System32 (the fakes stand in, by file name).
+    const sys = "C:\\Windows\\System32";
+    const fakes = win();
+    const ran = new Set<string>();
+    const e: ServiceEnv = {
+      ...fakes,
+      schtasks: `${sys}\\schtasks.exe`,
+      taskkill: `${sys}\\taskkill.exe`,
+      powershell: `${sys}\\WindowsPowerShell\\v1.0\\powershell.exe`,
+      exec: (cmd, args) => {
+        ran.add(cmd);
+        return fakes.exec(path.join(dir, path.win32.basename(cmd, ".exe")), args);
+      },
+    };
+    const state = path.join(dir, "s");
+    failVerb = "/Create";
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(1);
+    expect(errs).toEqual(["schtasks.exe /Create /TN failed: ERROR: Access is denied. (nothing installed)"]);
+    failVerb = "";
+    expect(await runService({ verb: "install", port: 7829, state, dryRun: true }, e)).toBe(0);
+    expect(out).toContain(`$ ${sys}\\schtasks.exe /Create /TN ${name} /XML ${path.join(state, "service-task.xml")} /F`);
+    expect(out).toContain(`$ ${sys}\\schtasks.exe /Run /TN ${name}`);
+    expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
+    writeRunFile(state, { port: 7829, pid: 4242, version: "0.6.0", url: "http://127.0.0.1:7829", startedAt: "now" });
+    proc(4242, receiverLine(e, state));
+    out = [];
+    expect(await runService({ verb: "uninstall", dryRun: true }, e)).toBe(0);
+    expect(out.slice(0, 3)).toEqual([
+      `$ ${sys}\\schtasks.exe /End /TN ${name}`,
+      `$ ${sys}\\taskkill.exe /PID 4242 /T /F`,
+      `$ ${sys}\\schtasks.exe /Delete /TN ${name} /F`,
+    ]);
+    failVerb = "/Delete";
+    errs = [];
+    expect(await runService({ verb: "uninstall" }, e)).toBe(1);
+    expect(errs).toEqual([
+      `${SERVICE_LABEL} is still loaded (schtasks.exe /Delete /TN: ERROR: Access is denied.); try again, or \`${sys}\\schtasks.exe /Delete /TN ${name} /F\``,
+    ]);
+    failVerb = "powershell";
+    errs = [];
+    expect(await runService({ verb: "status" }, e)).toBe(1);
+    expect(errs).toEqual([
+      "can't read Task Scheduler through powershell.exe: powershell: this system has scripts turned off.",
+    ]);
+    expect([...ran].sort()).toEqual([e.powershell, e.schtasks, e.taskkill].sort());
   });
 });

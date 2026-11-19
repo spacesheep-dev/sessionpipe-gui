@@ -1,0 +1,31 @@
+{
+  "name": "grant-rp-hash",
+  "description": "authenticatorData carries another rp id's hash.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"_CXiEkR5ziZdRGIIjJdm2Q\",\"iat\":1790800000000}",
+      "csig": "Jhk3uoPeXqMK-C0ofQZpsUF2jL67_D3YdBp6zXcEh1axxHuD7UcA8xP10VQ2LawK7QDpXkaaut2q6LYyrSGScA",
+      "grant": {
+        "cred": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+        "ad": "nBgN4M1pnueIl8R8_bPn7h11kG4xt3RqR0fepTaQmDcFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoidEVrVU8xYnV3Z25va2NqQkZPZThDWWJCelhVTGJBUnFfQmNWdXFxMFd0byIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIGnZcJM3ew8cR1sn3Gin0qBqYBvqry45ctQXJMnEbwzCAiEAvcPFfxB-jRuW5_v1ezSNU9CjjX2kDkQmepD-EqHGCyQ",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExzaXYZTe_WEhPIqiUUsYjH5ezr9uDxy5snmDVGErl1rnfzIHfdvsQ7MD6ohNFjrzaR30jeSvPXCxnB_p7LvMZQ\",\"iat\":1790799940000,\"exp\":1790803600000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6-lmO3JqCG-_5N3JNsB8iUax3_uanPDsgI59MfrVdaS4NVnpXNvOdLp09PSFZ9nFlyG_iFwKgGy13d7vNrzvtQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_assertion"
+  }
+}

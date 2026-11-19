@@ -26,7 +26,7 @@ export interface StoredEvent extends ProtocolEvent {
   preview?: Record<string, number>;
 }
 
-export type EventSource = "http" | "outbox" | "demo";
+export type EventSource = "http" | "outbox" | "demo" | "spacesheep";
 
 /** The sessionpipe v1 envelope. Kept structural (not imported from sessionpipe-core) so
  *  the web bundle never pulls the core package in. */
@@ -100,6 +100,30 @@ export const splitKey = (key: SessionKey): { harness: string; id: string } => {
   const i = key.indexOf(":");
   return { harness: key.slice(0, i), id: key.slice(i + 1) };
 };
+
+/** Nothing has happened in the session: no turn, no tool, no subagent, no prompt for the
+ *  person, no ask of another agent, nothing changed. Its end is not news. */
+export const nothingHappened = (
+  s: Pick<SessionSummary, "counts" | "currentTurn" | "openAttentions" | "delegations">,
+): boolean =>
+  s.counts.turns === 0 &&
+  s.counts.tools === 0 &&
+  s.counts.subagents === 0 &&
+  s.counts.attentions === 0 &&
+  s.counts.filesChanged === 0 &&
+  s.counts.compactions === 0 &&
+  !s.currentTurn &&
+  s.openAttentions.length === 0 &&
+  !s.delegations?.length;
+
+/** A session the lists leave out until its first turn: nothing happened in it, and nobody
+ *  is at it (the harness says unattended) or it has already ended. A program that starts
+ *  a harness and stops it (an IDE probing its provider, a health check) sends exactly
+ *  that; a terminal someone has just opened stays listed, so its first message can come
+ *  from here. The receiver keeps every such session; its page and Search find it. */
+export const isEmptySession = (
+  s: Pick<SessionSummary, "counts" | "currentTurn" | "openAttentions" | "delegations" | "attended" | "endedAt">,
+): boolean => nothingHappened(s) && (s.attended === false || !!s.endedAt);
 
 export interface SessionSummary {
   key: SessionKey;
@@ -288,7 +312,8 @@ export interface Delegation {
  *  3+ tool.ended were `ok: false`. loop: within the last 10 tool.started the same tool
  *  ran 3+ times on an identical input (tier 3 only). compacting: 2+ context.compacted
  *  within COMPACTING_WINDOW_MS of the last event. gap: seqs are missing behind the
- *  highest one for longer than GAP_AFTER_MS (they clear when they arrive). */
+ *  highest one for longer than GAP_AFTER_MS (they clear when they arrive). spacesheep
+ *  thins what it relays, so its events open no hole. */
 export type SessionFlagKind = "slow_tool" | "error_streak" | "loop" | "compacting" | "gap";
 
 export interface SessionFlag {
@@ -352,6 +377,7 @@ export interface MachineControl {
   mode?: MachineMode;
   folders?: string[];
   harnesses?: string[];
+  /** Hello `modes`: the delivery modes the machine has, among `DELIVERY_MODES`. */
   modes?: string[];
   version?: string;
   accounts?: HarnessAccount[];
@@ -360,6 +386,10 @@ export interface MachineControl {
   /** Pairing or hello `key_types`: the kinds of key this machine takes. Absent (an older
    *  daemon) means passkeys only, so the app never offers it a device key. */
   keyTypes?: KeyType[];
+  /** A machine paired on a spacesheep account this GUI reads through (docs/rfcs/08):
+   *  commands to it are signed for that receiver's rp id and carried by it; its keys here
+   *  are ids only. Absent for a machine paired with this receiver. */
+  remote?: { via: "spacesheep"; origin: string; rpId: string };
   /** Messages queued for it and not yet finally acked. */
   queued: number;
   /** Hello `files: true`: the machine takes `files` on a `start` (CONTROL.md §3.1, §6). */
@@ -388,6 +418,14 @@ export interface MachineControl {
   handoff?: boolean;
 }
 
+/** How a machine hands a message to a session, the first that fits (sessionpipe CONTROL.md
+ *  §6): a hello's `modes` lists the ones it has, an ack's `mode` names the one it used.
+ *  `inbox` (sessionpipe 0.13) is a message written into a live, idle Claude Code session's
+ *  own local inbox, answered by that session in its own turn: its reply is the session's
+ *  own, where a `fork`'s is a copy's. */
+export const DELIVERY_MODES = ["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"] as const;
+export type DeliveryMode = (typeof DELIVERY_MODES)[number];
+
 /** A machine's mode, the person's choice at its own terminal (CONTROL.md §2): `safe`,
  *  nothing that needs approval runs unattended; `auto`, the harness's auto mode; `inherit`
  *  (sessionpipe 0.10), no permission flag, so a session runs as the person's own do there,
@@ -397,12 +435,18 @@ export type MachineMode = "safe" | "auto" | "inherit";
 /** A harness account signed in on a machine, from its pairing and hello (CONTROL.md §2): a
  *  label for `session.account_id`, never checked against anything. `email` when it signs in
  *  with one; `name` instead for one with no email (sessionpipe 0.10: a Claude Code home on
- *  another API, named by its endpoint's host, `api.z.ai`). At least one of the two is set. */
+ *  another API, named by its endpoint's host, `api.z.ai`). At least one of the two is set.
+ *  `signedIn` (hello `signed_in`, sessionpipe 0.13.3): whether the harness's command line
+ *  is signed in to the account as the daemon sees it, which is what a resume runs with.
+ *  `false` means a message to a session of that account would fail until someone runs
+ *  `claude auth login` on the machine; absent is unknown (an older daemon, or one that
+ *  could not tell), never signed out. */
 export interface HarnessAccount {
   harness: string;
   id: string;
   email?: string;
   name?: string;
+  signedIn?: boolean;
 }
 
 /** What an account is called: its email, else its name, else nothing. */
@@ -551,8 +595,9 @@ export const MODEL_MAX = 100;
 export const validModel = (m: unknown): m is string =>
   typeof m === "string" && m.length >= 1 && m.length <= MODEL_MAX && MODEL_RE.test(m);
 
-/** One file a `start` names (CONTROL.md §3.1 `files`): the receiver holds the bytes under
- *  `sha256` (base64url, 43 characters) and the machine fetches them with its token. */
+/** One file a `start` or a `prompt` names (CONTROL.md §3.1 `files`): the receiver holds the
+ *  bytes under `sha256` (base64url, 43 characters) and the machine fetches them with its
+ *  token. */
 export interface StartFile {
   name: string;
   type: string;
@@ -563,6 +608,13 @@ export interface StartFile {
 export const START_FILES_MAX = 10;
 export const START_FILE_MAX_BYTES = 26_214_400;
 export const START_FILES_TOTAL_BYTES = 52_428_800;
+/** What POST ROUTES.ui.control + "/files" answers: the entry a signed command names, and
+ *  for a picture (PNG, JPEG, GIF, WebP) its size in pixels, read from its own bytes. Only
+ *  the four fields of `StartFile` go into a command; an older receiver sends no pixels. */
+export interface UploadedFile extends StartFile {
+  width?: number;
+  height?: number;
+}
 
 export interface Stats {
   events: number;
@@ -796,7 +848,8 @@ export interface DetailQuery {
   limit?: number;
   /** Slim events (big strings cut to a 2 KB preview) instead of the full lines from disk. */
   slim?: boolean;
-  /** With `slim`: a shorter cut, 200–2048 chars, for list pages. */
+  /** With `slim`: a shorter cut of tool input/output, 200–2048 chars, for list pages. The
+   *  turn's own words keep the 2 KB preview (an older receiver cuts them too). */
   preview?: number;
   /** Only this subagent's events (an AgentRun id): its subagent.started / .ended, the
    *  tool calls stamped with its `agent_id`, and the Agent / Task call that launched it.
@@ -1200,6 +1253,34 @@ export interface Digest {
   totals: DigestGroup;
 }
 
+/** Info.sources.spacesheep (server/sources/spacesheep.ts): the account this GUI reads
+ *  through, how the relay is doing, and what it has brought in. */
+export interface SpacesheepSourceStatus {
+  origin: string;
+  email: string;
+  connectedAt: string;
+  /** Events handed to the store since start. */
+  events: number;
+  /** The relay cursor: the last seq read. */
+  cursor: number;
+  /** `ok` after a good poll; `unauthorized` when the key was revoked; `offline` when the
+   *  origin can't be reached; `limited` when it asked this app to wait (429, its
+   *  Retry-After followed); `gap` when the relay no longer holds the cursor's past. */
+  state: "starting" | "ok" | "unauthorized" | "offline" | "limited" | "gap";
+  lastAt?: string;
+  lastError?: string;
+  /** The machines paired on spacesheep, as its hellos last said (names only here). */
+  machines: string[];
+}
+
+/** POST ROUTES.ui.spacesheep (connect): what the page shows while the person confirms. */
+export interface SpacesheepConnectStart {
+  code: string;
+  digits: string;
+  url: string;
+  expiresAt: string;
+}
+
 export interface Info {
   name: "sessionpipe-gui";
   version: string;
@@ -1218,6 +1299,8 @@ export interface Info {
     http: true;
     outbox: { path: string; sessions: number; enabled: boolean; events?: number } | null;
     demo: boolean;
+    /** A spacesheep account used as a backend (RFC 08): absent on older servers, null when off. */
+    spacesheep?: SpacesheepSourceStatus | null;
   };
   /** `bytes` is everything under `dir`: the event files, plus `attachments` (the images
    *  uploaded from the composer, ROUTES.ui.attachments). Absent on older servers. */
@@ -1258,9 +1341,10 @@ export interface RemoteInfo {
 
 export type AttachmentType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
-/** An image uploaded from the composer (POST ROUTES.ui.attachments). The control
- *  protocol carries text only, so the prompt names it instead: by `path` when the
- *  session runs on this machine, by `url` otherwise (shared/attachments.ts). */
+/** An image uploaded from the composer (POST ROUTES.ui.attachments) for a session whose
+ *  daemon takes no files on a prompt and runs on this machine: the prompt's text names it
+ *  by `path` (shared/attachments.ts). Every other machine gets pictures as the command's
+ *  `files` (`UploadedFile`), and nothing of them is in the text. */
 export interface Attachment {
   /** A ULID; the file is `<id>.<ext>` under `<stateDir>/attachments`. */
   id: string;
@@ -1268,17 +1352,19 @@ export interface Attachment {
   ext: "png" | "jpg" | "gif" | "webp";
   /** Absolute path on the machine the GUI runs on. */
   path: string;
-  /** Absolute URL another machine can fetch: the https origin when TLS is on, else the
-   *  first LAN URL, with `?k=<ui key>` so no cookie is needed. */
+  /** Where this board's own pages show it from: `/attachments/<id>.<ext>`, a path with no
+   *  origin and no key in it (the page's cookie or loopback lets it in). Never written into
+   *  a prompt. */
   url: string;
   width: number;
   height: number;
   bytes: number;
 }
 
-/** One image at most; the composer refuses a bigger file before uploading. */
+/** One image at most where the prompt names it by path; the composer refuses a bigger file
+ *  before uploading. A picture that goes as a file may be START_FILE_MAX_BYTES. */
 export const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
-/** Images per message. */
+/** Images per message, either way. */
 export const ATTACHMENTS_PER_MESSAGE = 6;
 export const ATTACHMENT_TYPES: Record<AttachmentType, Attachment["ext"]> = {
   "image/png": "png",
@@ -1464,7 +1550,21 @@ export interface Applied {
  *  `key.add` (server/control/pool.ts); its fields are `pool_action`, `pool_account`,
  *  `pool_order` and `pool_code`. */
 export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add" | "pool";
-export type ControlOutcome = "progress" | "taken" | "delivered" | "expired" | "unsupported" | "failed" | "refused";
+/** `unconfirmed` is this app's own, never a machine's ack: a send spacesheep carried whose
+ *  end nobody here can say. Either the computer took it and said nothing more within
+ *  spacesheep's day (server/control/remote.ts applyRemoteJobs; a later read of its job may
+ *  still settle it), or spacesheep took the send without naming its job, so there was never
+ *  anything to follow (enqueueRemote; the row's `code` is then `no_job`, and it is not
+ *  known that a computer took it). Final here; whether it ran is spacesheep's to say. */
+export type ControlOutcome =
+  | "progress"
+  | "taken"
+  | "delivered"
+  | "expired"
+  | "unsupported"
+  | "failed"
+  | "refused"
+  | "unconfirmed";
 
 /** A control message the receiver carries, as the UI sees it (never the raw signature). */
 export interface ControlActivity {
@@ -1476,13 +1576,32 @@ export interface ControlActivity {
   at: string;
   expiresAt: string;
   outcome?: ControlOutcome;
+  /** A send carried by spacesheep, waiting while this app follows no account that can say
+   *  how it went (disconnected): it is picked up again when that account connects. */
+  unfollowed?: "disconnected" | "revoked";
+  /** A send of a page on a spacesheep account whose answer nobody heard
+   *  (web/src/account/unheard.ts); a receiver never sets it. `asking`: it may have been
+   *  sent, and the page is finding out (the row waits, `detail` is what the app said of the
+   *  asking). `unsent`: no job was made of it: `status`, `reason`, `code` and `detail` are
+   *  the refusal a send answers with. `unknown`: nobody can say any more. Once spacesheep is
+   *  known to hold it, the row is a send like any other and says none of this. */
+  unheard?: { state: "asking" | "unsent" | "unknown"; status?: number; reason?: string };
+  /** The delivery mode the machine acked, one of `DELIVERY_MODES`. */
   mode?: string;
+  /** A `permission.answer`'s prompt and decision, as signed (`for`, `decision`): every
+   *  surface reads from it which prompt has an answer out, also after a reload. */
+  answer?: { for: string; decision: "allow" | "deny" };
   code?: string;
   detail?: string;
   reply?: string;
   replySeq?: number;
   /** The session the final ack named (a fork, or the session a start created), when it differs. */
   ackSession?: string;
+  /** The final ack's `copy_of` (sessionpipe 0.13, CONTROL.md §6 `prompt`, §10): the answer
+   *  came from a copy of the session the command named, not from it. This is that session,
+   *  as the machine names it; `ackSession` is then the copy, and `detail` says why one was
+   *  made. Absent: the session itself answered, or the daemon predates the field. */
+  copyOf?: SessionKey;
   takenAt?: string;
   ackedAt?: string;
   /** A start's folder, as signed: the starting page shows it and "Edit and start again" puts it back. */
@@ -1490,7 +1609,7 @@ export interface ControlActivity {
   /** A start's level and model, as signed (what was asked, never what ran). */
   permission?: StartPermission;
   model?: string;
-  /** A start's files, as signed. */
+  /** A start's files, or a prompt's (the pictures sent beside a message), as signed. */
   files?: StartFile[];
   /** What the machine ran it with, from its `taken` / `delivered` ack (sessionpipe 0.10);
    *  `inherit` when it ran with no permission flag. */
@@ -1667,10 +1786,18 @@ export const ROUTES = {
     rotateToken: "/api/ui/token/rotate",
     /** POST { on: boolean } → Info.sources.demo */
     demo: "/api/ui/demo",
+    /** GET → { link: SpacesheepSourceStatus | null, pending: SpacesheepConnectStart | null };
+     *  POST { origin? } → SpacesheepConnectStart (then the server polls and connects);
+     *  DELETE → disconnected (the key is forgotten here; revoke it on spacesheep to be sure).
+     *  POST …/device { key } → the app's device key asked to be trusted there: { code, devicesUrl, trustedOn };
+     *  GET …/device?id= → { trustedOn, machines, pending }. */
+    spacesheep: "/api/ui/spacesheep",
     /** GET → image/svg+xml: the LAN URL with the UI key, for a phone camera. */
     qr: "/api/ui/qr.svg",
     /** Everything under it is the control channel's UI side (server/control/README.md),
-     *  POST /files among it: one file a start will carry, as the raw body → StartFile. */
+     *  POST /files?name=&machine= among it: one file a start or a prompt will carry, as the
+     *  raw body → UploadedFile. `machine` (the machine it is for) is taken and not read yet.
+     *  415 `not_an_image` for bytes that are not the picture their content-type says. */
     control: "/api/ui/control",
     /** GET → { viewers: Viewer[] } */
     viewers: "/api/ui/viewers",

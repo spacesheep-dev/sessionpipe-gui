@@ -5,6 +5,7 @@
 import {
   type Applied,
   type ControlOutcome,
+  DELIVERY_MODES,
   type HarnessAccount,
   type HarnessStartOptions,
   INHERIT_LEVELS,
@@ -24,14 +25,19 @@ import {
 // The same reader the limits store uses for a limits.observed, so a hello's windows and an
 // event's are one shape (server-core owns it; control only reads with it).
 import { readWindows } from "../ui/limits.js";
+import { SESSION_REF } from "./refs.js";
+import { FINAL_OUTCOMES, type Hello, isFinal, MACHINE_RE } from "./rows.js";
 
-export const MACHINE_RE = /^m_[A-Za-z0-9_-]{16,40}$/;
+export { FINAL_OUTCOMES, type Hello, isFinal, MACHINE_RE };
 export const CODE_RE = /^[A-Za-z0-9_-]{6,32}$/;
 export const POLL_KEY_RE = /^[A-Za-z0-9_-]{22,128}$/;
 export const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-export const SESSION_REF = /^[a-z][a-z0-9-]{0,39}:[A-Za-z0-9._:-]{1,128}$/;
+export { SESSION_REF };
 export const HARNESS_RE = /^[a-z][a-z0-9-]{0,39}$/;
-const MODES = new Set(["sdk", "waiter", "turn", "api", "resume", "fork"]);
+/** The delivery modes a hello may list and an ack may name (CONTROL.md §6; `inbox` from
+ *  sessionpipe 0.13). Another word is dropped, never kept as a mode nobody can read. */
+const MODES: ReadonlySet<string> = new Set(DELIVERY_MODES);
+const MODE_RE = new RegExp(`^(?:${DELIVERY_MODES.join("|")})$`);
 const OUTCOMES = new Set<string>(["progress", "taken", "delivered", "expired", "unsupported", "failed", "refused"]);
 const ACCOUNT_EMAIL = /^[^@\s]{1,64}@[^@\s]{1,189}$/;
 /** The most harnesses a hello lists that this receiver keeps: the three built in, and every
@@ -40,34 +46,6 @@ export const HARNESSES_MAX = 64;
 const MACHINE_MODES = new Set<string>(["safe", "auto", "inherit"]);
 
 export type { HarnessAccount };
-
-export interface Hello {
-  name: string;
-  harnesses: string[];
-  modes: string[];
-  keys: string[];
-  version: string;
-  waiting: string[];
-  folders: string[] | null;
-  /** `inherit` (sessionpipe 0.10): no permission flag; null when not sent or unknown. */
-  mode: MachineMode | null;
-  accounts: HarnessAccount[];
-  /** `files: true`: the machine takes `files` on a `start`. */
-  files: boolean;
-  /** `prompt_files: true`: and on a `prompt` (sessionpipe 0.10). */
-  promptFiles: boolean;
-  /** What a `start` may ask for, per harness (sessionpipe 0.10); null when not sent. */
-  start: Record<string, HarnessStartOptions> | null;
-  /** `key_types` (CONTROL.md §2): the kinds of key it takes; null when not sent (passkeys only). */
-  keyTypes: KeyType[] | null;
-  /** `pool` (sessionpipe 0.11): the accounts its daemon pools; null when not sent or malformed. */
-  pool: MachinePool | null;
-  /** `ask`: whether `sessionpipe ask` is on there (CONTROL.md §13); absent when not sent (a
-   *  0.10 daemon says nothing about it). */
-  ask?: boolean;
-  /** `handoff: true`: it takes `reply_to` on a prompt or a start; absent when not sent. */
-  handoff?: boolean;
-}
 
 /** `key_types`: known kinds only, each once; null when absent or empty. */
 export function parseKeyTypes(v: unknown): KeyType[] | null {
@@ -92,7 +70,7 @@ export function parseHello(body: unknown): Hello | null {
   return {
     name: stripControl(b.name).trim().slice(0, 80),
     harnesses,
-    modes: strs(b.modes, /^(sdk|waiter|turn|api|resume|fork)$/, 6),
+    modes: strs(b.modes, MODE_RE, DELIVERY_MODES.length),
     keys: strs(b.keys, /^[A-Za-z0-9_-]{16,1400}$/, 50),
     version: b.version.slice(0, 40),
     waiting: strs(b.waiting, SESSION_REF, 500),
@@ -196,7 +174,9 @@ export function parseStart(
 /** `accounts`: a label the board shows for an account id, never checked against anything.
  *  Each is named by its email, or, for one with no email (sessionpipe 0.10: a Claude Code
  *  home on another API), by its `name` (`api.z.ai`), shown as printed text: control
- *  characters dropped, at most 200 characters. One with neither is dropped. */
+ *  characters dropped, at most 200 characters. One with neither is dropped. `signed_in`
+ *  (sessionpipe 0.13.3) is kept when it is a boolean; anything else is as if not sent,
+ *  which reads unknown, never signed out. */
 export function parseAccounts(v: unknown): HarnessAccount[] {
   if (!Array.isArray(v)) return [];
   const out: HarnessAccount[] = [];
@@ -208,7 +188,12 @@ export function parseAccounts(v: unknown): HarnessAccount[] {
     const label = ACCOUNT_EMAIL.test(email) ? { email } : name ? { name } : null;
     if (!label) continue;
     if (!out.some((x) => x.harness === a.harness && x.id === a.id))
-      out.push({ harness: a.harness, id: a.id, ...label });
+      out.push({
+        harness: a.harness,
+        id: a.id,
+        ...label,
+        ...(typeof a.signed_in === "boolean" ? { signedIn: a.signed_in } : {}),
+      });
   }
   return out;
 }
@@ -219,6 +204,8 @@ export interface AckIn {
   at: string;
   mode?: string;
   session?: string;
+  /** `copy_of` (sessionpipe 0.13): the session the command named, when a copy of it answered. */
+  copyOf?: string;
   code?: string;
   detail?: string;
   reply?: string;
@@ -239,6 +226,7 @@ export function parseAcks(body: unknown, now: () => string): AckIn[] | null {
     const ack: AckIn = { id: a.id, outcome: a.outcome as ControlOutcome, at };
     if (typeof a.mode === "string" && MODES.has(a.mode)) ack.mode = a.mode;
     if (typeof a.session === "string" && SESSION_REF.test(a.session)) ack.session = a.session;
+    if (typeof a.copy_of === "string" && SESSION_REF.test(a.copy_of)) ack.copyOf = a.copy_of;
     if (typeof a.code === "string" && /^[a-z_]{1,40}$/.test(a.code)) ack.code = a.code;
     if (typeof a.detail === "string") ack.detail = a.detail.slice(0, 500);
     if (typeof a.reply === "string") ack.reply = a.reply.slice(0, 20_000);
@@ -260,6 +248,3 @@ export function parseApplied(v: unknown): Applied | undefined {
   if (validModel(a.model)) out.model = a.model;
   return out.permission || out.model ? out : undefined;
 }
-
-export const FINAL_OUTCOMES = new Set<ControlOutcome>(["delivered", "expired", "unsupported", "failed", "refused"]);
-export const isFinal = (o: ControlOutcome | undefined): boolean => !!o && FINAL_OUTCOMES.has(o);

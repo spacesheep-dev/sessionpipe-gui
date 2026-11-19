@@ -1,0 +1,26 @@
+{
+  "name": "enroll-device-webauthn-shaped-proof",
+  "description": "WebAuthn authenticatorData and clientDataJSON beside a device key's pairing proof.",
+  "input": {
+    "machine": "m_testmachine0000000001",
+    "code": "K7Q2-9XMV",
+    "key": {
+      "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+      "alg": -7,
+      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+      "type": "device",
+      "store": "hardware",
+      "uv": "each-use"
+    },
+    "proof": {
+      "cred": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+      "sig": "p55ZRpqwomxIvRTiVTVUOcDeyw6aUFzuDBbpftHMz1JxLcObnwBf76CgstkgwW7owKiva9q-tmRAvn0rBGqasQ",
+      "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+      "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiUHlBYzEtVUl1Vi1SUDluTklRNjZXMU9ubnlJcndpai1WZ0ZHWW9qTl90MCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0"
+    },
+    "rp_id": "receiver.example"
+  },
+  "expect": {
+    "ok": false
+  }
+}

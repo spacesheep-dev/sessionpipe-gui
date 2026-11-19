@@ -1,0 +1,79 @@
+{
+  "name": "control-start-permission-refused",
+  "spec": "CONTROL.md \u00a75 step 8",
+  "capability": "control",
+  "note": "The machine's hello said mode safe and, for claude-code, permissions read and safe. A start that asks for auto is refused with code permission at once, with no taken before it; the receiver records it as final and never redelivers it. (A receiver SHOULD NOT have queued it: the hello didn't advertise auto. The runner queues it anyway, the way a receiver that predates start options would.)",
+  "steps": [
+    {
+      "hello": {
+        "machine": "{machine}",
+        "body": {
+          "name": "conformance",
+          "harnesses": [
+            "claude-code"
+          ],
+          "modes": [
+            "resume"
+          ],
+          "keys": [],
+          "version": "0.10.0",
+          "mode": "safe",
+          "start": {
+            "claude-code": {
+              "permissions": [
+                "read",
+                "safe"
+              ],
+              "permission": "safe",
+              "any_model": true
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 204
+      }
+    },
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": {
+          "session": "claude-code:{uuid}",
+          "kind": "start",
+          "cwd": "/tmp/conformance",
+          "text": "permission probe",
+          "permission": "auto"
+        },
+        "expires_in_s": 60
+      }
+    },
+    {
+      "poll": {
+        "machine": "{machine}",
+        "wait": 1
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "ack": {
+        "outcome": "refused",
+        "code": "permission",
+        "detail": "this machine runs in safe mode; auto needs `sessionpipe control mode auto` at the machine"
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "poll": {
+        "machine": "{machine}",
+        "wait": 1
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}

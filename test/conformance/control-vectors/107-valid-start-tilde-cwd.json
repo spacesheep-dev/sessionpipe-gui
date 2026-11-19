@@ -1,0 +1,32 @@
+{
+  "name": "valid-start-tilde-cwd",
+  "description": "A new session in `~/spacesheep`: the machine reads `~` under its own user's home, as events write a session's folder, so no receiver needs to know it.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"start\",\"session\":\"claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b\",\"text\":\"What's wrong here?\",\"nonce\":\"E0qftKxhKCkqd1RvCAY9Tg\",\"iat\":1790800000000,\"cwd\":\"~/spacesheep\"}",
+      "csig": "wFqgcM7-Bb6fUUQ5mfNeOKLRCoZdM5EykDjav4GKivetm0IJ-EdVnUY1Ip4XzNukp7gSvPvyFxomaQisMsenAA",
+      "grant": {
+        "cred": "muKOVE3ONY_FHq72bYDwL4uocF1A0D7F",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiMFg1STQ0RWo4UVlkNUlXQjh1d1VJem55YlU4dUxEbE11YmR5bm5scEk5TSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIQC2Ooua8Z1DU87gsweH0np-rSSRpdlPwaKu-7ss_AM84QIgbqKAynfTyLeiKSNuzHXZyLJi2F4vlvxemFKSZ2JbMLI",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEeJfV73ePDIGLGAnBO1kzYYnACL5FqegoHbwZBZYBu-LgqXdHmefGzdvl0gTyUzALnxB2el43t8IVymqGh9sPpQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "muKOVE3ONY_FHq72bYDwL4uocF1A0D7F",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmL_a0b_HoNcPmMmx0Tdlp_In_Q5nmdnquPe9n-9NaIP_P29oLGT5eBTM4bIqTbWRSXCYUYR9i20BuWtOwIxmEQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "grant",
+    "kind": "start"
+  }
+}

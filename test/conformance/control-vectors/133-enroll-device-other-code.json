@@ -1,0 +1,24 @@
+{
+  "name": "enroll-device-other-code",
+  "description": "A device proof made for another pairing code.",
+  "input": {
+    "machine": "m_testmachine0000000001",
+    "code": "K7Q2-9XMV",
+    "key": {
+      "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+      "alg": -7,
+      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+      "type": "device",
+      "store": "hardware",
+      "uv": "each-use"
+    },
+    "proof": {
+      "cred": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+      "sig": "p5f5V2VIZ7HEK8nyJcEwIH6t4DC5vYAhDFwX29v_M9AYHZ5jQyZY__g7_lviXNMYXpnnIJE6TKVO7Kq2XJiSyw"
+    },
+    "rp_id": "receiver.example"
+  },
+  "expect": {
+    "ok": false
+  }
+}

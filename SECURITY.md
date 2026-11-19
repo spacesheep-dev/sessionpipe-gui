@@ -19,7 +19,7 @@ Versions: only the latest `0.x` release receives fixes.
 |---|---|---|
 | A `sessionpipe` sink on another machine | `Authorization: Bearer <sink token>` | `POST` event batches (`/api/sessionpipe/v1/events`) |
 | A browser on the LAN | the UI key, carried once in `?k=` and then as the `spgui` cookie | read the board, the UI API and the SSE stream; sign control commands with a passkey |
-| A browser on `localhost` | none (loopback is trusted) | the above, plus the loopback-only routes: rotate the sink token, toggle demo, plugin and skin settings, setup |
+| A browser on `localhost` | none (loopback is trusted), on the receiver's own pages | the above, plus the loopback-only routes: rotate the sink token, toggle demo, plugin and skin settings, setup |
 | A paired machine's daemon | that machine's own bearer token | poll and ack its control queue |
 
 **The control channel.** Every command a page sends to a machine (a message, a
@@ -33,6 +33,17 @@ The sink token authenticates event batches and the UI key signs a browser into t
 neither authorizes a command. Details: the sessionpipe `CONTROL.md` spec and
 [ARCHITECTURE.md](ARCHITECTURE.md).
 
+**Requests from a browser.** The receiver answers its own pages, and on its own machine
+under its own names. Before any route is reached, a request the browser marks as coming
+from another origin is refused (another site may link to a page; it can neither read an
+answer nor change anything), and a
+request made on this machine must name the receiver by a name it hands out itself or was
+given (`localhost`, an address, the `.local` name, or one given with `--allow-host`); the
+public url's name is answered through the proxy only. Pages are sent with
+`frame-ancestors 'self'`, and no route answers a CORS preflight, so no page of another
+origin reads an answer. The routes sinks and daemons call answer to their own bearer
+tokens. Details: `server/http/guard.ts` and [ARCHITECTURE.md](ARCHITECTURE.md).
+
 **Where secrets live.** `~/.local/state/sessionpipe-gui/config.json` (the sink token,
 the UI key), `control/` (hashes of the per-machine tokens), `tls/` (the local CA and
 server key when `--tls` is on), `plugins-settings/` (plugin secrets, mode 0600, masked on
@@ -40,14 +51,25 @@ the wire and in logs). Rotate the sink token from the Connect page or
 `POST /api/ui/token/rotate` (loopback only); a new UI key is made by deleting `uiKey`
 from `config.json` and restarting.
 
-**Network exposure.** The GUI is meant for a trusted LAN. It makes no outbound request
-of its own, the web bundle calls only its own origin, and there is no telemetry. Putting
-the port on the public internet is not a supported configuration.
+**Network exposure.** The GUI is meant for a trusted LAN. The web bundle calls only its
+own origin, and there is no telemetry. The server makes outbound requests only for what
+you turn on: a plugin, which runs in the server process once installed or enabled
+(ping-a-human calls Telegram's API); and a spacesheep account you connect (Settings →
+Data). Connecting sends this machine's name and the GUI's version to the spacesheep
+account's origin (spacesheep.dev) to get the four-digit code. Once connected, every
+request there carries the account's key: the server polls the relay, lists its machines
+and jobs, forwards the messages you send and, when you approve the app on spacesheep
+(Machines), sends the app's public device key with this machine's name. Installing an
+extension from a URL, npm or git is the `view add` CLI command's request, in the CLI
+process, not the running server. Putting the port on the public internet is not a
+supported configuration.
 
 ## In scope
 
 - Reading events, sessions or the stream without the UI key or the sink token.
 - Reaching a loopback-only route from a non-loopback address.
+- A page of another origin changing anything through the receiver, or reading anything
+  from it.
 - Forging, replaying or redirecting a control command; getting a suggestion delivered
   without a passkey confirmation.
 - Path traversal or injection through the static server, attachments, installed views,

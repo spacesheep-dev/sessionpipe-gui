@@ -1,0 +1,42 @@
+{
+  "name": "control-double-ack",
+  "spec": "CONTROL.md \u00a710",
+  "capability": "control",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "m_conformance{run}0000",
+        "message": {
+          "kind": "cancel",
+          "session": "claude-code:00000000-0000-4000-8000-{run12}",
+          "expires_in_s": 60
+        }
+      }
+    },
+    {
+      "poll": {
+        "machine": "m_conformance{run}0000",
+        "wait": 1
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "ack": {
+        "outcome": "unsupported"
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "ack": {
+        "outcome": "unsupported"
+      },
+      "expect": {
+        "status": 202
+      }
+    }
+  ]
+}

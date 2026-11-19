@@ -1,0 +1,25 @@
+{
+  "name": "control-held-no-retry",
+  "spec": "CONTROL.md §6.3 inbox, §10 failed/held",
+  "capability": "control",
+  "note": "The machine wrote the message into the live session's own inbox and that session did not take it — no turn of its own began, or the turn that began was asked for by something else — so the message may be parked there. It is acked `failed` with code `held` ONCE: the bytes went out, so nothing is retried and no other mode is tried. The receiver's part is to show that it was sent and not duplicated, and not to redeliver it: the same words sent again would be a second copy of them in one place, and a released hold delivers both.",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": { "session": "claude-code:{uuid}", "kind": "prompt", "text": "did you see this?" },
+        "expires_in_s": 60
+      }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 200 } },
+    {
+      "ack": {
+        "outcome": "failed",
+        "code": "held",
+        "detail": "written into the live session on this computer; it didn't begin a turn for it, so it may be holding the message. Nothing was duplicated, and nothing else was tried."
+      },
+      "expect": { "status": 202 }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 204 } }
+  ]
+}

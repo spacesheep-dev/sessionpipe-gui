@@ -1,0 +1,32 @@
+{
+  "name": "valid-prompt-with-files",
+  "description": "A message for a running session with a screenshot attached (to a machine whose hello says prompt_files).",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"HxCqimGYR26_31T_hM4kNQ\",\"iat\":1790800000000,\"files\":[{\"name\":\"screenshot.png\",\"type\":\"image/png\",\"size\":183402,\"sha256\":\"0BNhTcFKN-4g_pIAVzerfTQn5-k1gK1W74pCIF5_ek4\"}]}",
+      "csig": "nH-v2Uy1U1hmznd-SB4L9foFK68PhOab3gEiWrOEG8Uz8CebGXAftfRrbeIQ9DMYnfvDYxG4T-_Id3ybyfqBZQ",
+      "grant": {
+        "cred": "CVD6ELKmWGYqQFr9O7jr68_XZudh7G3M",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZ2tvcWxWTzExX2ptQXVMaEU1MlBsZXJuQzdNVVJ3Qko5ZVo4c0JZQnYwYyIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIQDWUgiBqj7AiKKVm6L9teXy2r4A022U3OTV6QpwNdByDQIgbhZJrHM-TP2PBZHTzQPaF0YirnIh7SsDMJ0KvFHgTsI",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEDDG9nAjgpNta2ifo-WpzjCiPkIyF4YTUy-EJXnEcWFFLdbh9Ez0Gue_bAit5gMuwfvgFrKJLUyDHoSfqX0OOLA\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "CVD6ELKmWGYqQFr9O7jr68_XZudh7G3M",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEShzjtTGQHk7mpd7PTBhlPc0gia6I0eILQehS8J97rWpyJxyyWlKymvddDvm2rrJssf5v1NtD4P0XaZnS2xbAyg"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "grant",
+    "kind": "prompt"
+  }
+}

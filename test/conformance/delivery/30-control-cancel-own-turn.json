@@ -1,0 +1,26 @@
+{
+  "name": "control-cancel-own-turn",
+  "spec": "CONTROL.md §6 cancel, §10 acks",
+  "capability": "control",
+  "note": "A Stop for a session whose turn the machine itself is running as a child process (a resume, a fork, a headless start), named by the session's own id or by the id of the copy that turn runs in. The machine ends the child it spawned and acks the cancel `taken`, then `delivered` once that process is gone, with the mode the turn was running in and a `detail` that says what was stopped. The stopped turn's own message is acked separately, `delivered`, its reply ending `(The turn was cancelled.)`; a message queued behind it still runs, in order. The receiver's part is to accept `taken` for a cancel, to show the session as stopped on `delivered`, and to keep the queued message as it was.",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": { "session": "claude-code:{uuid}", "kind": "cancel" },
+        "expires_in_s": 60
+      }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 200 } },
+    { "ack": { "outcome": "taken" }, "expect": { "status": 202 } },
+    {
+      "ack": {
+        "outcome": "delivered",
+        "mode": "resume",
+        "detail": "stopped the turn this computer was running for that session"
+      },
+      "expect": { "status": 202 }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 204 } }
+  ]
+}

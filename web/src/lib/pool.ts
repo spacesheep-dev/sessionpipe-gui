@@ -15,6 +15,7 @@ import type {
   SessionSummary,
 } from "@shared/api";
 import {
+  agentAside,
   isOut,
   orderWindows,
   readWindow,
@@ -259,10 +260,22 @@ export function servedBy(
 
 // ----- the ack's detail -----
 
+/** The link as it was written when it reads as an `https:` URL, else nothing: it comes
+ *  from outside (a machine's ack, by way of spacesheep for a computer paired there) and is
+ *  put on a button, so what does not parse as one is no link. */
+function httpsUrl(s: string): string | null {
+  try {
+    return new URL(s).protocol === "https:" ? s : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A `login.begin`'s answer (CONTROL.md, the pool: the ack's `detail` is
  *  "<pending login id> <URL>", the id, one space, the URL): the id is the first word when
  *  it has the shape of one, the URL the first https URL anywhere in the line (so a daemon
- *  that words it more fully still reads), and `text` what is left besides them. */
+ *  that words it more fully still reads) when it parses as one, and `text` what is left
+ *  besides them. */
 export function loginFromDetail(detail: string | undefined): {
   url: string | null;
   pendingId: string | null;
@@ -270,7 +283,7 @@ export function loginFromDetail(detail: string | undefined): {
 } {
   const d = (detail ?? "").trim();
   const m = /https:\/\/[^\s<>"']+/.exec(d);
-  const url = m ? m[0].replace(/[.,;:)\]]+$/, "") : null;
+  const url = m ? httpsUrl(m[0].replace(/[.,;:)\]]+$/, "")) : null;
   const first = d.split(/\s+/)[0] ?? "";
   const pendingId =
     url && first && !first.startsWith("https://") && /^[A-Za-z0-9._:-]{1,128}$/.test(first) ? first : null;
@@ -290,32 +303,31 @@ export const isPoolActivity = (a: ControlActivity): boolean => a.kind === "pool"
  *  the name the room count and that account's window ("3 accounts, 2 with room · Misha,
  *  5 hours, resets in 2 h 21 m", with "numbers as of 3 h ago" when its entry is stale), and
  *  `out` when the hint takes the accent: "None left" when no account has room and one is
- *  used up. Every account off or in error has no hint, only the count. */
+ *  used up; `aside`, the chosen agent's line, as limits.ts agentAside words it. Every account
+ *  off or in error has no hint, only the count, and so has one whose windows have all reset. */
 export function poolPickerWords(
   pool: MachinePool,
   entryFor: (accountId: string) => LimitsEntry | undefined,
   now: number,
-): { hint?: string; detail?: string; out?: boolean } {
+): { hint?: string; detail?: string; out?: boolean; aside?: string } {
   const room = roomWords(pool.accounts, now);
   const current = pool.accounts.find((a) => a.current && hasRoom(a));
   if (!current) {
     const usedUp = pool.accounts.some((a) => a.enabled && a.status === "limited");
-    return usedUp ? { hint: "None left", detail: room, out: true } : { detail: room };
+    return usedUp ? { hint: "None left", detail: room, out: true, aside: "None left" } : { detail: room };
   }
   const name = sentenceName(current, pool.accounts);
   const e = entryFor(current.id);
   const t = e ? tightest(e, now) : null;
-  if (!e) return { detail: `${room} · ${name}` };
-  if (!t) {
-    const first = orderWindows(e.windows)[0];
-    return { hint: "Reset", detail: first ? `${room} · ${name}, ${windowSentence(first, now)}` : `${room} · ${name}` };
-  }
+  // No numbers, or every window has reset since (what was used after is unknown): the count.
+  if (!e || !t) return { detail: `${room} · ${name}` };
   const r = readWindow(t, now);
   const stale = staleWords(e, now);
   const detail = [`${room} · ${name}`, windowLabel(t), r.when, stale ? `numbers ${stale}` : ""]
     .filter(Boolean)
     .join(", ");
-  return { hint: r.value, detail, out: isOut(r) };
+  const aside = agentAside(r);
+  return { hint: r.value, detail, out: isOut(r), ...(aside ? { aside } : {}) };
 }
 
 // ----- the sidebar's tooltip (§7.3) -----
@@ -444,6 +456,8 @@ export function commandNote(
   machine: string,
   online: boolean,
   refusal: (code: string | undefined) => string,
+  /** Where the account that carries the machine's commands lives ("spacesheep.dev"). */
+  host?: string,
 ): CommandNote | null {
   const detail = a.detail?.trim();
   switch (a.outcome) {
@@ -454,13 +468,27 @@ export function commandNote(
     case "delivered":
       return null;
     case "refused":
-      return { text: `${machine} refused it: ${ended(a.code ? refusal(a.code) : (detail ?? "refused"))}`, err: true };
+      // No code and no reason worth quoting (an older spacesheep notes the bare outcome):
+      // "refused it.", never "refused it: refused."
+      if (!a.code && (!detail || detail.toLowerCase() === "refused"))
+        return { text: `${machine} refused it.`, err: true };
+      return { text: `${machine} refused it: ${ended(a.code ? refusal(a.code) : detail!)}`, err: true };
     case "unsupported":
       return { text: olderDaemon(machine), err: true, sticky: true };
     case "failed":
       return { text: `It didn't reach ${machine}${detail ? `: ${ended(detail)}` : "."}`, err: true };
     case "expired":
       return { text: `${machine} didn't take it in time.`, err: true };
+    case "unconfirmed":
+      // The code `no_job`: spacesheep took the send and named no job, so no computer is
+      // known to have taken it (the same two sentences as web/src/control/words.ts).
+      return {
+        text:
+          a.code === "no_job"
+            ? `Sent, but this app can't follow it. Check ${host || "spacesheep.dev"} to see how it went.`
+            : `No word from ${machine} since it took this. Check spacesheep.dev to see how it went.`,
+        err: true,
+      };
   }
 }
 

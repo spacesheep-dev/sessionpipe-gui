@@ -18,6 +18,26 @@ pub fn enabled(env_receiver_url: Option<&str>) -> bool {
     cfg!(not(debug_assertions)) && env_receiver_url.is_none_or(|s| s.trim().is_empty())
 }
 
+/// The home the receiver's `os.homedir()` names. Node reads it through libuv's
+/// `uv_os_homedir`: HOME on macOS and Linux, but USERPROFILE on Windows, where a HOME set by
+/// Git Bash, MSYS2 or Emacs is never looked at. Each falls back to the other here.
+pub fn home_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    home_dir_on(cfg!(windows), env)
+}
+
+/// [`home_dir`] for a given platform (tests run both on any machine).
+fn home_dir_on(windows: bool, env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let (first, then) = if windows {
+        ("USERPROFILE", "HOME")
+    } else {
+        ("HOME", "USERPROFILE")
+    };
+    env(first)
+        .filter(|h| !h.is_empty())
+        .or_else(|| env(then).filter(|h| !h.is_empty()))
+        .map(PathBuf::from)
+}
+
 /// The receiver's default state dir for a given home, as server/config.ts
 /// `defaultStateDir()` computes it (env first).
 pub fn default_state_dir(home: &Path, env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
@@ -66,7 +86,35 @@ pub fn pid_alive(pid: u32) -> bool {
         // EPERM: it exists but belongs to someone else.
         std::io::Error::last_os_error().raw_os_error() == Some(1)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        type Handle = *mut core::ffi::c_void;
+        const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        const STILL_ACTIVE: u32 = 259;
+        const ERROR_ACCESS_DENIED: i32 = 5;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+            fn GetExitCodeProcess(process: Handle, code: *mut u32) -> i32;
+            fn CloseHandle(handle: Handle) -> i32;
+        }
+        // SAFETY: OpenProcess only asks for the right to read the process's exit code;
+        // the handle is closed before returning.
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                // Access denied: it exists but belongs to someone else.
+                return std::io::Error::last_os_error().raw_os_error() == Some(ERROR_ACCESS_DENIED);
+            }
+            let mut code = 0u32;
+            let ok = GetExitCodeProcess(h, &mut code) != 0;
+            CloseHandle(h);
+            // An exited process keeps a handle while one is open; its code is no longer
+            // STILL_ACTIVE.
+            ok && code == STILL_ACTIVE
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         true
     }
@@ -134,8 +182,9 @@ async fn find_default(client: &reqwest::Client) -> Option<String> {
     if !enabled(std::env::var("SP_RECEIVER_URL").ok().as_deref()) {
         return None;
     }
-    let home = PathBuf::from(std::env::var_os("HOME")?);
-    let state = default_state_dir(&home, &|k| std::env::var(k).ok());
+    let env = |k: &str| std::env::var(k).ok();
+    let home = home_dir(&env)?;
+    let state = default_state_dir(&home, &env);
     find_local(client, &format!("http://127.0.0.1:{DEFAULT_PORT}"), &state).await
 }
 
@@ -148,6 +197,60 @@ async fn find_default(_client: &reqwest::Client) -> Option<String> {
 mod tests {
     use super::*;
     use crate::testutil::{serve_once_forever, TempDir};
+
+    #[test]
+    fn home_on_windows_is_userprofile_else_home() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        // A Git Bash or an MSYS2 HOME beside the profile: the receiver writes under the profile.
+        assert_eq!(
+            home_dir_on(
+                true,
+                &env(&[("HOME", "/c/Users/x"), ("USERPROFILE", r"C:\Users\x")])
+            ),
+            Some(r"C:\Users\x".into())
+        );
+        assert_eq!(
+            home_dir_on(true, &env(&[("HOME", "/h"), ("USERPROFILE", "")])),
+            Some("/h".into())
+        );
+        assert_eq!(
+            home_dir_on(true, &env(&[("HOME", "/h")])),
+            Some("/h".into())
+        );
+        assert_eq!(home_dir_on(true, &env(&[])), None);
+    }
+
+    #[test]
+    fn home_is_home_else_userprofile() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        assert_eq!(
+            home_dir_on(false, &env(&[("HOME", "/h"), ("USERPROFILE", "/u")])),
+            Some("/h".into())
+        );
+        assert_eq!(
+            home_dir_on(false, &env(&[("HOME", ""), ("USERPROFILE", "/u")])),
+            Some("/u".into())
+        );
+        assert_eq!(
+            home_dir_on(false, &env(&[("USERPROFILE", "/u")])),
+            Some("/u".into())
+        );
+        assert_eq!(home_dir_on(false, &env(&[])), None);
+    }
 
     #[test]
     fn disabled_in_debug_and_by_env() {

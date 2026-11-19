@@ -1,0 +1,43 @@
+{
+  "name": "unknown-type",
+  "spec": "PROTOCOL.md §2 type",
+  "steps": [
+    {
+      "send": {
+        "events": [
+          {
+            "protocol": 1,
+            "id": "*",
+            "type": "x.y",
+            "time": "*",
+            "tier": 0,
+            "harness": {
+              "name": "conformance",
+              "event": "test"
+            },
+            "session": {
+              "id": "conf-{run}",
+              "seq": 0
+            },
+            "privacy": {
+              "rulesets": [
+                "secrets@1"
+              ],
+              "pii": false
+            },
+            "data": {
+              "anything": true
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": 1,
+          "rejected": []
+        }
+      }
+    }
+  ]
+}

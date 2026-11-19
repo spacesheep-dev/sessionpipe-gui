@@ -48,7 +48,7 @@ export function agentNow(a: AgentRun, now: number): string {
 export const agentTip = (a: AgentRun): string | undefined =>
   a.attributed || a.session ? undefined : "Codex doesn't report a subagent's tools separately";
 
-/** The parent row's trailing fact while any agent is open: "2 subagents running", or
+/** The session page's fact while any agent is open: "2 subagents running", or
  *  "2 subagents · 1 quiet" when some went silent. Null when none is open. */
 export function agentsFact(s: Pick<SessionSummary, "agents" | "counts">): string | null {
   const open = s.counts.agentsRunning ?? 0;
@@ -58,9 +58,32 @@ export function agentsFact(s: Pick<SessionSummary, "agents" | "counts">): string
   return quiet > 0 ? `${n} · ${quiet} quiet` : `${n} running`;
 }
 
+/** The board row's fact: "2 subagents running", the ones running now and no others (a
+ *  quiet one is not news on the board). Null when none runs. */
+export function agentsRunningFact(s: Pick<SessionSummary, "agents">): string | null {
+  const n = (s.agents ?? []).filter((a) => a.state === "running").length;
+  return n > 0 ? `${n} subagent${n === 1 ? "" : "s"} running` : null;
+}
+
+/** Whether a parent's tree opens by itself: it is working or needs you, and one of its
+ *  agents runs now. Not `counts.agentsRunning`, which counts the quiet ones too. */
+export const agentsLive = (s: Pick<SessionSummary, "state" | "agents">): boolean =>
+  (s.state === "working" || s.state === "needs_you") && (s.agents ?? []).some((a) => a.state === "running");
+
+/** Whether a parent's agents show under it: the person's choice on this device
+ *  (agentsChoice), else while one runs. */
+export const agentsOpen = (s: Pick<SessionSummary, "state" | "agents">, choice: boolean | undefined): boolean =>
+  choice ?? agentsLive(s);
+
 /** Whether a search word finds an agent (its type or what it was asked). */
 export const agentMatches = (a: AgentRun, word: string): boolean =>
   `${a.type ?? ""} ${a.description ?? ""}`.toLowerCase().includes(word);
+
+/** Whether a search finds an agent: every one of its words does. */
+export function agentFound(a: AgentRun, q: string): boolean {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.every((w) => agentMatches(a, w));
+}
 
 const phone = () => typeof matchMedia === "function" && matchMedia("(max-width: 839px)").matches;
 
@@ -93,12 +116,20 @@ export function taskNotification(text: string | undefined): { agentId: string; s
   return { agentId: m[1]!, summary: summary || undefined };
 }
 
-/** A parent's agents for a list: every open one, then the newest `done` finished ones,
- *  and how many finished ones that leaves out. */
-export function agentsShown(agents: readonly AgentRun[], done: number): { shown: AgentRun[]; more: number } {
+/** A parent's agents for a list: every open one, then the newest `done` finished ones
+ *  (of those `keep` passes, when given: the ones a search found), and how many finished
+ *  ones that leaves out. One left out is listed instead: its "Show 1 more" would take the
+ *  same room. */
+export function agentsShown(
+  agents: readonly AgentRun[],
+  done: number,
+  keep?: (a: AgentRun) => boolean,
+): { shown: AgentRun[]; more: number } {
   const open = agents.filter((a) => a.state !== "done");
   const ended = agents.filter((a) => a.state === "done");
-  return { shown: [...open, ...ended.slice(0, done)], more: Math.max(0, ended.length - done) };
+  const listed = (keep ? ended.filter(keep) : ended).slice(0, done);
+  const more = ended.length - listed.length;
+  return more === 1 ? { shown: [...open, ...ended], more: 0 } : { shown: [...open, ...listed], more };
 }
 
 // ----- the board's disclosure, per device -----
@@ -125,7 +156,7 @@ function readChoices(): [SessionKey, boolean][] {
 }
 
 /** The person's choice for a parent's disclosure, or undefined when they made none (the
- *  row then opens while any agent is open). */
+ *  row then opens while an agent runs). */
 export const agentsChoice = (key: SessionKey): boolean | undefined => readChoices().find(([k]) => k === key)?.[1];
 
 /** Remember opening or closing a parent's agents on this device. */

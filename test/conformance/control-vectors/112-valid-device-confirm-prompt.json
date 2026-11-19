@@ -1,0 +1,36 @@
+{
+  "name": "valid-device-confirm-prompt",
+  "description": "A prompt confirmed by the device key's signature for purpose confirm over sha256(cmd).",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"TaXX3E7eh2poz4kYybCMjQ\",\"iat\":1790800000000}",
+      "confirm": {
+        "cred": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "sig": "k0zW_IFzikhR9xUOchotp73Y_8siIIXOPgoSLR8gqFp1845JKr-yCQgv-503E-hb6ZIYxj2QG5DL8NULENTsAQ"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "-XI3B3JNIS6D9Ft-nSQ9nzDMQdIQzjCB",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEnBYOZ9CSzoMtBlJ-WUR6uE2Hwtrt6r_7d9YkrKFQvDLp6uHGzGrVGRG0gP7UrdEkfnK4VYXJD3MizA7AOsabLg"
+      },
+      {
+        "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+        "type": "device",
+        "store": "hardware",
+        "uv": "each-use"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "confirm",
+    "kind": "prompt"
+  }
+}

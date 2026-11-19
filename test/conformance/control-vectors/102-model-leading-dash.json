@@ -1,0 +1,31 @@
+{
+  "name": "model-leading-dash",
+  "description": "A model that would read as a flag (`--dangerously-skip-permissions`).",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"start\",\"session\":\"claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b\",\"text\":\"What's wrong here?\",\"nonce\":\"dVadjy23Aoc5c1w5tsUUcg\",\"iat\":1790800000000,\"cwd\":\"/Users/misha/spacesheep\",\"model\":\"--dangerously-skip-permissions\"}",
+      "csig": "SMS1-n6Qu77Tz2OeAxpkzkHtIKs_K3gX46tIAfHRYc60J6W71ItiM-UjuP7Z8K2dXFelpsBK37NYJmehvodsHQ",
+      "grant": {
+        "cred": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiV3VNUUpFYTZPMFIxRjg3MzFHLWhheVlNa3RpUTRXcWRUMjh2eHpxeTBlOCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEQCIEzxGaYM20gV6D3XmrjL-d_nHa-O8ybjg5Ca2Tn1wZhsAiAF--N2jCquNF9RudaUC0OYH3RrzLVNaOuw_c_BpZSi0w",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEp5HQwvAkp-apR6WkrQdF7RplNelBCtZ6_wCaAZJs7wrxsAIT_vlyLqZYbvXj1qMDM7iJPtE3fZMwiO-eUzo1Xw\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4887MC68Vfbb2iYIKfVZ3p-757sPNy-3vpRc-Xu6dKn6CfbemFsJ9IXCiSYcyd9rqfkFC4G-ADShR-8dbNYjqA"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

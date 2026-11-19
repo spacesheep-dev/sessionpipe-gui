@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control-web. React bindings for the control channel: the rp id, the cached
-// grant's expiry, and the activity (AppState.control live from the stream, backed by one
-// read of GET /activity so a reload still shows this morning's messages).
-import type { ControlActivity } from "@shared/api";
+// grant's expiry, and the activity (AppState.control: the stream's frames over a read of
+// GET /activity, so a reload still shows this morning's messages, and a page that
+// dropped reads what it missed; data/store.ts `loadControl`).
+import type { Attention, ControlActivity } from "@shared/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAppState } from "../data/hooks";
-import { controlApi, rpId } from "./api";
+import { useAppState, useStore } from "../data/hooks";
+import { type AnswerOut, answersOut } from "./answers";
+import { rpId } from "./api";
 import { GRANT_EVENT, grantExpiry } from "./signer";
 
 export function useRpId(): string | null {
@@ -44,38 +46,30 @@ export function useGrant(rp: string | null): { exp: number | null | undefined; r
   return { exp, refresh };
 }
 
-let historyPromise: Promise<ControlActivity[]> | null = null;
-const history = (): Promise<ControlActivity[]> => {
-  if (!historyPromise)
-    historyPromise = controlApi.activity(300).catch(() => {
-      historyPromise = null;
-      return [];
-    });
-  return historyPromise;
-};
-
-/** Control activity, newest first: the stream's messages over one fetched history. */
+/** Control activity, newest first: the stream's messages over the receiver's history,
+ *  which the store reads when the first page asks and again each time the stream comes
+ *  back. */
 export function useControlActivity(filter?: (a: ControlActivity) => boolean): ControlActivity[] {
-  const live = useAppState().control;
-  const [past, setPast] = useState<ControlActivity[]>([]);
-  useEffect(() => {
-    let on = true;
-    history().then((h) => on && setPast(h));
-    return () => {
-      on = false;
-    };
-  }, []);
+  const store = useStore();
+  const known = useAppState().control;
+  useEffect(() => store.loadControl(), [store]);
   return useMemo(() => {
-    const byId = new Map<string, ControlActivity>();
-    for (const a of past) byId.set(a.id, a);
-    for (const a of live) byId.set(a.id, a);
-    const all = [...byId.values()].sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+    const all = [...known].sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     return filter ? all.filter(filter) : all;
-  }, [live, past, filter]);
+  }, [known, filter]);
 }
 
 /** One message by id, as it moves through its lifecycle on the stream. */
 export function useMessage(id: string | null): ControlActivity | undefined {
   const live = useAppState().control;
   return useMemo(() => (id ? live.find((a) => a.id === id) : undefined), [live, id]);
+}
+
+/** Per prompt of `open` with an answer out (or closed by its computer), what became of it,
+ *  as the page's activity says (answers.ts): the same on every surface, and after a reload. */
+export function useAnswersOut(open: readonly Attention[]): Readonly<Record<string, AnswerOut>> {
+  const store = useStore();
+  const known = useAppState().control;
+  useEffect(() => store.loadControl(), [store]);
+  return useMemo(() => answersOut(known, open), [known, open]);
 }

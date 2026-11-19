@@ -6,6 +6,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { UI_KEY_COOKIE, UI_KEY_PARAM } from "../shared/api.js";
+import { NO_FRAMING } from "./http/guard.js";
 import type { Ctx, Handler, Reply } from "./http/router.js";
 import { WORDMARK_CSS, wordmarkHtml } from "./ui/brand.js";
 
@@ -58,13 +59,14 @@ export function staticFiles(dir: string, opts: StaticOptions): Handler {
         status: 302,
         text: "",
         headers: {
-          location: `${pathname}${qs ? `?${qs}` : ""}`,
+          // Back to the same path on this server: `//x` would read as another host.
+          location: `${pathname.replace(/^\/{2,}/, "/")}${qs ? `?${qs}` : ""}`,
           "set-cookie": `${UI_KEY_COOKIE}=${encodeURIComponent(k)}; Path=/; Max-Age=31536000; SameSite=Lax`,
           "cache-control": "no-store",
         },
       };
     }
-    if (!opts.uiAuth(ctx)) return unauthorized();
+    if (!opts.uiAuth(ctx)) return unauthorized(pathname);
     if (!existsSync(path.join(dir, "index.html"))) {
       return { status: 503, text: "The web app is not built: run `npm run build` (dist/web is missing).\n" };
     }
@@ -81,6 +83,8 @@ export function staticFiles(dir: string, opts: StaticOptions): Handler {
       "content-type": TYPES[ext] ?? "application/octet-stream",
       "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
       etag,
+      // The page is this server's alone to show: never inside another site's frame.
+      ...(ext === ".html" ? NO_FRAMING : {}),
     };
     if (!immutable && ctx.req.headers["if-none-match"] === etag) {
       ctx.res.writeHead(304, headers);
@@ -115,7 +119,13 @@ function resolveFile(dir: string, pathname: string): string | null {
   }
 }
 
-function unauthorized(): Reply {
+/** The 401 page. A pairing link opened where the board never was says what to do next:
+ *  an open pairing's link carries no key (control/routes.ts). */
+function unauthorized(pathname: string): Reply {
+  const pairing =
+    pathname === "/pair"
+      ? "\n<p>This is a pairing link. Once this browser has the key, open the link again; or approve the pairing on the board itself, where Machines lists it.</p>"
+      : "";
   return {
     status: 401,
     headers: { "cache-control": "no-store" },
@@ -129,7 +139,7 @@ header{padding-bottom:12px;border-bottom:1px solid var(--line)}${WORDMARK_CSS}</
 <header>${wordmarkHtml()}</header>
 <h1>This board needs its key</h1>
 <p>You are reaching sessionpipe-gui from another device. Open it through the link or the QR code the terminal printed where it runs: that link carries the key (<code>?k=…</code>) and sets a cookie here, once.</p>
-<p>From the machine itself, <code>http://localhost</code> needs no key.</p>
+<p>From the machine itself, <code>http://localhost</code> needs no key.</p>${pairing}
 `,
   };
 }

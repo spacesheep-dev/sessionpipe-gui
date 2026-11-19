@@ -462,6 +462,13 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
   const canLive = (): boolean =>
     !firstRun() && (!deps.history() || existsSync(path.join(dir, indexSubdir("history"), "MANIFEST")));
   let readerError: string | undefined;
+  const histDir = path.join(dir, indexSubdir("history"));
+  /** history/ is deleted when history goes off and at each indexer start; once one of those
+   *  has run (and no switch is under way), a history/ still there while history is off is
+   *  one that could not be deleted, and the status says so. `leftWhy`: the last error code. */
+  let historyTried = false;
+  let switchingOff = false;
+  let leftWhy: string | undefined;
   let readerGen = 0;
   let closed = false;
 
@@ -568,6 +575,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
   const onIndexerMessage = (m: FromIndexer): void => {
     if (closed || !m || typeof m !== "object") return;
     if (m.t === "status") {
+      historyTried = true;
       if (m.status.phase !== "error") crashes = 0;
       // After history is turned on, a status the indexer sent before it heard is stale:
       // hold "first run" until it reports one itself (or 10 s pass).
@@ -819,7 +827,13 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       sources: st.bySource.filter((b) => b.sessions > 0 && (history || b.source !== "history")),
     };
     if (st.updatedAt) out.updatedAt = iso(st.updatedAt);
-    const error = readerError ?? ixError;
+    const left = !history && historyTried && !switchingOff && existsSync(histDir);
+    const error =
+      readerError ??
+      ixError ??
+      (left
+        ? `History search is off, but its index is still on disk: it could not be deleted${leftWhy ? ` (${leftWhy})` : ""}. It is tried again each time the indexer starts, and on Rebuild.`
+        : undefined);
     if (error) {
       out.state = "error";
       out.error = error;
@@ -1041,35 +1055,50 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       return computeStatus();
     },
 
-    async setHistory(on) {
+    // One switch at a time: a second one waits for the first, which may be deleting history/.
+    setHistory: oneAtATime(async (on: boolean) => {
       if (closed) return computeStatus();
       if (on === deps.history()) return computeStatus();
       if (!on) {
-        // The writer deletes history/ (it holds the LOCK); wait for that, then read without it.
-        const histDir = path.join(dir, "history");
-        if (indexer?.kind === "child") {
-          indexer.send({ t: "history", on: false });
-          const t0 = Date.now();
-          while (existsSync(histDir) && Date.now() - t0 < 3000 && indexer?.kind === "child") await sleep(50);
-        } else {
-          await indexer?.stop();
-          indexer = null;
-        }
+        // The reader lets go of history/ first: it holds its segments open, and Windows may
+        // refuse to delete a file that is open (EPERM, as with Node 20). Searches leave
+        // history out from here on.
         deps.setHistory(false);
-        if (existsSync(histDir) && backend) {
-          // No child to do it (in-process, or it did not answer): stop it and remove it here.
-          await indexer?.stop();
-          indexer = null;
-          try {
-            await backend.removeIndex(dir, "history");
-          } catch (e) {
-            log(`remove history: ${(e as Error).message}`);
-            rmSync(histDir, { recursive: true, force: true });
+        switchingOff = true;
+        leftWhy = undefined;
+        try {
+          await openNow();
+          // The writer deletes history/ (it holds the LOCK); wait for that.
+          if (indexer?.kind === "child") {
+            indexer.send({ t: "history", on: false });
+            const t0 = Date.now();
+            while (existsSync(histDir) && Date.now() - t0 < 3000 && indexer?.kind === "child") await sleep(50);
+          } else {
+            await indexer?.stop();
+            indexer = null;
           }
+          if (existsSync(histDir) && backend) {
+            // No child to do it (in-process, or it did not answer): stop it and remove it here.
+            await indexer?.stop();
+            indexer = null;
+            try {
+              await backend.removeIndex(dir, "history");
+            } catch (e) {
+              log(`remove history: ${(e as Error).message}`);
+              rmSync(histDir, { recursive: true, force: true });
+            }
+          }
+        } catch (e) {
+          // Another program still holds a file of it (Windows). The setting stands and the
+          // indexer runs on; the status says so while the folder is there.
+          leftWhy = (e as NodeJS.ErrnoException).code;
+          log(`remove history: ${(e as Error).message}`);
+        } finally {
+          switchingOff = false;
+          historyTried = true;
+          ixStatus = ixStatus ? { ...ixStatus, firstRun: false, skipped: undefined } : undefined;
+          if (!indexer) startIndexer();
         }
-        ixStatus = ixStatus ? { ...ixStatus, firstRun: false, skipped: undefined } : undefined;
-        await openNow();
-        if (!indexer) startIndexer();
       } else {
         deps.setHistory(true);
         liveOn = false;
@@ -1087,7 +1116,7 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
       lastFrame = "";
       scheduleFrame();
       return computeStatus();
-    },
+    }),
 
     async reveal(r: SearchRevealRequest) {
       const key = sessionKey(r.harness, r.id);
@@ -1137,6 +1166,16 @@ export async function createSearch(deps: SearchDeps): Promise<SearchService> {
     },
   };
   return svc;
+}
+
+/** `f`, one call at a time: each call starts when the one before it has settled. */
+function oneAtATime<A extends unknown[], R>(f: (...a: A) => Promise<R>): (...a: A) => Promise<R> {
+  let chain: Promise<unknown> = Promise.resolve();
+  return (...a) => {
+    const next = chain.then(() => f(...a));
+    chain = next.catch(() => {});
+    return next;
+  };
 }
 
 function sleep(ms: number): Promise<void> {

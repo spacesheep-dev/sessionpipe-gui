@@ -1,0 +1,44 @@
+{
+  "name": "control-unsupported",
+  "spec": "CONTROL.md \u00a76 cancel",
+  "capability": "control",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "m_conformance{run}0000",
+        "message": {
+          "kind": "cancel",
+          "session": "gemini-cli:conf-{run}",
+          "expires_in_s": 60
+        }
+      }
+    },
+    {
+      "poll": {
+        "machine": "m_conformance{run}0000",
+        "wait": 1
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "ack": {
+        "outcome": "unsupported",
+        "detail": "no cancel API on this harness"
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "poll": {
+        "machine": "m_conformance{run}0000",
+        "wait": 1
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}

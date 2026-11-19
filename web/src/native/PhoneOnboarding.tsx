@@ -5,12 +5,17 @@
 // a step and runs the shell's commands for it: the camera (scanner.ts), `rx_add` (the
 // shell asks in its own sheet) and `rx_select` (the shell reopens the window on the
 // receiver). The Mac's welcome is Welcome.tsx.
-import { type ButtonHTMLAttributes, type ReactNode, useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
+import { takeGoneNote } from "../account/local";
+import { connectView, tauriConnect } from "../account/shell";
 import { Mark } from "../components/Brand";
 import { haptic } from "../lib/haptics";
+import { NEW_WORDS, REUSED } from "./accountWords";
 import { invoke } from "./bridge";
+import { ConnectAccount, Disconnected } from "./ConnectAccount";
 import { INSTALL_COMMAND } from "./logic";
-import { INITIAL, isScanning, parsePayload, step, trustBrowser, WORDS } from "./onboarding";
+import { Primary, Quiet, Screen, Secondary } from "./OnbParts";
+import { INITIAL, isScanning, parsePayload, type Step, step, trustBrowser, WORDS } from "./onboarding";
 import { cameraPermission, cancelScan, hasScanner, openCameraSettings, requestCamera, scanQr } from "./scanner";
 import type { ShellInfo } from "./shell";
 import "./native.css";
@@ -21,24 +26,47 @@ interface Receiver {
 
 const openOutside = (url: string) => void invoke("app_open_external", { url }).catch(() => {});
 
-/** A line that names the computer: its name never breaks at its hyphen ("studio-" /
- *  "mac"), so the words stay one word. */
-function withHost(text: string, host?: string): ReactNode {
-  if (!host || !text.includes(host)) return text;
-  const parts = text.split(host);
-  return parts.map((part, i) => (
-    <span key={i}>
-      {part}
-      {i < parts.length - 1 && <span className="onb-nowrap">{host}</span>}
-    </span>
-  ));
+/** Where the first run opens: the welcome; or, when the account this window showed was
+ *  disconnected a moment ago, what the hub said of its key, once. */
+function firstStep(): Step {
+  const gone = takeGoneNote();
+  return gone
+    ? { kind: "disconnected", note: gone.note, ...(gone.revokeUrl ? { revokeUrl: gone.revokeUrl } : {}) }
+    : INITIAL;
 }
 
 export function Onboarding({ info }: { info: ShellInfo }) {
-  const browser = trustBrowser(info.platform === "android" ? "android" : "ios");
-  const [s, send] = useReducer(step, INITIAL);
+  const phone = info.platform === "android" ? "android" : "ios";
+  const browser = trustBrowser(phone);
+  const [s, send] = useReducer(step, undefined, firstStep);
   const field = useRef<HTMLInputElement>(null);
   const scanner = hasScanner();
+  // An app that takes a spacesheep account offers it as the other way in.
+  const account = info.features.includes("account");
+
+  // A connect that was under way when the app was closed (the person was in the browser)
+  // goes on where it was: the hub kept it.
+  useEffect(() => {
+    if (!account) return;
+    let on = true;
+    void tauriConnect.status().then(
+      (st) => {
+        const c = connectView(st.connect);
+        const going =
+          c &&
+          (c.state === "pending" ||
+            c.state === "asking" ||
+            (c.state === "approved" && !!c.receiver && st.accounts.some((a) => a.id === c.receiver)));
+        // One that ended with a key made on spacesheep and not kept here is picked up too:
+        // its note has to be seen.
+        if (on && (going || !!c?.note)) send({ type: "account", resume: true });
+      },
+      () => {},
+    );
+    return () => {
+      on = false;
+    };
+  }, [account]);
 
   // The camera: asked for when Scan is tapped, never before; then one scan.
   useEffect(() => {
@@ -119,6 +147,12 @@ export function Onboarding({ info }: { info: ShellInfo }) {
   }, [s.kind]);
 
   if (isScanning(s)) return <Viewfinder onCancel={cancelScan} />;
+
+  if (s.kind === "account")
+    return <ConnectAccount platform={phone} begin={s.begin} onLeave={() => send({ type: "back" })} />;
+
+  if (s.kind === "disconnected")
+    return <Disconnected note={s.note} revokeUrl={s.revokeUrl} onDone={() => send({ type: "back" })} />;
 
   const back = (
     <button type="button" className="btn btn--ghost onb-back" onClick={() => send({ type: "back" })}>
@@ -250,6 +284,16 @@ export function Onboarding({ info }: { info: ShellInfo }) {
           ) : (
             <Primary onClick={() => send({ type: "address" })}>{WORDS.address}</Primary>
           )}
+          {account && (
+            <>
+              <span className="onb-or" aria-hidden="true">
+                {NEW_WORDS.or}
+              </span>
+              <Secondary onClick={() => send({ type: "account" })} data-account>
+                {REUSED.use}
+              </Secondary>
+            </>
+          )}
           <button
             type="button"
             className="onb-help"
@@ -266,57 +310,6 @@ export function Onboarding({ info }: { info: ShellInfo }) {
       </main>
     </div>
   );
-}
-
-/** One screen: an optional bar (Back), a glyph over the title, one line under it, then
- *  its actions. */
-function Screen({
-  bar,
-  glyph,
-  title,
-  body,
-  host,
-  live,
-  children,
-  ...rest
-}: {
-  bar?: ReactNode;
-  glyph?: ReactNode;
-  title?: string;
-  body?: string;
-  /** The computer's name, where the title or body says it. */
-  host?: string;
-  live?: boolean;
-  children?: ReactNode;
-  "data-step"?: string;
-  "data-opened"?: boolean;
-}) {
-  return (
-    <div className="onb" {...rest}>
-      <header className="onb-bar">{bar}</header>
-      <main className="onb-body onb-body--step" id="main" aria-live={live ? "polite" : undefined}>
-        {title && (
-          <div className="onb-head">
-            {glyph}
-            <h1 className="onb-title">{withHost(title, host)}</h1>
-            {body && <p className="onb-text">{withHost(body, host)}</p>}
-          </div>
-        )}
-        <div className="onb-actions">{children}</div>
-      </main>
-    </div>
-  );
-}
-
-/** The one primary action of a screen: the ink fill, as every primary in the app. */
-function Primary(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button type="button" {...props} className="btn btn--primary btn--lg onb-primary" />;
-}
-function Secondary(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button type="button" {...props} className="btn btn--lg onb-secondary" />;
-}
-function Quiet(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button type="button" {...props} className="btn btn--ghost btn--lg onb-quiet" />;
 }
 
 /** The step card under "No sessionpipe on your computer yet?": three numbered rows in

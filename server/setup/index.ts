@@ -16,7 +16,6 @@
 //   POST /remote        { url } → set --public-url at runtime (the rp id follows, remembered)
 //                       → { ok, remote, rpId }; 400 bad_url with the reason
 //   POST /remote/off    forget it → { ok }
-import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type Info, ROUTES } from "../../shared/api.js";
@@ -27,7 +26,7 @@ import type { Store } from "../store/store.js";
 import { opensslAvailable, readCerts, TlsError, type TlsMaterial } from "../tls/certs.js";
 import type { ViewerRegistry } from "../ui/viewers.js";
 import { createHarnessDetector, type HarnessFs, realHarnessFs } from "./harnesses.js";
-import { type Exec, execDefault, findCli, thisMachineOnly } from "./local.js";
+import { cliCommand, type Exec, execDefault, findCli, thisMachineOnly } from "./local.js";
 import { Pairer, type SpawnFn } from "./pairer.js";
 import { type AskDaemon, askDaemonDefault, buildStatus, caTrustedOnMac, type Lookup } from "./status.js";
 import { createTailscaleProbe, type TailscaleProbe } from "./tailscale.js";
@@ -87,6 +86,19 @@ export function linuxTrustSteps(caCertPath: string): string[] {
     "Resolving the .local name needs avahi-daemon (or nss-mdns) on this machine.",
   ];
 }
+
+export function windowsTrustSteps(caCertPath: string): string[] {
+  return [
+    `certutil -user -addstore Root "${caCertPath}" (Windows asks once; Edge and Chrome read this store)`,
+    "By hand: open ca.crt → Install Certificate… → Current User → Place all certificates in the following store → Trusted Root Certification Authorities.",
+    "Firefox keeps its own store: Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import.",
+    "The .local name resolves on Windows 10 and later with nothing to install.",
+  ];
+}
+
+/** The CA-trust steps for a platform `tls trust` can't do itself. */
+export const trustSteps = (platform: NodeJS.Platform, caCertPath: string): string[] =>
+  platform === "win32" ? windowsTrustSteps(caCertPath) : linuxTrustSteps(caCertPath);
 
 export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer } {
   const exec = deps.exec ?? execDefault;
@@ -182,7 +194,7 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
       if (platform !== "darwin")
         return {
           status: 200,
-          json: { trusted: false, platform, caCertPath: m.caCertPath, steps: linuxTrustSteps(m.caCertPath) },
+          json: { trusted: false, platform, caCertPath: m.caCertPath, steps: trustSteps(platform, m.caCertPath) },
         };
       const keychain = path.join(home, "Library", "Keychains", "login.keychain-db");
       // The user trust domain (no -d): the admin domain needs sudo and otherwise imports
@@ -247,18 +259,8 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
         deps.sinkToken(),
         ...folders.flatMap((f) => ["--folder", f]),
       ];
-      // The installed CLI is `#!/usr/bin/env node`; a GUI started by launchd may have no
-      // node on its PATH, so a JavaScript entry runs under our own node.
-      let file = cli.path;
-      let argv = args;
-      try {
-        const real = realpathSync(cli.path);
-        if (/\.(c|m)?js$/.test(real)) {
-          file = process.execPath;
-          argv = [real, ...args];
-        }
-      } catch {}
-      pairer.start(file, argv, { cwd: home, env, shell: platform === "win32" && file === cli.path });
+      const c = cliCommand(cli.path, args, platform);
+      pairer.start(c.file, c.args, { cwd: home, env, shell: c.shell });
       return { status: 200, json: { started: true, cli: cli.path, folders } };
     }),
   );

@@ -1,19 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // The pool (DESIGN §2.3): the hello's `pool` read strictly, the `pool` command parsed and
-// verified on real signatures beside the core (grant and confirm paths, every refusal code
-// the core would give), the second look against the hello, and the whole way through
-// POST /send to the queue and back through an ack.
+// verified on real signatures by the core (grant and confirm paths, every refusal code it
+// gives), the fresh confirm some actions take, the second look against the hello, and the
+// whole way through POST /send to the queue and back through an ack.
 import { mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import {
-  CONTROL_KINDS,
-  RECEIVER_MAX_AGE_MS,
-  type SignedCommand,
-  SKEW_MS,
-  verifyCommand,
-} from "sessionpipe-core/control";
+import { RECEIVER_MAX_AGE_MS, type SignedCommand, SKEW_MS, verifyCommand } from "sessionpipe-core/control";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   type ControlActivity,
@@ -28,7 +22,7 @@ import {
 import { Router } from "../http/router.js";
 import { type Control, createControl } from "./index.js";
 import { parseHello, parsePool } from "./parse.js";
-import { coreTakesPool, looksLikePool, type PoolCommand, parsePoolCommand, verifyPoolCommand } from "./pool.js";
+import { looksLikePool, type PoolCommand, parsePoolCommand, verifyPoolCommand } from "./pool.js";
 import { poolProblem, precheck } from "./precheck.js";
 import { describePool } from "./state.js";
 import { commandStr, signCommand, TestDayKey, TestPasskey } from "./testkeys.js";
@@ -193,7 +187,7 @@ describe("verifyPoolCommand", () => {
     maxAgeMs: RECEIVER_MAX_AGE_MS,
   });
 
-  it("takes the grant path and the confirm path on a trusted key, by the core's own primitives", async () => {
+  it("takes the grant path and the confirm path on a trusted key, as the core verifies them", async () => {
     const pk = await TestPasskey.create();
     const day = await TestDayKey.create();
     const cmd = poolCmd(M, { pool_action: "refresh", pool_account: A });
@@ -201,12 +195,12 @@ describe("verifyPoolCommand", () => {
     expect(grant).toMatchObject({ ok: true, via: "grant", key: pk.key.id, cmd: { pool_account: A } });
     const confirm = await verifyPoolCommand(await signCommand(pk, day, cmd, { confirm: true }), await opts(pk));
     expect(confirm).toMatchObject({ ok: true, via: "confirm", key: pk.key.id });
-    // The core itself still says unknown_kind: that is why pool.ts exists.
+    // The verdict is the core's own: it lists the kind (sessionpipe-core 0.11 on).
     expect(await verifyCommand(await signCommand(pk, day, cmd), await opts(pk))).toMatchObject({
-      ok: false,
-      code: "unknown_kind",
+      ok: true,
+      via: "grant",
+      cmd: { kind: "pool", pool_action: "refresh" },
     });
-    expect(coreTakesPool()).toBe(CONTROL_KINDS.includes("pool" as never));
   });
 
   it("refuses the way the core does: each code in the core's order", async () => {
@@ -286,50 +280,43 @@ describe("verifyPoolCommand", () => {
     expect(await verifyPoolCommand(off, { ...o, trusted: [other.key] })).toMatchObject({ code: "untrusted_key" });
   });
 
-  it("hands the whole check to a core that lists the kind", async () => {
+  it("the core's verdict decides, and the confirm rule is held on top of it", async () => {
     const pk = await TestPasskey.create();
     const day = await TestDayKey.create();
     const cmd = poolCmd(M, {});
     const calls: unknown[] = [];
     let via: "grant" | "confirm" = "confirm";
-    const newer = {
-      CONTROL_KINDS: [...CONTROL_KINDS, "pool"] as unknown as typeof CONTROL_KINDS,
+    const core = {
       verifyCommand: async (s: unknown, o: unknown) => {
         calls.push([s, o]);
         return { ok: true as const, cmd: JSON.parse((s as SignedCommand).cmd), via, key: "k" };
       },
     };
-    expect(coreTakesPool(newer)).toBe(true);
-    const v = await verifyPoolCommand(
-      await signCommand(pk, day, cmd, { confirm: true }),
-      await opts(pk),
-      newer as never,
-    );
+    const o = await opts(pk);
+    const confirmed = await signCommand(pk, day, cmd, { confirm: true });
+    const v = await verifyPoolCommand(confirmed, o, core as never);
     expect(v).toMatchObject({ ok: true, via: "confirm", key: "k", cmd: { pool_action: "on" } });
-    expect(calls).toHaveLength(1);
-    // The confirm rule holds on this path too: `on` under a grant is refused whatever the core said.
+    // The core is asked once, with the bytes as they came and the receiver's window.
+    expect(calls).toEqual([[confirmed, o]]);
+    // `on` under a grant is refused whatever the core said.
     via = "grant";
-    expect(await verifyPoolCommand(await signCommand(pk, day, cmd), await opts(pk), newer as never)).toMatchObject({
+    expect(await verifyPoolCommand(await signCommand(pk, day, cmd), o, core as never)).toMatchObject({
       ok: false,
       code: "confirm_required",
     });
-    const refusing = {
-      ...newer,
-      verifyCommand: async () => ({ ok: false as const, code: "replay" as const, why: "seen" }),
-    };
-    expect(await verifyPoolCommand(await signCommand(pk, day, cmd), await opts(pk), refusing as never)).toEqual({
+    // A refusal of the core's is passed on as it is.
+    const refusing = { verifyCommand: async () => ({ ok: false as const, code: "replay" as const, why: "seen" }) };
+    expect(await verifyPoolCommand(await signCommand(pk, day, cmd), o, refusing as never)).toEqual({
       ok: false,
       code: "replay",
       why: "seen",
     });
-    // A broken core object answers false, never throws.
+    // Fields the receiver's own reading refuses never reach the core.
+    const before = calls.length;
     expect(
-      coreTakesPool({
-        get CONTROL_KINDS(): never {
-          throw new Error("x");
-        },
-      } as never),
-    ).toBe(false);
+      await verifyPoolCommand({ ...confirmed, cmd: poolCmd(M, { pool_action: "shell" }) }, o, core as never),
+    ).toMatchObject({ ok: false, code: "bad_fields" });
+    expect(calls).toHaveLength(before);
   });
 });
 

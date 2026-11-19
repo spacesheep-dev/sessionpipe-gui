@@ -3,21 +3,36 @@
 // open, renewal, expiry, wrong poll key), machine-token isolation, the long-poll,
 // redelivery, the `taken` pause, acks, expiry, off, the early verification against
 // every control vector, the approval proof, persistence and the stream.
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { RECEIVER_MAX_AGE_MS, sha256 } from "sessionpipe-core/control";
+import {
+  type Assertion,
+  RECEIVER_MAX_AGE_MS,
+  type SignedCommand,
+  sha256,
+  verifyCommand,
+  verifyEnrollment,
+} from "sessionpipe-core/control";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ROUTES, type StreamMessage } from "../../shared/api.js";
+import {
+  type ControlActivity,
+  DELIVERY_MODES,
+  type MachineControl,
+  ROUTES,
+  type StreamMessage,
+  type TrustedKey,
+} from "../../shared/api.js";
+import { fixtures } from "../../test/conformance.js";
 import { Router } from "../http/router.js";
 import { coreTakesDevice, receiverKeyTypes } from "./devicekeys.js";
 import { fileHash } from "./files.js";
 import { type Control, createControl } from "./index.js";
 import { parseAccounts, parseAcks, parseHello } from "./parse.js";
+import { pairUrlFor } from "./routes.js";
 import { commandStr, signCommand, signWithDevice, TestDayKey, TestDeviceKey, TestPasskey } from "./testkeys.js";
-import { coreTakesTilde } from "./tilde.js";
 import { readKey, readProof } from "./ui.js";
 
 const SINK = "spg_test_sink_token_0123456789";
@@ -32,7 +47,15 @@ interface Booted {
 }
 
 async function boot(
-  o: { stateDir?: string; rpId?: string; testDoor?: boolean; uiAuth?: boolean; deviceKeys?: boolean } = {},
+  o: {
+    stateDir?: string;
+    rpId?: string;
+    testDoor?: boolean;
+    uiAuth?: boolean;
+    deviceKeys?: boolean;
+    /** The board's key and the origins a pairing link may name, as app.ts passes them. */
+    uiKey?: string;
+  } = {},
 ): Promise<Booted> {
   const stateDir = o.stateDir ?? mkdtempSync(path.join(os.tmpdir(), "spgui-control-"));
   const control = createControl({
@@ -42,6 +65,7 @@ async function boot(
     testDoor: o.testDoor ?? true,
     uiAuth: (ctx) => (o.uiAuth ?? true) && ctx.remote.loopback,
     ...(o.deviceKeys !== undefined ? { deviceKeys: o.deviceKeys } : {}),
+    ...(o.uiKey !== undefined ? { uiKey: () => o.uiKey as string, origins: () => ["http://localhost:7373"] } : {}),
   });
   const router = new Router();
   control.register(router);
@@ -247,6 +271,111 @@ describe("open pairing", () => {
       expect(paired.body).toMatchObject({ status: "paired", key: pk.key, sink_token: SINK, account: "misha" });
       expect(paired.body.token).toMatch(/^mt_/);
       expect((await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: pollKey })).status).toBe(404);
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+describe("the pairing link and the board's key", () => {
+  const KEY = "uik_test_board_key";
+
+  it("carries the key for a pairing the sink token started, and the code alone for an open one", async () => {
+    const b = await boot({ uiKey: KEY });
+    tmpDirs.push(b.stateDir);
+    try {
+      const keyed = await call(b.url, "POST", `${CONTROL}/pair`, { bearer: SINK, body: facts });
+      expect(keyed.status).toBe(201);
+      expect(keyed.body.url).toBe(`http://localhost:7373/pair?code=${keyed.body.code}&k=${KEY}`);
+      // No token, and a poll key of the caller's own making.
+      const pollKey = "p".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
+      expect(open.status).toBe(201);
+      expect(open.body.url).toBe(`http://localhost:7373/pair?code=${open.body.code}`);
+      expect(JSON.stringify(open.body)).not.toContain(KEY);
+      // Its status says no more while it waits, and a renewal under the same poll key gets the same link.
+      const waiting = await call(b.url, "GET", `${CONTROL}/pair?code=${open.body.code}`, { bearer: pollKey });
+      expect(waiting.body).toEqual({ status: "pending" });
+      const renewed = await call(b.url, "POST", `${CONTROL}/pair`, {
+        body: { ...facts, poll_key: pollKey, machine: open.body.machine },
+      });
+      expect(renewed.status).toBe(201);
+      expect(JSON.stringify(renewed.body)).not.toContain(KEY);
+      // A bearer that is not the sink token starts nothing, with or without a poll key.
+      const wrong = await call(b.url, "POST", `${CONTROL}/pair`, {
+        bearer: "nope",
+        body: { ...facts, poll_key: pollKey },
+      });
+      expect(wrong.status).toBe(401);
+      expect(JSON.stringify(wrong.body)).not.toContain(KEY);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("an open pairing is approved on its code by a browser the board already lets in", async () => {
+    const b = await boot({ uiKey: KEY });
+    tmpDirs.push(b.stateDir);
+    try {
+      const pollKey = "p".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
+      const code = open.body.code as string;
+      const machine = open.body.machine as string;
+      // The page the link opens reads the pairing by its code, and the board lists it.
+      const view = await call(b.url, "GET", `${UI}/pair/${code}`);
+      expect(view).toMatchObject({ status: 200, body: { code, open: true, check: open.body.check } });
+      const list = await call(b.url, "GET", `${UI}/pairings`);
+      expect((list.body.pairings as { code: string }[]).map((p) => p.code)).toContain(code);
+      const pk = await TestPasskey.create();
+      const ok = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+        body: { key: pk.key, proof: await pk.enroll(machine, code) },
+      });
+      expect(ok.status).toBe(200);
+      // The daemon's next poll is the paired answer: the key, its proof, the machine's own
+      // token and the sink token, and still no key of the board's.
+      const paired = await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: pollKey });
+      expect(paired.body).toMatchObject({ status: "paired", key: pk.key, sink_token: SINK });
+      expect(paired.body.token).toMatch(/^mt_/);
+      expect(JSON.stringify(paired.body)).not.toContain(KEY);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("the pairing page and its approval need the board's own sign-in", async () => {
+    const b = await boot({ uiKey: KEY, uiAuth: false });
+    tmpDirs.push(b.stateDir);
+    try {
+      const pollKey = "p".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
+      expect(open.status).toBe(201);
+      const code = open.body.code as string;
+      const pk = await TestPasskey.create();
+      expect((await call(b.url, "GET", `${UI}/pair/${code}`)).status).toBe(401);
+      expect((await call(b.url, "GET", `${UI}/challenge`)).status).toBe(401);
+      const approve = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+        body: { key: pk.key, proof: await pk.enroll(open.body.machine as string, code) },
+      });
+      expect(approve.status).toBe(401);
+      expect((await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: pollKey })).body).toEqual({
+        status: "pending",
+      });
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+describe("the origin a request came in on", () => {
+  it("is read from the forwarding headers only through a trusted proxy", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    try {
+      // No proxy is trusted here: what a caller says of its own origin is not read.
+      const r = await fetch(`${b.url}${UI}/challenge`, {
+        headers: { "x-forwarded-proto": "https", "x-forwarded-host": "board.example" },
+      });
+      expect(((await r.json()) as { origin: string }).origin).toBe(b.url);
     } finally {
       await b.close();
     }
@@ -1215,6 +1344,203 @@ describe("parseAcks: applied", () => {
   });
 });
 
+// --- what a 0.13 daemon says that a 0.10 one did not (CONTROL.md §2, §6, §10) ---------
+
+describe("a 0.13 daemon's hello and acks: the inbox mode, copy_of, signed_in", () => {
+  const now = () => "2026-11-10T10:00:00.000Z";
+  const id = "01K8ZQ6X4N3T5V7W9Y1A2B3C4D";
+  const SESSION = "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e";
+  const COPY = "claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b";
+
+  it("parseHello keeps inbox among the delivery modes, and drops a word that is not one", () => {
+    const h = parseHello({
+      ...facts,
+      modes: ["sdk", "waiter", "turn", "inbox", "api", "resume", "fork", "teleport", 7],
+    });
+    expect(h?.modes).toEqual(["sdk", "waiter", "turn", "inbox", "api", "resume", "fork"]);
+    expect([...DELIVERY_MODES]).toEqual(h?.modes);
+    // What a 0.12 daemon lists reads as before.
+    expect(parseHello({ ...facts, modes: ["waiter", "turn", "resume"] })?.modes).toEqual(["waiter", "turn", "resume"]);
+  });
+
+  it("parseAccounts keeps signed_in as a boolean, and leaves anything else unsaid", () => {
+    expect(
+      parseAccounts([
+        { harness: "claude-code", id: "a1", email: "dev@example.com", signed_in: false },
+        { harness: "claude-code", id: "a2", email: "work@example.com", signed_in: true },
+        { harness: "claude-code", id: "a3", email: "old@example.com" },
+        { harness: "claude-code", id: "api-3f9c1e0b7d2a4c68", name: "api.z.ai", signed_in: "no" },
+        { harness: "codex", id: "c1", email: "codex@example.com", signed_in: null },
+      ]),
+    ).toEqual([
+      { harness: "claude-code", id: "a1", email: "dev@example.com", signedIn: false },
+      { harness: "claude-code", id: "a2", email: "work@example.com", signedIn: true },
+      { harness: "claude-code", id: "a3", email: "old@example.com" },
+      { harness: "claude-code", id: "api-3f9c1e0b7d2a4c68", name: "api.z.ai" },
+      { harness: "codex", id: "c1", email: "codex@example.com" },
+    ]);
+  });
+
+  it("parseAcks keeps the inbox mode and a copy_of that is a session, and drops one that is not", () => {
+    const [inbox] = parseAcks({ acks: [{ id, outcome: "delivered", at: now(), mode: "inbox", reply: "Yes." }] }, now)!;
+    expect(inbox).toEqual({ id, outcome: "delivered", at: now(), mode: "inbox", reply: "Yes." });
+    const [copy] = parseAcks(
+      { acks: [{ id, outcome: "delivered", at: now(), mode: "fork", session: COPY, copy_of: SESSION }] },
+      now,
+    )!;
+    expect(copy).toEqual({ id, outcome: "delivered", at: now(), mode: "fork", session: COPY, copyOf: SESSION });
+    for (const bad of ["8c132906", "Claude-Code:x", 7, null, { harness: "claude-code" }, ""]) {
+      const [a] = parseAcks({ acks: [{ id, outcome: "delivered", at: now(), mode: "fork", copy_of: bad }] }, now)!;
+      // The field goes; the ack stands.
+      expect(a, JSON.stringify(bad)).toEqual({ id, outcome: "delivered", at: now(), mode: "fork" });
+    }
+    const [unknown] = parseAcks({ acks: [{ id, outcome: "delivered", at: now(), mode: "teleport" }] }, now)!;
+    expect(unknown).toEqual({ id, outcome: "delivered", at: now() });
+  });
+
+  it("a hello's modes and each account's signed_in reach the machine, the API and a restart", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    const pk = await TestPasskey.create();
+    const m = await enrolled(b, pk, "m_daemon0130000000001");
+    const say = (accounts: unknown[]) =>
+      call(b.url, "POST", `${CONTROL}/hello`, {
+        bearer: m.token,
+        body: {
+          ...facts,
+          name: "studio-mac",
+          version: "0.13.6",
+          modes: ["sdk", "waiter", "turn", "inbox", "resume", "fork"],
+          accounts,
+        },
+      });
+    const accounts = [
+      { harness: "claude-code", id: "a1", email: "dev@example.com", signed_in: false },
+      { harness: "claude-code", id: "a2", email: "work@example.com", signed_in: true },
+      { harness: "codex", id: "c1", email: "codex@example.com" },
+    ];
+    const read = [
+      { harness: "claude-code", id: "a1", email: "dev@example.com", signedIn: false },
+      { harness: "claude-code", id: "a2", email: "work@example.com", signedIn: true },
+      { harness: "codex", id: "c1", email: "codex@example.com" },
+    ];
+    try {
+      expect((await say(accounts)).status).toBe(204);
+      const c = b.control.machines().get("studio-mac")!;
+      expect(c.modes).toEqual(["sdk", "waiter", "turn", "inbox", "resume", "fork"]);
+      expect(c.accounts).toEqual(read);
+      const listed = (await call(b.url, "GET", `${UI}/machines`)).body.machines as MachineControl[];
+      expect(listed.find((x) => x.machineId === m.machine)).toMatchObject({ modes: c.modes, accounts: read });
+      // Said again in every hello: signed in now, and a daemon that can no longer tell says nothing.
+      expect(
+        (
+          await say([
+            { ...accounts[0], signed_in: true },
+            { harness: "claude-code", id: "a2", name: "Work" },
+          ])
+        ).status,
+      ).toBe(204);
+      expect(b.control.machines().get("studio-mac")!.accounts).toEqual([
+        { harness: "claude-code", id: "a1", email: "dev@example.com", signedIn: true },
+        { harness: "claude-code", id: "a2", name: "Work" },
+      ]);
+      expect((await say(accounts)).status).toBe(204);
+    } finally {
+      await b.close();
+    }
+    const b2 = await boot({ stateDir: b.stateDir });
+    try {
+      expect(b2.control.machines().get("studio-mac")).toMatchObject({
+        modes: ["sdk", "waiter", "turn", "inbox", "resume", "fork"],
+        accounts: read,
+      });
+    } finally {
+      await b2.close();
+    }
+  });
+
+  it("an ack's inbox mode and copy_of reach the activity, the API, the stream and a restart", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    const pk = await TestPasskey.create();
+    const day = await TestDayKey.create();
+    const m = await enrolled(b, pk, "m_daemon0130000000002");
+    const seen: ControlActivity[] = [];
+    const off = b.control.subscribe((msg) => {
+      if (msg.kind === "control") seen.push(msg.message);
+    });
+    const sendPrompt = async () => {
+      const r = await call(b.url, "POST", `${UI}/send`, {
+        body: { machineId: m.machine, ...(await signedPrompt(pk, day, m.machine, { session: SESSION })) },
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return r.body.id as string;
+    };
+    const ack = (a: Record<string, unknown>) =>
+      call(b.url, "POST", `${CONTROL}/ack`, {
+        bearer: m.token,
+        body: { acks: [{ at: new Date().toISOString(), ...a }] },
+      });
+    const why =
+      "ran in a copy, because the session was open in Claude Code on this computer (a terminal window or the Claude app)";
+    let inbox = "";
+    let copied = "";
+    let plain = "";
+    try {
+      // The session's own inbox took it: its own answer, no copy.
+      inbox = await sendPrompt();
+      expect((await ack({ id: inbox, outcome: "taken" })).status).toBe(202);
+      expect((await ack({ id: inbox, outcome: "delivered", mode: "inbox", reply: "Yes, all three." })).status).toBe(
+        202,
+      );
+      const a = b.control.activityById(inbox)!;
+      expect(a).toMatchObject({ outcome: "delivered", mode: "inbox", reply: "Yes, all three." });
+      expect(a).not.toHaveProperty("copyOf");
+      // A copy answered: the ack names the copy in `session` and the session asked in `copy_of`.
+      copied = await sendPrompt();
+      expect(
+        (await ack({ id: copied, outcome: "delivered", mode: "fork", session: COPY, copy_of: SESSION, detail: why }))
+          .status,
+      ).toBe(202);
+      const want = {
+        outcome: "delivered",
+        mode: "fork",
+        session: SESSION,
+        ackSession: COPY,
+        copyOf: SESSION,
+        detail: why,
+      };
+      expect(b.control.activityById(copied)).toMatchObject(want);
+      // A copy_of that names no session is dropped, and the ack is still applied.
+      plain = await sendPrompt();
+      expect(
+        (await ack({ id: plain, outcome: "delivered", mode: "fork", session: COPY, copy_of: "the original" })).body,
+      ).toEqual({
+        applied: 1,
+        unknown: 0,
+      });
+      expect(b.control.activityById(plain)).toMatchObject({ outcome: "delivered", ackSession: COPY });
+      expect(b.control.activityById(plain)).not.toHaveProperty("copyOf");
+
+      const listed = (await call(b.url, "GET", `${UI}/activity`)).body.activity as ControlActivity[];
+      expect(listed.find((x) => x.id === copied)).toMatchObject(want);
+      expect(listed.find((x) => x.id === inbox)).toMatchObject({ mode: "inbox" });
+      expect(seen.filter((x) => x.id === copied).at(-1)).toMatchObject(want);
+      expect(seen.filter((x) => x.id === inbox).at(-1)).toMatchObject({ outcome: "delivered", mode: "inbox" });
+    } finally {
+      off();
+      await b.close();
+    }
+    const b2 = await boot({ stateDir: b.stateDir });
+    try {
+      expect(b2.control.activityById(copied)).toMatchObject({ mode: "fork", ackSession: COPY, copyOf: SESSION });
+      expect(b2.control.activityById(inbox)).toMatchObject({ mode: "inbox" });
+    } finally {
+      await b2.close();
+    }
+  });
+});
+
 describe("a start's options, files and applied, through POST send", () => {
   let b: Booted;
   let pk: TestPasskey;
@@ -1346,6 +1672,32 @@ describe("a start's options, files and applied, through POST send", () => {
     expect((await get("not-a-hash", m.token)).status).toBe(404);
   });
 
+  it("files: an upload is taken from the board's own page, and one from another origin is not held", async () => {
+    const m = await enrolled(b, pk, "m_startfiles0000000002");
+    const bytes = new TextEncoder().encode("notes from elsewhere\n");
+    const sha = fileHash(bytes);
+    const held = () => fetch(`${b.url}${CONTROL}/files/${sha}`, { headers: { authorization: `Bearer ${m.token}` } });
+    const send = (headers: Record<string, string>) =>
+      fetch(`${b.url}${UI}/files?name=notes.txt`, {
+        method: "POST",
+        headers: { "content-type": "text/plain;charset=UTF-8", ...headers },
+        body: bytes,
+      });
+    const others: Record<string, string>[] = [
+      { origin: "https://other.example", "sec-fetch-site": "cross-site" },
+      { origin: "https://other.example" },
+      { origin: "null" },
+    ];
+    for (const headers of others) {
+      const r = await send(headers);
+      expect(r.status).toBe(403);
+      expect(await r.json()).toMatchObject({ reason: "cross_site" });
+      expect((await held()).status).toBe(404);
+    }
+    expect((await send({ origin: b.url, "sec-fetch-site": "same-origin" })).status).toBe(201);
+    expect((await held()).status).toBe(200);
+  });
+
   it("an upload over 25 MiB, without a type, empty, or with a bad name is refused", async () => {
     // The router answers 413 and drops the connection mid-body, so the client may only see the drop.
     const big = await upload(new Uint8Array(26_214_401), "application/octet-stream", "big.bin").then(
@@ -1430,50 +1782,234 @@ describe("a start's options, files and applied, through POST send", () => {
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
   });
 
+  /** The first bytes of a PNG, which is all the receiver reads of one: the signature and
+   *  the IHDR's width and height. */
+  const pngHead = (w: number, h: number): Uint8Array => {
+    const head = Buffer.alloc(33);
+    head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    head.writeUInt32BE(13, 8);
+    head.write("IHDR", 12, "latin1");
+    head.writeUInt32BE(w, 16);
+    head.writeUInt32BE(h, 20);
+    return new Uint8Array(head);
+  };
+
+  it("a picture is held to its own bytes: the answer says its pixels, and a file that is not the picture its type says is refused", async () => {
+    const up = await upload(pngHead(640, 400), "image/png", "kiwi.png");
+    expect(up.status).toBe(201);
+    const entry = (await up.json()) as Record<string, unknown>;
+    expect(entry).toEqual({
+      name: "kiwi.png",
+      type: "image/png",
+      size: 33,
+      sha256: fileHash(pngHead(640, 400)),
+      width: 640,
+      height: 400,
+    });
+    // `machine` (the machine it is for) is taken, and changes nothing here.
+    const forOne = await fetch(`${b.url}${UI}/files?name=kiwi.png&machine=m_promptfiles000000002`, {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: pngHead(640, 400) as BodyInit,
+    });
+    expect(forOne.status).toBe(201);
+    expect(await forOne.json()).toEqual(entry);
+
+    // Words sent as a PNG, and a PNG sent as a JPEG: neither is the picture its type says.
+    for (const [bytes, type] of [
+      ["just words, not a picture", "image/png"],
+      [pngHead(640, 400), "image/jpeg"],
+      ["<svg xmlns='http://www.w3.org/2000/svg'/>", "image/webp"],
+      ["GIF8 almost", "image/gif"],
+    ] as const) {
+      const lying = await upload(bytes, type, "kiwi.png");
+      expect(lying.status, type).toBe(415);
+      expect(await lying.json()).toEqual({
+        reason: "not_an_image",
+        error: "This file isn't the picture its type says.",
+      });
+    }
+    // Nothing of a refused upload is held.
+    const m = await enrolled(b, pk, "m_promptfiles000000002");
+    const held = await fetch(
+      `${b.url}${CONTROL}/files/${fileHash(new TextEncoder().encode("just words, not a picture"))}`,
+      {
+        headers: { authorization: `Bearer ${m.token}` },
+      },
+    );
+    expect(held.status).toBe(404);
+    // Any other kind of file is taken as before, with no pixels in its answer.
+    const notes = await upload("# notes", "text/markdown", "notes.md");
+    expect(notes.status).toBe(201);
+    expect(Object.keys((await notes.json()) as object).sort()).toEqual(["name", "sha256", "size", "type"]);
+  });
+
+  it("a prompt's pictures: only their four fields are signed, the row names them, and their bytes are kept as long as the row", async () => {
+    const m = await enrolled(b, pk, "m_promptfiles000000003");
+    await hello(m, { files: true, prompt_files: true });
+    const up = (await (await upload(pngHead(800, 600), "image/png", "birch.png")).json()) as Record<string, unknown>;
+    const send = async (files: unknown[], expires_in_s?: number) =>
+      call(b.url, "POST", `${UI}/send`, {
+        body: {
+          machineId: m.machine,
+          ...(await signedPrompt(pk, day, m.machine, { text: "Look at the attached picture.", files })),
+          ...(expires_in_s ? { expires_in_s } : {}),
+        },
+      });
+    // The upload's answer as it is, pixels and all, is not a file a command may name.
+    expect((await send([up])).body.code).toBe("bad_fields");
+    const entry = { name: up.name, type: up.type, size: up.size, sha256: up.sha256 };
+    const before = Date.parse(
+      JSON.parse(readFileSync(path.join(b.stateDir, "control", "files", `${up.sha256}.json`), "utf8")).expiresAt,
+    );
+    const ok = await send([entry], 24 * 3600);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body).toMatchObject({ kind: "prompt", text: "Look at the attached picture.", files: [entry] });
+    expect(b.control.activity().find((a) => a.id === ok.body.id)?.files).toEqual([entry]);
+    // Uploaded a moment before the send, it would have gone a moment before the row does.
+    const after = Date.parse(
+      JSON.parse(readFileSync(path.join(b.stateDir, "control", "files", `${up.sha256}.json`), "utf8")).expiresAt,
+    );
+    expect(after).toBe(Date.parse(ok.body.expiresAt as string));
+    expect(after).toBeGreaterThanOrEqual(before);
+    // The machine fetches it with its own token, as a start's file.
+    const got = await fetch(`${b.url}${CONTROL}/files/${up.sha256}`, {
+      headers: { authorization: `Bearer ${m.token}` },
+    });
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await got.arrayBuffer())).toEqual(pngHead(800, 600));
+  });
+
   it("the well-known says control.files and control.inherit", () => {
     expect(b.control.wellKnown().files).toBe(true);
     expect(b.control.wellKnown().inherit).toBe(true);
   });
 });
 
-// --- the early verification against every control vector ---------------------------
+// --- every control vector (CONTROL.md §11) ------------------------------------------
+// "The reference verifier and every receiver that pre-checks MUST agree with all of them."
+// Twice over: the verdict the verifier this receiver runs reaches on each vector, as it is
+// written; and what the receiver then does with the command through POST send. The vectors
+// are the pinned sessionpipe's, in this repo (test/conformance.ts): never skipped.
 
-const repo =
-  process.env.SESSIONPIPE_REPO ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../sessionpipe");
-const vectorsDir = path.join(repo, "conformance/control-vectors");
-let vectorFiles: string[] = [];
-try {
-  vectorFiles = readdirSync(vectorsDir)
-    .filter((f) => f.endsWith(".json"))
-    .sort();
-} catch {}
+const { dir: vectorsDir, files: vectorFiles } = fixtures("control-vectors");
 
 interface Vector {
   name: string;
   input: {
-    signed?: { cmd: string; csig?: string | null; grant?: unknown; confirm?: unknown };
-    proof?: unknown;
+    signed?: SignedCommand;
+    proof?: Assertion;
+    key?: TrustedKey;
+    code?: string;
     machine: string;
     rp_id: string;
-    trusted?: { id: string; alg: number; spki: string }[];
+    trusted?: TrustedKey[];
     now?: number;
+    max_age_ms?: number;
     seen_nonces?: string[];
   };
-  expect: { ok: boolean; code?: string };
+  expect: { ok: boolean; code?: string; via?: "grant" | "confirm"; kind?: string };
 }
+const readVector = (f: string): Vector => JSON.parse(readFileSync(path.join(vectorsDir, f), "utf8")) as Vector;
 
-describe.skipIf(!vectorFiles.length)("early verification: conformance/control-vectors through POST send", () => {
-  if (!vectorFiles.length) console.log(`control vectors not found at ${vectorsDir}; set SESSIONPIPE_REPO`);
+/** The pool the vector machine's hello lists: the two accounts the pool vectors name
+ *  (139 to 144), which are the whole order vector 142 signs. */
+const VECTOR_POOL = {
+  on: true,
+  harness: "claude-code",
+  accounts: [
+    { id: "b3f0c1d2-4e5f-4a6b-8c7d-9e0f1a2b3c4d", enabled: true, status: "ready", current: true },
+    { id: "7a1e2f3b-9c4d-4e5f-a6b7-c8d9e0f1a2b3", enabled: true, status: "ready" },
+  ],
+};
+/** The bytes behind the two hashes the file vectors sign (66 to 68, 93, 109): sessionpipe's
+ *  generator hashes these words. Uploaded, so the receiver holds what the commands name. */
+const VECTOR_FILE_BYTES = ["png bytes", "pdf bytes"];
+
+describe("control vectors: the verdict of the verifier this receiver runs", () => {
   for (const f of vectorFiles) {
-    const v = JSON.parse(readFileSync(path.join(vectorsDir, f), "utf8")) as Vector;
-    if (!v.input.signed) continue; // enrollment vectors are verifyEnrollment's; covered above
+    const v = readVector(f);
+    it(f, async () => {
+      // An enrollment proof (§2): what the approval route asks before it trusts a key.
+      if (v.input.proof) {
+        const r = await verifyEnrollment({
+          machine: v.input.machine,
+          code: v.input.code!,
+          key: v.input.key!,
+          proof: v.input.proof,
+          rpId: v.input.rp_id,
+        });
+        expect(r.ok, JSON.stringify(r)).toBe(v.expect.ok);
+        return;
+      }
+      // A signed command (§5), with the vector's own clock, window and nonce store.
+      const seen = new Set(v.input.seen_nonces ?? []);
+      const r = await verifyCommand(v.input.signed, {
+        machine: v.input.machine,
+        rpId: v.input.rp_id,
+        trusted: v.input.trusted ?? [],
+        now: v.input.now ?? Date.now(),
+        ...(v.input.max_age_ms ? { maxAgeMs: v.input.max_age_ms } : {}),
+        seenNonce: (n) => {
+          if (seen.has(n)) return true;
+          seen.add(n);
+          return false;
+        },
+      });
+      if (v.expect.ok) {
+        expect(r, JSON.stringify(r)).toMatchObject({ ok: true, via: v.expect.via });
+        if (r.ok) expect(r.cmd.kind).toBe(v.expect.kind);
+      } else {
+        expect(r.ok, JSON.stringify(r)).toBe(false);
+        if (!r.ok) expect(r.code).toBe(v.expect.code);
+      }
+    });
+  }
+});
+
+describe("control vectors: carried or refused through POST send", () => {
+  for (const f of vectorFiles) {
+    const v = readVector(f);
+    if (!v.input.signed) continue; // an enrollment proof names a pairing code only its machine made
     it(f, async () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(v.input.now ?? Date.now());
       const b = await boot({ rpId: v.input.rp_id });
       tmpDirs.push(b.stateDir);
       try {
-        const trusted = v.input.trusted ?? [];
+        const s = v.input.signed!;
+        let cmd: Record<string, unknown> = {};
+        try {
+          const c = JSON.parse(s.cmd) as unknown;
+          if (c && typeof c === "object" && !Array.isArray(c)) cmd = c as Record<string, unknown>;
+        } catch {}
+        // A receiver's early word differs from the machine's gate in two places (CONTROL.md
+        // §5): it allows ten minutes, not a day, and it keeps no nonce store.
+        let expectOk = v.expect.ok;
+        let code = v.expect.code;
+        if (expectOk && typeof cmd.iat === "number" && Date.now() - cmd.iat > RECEIVER_MAX_AGE_MS) {
+          expectOk = false;
+          code = "too_old";
+        }
+        if (!expectOk && code === "replay") expectOk = true;
+        // And it asks for what the machine will ask for (§6 `pool`): on, off, remove, order,
+        // disable and login.complete take a fresh confirm, so one that verifies on a day
+        // grant is refused `confirm_required` here as it is there, and carried once a key
+        // the machine trusts has confirmed the very bytes the vector signed. The five the
+        // vectors sign with a grant (137, 138, 140, 141, 142) are named here, in the test's
+        // own words and not by the constant the receiver reads: an action dropped from that
+        // constant would be carried on a grant, and has to fail here. (login.complete, the
+        // sixth, is signed with a confirm in its vector, 146.)
+        const fresh =
+          expectOk &&
+          cmd.kind === "pool" &&
+          ["on", "off", "disable", "remove", "order"].includes(String(cmd.pool_action)) &&
+          !s.confirm
+            ? await TestPasskey.create({ rpId: v.input.rp_id })
+            : null;
+
+        const trusted = [...(v.input.trusted ?? []), ...(fresh ? [fresh.key] : [])];
         const r0 = await call(b.url, "POST", `${CONTROL}/_test/enroll`, {
           body: { machine: v.input.machine, key: trusted[0] },
         });
@@ -1483,10 +2019,10 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
           r0.body.token = (
             await call(b.url, "POST", `${CONTROL}/_test/enroll`, { body: { machine: v.input.machine, key: k } })
           ).body.token;
-        // A machine that takes every option a hello can advertise (CONTROL.md §2): files on a
-        // start and a prompt, every level and any model, so the receiver's second look lets
-        // through what the verifier lets through.
-        await call(b.url, "POST", `${CONTROL}/hello`, {
+        // A machine that takes everything a hello can advertise (CONTROL.md §2): files on a
+        // start and a prompt, every level and any model, a handoff's `reply_to`, and a pool,
+        // so the receiver's second look lets through what the verifier lets through.
+        const said = await call(b.url, "POST", `${CONTROL}/hello`, {
           bearer: r0.body.token as string,
           body: {
             ...facts,
@@ -1494,55 +2030,43 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
             harnesses: ["claude-code", "codex"],
             mode: "auto",
             files: true,
-            // Files on a prompt are 0.10's (S2): only for a vector set that has them.
-            prompt_files: vectorFiles.some((x) => x.includes("prompt-with-files")),
+            prompt_files: true,
             start: {
               "claude-code": { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
               codex: { permissions: ["read", "safe", "edits", "auto"], permission: "auto", any_model: true },
             },
+            ask: true,
+            handoff: true,
+            pool: VECTOR_POOL,
           },
         });
-        const s = v.input.signed!;
-        const r = await call(b.url, "POST", `${UI}/send`, {
-          body: {
-            machineId: v.input.machine,
-            cmd: s.cmd,
-            csig: s.csig ?? undefined,
-            grant: s.grant ?? undefined,
-            confirm: s.confirm ?? undefined,
-          },
-        });
-        // A receiver's early word differs from the machine's gate in two places (CONTROL.md §5):
-        // it allows ten minutes, not a day, and it keeps no nonce store.
-        let expectOk = v.expect.ok;
-        let code = v.expect.code;
-        let iat = Number.NaN;
-        try {
-          iat = JSON.parse(s.cmd).iat;
-        } catch {}
-        if (expectOk && Number.isFinite(iat) && Date.now() - iat > RECEIVER_MAX_AGE_MS) {
-          expectOk = false;
-          code = "too_old";
+        expect(said.status).toBe(204);
+        // And a receiver that holds the files the commands name (HTTP.md §3).
+        for (const bytes of VECTOR_FILE_BYTES) {
+          const up = await fetch(`${b.url}${UI}/files?name=vector.bin`, {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body: bytes,
+          });
+          expect(up.status).toBe(201);
         }
-        if (!expectOk && code === "replay") expectOk = true;
-        // And in a third: it holds the bytes a start's files name, and nobody uploaded these.
-        let carriesFiles = false;
-        try {
-          carriesFiles = Array.isArray(JSON.parse(s.cmd).files);
-        } catch {}
-        if (expectOk && carriesFiles) {
-          expectOk = false;
-          code = "file";
-        }
-        // And in a fourth, until this receiver's sessionpipe-core is 0.10: a start's `~/…`
-        // folder (tilde.ts). Its core wants an absolute one and refuses it, which fails closed.
-        let tildeCwd = false;
-        try {
-          tildeCwd = /^~(?:[/\\]|$)/.test(String(JSON.parse(s.cmd).cwd ?? ""));
-        } catch {}
-        if (expectOk && tildeCwd && !coreTakesTilde()) {
-          expectOk = false;
-          code = "bad_fields";
+
+        const send = (signed: SignedCommand) =>
+          call(b.url, "POST", `${UI}/send`, {
+            body: {
+              machineId: v.input.machine,
+              cmd: signed.cmd,
+              csig: signed.csig ?? undefined,
+              grant: signed.grant ?? undefined,
+              confirm: signed.confirm ?? undefined,
+            },
+          });
+        let r = await send(s);
+        if (fresh) {
+          expect(r.status, JSON.stringify(r.body)).toBe(422);
+          expect(r.body.code).toBe("confirm_required");
+          expect(b.control.activity()).toHaveLength(0);
+          r = await send({ cmd: s.cmd, confirm: await fresh.assert(await sha256(s.cmd)) });
         }
         if (expectOk) {
           expect(r.status, JSON.stringify(r.body)).toBe(201);
@@ -1552,6 +2076,7 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
             bearer: r0.body.token as string,
           });
           expect(got.status).toBe(200);
+          expect(got.body.messages).toHaveLength(1);
           expect(got.body.messages![0]!.cmd).toBe(s.cmd);
         } else {
           expect(r.status, JSON.stringify(r.body)).toBe(422);
@@ -1567,4 +2092,28 @@ describe.skipIf(!vectorFiles.length)("early verification: conformance/control-ve
 
 it("sha256 is the WebCrypto one the verifier uses", async () => {
   expect((await sha256("x")).length).toBe(32);
+});
+
+describe("the pairing link the terminal prints (pairUrlFor)", () => {
+  it("names a passkey origin, keeping the daemon's own when that is one", () => {
+    const origins = ["https://misha-laptop.local:7373", "http://localhost:7373"];
+    expect(pairUrlFor("http://100.68.187.81:7373", origins, "abc")).toBe(
+      "https://misha-laptop.local:7373/pair?code=abc",
+    );
+    expect(pairUrlFor("http://localhost:7373", origins, "abc")).toBe("http://localhost:7373/pair?code=abc");
+    expect(pairUrlFor("https://misha-laptop.local:7373/", origins, "a b")).toBe(
+      "https://misha-laptop.local:7373/pair?code=a%20b",
+    );
+  });
+  it("falls back to the daemon's address when no passkey origin is known", () => {
+    expect(pairUrlFor("http://100.68.187.81:7373", [], "abc")).toBe("http://100.68.187.81:7373/pair?code=abc");
+  });
+  it("carries the UI key when it has one, so a browser that never saw the board is let in", () => {
+    expect(pairUrlFor("http://localhost:7373", ["http://localhost:7373"], "abc", "k3y/+=")).toBe(
+      "http://localhost:7373/pair?code=abc&k=k3y%2F%2B%3D",
+    );
+    expect(pairUrlFor("http://localhost:7373", ["http://localhost:7373"], "abc", "")).toBe(
+      "http://localhost:7373/pair?code=abc",
+    );
+  });
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: search sources. Test helpers: a private copy of the synthetic fixture home,
 // a collecting DocSink, and a read loop that drives an adapter the way the engine does.
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,11 +18,36 @@ import type {
 
 export const FIXTURE_HOME = fileURLToPath(new URL("./fixtures/home", import.meta.url));
 
+/** A folder copied in name order, each file and folder keeping its times. The order is the
+ *  point: a copy is created when it is copied, and the Claude adapter tells a fork from
+ *  the session it forks by which file was created first (two files that begin with the
+ *  same record; `forkOwners`), by id when the two times are equal. `cpSync` follows the
+ *  directory's own order, which on Linux is a hash's: the fork (…0002) was sometimes made
+ *  a tick before its session (…0001), took the shared records for its own, and three
+ *  `claude read` cases failed, on some CI runs and not others. In name order the session
+ *  is never the later of the two. */
+export function copyInNameOrder(from: string, to: string): void {
+  mkdirSync(to, { recursive: true });
+  const entries = readdirSync(from, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1));
+  for (const e of entries) {
+    const src = path.join(from, e.name);
+    const dst = path.join(to, e.name);
+    if (e.isDirectory()) copyInNameOrder(src, dst);
+    else {
+      copyFileSync(src, dst);
+      const st = statSync(src);
+      utimesSync(dst, st.atime, st.mtime);
+    }
+  }
+  const st = statSync(from);
+  utimesSync(to, st.atime, st.mtime);
+}
+
 /** A writable copy of the fixture home (tests append to it), removed by `done()`. */
 export function fixtureHome(): { home: string; state: string; done: () => void } {
   const dir = mkdtempSync(path.join(os.tmpdir(), "spgui-sources-"));
   const home = path.join(dir, "home");
-  cpSync(FIXTURE_HOME, home, { recursive: true, preserveTimestamps: true });
+  copyInNameOrder(FIXTURE_HOME, home);
   return { home, state: path.join(dir, "state"), done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 

@@ -1,0 +1,31 @@
+{
+  "name": "files-total-too-big",
+  "description": "Three files of 20 MiB: more than 50 MiB together.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"start\",\"session\":\"claude-code:0b6f2c7e-3d4a-4f1b-9c8e-2a1d5e6f7a8b\",\"text\":\"What's wrong here?\",\"nonce\":\"fkK1xt5ppaX47M_ItI-Qyw\",\"iat\":1790800000000,\"cwd\":\"/Users/misha/spacesheep\",\"files\":[{\"name\":\"f1.png\",\"type\":\"image/png\",\"size\":20971520,\"sha256\":\"0BNhTcFKN-4g_pIAVzerfTQn5-k1gK1W74pCIF5_ek4\"},{\"name\":\"f2.png\",\"type\":\"image/png\",\"size\":20971520,\"sha256\":\"0BNhTcFKN-4g_pIAVzerfTQn5-k1gK1W74pCIF5_ek4\"},{\"name\":\"f3.png\",\"type\":\"image/png\",\"size\":20971520,\"sha256\":\"0BNhTcFKN-4g_pIAVzerfTQn5-k1gK1W74pCIF5_ek4\"}]}",
+      "csig": "Yov_AbZHFs6ECnt5kWYIfbRJ6HhsVWMUwAoCUeMYrZgz5rbu4c7BLWpgifML0fYYDj8D59XUnqixNoa_v8TU-A",
+      "grant": {
+        "cred": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiUzY3M094OWFJLV9xa3BYT2lXX2VSbVBhLTVzTUIwVGMwbV9vUDc1dDZpNCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIQCwXF8A-O4IJY0F6B2FWMBZwT0ygXUdfsPIRM9-qeXHFQIgOJ54CVKq4hoPG2MnpkFLuCV4mXHSPP7g2Su3H5rBRY4",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExzaXYZTe_WEhPIqiUUsYjH5ezr9uDxy5snmDVGErl1rnfzIHfdvsQ7MD6ohNFjrzaR30jeSvPXCxnB_p7LvMZQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6-lmO3JqCG-_5N3JNsB8iUax3_uanPDsgI59MfrVdaS4NVnpXNvOdLp09PSFZ9nFlyG_iFwKgGy13d7vNrzvtQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

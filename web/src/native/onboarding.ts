@@ -169,7 +169,12 @@ export type Step =
   | { kind: "connecting"; url: string; host: string; from: "scan" | "address" }
   | { kind: "failed"; url: string; host: string; message: string; from: "scan" | "address" }
   /** `rx_select` went through: the shell is replacing this window. */
-  | { kind: "done"; host: string };
+  | { kind: "done"; host: string }
+  /** The other way in: a spacesheep account (ConnectAccount.tsx draws it; its own steps
+   *  are accountConnect.ts's). `resuming`: one was under way when the app opened. */
+  | { kind: "account"; begin: "intro" | "resuming" }
+  /** The account this window showed was disconnected a moment ago: what the hub said of its key. */
+  | { kind: "disconnected"; note: string; revokeUrl?: string };
 
 export type Event =
   | { type: "help"; open: boolean }
@@ -187,7 +192,9 @@ export type Event =
   | { type: "connected" }
   | { type: "error"; error: unknown }
   | { type: "retry" }
-  | { type: "back" };
+  | { type: "back" }
+  /** "Use a spacesheep account" on the welcome; `resume`: one is under way already. */
+  | { type: "account"; resume?: boolean };
 
 export const INITIAL: Step = { kind: "welcome", help: false };
 
@@ -276,6 +283,10 @@ export function step(prev: Step, ev: Event): Step {
     case "back":
       if (prev.kind === "connecting" || prev.kind === "done") return prev;
       return INITIAL;
+    case "account":
+      // From the welcome (or the screen after a disconnect), and from nowhere else.
+      if (prev.kind !== "welcome" && prev.kind !== "disconnected") return prev;
+      return { kind: "account", begin: ev.resume ? "resuming" : "intro" };
   }
 }
 

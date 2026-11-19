@@ -1,0 +1,30 @@
+{
+  "name": "valid-pool-on-confirmed",
+  "description": "Turn the pool on with a fresh confirm: what the machine requires for on, off, remove, order, disable and login.complete; the same command on a day grant alone (137) verifies but the machine refuses it confirm_required.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"pool\",\"session\":\"sessionpipe:pool\",\"nonce\":\"37jtxSI1W3FzfiSut1MKUA\",\"iat\":1790800000000,\"pool_action\":\"on\"}",
+      "confirm": {
+        "cred": "D3I2CYYd3u5WDAMhth6bZmE6Ncp587E-",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoibnR3UTJuR0dzLVZPaWhUbmthd3ROY3RwN0tkTThWSjBydWQ2dGRsNGQ3YyIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIQDVhhtOyf0lYGCFWDfYf0K4x96NtajLMVmblAE790TMNQIgUXaRaU3xVOuqojggidFoVBAkFjJnZztXMsI3tRiyQP8"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "D3I2CYYd3u5WDAMhth6bZmE6Ncp587E-",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEzK3H-mhKzG0aEvm3_nbNeOiyPlVa-azJcD3MmPCK0EzsZ4RDcV_QhVWWwMEgAy2KGG_E93l5h8UR6mmyh_XrlA"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "confirm",
+    "kind": "pool"
+  }
+}

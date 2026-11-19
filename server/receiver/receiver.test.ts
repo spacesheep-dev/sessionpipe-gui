@@ -4,6 +4,7 @@ import { type LimitsEntry, ROUTES, type SessionDetail } from "../../shared/api.j
 import { Session, SID, tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
 import { MAX_BYTES, MAX_EVENTS } from "./index.js";
+import { eventProblem } from "./validate.js";
 
 let app: App;
 let tmp: { dir: string; cleanup: () => void };
@@ -98,6 +99,25 @@ describe("POST events", () => {
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ reason: "tier_above_max", max_tier: 3 });
     expect(app.store.session("claude-code:tier")).toBeUndefined();
+  });
+
+  it("rejects a seq above 2^53 - 1 as bad_seq, the schema's bound, so the gap tracker never spins on it", async () => {
+    expect(
+      eventProblem(new Session("seq-safe").ev("session.started", {}, { seq: Number.MAX_SAFE_INTEGER })),
+    ).toBeNull();
+    expect(eventProblem(new Session("seq-past").ev("session.started", {}, { seq: 2 ** 53 }))).toBe("bad_seq");
+    const top = new Session("seq-top").ev("session.started", { source: "startup" }, { seq: Number.MAX_SAFE_INTEGER });
+    const s = new Session("seq-bound");
+    const past = s.ev("turn.started", { turn_id: "t1" }, { seq: 2 ** 53 + 2 });
+    const huge = s.ev("turn.started", { turn_id: "t2" }, { seq: 1e21 });
+    const res = await post({ events: [top, past, huge] });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { accepted: number; rejected: { id: string; reason: string }[] };
+    expect(body.accepted).toBe(1);
+    expect(body.rejected).toEqual([
+      { id: past.id, reason: "bad_seq" },
+      { id: huge.id, reason: "bad_seq" },
+    ]);
   });
 
   it("validates per event: rejected with a reason, counts add up, the rest is stored", async () => {

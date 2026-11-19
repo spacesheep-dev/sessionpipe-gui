@@ -346,6 +346,14 @@ function useHttpsProbe(url: string, enabled: boolean): { ok: boolean | null; aga
   return { ok, again: useCallback(() => setTick((n) => n + 1), []) };
 }
 
+/** Where the openssl command comes from on this machine, when TLS mode can't find it. */
+function opensslHint(platform: string): string {
+  if (platform === "win32")
+    return "Needs the openssl command: Git for Windows ships one (its usr\\bin folder, on the PATH), or winget install ShiningLight.OpenSSL.Light; then try again.";
+  if (platform === "darwin") return "Needs the openssl command (brew install openssl), then try again.";
+  return "Needs the openssl command (apt install openssl, or dnf), then try again.";
+}
+
 function SecureStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } & Fold) {
   const store = useStore();
   const mac = s.platform === "darwin";
@@ -468,9 +476,7 @@ function SecureStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } 
             {busy === "on" ? "Turning on…" : "Turn on"}
           </button>
           <span className="step-note">
-            {s.tls.opensslPresent
-              ? "Adds https on this same port, now; remembered as --tls."
-              : "Needs the openssl command (brew install openssl), then try again."}
+            {s.tls.opensslPresent ? "Adds https on this same port, now; remembered as --tls." : opensslHint(s.platform)}
           </span>
         </div>
       )}
@@ -514,7 +520,18 @@ function SecureStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } 
           {!mac && (
             <p className="step-note">
               Trust the CA on this machine first: <code>ca.crt</code> under the state dir's <code>tls/</code> folder
-              (Debian: <code>sudo update-ca-certificates</code>; Fedora: <code>sudo trust anchor ca.crt</code>).
+              {s.platform === "win32" ? (
+                <>
+                  {" "}
+                  (<code>certutil -user -addstore Root ca.crt</code>, or open it and pick Install Certificate → Current
+                  User → Trusted Root Certification Authorities).
+                </>
+              ) : (
+                <>
+                  {" "}
+                  (Debian: <code>sudo update-ca-certificates</code>; Fedora: <code>sudo trust anchor ca.crt</code>).
+                </>
+              )}
             </p>
           )}
           <div className="step-action">
@@ -702,7 +719,7 @@ function PairStep({
             disabled={busy}
             data-action="pair"
           >
-            {busy ? "Starting…" : "Pair this Mac"}
+            {busy ? "Starting…" : s.platform === "darwin" ? "Pair this Mac" : "Pair this machine"}
           </button>
           <span className="step-note">
             Runs <code>sessionpipe control pair</code>; the six digits appear here to approve with {signerLabel()}.

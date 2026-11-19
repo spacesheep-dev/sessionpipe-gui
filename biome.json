@@ -8,6 +8,7 @@
       "!**/node_modules",
       "!package-lock.json",
       "!conformance",
+      "!test/conformance",
       "!apps/crates/*/permissions/schemas",
       "!apps/mobile/src-tauri/gen/apple/Assets.xcassets"
     ]

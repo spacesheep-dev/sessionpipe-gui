@@ -1,0 +1,30 @@
+{
+  "name": "valid-pool-login-complete",
+  "description": "Finish a sign-in with the pasted code#state, for the pending login id login.begin acked; a confirm, as a key.add often is.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"pool\",\"session\":\"sessionpipe:pool\",\"nonce\":\"ssPnjmI-MTTfBDQqD9FQZQ\",\"iat\":1790800000000,\"pool_action\":\"login.complete\",\"pool_account\":\"login_7Qm2xK9pLw\",\"pool_code\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}",
+      "confirm": {
+        "cred": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZThVdjJRMzNWSEVSajBad2diMVNaRS1GLTJLd050V3VHWVpYWWk1OTFwUSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEQCIF0SJ2eGXSQLQ8PuuPQlomlvsXUnpSfmFVVjkpQWeLwQAiAmptLG3OoO90eacIGiH5ONVr_1sk7XCQeEBmctimNWVg"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2U3x1j5ZGN8EVblGBeu875Wx5uTrMdyAsI4SehypmilhtnYsCBuPwkDLH7UH1L0U6C11cpV-G2dJkzNuIp29XQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "confirm",
+    "kind": "pool"
+  }
+}

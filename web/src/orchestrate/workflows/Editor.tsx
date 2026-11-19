@@ -25,15 +25,16 @@ import { type MenuList, MoreButton, useContextMenu } from "../../components/Cont
 import { BackButton, PageBar } from "../../components/PageBar";
 import { MultiSelect, Select, type SelectOption } from "../../components/Select";
 import { folderChoices, machineHome, tildify, typedFolder } from "../../control/folders";
-import { fixedPermission, permissionChoices } from "../../control/newSessionState";
+import { fixedLine, fixedPermission, permissionChoices } from "../../control/newSessionState";
 import { PERMISSION_LABEL } from "../../control/words";
-import { useAppState, useMachines } from "../../data/hooks";
+import { useAppState, useListedSessions, useMachines } from "../../data/hooks";
 import "../../lib/acp";
 import { sessionTitle } from "../../lib/format";
 import { Link, navigate, useSearchParam } from "../../lib/router";
 import { actionById, useShortcut } from "../../lib/shortcuts";
 import { useNow } from "../../lib/time";
 import { pushUndo } from "../../lib/toasts";
+import { START } from "../../native/accountWords.new";
 import {
   cancelRun,
   copyWorkflowLink,
@@ -381,7 +382,9 @@ function EditorForm({
 
   // ----- the agent pop-up's options -----
   const icon = useCallback((h: string) => <HarnessGlyph name={h} size="sm" />, []);
-  const sessionList = useMemo(() => [...sessions.values()], [sessions]);
+  // A step's agent and folder are picked among the sessions the board lists.
+  const listedSessions = useListedSessions();
+  const sessionList = useMemo(() => [...listedSessions.values()], [listedSessions]);
   const title = useCallback(
     (key: string) => {
       const s = sessions.get(key);
@@ -834,7 +837,9 @@ function StepRow({
                 ) : fixed ? (
                   <span className="wf-opt">
                     <span className="wf-opt-label">Permission</span>
-                    <span className="wf-fixed">{fixed}</span>
+                    <span className="wf-fixed" title={machine ? START.setOn(machine.name) : undefined}>
+                      {fixedLine(fixed)}
+                    </span>
                   </span>
                 ) : null}
                 {showModel && (

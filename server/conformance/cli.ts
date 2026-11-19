@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: control. `sessionpipe-gui-conformance <receiver url> --fixtures <dir> [--token T]
 // [--no-test-door] [--only <substring>]` runs the delivery scenarios of spec/HTTP.md §7
-// against a receiver. The fixtures live in the sessionpipe repo (conformance/delivery);
-// without --fixtures, $SESSIONPIPE_REPO/conformance/delivery or ../sessionpipe's is used.
+// against a receiver. The fixtures are sessionpipe's (conformance/delivery); without
+// --fixtures they are $SESSIONPIPE_REPO/conformance/delivery, else this checkout's copy at
+// the pinned version (test/conformance/delivery), else ../sessionpipe's.
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { runDelivery } from "./runner.js";
@@ -19,9 +20,14 @@ if (!url || args.includes("--help") || args.includes("-h")) {
   );
   process.exit(2);
 }
+const vendored = path.resolve("test/conformance/delivery");
 const fixtures =
   flag("--fixtures") ??
-  path.join(process.env.SESSIONPIPE_REPO ?? path.resolve("../sessionpipe"), "conformance/delivery");
+  (process.env.SESSIONPIPE_REPO
+    ? path.join(process.env.SESSIONPIPE_REPO, "conformance/delivery")
+    : existsSync(vendored)
+      ? vendored
+      : path.resolve("../sessionpipe/conformance/delivery"));
 if (!existsSync(fixtures)) {
   process.stderr.write(`no fixtures at ${fixtures}: pass --fixtures <sessionpipe>/conformance/delivery\n`);
   process.exit(2);

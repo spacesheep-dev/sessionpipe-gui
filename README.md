@@ -13,19 +13,19 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_universal.dmg"><picture>
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.8.5/sessionpipe_0.8.5_universal.dmg"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos-dark.svg">
     <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/macos.svg" alt="Download for macOS: Apple silicon and Intel" width="272" height="56">
   </picture></a>
   &nbsp;
-  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.deb"><picture>
+  <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.8.5/sessionpipe_0.8.5_amd64.deb"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux-dark.svg">
     <img src="https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/buttons/linux.svg" alt="Download for Linux: .deb, x86-64" width="272" height="56">
   </picture></a>
 </p>
 
 <p align="center">
-  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.AppImage">AppImage</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
+  <sub>Signed and notarized for macOS 11 or newer · Linux <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.8.5/sessionpipe_0.8.5_amd64.AppImage">AppImage</a> · <a href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">All releases</a> · or <a href="#install">install with npm</a></sub>
 </p>
 
 <p align="center">
@@ -54,7 +54,8 @@ of it.
   passkey and checked on the machine that runs the agent; the GUI carries commands and
   cannot forge one.
 - **Yours, on your machine.** Plain files on your disk, no database, no account, no service
-  of ours in between, no Electron. The server makes no outbound request of its own.
+  of ours in between, no Electron. The server calls out only for what you turn on: a plugin
+  you enable or a spacesheep account you connect.
 
 ## Search
 
@@ -143,7 +144,7 @@ To keep it on the PATH as `sessionpipe-gui`, install a [release](https://github.
 tarball:
 
 ```sh
-npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe-gui-0.7.0.tgz
+npm i -g https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.8.5/sessionpipe-gui-0.8.5.tgz
 ```
 
 Or from a clone: `git clone https://github.com/spacesheep-dev/sessionpipe-gui && cd
@@ -158,7 +159,7 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
 1. **Run `sessionpipe-gui`.** It prints where to open it, and a QR code for your phone:
 
    ```
-   sessionpipe-gui 0.7.0 · ~/.local/state/sessionpipe-gui
+   sessionpipe-gui 0.8.5 · ~/.local/state/sessionpipe-gui
 
      setup   http://localhost:7373/setup   (first run: your sessions, https, pairing, your phone)
      local   http://localhost:7373
@@ -180,6 +181,18 @@ ping-a-human Telegram plugin (off until you turn it on). The board runs on port 
    you, and you approve the six digits with your passkey.
 5. **Add your phone.** Scan the QR code; Setup's phone step gets it sending, over the same
    Wi-Fi or [Tailscale](https://tailscale.com).
+
+### Or a spacesheep account
+
+Nothing to host, if you'd rather not: **Settings → Data → Use a spacesheep account**
+connects this GUI to a [spacesheep](https://spacesheep.dev) account. The GUI shows a
+code, the account's page shows the same four digits, you confirm once, and from then on
+every machine paired on that account (`sessionpipe control pair spacesheep.dev`, one
+command per machine, no port to open) shows up here with its sessions, through
+spacesheep's relay. Messages to those sessions go back the same way, signed by the desktop
+app's own key, which you approve once per machine on spacesheep's Devices. It is an
+option, not the default: a GUI that never connects keeps everything on this machine
+([docs/rfcs/08](docs/rfcs/08-spacesheep-as-a-hosted-backend.md)).
 
 No agent handy? `sessionpipe-gui --demo` fills the board with a synthetic team.
 
@@ -312,17 +325,30 @@ device.
 
 | Platform | Download |
 |---|---|
-| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.7.0_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_universal.dmg), signed and notarized |
-| Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.7.0/sessionpipe_0.7.0_amd64.AppImage), for any distribution |
+| macOS 11 or newer, Apple silicon and Intel | [sessionpipe_0.8.5_universal.dmg](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.8.5/sessionpipe_0.8.5_universal.dmg), signed and notarized |
+| Linux, x86-64 | [.deb](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.8.5/sessionpipe_0.8.5_amd64.deb) · [AppImage](https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.8.5/sessionpipe_0.8.5_amd64.AppImage), for any distribution |
 
 The same UI in a small [Tauri 2](https://tauri.app) app that uses the system's own web view
 (the AppImage carries WebKitGTK with it, which is why it is larger). It connects to the
 receiver on this machine; on first run it can start one for you as a service, which needs
-Node 20 or newer (`sessionpipe-gui service install` does the same from a terminal, and a
+Node 20 or newer (`sessionpipe-gui service install` does the same from a terminal: a
+LaunchAgent on macOS, a systemd user unit on Linux, a scheduled task at logon on Windows; a
 newer version upgrades the service it finds in place). It
 keeps a menu bar item and a Dock badge that count what needs you, notifies you, launches at
 login if you like, and updates itself. Every release is
 on the [releases page](https://github.com/spacesheep-dev/sessionpipe-gui/releases).
+
+When the app has updated itself, the receiver on this computer can still be the older
+version that installed it. Each time the app opens it asks that receiver its version (only
+the one this computer's state folder names, never a receiver on another machine). If it is
+older than the app and a `sessionpipe-gui` command at the app's version or newer is
+installed here, the app runs that command's `service install` in the background, which
+restarts the service on its own port and state folder; nothing is downloaded and the app's
+log says what happened. If bringing it up to date would mean downloading the app's release
+(through `npx`), the app does nothing on its own: Settings › Data then shows
+**Update sessionpipe**, and only that press, or "Start sessionpipe" on the welcome, downloads
+and runs it. The service then runs from npx's cache; a `sessionpipe-gui` you installed with
+`npm i -g` stays the version you installed.
 
 On a Mac the app also sends: prompts, new sessions and permission answers, from the window
 or from a notification. It signs with a key in the Mac's Secure Enclave, unlocked with Touch
@@ -388,8 +414,11 @@ and secrets are redacted before the outbox. The GUI shows what arrived and nothi
    where sending does, instead of offering to enrol a new device.
 4. **Setup is local.** Setup's actions, token rotation and plugin settings answer only on
    this machine.
-5. **Nothing phones home.** No telemetry; the web app calls only its own origin, and the
-   server's only outbound request is an extension you ask it to install by URL.
+5. **Nothing phones home.** No telemetry; the web app calls only its own origin. The
+   server's outbound requests are the ones you turn on: a plugin you enable (ping-a-human
+   talks to Telegram) and a spacesheep account you connect in Settings → Data (the server
+   then polls its relay and sends your messages through it). Installing an extension from a
+   URL is the `view add` CLI command's request, not the running server's.
    [SECURITY.md](SECURITY.md) has the details.
 
 The GUI is meant for your own network. For outside it, use Tailscale or another https proxy
@@ -430,6 +459,7 @@ Other sessionpipe receivers: [spacesheep.dev](https://spacesheep.dev) (hosted, t
 | `--tls`, `--no-tls` | off | https on the same port from the GUI's own local CA, for passkeys from a phone; remembered |
 | `--public-url URL`, `--no-public-url` | none | the https origin a proxy on this machine serves (Tailscale); remembered |
 | `--rp-id HOST` | `localhost` | the passkeys' rp id; set by `--tls` and `--public-url` |
+| `--allow-host NAME` | none | another name this machine is opened by from itself (its hostname, an `/etc/hosts` alias, a name your network's DNS gives it); `localhost`, any address and the `<name>.local` name of `--tls` are known already. May be repeated |
 | `--demo`, `--replay FILE`, `--speed N` | | synthetic sessions, or a sessionpipe JSONL file replayed |
 | `--open`, `--quiet` | | open the browser; no banner |
 | `--themes-dir`, `--skins-dir`, `--plugins-dir`, `--bundled-dir` | under the state dir | where extensions live |
@@ -464,9 +494,9 @@ Everything is under `~/.local/state/sessionpipe-gui/` (or `--state DIR`):
 | `events/<harness>/<session>.jsonl` | One append-only file per session, the full events; the index is rebuilt at boot |
 | `search/` | The search index: what the receiver holds, and this machine's history unless it is off |
 | `config.json` | The sink token, the UI key, TLS and public url, which extensions are on or off |
-| `control/` | Paired machines (token hashes), their queues, and files a new session carries until the machine fetches them |
+| `control/` | Paired machines (token hashes), their queues, and the files a new session or a message carries (its pictures) until the machine fetches them |
 | `tls/` | The local CA and certificate (`--tls`) |
-| `attachments/` | Images sent from the composer |
+| `attachments/` | Images sent from the composer to a session whose sessionpipe is older than 0.10 |
 | `labels.json` | Your colour labels |
 | `themes/`, `skins/`, `plugins/` | Installed extensions, with their settings (mode 0600) beside them |
 
@@ -531,8 +561,11 @@ Antigravity and Gemini CLI on this machine.
 <summary><b>Does anything leave my machine?</b></summary>
 
 Not unless you ask. No telemetry, no analytics, no account; search runs here, on files here.
-The server's one outbound request is an extension you install by URL. What other machines
-send to this one is up to each machine's sink tier.
+The server calls out only for what you turn on: a plugin you enable (ping-a-human talks to
+Telegram) and a spacesheep account you connect (the server then polls its relay and sends
+your messages through it). Installing an extension from a URL is the `view add` CLI
+command's request, not the running server's. What other machines send to this one is up to
+each machine's sink tier.
 
 </details>
 

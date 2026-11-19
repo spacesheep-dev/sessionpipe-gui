@@ -1,0 +1,19 @@
+{
+  "name": "control-session-tools",
+  "spec": "CONTROL.md \u00a76 session_tools",
+  "capability": "control",
+  "note": "Shape check for the well-known field: MCP server names only.",
+  "steps": [
+    {
+      "well_known": {},
+      "expect": {
+        "status": 200,
+        "body": {
+          "control": {
+            "session_tools": "*"
+          }
+        }
+      }
+    }
+  ]
+}

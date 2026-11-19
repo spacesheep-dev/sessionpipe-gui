@@ -54,16 +54,37 @@ export function startOutboxSource(store: Store, opts: OutboxSourceOptions = {}):
   let lastTickAt: string | undefined;
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;
+  /** Session files that could not be read, and the error code each last failed with:
+   *  logged once per file and code, not on every tick. */
+  const unreadable = new Map<string, string>();
 
   const tick = (): void => {
     const refs = outbox.sessions();
     sessions = refs.length;
+    const seen = new Set(refs.map((r) => `${r.harness}/${r.session}`));
+    for (const k of unreadable.keys()) if (!seen.has(k)) unreadable.delete(k);
     for (const ref of refs) {
       const k = `${ref.harness}/${ref.session}`;
       let from = offsets[k] ?? 0;
       // Drain the file: on first run that is the whole history, instantly.
       for (;;) {
-        const { events: batch, offset } = outbox.read(ref, from, 200);
+        let read: ReturnType<Outbox["read"]>;
+        try {
+          read = outbox.read(ref, from, 200);
+        } catch (e) {
+          // One file we can't open or read (permissions, a folder named *.jsonl) skips
+          // that file for this tick, not the whole outbox; its offset stays. A throw
+          // without an fs error code is a bug and still propagates.
+          const code = (e as NodeJS.ErrnoException | undefined)?.code;
+          if (typeof code !== "string") throw e;
+          if (unreadable.get(k) !== code) {
+            unreadable.set(k, code);
+            process.stderr.write(`[outbox] can't read ${k}: ${(e as Error).message}; skipped, its offset stays\n`);
+          }
+          break;
+        }
+        unreadable.delete(k);
+        const { events: batch, offset } = read;
         if (offset !== from) {
           offsets[k] = offset;
           dirty = true;

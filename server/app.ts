@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: server-core (composition root). Every module plugs in here and nowhere
 // else. Module boundaries and who owns what: ARCHITECTURE.md.
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import type net from "node:net";
@@ -13,17 +14,19 @@ import {
   packageVersion,
   readGuiConfig,
   rotateSinkToken,
+  type SpacesheepLink,
   setDisabled,
   setEnabled,
   setPublicUrl,
   setSearchHistory,
+  setSpacesheep,
   setTlsPreference,
 } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
 import { type Runner, startDemo, startReplay } from "./demo/index.js";
 import { registerExtras } from "./extensions/extras.js";
 import { bundledDirs } from "./extensions/kind.js";
-import { lanAddresses } from "./http/net.js";
+import { isLoopback, lanAddresses } from "./http/net.js";
 import { Router } from "./http/router.js";
 import { createOrchestrate, type Orchestrate } from "./orchestrate/index.js";
 import { registerOrchestrate } from "./orchestrate/routes.js";
@@ -38,10 +41,11 @@ import { execDefault, isThisMachine } from "./setup/local.js";
 import { createTailscaleProbe } from "./setup/tailscale.js";
 import { registerSkins, SkinRegistry } from "./skins/index.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
+import { type SpacesheepSource, startSpacesheepSource } from "./sources/spacesheep.js";
 import { staticFiles, webDir } from "./static.js";
 import { Store } from "./store/store.js";
 import { registerThemes, ThemeRegistry } from "./themes/index.js";
-import { ensureCerts, type TlsMaterial } from "./tls/certs.js";
+import { ensureCerts, localHostname, type TlsMaterial } from "./tls/certs.js";
 import { createDualListener, type DualListener, listen } from "./tls/listen.js";
 import { registerTrust } from "./tls/trust.js";
 import { AttachmentStore } from "./ui/attachments.js";
@@ -50,6 +54,7 @@ import { registerUi, uiGuard } from "./ui/index.js";
 import { LabelStore } from "./ui/labels.js";
 import { LimitsStore } from "./ui/limits.js";
 import { MarkStore } from "./ui/marks.js";
+import { registerSpacesheepUi } from "./ui/spacesheep.js";
 import { Broadcast } from "./ui/stream.js";
 import { ViewerRegistry } from "./ui/viewers.js";
 
@@ -81,6 +86,10 @@ export interface AppOptions {
   tlsHostname?: string;
   /** Loopback-only test door for the conformance runner. */
   testDoor?: boolean;
+  /** More names this machine is reached by from itself (`--allow-host`): its hostname, an
+   *  alias in /etc/hosts, a name only this network's DNS knows. localhost, its addresses,
+   *  the `.local` name, the TLS name and `--rp-id` need no telling (http/guard.ts rule 2). */
+  allowHosts?: string[];
   /** Where the built web app is; default: dist/web beside the bundle. */
   webDir?: string;
   /** Stop the console banner (tests). */
@@ -128,9 +137,10 @@ export interface App {
   store: Store;
   control: Control;
   port: number;
-  /** http://127.0.0.1:<port> */
+  /** http://127.0.0.1:<port>, or the address --host bound when it is not a wildcard. */
   url: string;
-  /** http://<lan ip>:<port> for every LAN address, most likely first. */
+  /** http://<lan ip>:<port> for every LAN address the listener answers on, most likely
+   *  first: all of them on a wildcard bind, the one bound address otherwise, none on loopback. */
   lanUrls: string[];
   stateDir: string;
   config: () => GuiConfig;
@@ -171,10 +181,44 @@ function remoteInfo(url: string, sinkToken: string): RemoteInfo {
   };
 }
 
+/** The addresses `server.address()` gives for a wildcard bind: every address of its family,
+ *  or every IPv4 address for the IPv4-mapped ::ffff:0.0.0.0. */
+const WILDCARDS = new Set(["0.0.0.0", "::", "::ffff:0.0.0.0"]);
+
 export async function createApp(opts: AppOptions = {}): Promise<App> {
   const startedAt = new Date().toISOString();
   const stateDir = opts.stateDir ?? defaultStateDir();
   let config = readGuiConfig(stateDir);
+  // `plugin|skin|view enable|disable` (server/cli.ts) write config.json while this runs.
+  // The two lists they change are taken from the file each time they are read and before
+  // every write here, so Reload plugins sees the CLI's change and no write of ours drops it.
+  // The rest, the secrets above all, stays this process's own. A file that is gone, does
+  // not parse, or holds other secrets than ours changes nothing here: the CLI rebuilds a
+  // file it cannot parse with new secrets and only its own key, and those cut-down lists
+  // are not an edit of ours (the re-read never writes; the next write of ours replaces
+  // it). The CLI takes no lock, so two writes at the same instant are still last-writer-wins.
+  const live = (): GuiConfig => {
+    let disk: unknown;
+    try {
+      disk = JSON.parse(readFileSync(path.join(stateDir, "config.json"), "utf8").replace(/^\uFEFF/, ""));
+    } catch {
+      return config;
+    }
+    if (!disk || typeof disk !== "object" || Array.isArray(disk)) return config;
+    const list = (v: unknown): string[] | undefined =>
+      Array.isArray(v) ? v.filter((d): d is string => typeof d === "string") : undefined;
+    const { disabled, enabled, sinkToken, uiKey } = disk as Record<string, unknown>;
+    if (sinkToken !== config.sinkToken || uiKey !== config.uiKey) return config;
+    const next: GuiConfig = { ...config };
+    const off = list(disabled);
+    const on = list(enabled);
+    if (off) next.disabled = off;
+    else delete next.disabled;
+    if (on) next.enabled = on;
+    else delete next.enabled;
+    config = next;
+    return config;
+  };
   const store = new Store(stateDir, { tickMs: opts.tickMs, keepDays: opts.keepDays });
   // Each account's usage limits follow the store from its first event (the outbox's
   // first read, the demo's) on.
@@ -187,7 +231,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     : null;
   // --public-url: given → remembered; null → forgotten; undefined → the remembered one.
   if (opts.publicUrl !== undefined)
-    config = setPublicUrl(stateDir, config, opts.publicUrl === null ? undefined : normalizePublicUrl(opts.publicUrl));
+    config = setPublicUrl(stateDir, live(), opts.publicUrl === null ? undefined : normalizePublicUrl(opts.publicUrl));
   let publicUrl: string | undefined = config.publicUrl ? normalizePublicUrl(config.publicUrl) : undefined;
   const publicHost = (): string | undefined => (publicUrl ? new URL(publicUrl).hostname : undefined);
   const chooseRpId = (): string => opts.rpId ?? publicHost() ?? tls?.hostname ?? "localhost";
@@ -202,6 +246,21 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     return out;
   };
   router.trustProxy = () => publicUrl !== undefined;
+  // What http/guard.ts asks of every request: the names this server goes by on this
+  // machine besides localhost and its addresses (the `.local` name the setup page shows,
+  // the TLS name, --rp-id, --allow-host), and the public url as an origin that is this
+  // server. The public url's host is not among the names, also when --rp-id is that
+  // host: it is the proxy's, and a request under it is answered when the proxy forwarded it. Read on each request: the
+  // setup page changes them.
+  router.guard = {
+    hosts: () => [
+      localHostname(opts.tlsHostname),
+      tls?.hostname,
+      opts.rpId && opts.rpId === publicHost() ? undefined : opts.rpId,
+      ...(opts.allowHosts ?? []),
+    ],
+    origins: () => [publicUrl],
+  };
   const uiKey = (): string => config.uiKey;
   const uiAuth = uiAuthFor(uiKey);
 
@@ -212,6 +271,28 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     testDoor: opts.testDoor ?? false,
     uiAuth,
     sessionExists: (key) => store.sessionExists(key),
+    origins,
+    uiKey,
+    // A send for a machine paired on spacesheep: the signed body to its jobs route, as
+    // this account (the gui key), which verifies it against the machine's keys.
+    remoteSend: async (m, body) => {
+      const link = config.spacesheep;
+      if (!link || m.remote?.origin !== link.origin)
+        return { status: 503, json: { code: "no_relay", error: "Not connected to spacesheep any more." } };
+      const res = await fetch(`${link.origin}/api/machines/${encodeURIComponent(m.id)}/jobs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${link.key}`,
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      // The key revoked there: the source says so now, not at its next poll (ui.ts forwardSend).
+      if (res.status === 401 && json.code !== "unlock") spacesheep?.unauthorized();
+      return { status: res.status, json };
+    },
   });
 
   registerReceiver(router, { store, sinkToken: () => config.sinkToken, control });
@@ -219,6 +300,34 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // A pooled account's windows ride on the hello too (DESIGN §2.3): the limits follow the
   // machine frames for them, newest wins against the events'.
   limits.followControl(control);
+
+  // A spacesheep account as the backend (docs/rfcs/08): the relay feeds the store like
+  // the outbox does; on by the link in config, started again when a connect lands.
+  let spacesheep: SpacesheepSource | null = null;
+  const startSpacesheep = (link: SpacesheepLink): void => {
+    spacesheep?.stop();
+    // The sends this account carried are followed from now; another account's can't be.
+    control.remote.account({ origin: link.origin, email: link.email });
+    try {
+      spacesheep = startSpacesheepSource(store, {
+        ...link,
+        // The machines paired there become rows here (control.remote), their sends settled
+        // by the relay's word on spacesheep's jobs.
+        onMachines: (list, origin, rpId) => control.remote.upsert(list as never, { via: "spacesheep", origin, rpId }),
+        pendingJobs: () => control.remote.pending(),
+        jobsCadence: () => control.remote.cadence(),
+        onEvents: (keys) => control.remote.eventsSeen(keys),
+        onUnauthorized: () => control.remote.revoked(true),
+        onJobs: (jobs, through, serverNow) => control.remote.applyJobs(jobs, through, serverNow),
+      });
+    } catch (e) {
+      if (!opts.quiet) process.stderr.write(`[sessionpipe-gui] spacesheep: ${(e as Error).message}\n`);
+    }
+  };
+  control.remote.onKick(() => spacesheep?.kickJobs());
+  if (config.spacesheep) startSpacesheep(config.spacesheep);
+  // No link: what spacesheep carried before can't be followed (kept from before a restart).
+  else control.remote.account(null);
 
   let outbox: OutboxSource | null = null;
   if (opts.outbox !== false) {
@@ -257,12 +366,26 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   let replay: Runner | null = null;
   if (opts.replay) replay = startReplay(store, opts.replay, { speed: opts.speed ?? 0, rebase: true, maxGapMs: 10_000 });
 
-  const lanUrls = (): string[] => lanAddresses().map((ip) => `http://${ip}:${port}`);
+  // What --host bound. A wildcard (the default 0.0.0.0, ::, or ::ffff:0.0.0.0) answers on every LAN
+  // address; one address answers there alone, so a loopback bind offers no LAN URL and
+  // the sink command names the loopback address that was bound (::1 refuses 127.0.0.1).
+  // Null until the listener is bound, and for a wildcard.
+  // An address with a zone id (fe80::1%en0) has no URL form browsers or fetch accept, so
+  // it is never put in a URL; the fallback stays 127.0.0.1, as before.
+  let bound: string | null = null;
+  const urlHost = (ip: string): string => (ip.includes(":") ? `[${ip}]` : ip);
+  const usable = (): string | null => (bound !== null && !bound.includes("%") ? bound : null);
+  const selfUrl = (): string => `http://${urlHost(usable() ?? "127.0.0.1")}:${port}`;
+  const lanUrls = (): string[] => {
+    if (bound === null) return lanAddresses().map((ip) => `http://${ip}:${port}`);
+    const ip = usable();
+    return ip === null || isLoopback(ip) ? [] : [`http://${urlHost(ip)}:${port}`];
+  };
   const httpsUrl = (): string | undefined => (tls ? `https://${tls.hostname}:${port}` : undefined);
   const attachments = AttachmentStore.for(stateDir);
   const info = (): Info => {
     const lan = lanUrls();
-    const base = lan[0] ?? `http://127.0.0.1:${port}`;
+    const base = lan[0] ?? selfUrl();
     const stats = store.stats();
     const ob = outbox?.status();
     return {
@@ -283,6 +406,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
         http: true,
         outbox: ob ? { path: ob.path, sessions: ob.sessions, enabled: true, events: ob.events } : null,
         demo: demo !== null,
+        spacesheep: spacesheep?.status() ?? null,
       },
       storage: { dir: stateDir, bytes: stats.storageBytes + attachments.bytes(), attachments: attachments.bytes() },
       wellKnown: wellKnown(control),
@@ -312,12 +436,11 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   const viewers = new ViewerRegistry();
   const bundled = bundledDirs(opts.bundledDir);
-  const disabled = (): readonly string[] => config.disabled ?? [];
+  const disabled = (): readonly string[] => live().disabled ?? [];
   const plugins = new PluginHost({
     registry: new PluginRegistry(opts.pluginsDir ?? path.join(stateDir, "plugins"), {
       bundledDir: bundled.plugin,
-      disabled,
-      enabled: () => config.enabled ?? [],
+      lists: live,
     }),
     settings: new PluginSettings(path.join(stateDir, "plugins-settings")),
     storageDir: path.join(stateDir, "plugins-storage"),
@@ -325,7 +448,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     control,
     info,
     setEnabled: (id, on) => {
-      config = setEnabled(stateDir, config, `plugin:${id}`, on);
+      config = setEnabled(stateDir, live(), `plugin:${id}`, on);
     },
   });
   // The person's labels follow the store: a forgotten session loses its label.
@@ -348,7 +471,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     viewers,
     plugins,
     rotateSinkToken: () => {
-      config = rotateSinkToken(stateDir, config);
+      config = rotateSinkToken(stateDir, live());
       return config.sinkToken;
     },
     demo: { on: () => demo !== null, set: setDemo },
@@ -364,7 +487,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     home: opts.searchHome ?? path.join(stateDir, "search", "no-home"),
     history: () => config.searchHistory !== false,
     setHistory: (on) => {
-      config = setSearchHistory(stateDir, config, on);
+      config = setSearchHistory(stateDir, live(), on);
     },
     broadcast: (m) => broadcast.emit(m),
     port: () => port,
@@ -380,6 +503,28 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   // acks and a one-second clock, signed only by a browser; their frames ride the broadcast.
   const orchestrate = createOrchestrate({ stateDir, control, broadcast: (m) => broadcast.emit(m) });
   registerOrchestrate(router, orchestrate, uiGuard(uiKey), { testDoor: opts.testDoor ?? false });
+  registerSpacesheepUi(
+    router,
+    {
+      link: () => config.spacesheep,
+      status: () => spacesheep?.status() ?? null,
+      connect: (link) => {
+        config = setSpacesheep(stateDir, live(), link);
+        startSpacesheep(link);
+        broadcast.emit({ kind: "info" } as never);
+      },
+      disconnect: () => {
+        spacesheep?.stop();
+        spacesheep = null;
+        config = setSpacesheep(stateDir, live(), undefined);
+        control.remote.drop("spacesheep");
+        control.remote.account(null);
+      },
+      deviceName: () => `${os.hostname().replace(/\.(local|lan|home)$/i, "")}`,
+      version: () => packageVersion(),
+    },
+    uiGuard(uiKey),
+  );
   const themes = new ThemeRegistry(opts.themesDir ?? path.join(stateDir, "themes"), {
     bundledDir: bundled.view,
     disabled,
@@ -390,7 +535,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     stateDir: path.join(stateDir, "themes-state"),
     onState: (id, etag) => broadcast.emit({ kind: "viewState", id, etag }),
     setDisabled: (id, off) => {
-      config = setDisabled(stateDir, config, `view:${id}`, off);
+      config = setDisabled(stateDir, live(), `view:${id}`, off);
     },
   });
   registerPlugins(router, { host: plugins, uiAuth, demo: opts.demo === true });
@@ -434,7 +579,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     listener.setHttps(httpsServer);
     tls = m;
     rpId = chooseRpId();
-    config = setTlsPreference(stateDir, config, true);
+    config = setTlsPreference(stateDir, live(), true);
     return m;
   };
   /** The setup page's "Use https://…" and "Stop using it": at runtime, remembered. */
@@ -442,7 +587,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     const next = url ? normalizePublicUrl(url) : undefined;
     publicUrl = next;
     rpId = chooseRpId();
-    config = setPublicUrl(stateDir, config, next);
+    config = setPublicUrl(stateDir, live(), next);
   };
 
   const tailscale = createTailscaleProbe(execDefault, {
@@ -480,6 +625,14 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
 
   const host = opts.host ?? "0.0.0.0";
   port = await listen(listener, opts.port ?? DEFAULT_PORT, host);
+  const addr = listener.address();
+  // Node reports 0 as 0.0.0.0 and ::0 as ::. The IPv4-mapped wildcard (::ffff:0.0.0.0, or
+  // ::ffff:0:0) comes back as :: on macOS but as ::ffff:0.0.0.0 on Linux, and answers on
+  // every IPv4 address there too.
+  // An IPv4-mapped address (::ffff:127.0.0.1) answers on its IPv4 address too, so URLs name
+  // that form: the one main always gave, and the one the desktop's loopback check knows.
+  if (typeof addr === "object" && addr && !WILDCARDS.has(addr.address))
+    bound = addr.address.replace(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i, "$1");
   // Plugins start once the port is known: their api names the URLs a message can carry.
   // Plugins can reach out of the machine (a Telegram bot, say). Demo mode exists to look
   // at the UI with synthetic sessions, so it never activates them: a throwaway server
@@ -509,12 +662,12 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     store,
     control,
     port,
-    url: `http://127.0.0.1:${port}`,
+    url: selfUrl(),
     get lanUrls() {
       return lanUrls();
     },
     stateDir,
-    config: () => config,
+    config: () => live(),
     info,
     outbox,
     themes,
@@ -526,6 +679,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       await plugins.stop();
       setup.pairer.close();
       outbox?.stop();
+      spacesheep?.stop();
       setDemo(false);
       replay?.stop();
       orchestrate.close();

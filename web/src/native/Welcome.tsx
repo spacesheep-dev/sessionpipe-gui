@@ -27,8 +27,10 @@ export function showWelcome(info: ShellInfo): void {
 
 const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** The Mac's welcome (a phone never reaches it: Onboarding.tsx is its first run). */
-export function Welcome(_: { info: ShellInfo }) {
+/** The desktop app's welcome (a phone never reaches it: Onboarding.tsx is its first run). */
+export function Welcome({ info }: { info: ShellInfo }) {
+  // What this device is, in the welcome's words: a Windows or Linux PC is no Mac.
+  const here = info.platform === "macos" ? "Mac" : "computer";
   const [start, setStart] = useState<StartState>({ kind: "idle" });
   const [connecting, setConnecting] = useState(false);
   const [address, setAddress] = useState("");
@@ -82,7 +84,7 @@ export function Welcome(_: { info: ShellInfo }) {
           <ul className="form-list welcome-list">
             <li className="form-row" data-welcome="start">
               <span className="form-row-text">
-                <span className="form-label">This Mac</span>
+                <span className="form-label">This {here}</span>
                 <span className="form-caption" aria-live="polite">
                   {start.kind === "starting"
                     ? start.message
@@ -90,7 +92,7 @@ export function Welcome(_: { info: ShellInfo }) {
                       ? `It didn't start: ${start.message}`
                       : start.kind === "needsNode"
                         ? "sessionpipe needs Node 20 or later. Install it from nodejs.org, then run:"
-                        : "Runs sessionpipe in the background, so this Mac's sessions show up here."}
+                        : `Runs sessionpipe in the background, so this ${here}'s sessions show up here.`}
                 </span>
               </span>
               <button
@@ -164,7 +166,7 @@ export function Welcome(_: { info: ShellInfo }) {
             <li className="form-row" data-welcome="demo">
               <span className="form-row-text">
                 <span className="form-label">Just looking</span>
-                <span className="form-caption">A board of made-up sessions. Nothing leaves this Mac.</span>
+                <span className="form-caption">A board of made-up sessions. Nothing leaves this {here}.</span>
               </span>
               <button type="button" className="btn" onClick={() => location.assign("/?mock=1")}>
                 Try the demo

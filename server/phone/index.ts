@@ -24,7 +24,7 @@ import {
   UI_KEY_PARAM,
 } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
-import type { Ctx, Handler, Reply, Router } from "../http/router.js";
+import { type Ctx, type Handler, proxyEntry, type Reply, type Router } from "../http/router.js";
 import { type Exec, execDefault, thisMachineOnly } from "../setup/local.js";
 import { findTailscale, serveTailscale, TailscaleError, type TailscaleProbe } from "../setup/tailscale.js";
 
@@ -65,8 +65,7 @@ export function lanPhoneUrl(info: Info): string {
 export function arrivedOverHttps(ctx: Ctx): boolean {
   if ((ctx.req.socket as TLSSocket).encrypted === true) return true;
   if (!ctx.remote.forwarded) return false;
-  const v = ctx.req.headers["x-forwarded-proto"];
-  return (Array.isArray(v) ? v[0] : v)?.split(",")[0]?.trim() === "https";
+  return proxyEntry(ctx.req.headers["x-forwarded-proto"]) === "https";
 }
 
 export function registerPhone(router: Router, deps: PhoneDeps): void {

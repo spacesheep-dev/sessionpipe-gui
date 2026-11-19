@@ -1,0 +1,31 @@
+{
+  "name": "prompt-with-pool-action",
+  "description": "Only a pool command carries pool fields.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"uNvLS6dB4ZykyqjUETv8Jw\",\"iat\":1790800000000,\"pool_action\":\"off\"}",
+      "csig": "9-gJCkzgNofUnp5GQipka2A9ex0CeSxuOxz9cx6KxE8ljMVWAK1Qv8hrDfAN1oiLQJBdhISqAXAZBOh14fPMSw",
+      "grant": {
+        "cred": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiaGVBUjh4c21ScjM0MmJ5QXM2RUdtMjFWcU5xX2ctSWgycl9ReHR1VExnWSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIQCcFrmgK2T0JPrgfbADH24B_GTissdsWGrY6y_Za-uMVQIgCcg1TvMLHFU-KIlg_gUp-SzaJb-AlYjqj6xK3PGpFSA",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3LRphQ8Tu3hwfO3l10QT-ymYuFMqIXM4NZ3qYUa8uuQcQGT1R-m4le19ttipt0maUgg6UC-j6TRO821MsozEBA\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2U3x1j5ZGN8EVblGBeu875Wx5uTrMdyAsI4SehypmilhtnYsCBuPwkDLH7UH1L0U6C11cpV-G2dJkzNuIp29XQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "name": "control",
+  "spec": "CONTROL.md, HTTP.md \u00a73",
+  "capability": "control",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "m_conformance{run}0000",
+        "message": {
+          "kind": "prompt",
+          "session": "claude-code:00000000-0000-4000-8000-{run12}",
+          "text": "conformance ping",
+          "expires_in_s": 60
+        }
+      }
+    },
+    {
+      "poll": {
+        "machine": "m_conformance{run}0000",
+        "wait": 1
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "messages": [
+            {
+              "id": "*",
+              "cmd": "*",
+              "at": "*",
+              "expires_at": "*"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "ack": {
+        "outcome": "delivered",
+        "mode": "waiter"
+      },
+      "expect": {
+        "status": 202
+      }
+    },
+    {
+      "poll": {
+        "machine": "m_conformance{run}0000",
+        "wait": 1
+      },
+      "expect": {
+        "status": 204
+      }
+    }
+  ]
+}

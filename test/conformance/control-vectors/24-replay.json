@@ -1,0 +1,34 @@
+{
+  "name": "replay",
+  "description": "The nonce was seen before on this machine.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"prompt\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"CVUUKKixrh8mBEaapBz5Dg\",\"iat\":1790800000000}",
+      "csig": "JU4FHUYKn5jY2U6eX1TEwL-3vQ1jFhhwUJnYAUhJeyUCskfdGqGNk2vpgf2uNqotKPffMGDFwhTwY3NAGh7EGg",
+      "grant": {
+        "cred": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiUzY3M094OWFJLV9xa3BYT2lXX2VSbVBhLTVzTUIwVGMwbV9vUDc1dDZpNCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIDUqfUsaTWITiD8asDmMUw_gRCXq0HdOq_oC3OcHrb2VAiEA0zGmTWfRKy9URvLdI-1Kk-UlB_mr1NCvILk5e8JkDZc",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAExzaXYZTe_WEhPIqiUUsYjH5ezr9uDxy5snmDVGErl1rnfzIHfdvsQ7MD6ohNFjrzaR30jeSvPXCxnB_p7LvMZQ\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6-lmO3JqCG-_5N3JNsB8iUax3_uanPDsgI59MfrVdaS4NVnpXNvOdLp09PSFZ9nFlyG_iFwKgGy13d7vNrzvtQ"
+      }
+    ],
+    "now": 1790800060000,
+    "seen_nonces": [
+      "CVUUKKixrh8mBEaapBz5Dg"
+    ]
+  },
+  "expect": {
+    "ok": false,
+    "code": "replay"
+  }
+}

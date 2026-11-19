@@ -6,6 +6,811 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-11-18
+
+Pictures from a session's message box reach the agent as files in the session's own
+folder, at every permission level, and the receiver is stricter about which requests it
+answers: a browser on its own pages, a proxy's visitor by the proxy's own word, and a
+pairing link that carries the board's key only for a pairing the sink token started.
+
+### Changed
+
+- **A picture sent from a session's message box reaches the agent as a file in the
+  session's own folder.** Until now the message named it: by a path in the GUI's own
+  folder, which a session at Safe could not read and one at Accept edits asked about, or,
+  for a session on another computer, by a link to this board, which often could not be
+  opened from there. A computer whose sessionpipe is 0.10 or later
+  now fetches each picture itself and saves it under `.sessionpipe/files` in the session's
+  folder, where the agent reads it at every permission level. The message holds your words
+  and nothing else. A picture may be 25 MB (it was 8), six to a
+  message and 50 MB together; two upload at a time and the rest wait; a pasted screenshot
+  goes under a plain name (`image.png`, `image-2.png`); and a picture with no words is sent
+  as "Look at the attached picture." A file that is not the picture its type says is
+  refused in words, and so is one that did not arrive whole. An older sessionpipe on the
+  computer the GUI runs on still gets the path.
+- **Where a picture cannot be sent, the message box says so.** For a computer whose
+  sessionpipe is older than 0.10 and that is not the one the GUI runs on, and for one
+  reached through spacesheep, there is no paperclip, and a picture pasted or dropped is
+  answered under the field ("Pictures can't be sent to studio-mac: its sessionpipe is older
+  than 0.10. Run `sessionpipe update` there.") where it used to vanish or go as a link.
+  A file dropped on the message box that is no picture stays out of the way: the browser
+  no longer opens it in the page's place.
+- **A view's `control.attach` answers the board's own path to the image.** `url` is
+  `/attachments/<id>.<ext>`, with no address: it shows the image on this board
+  and opens nothing from another computer. A view that sends an image names its `path`.
+- **A pairing link carries the board's key only when the sink token started the pairing.**
+  A pairing started with no token (`sessionpipe connect`, or `sessionpipe control pair` on
+  a machine that has no sink for this GUI) gets a link with its code alone: open it in a
+  browser where the board is already open, or approve it on the Machines page, which lists
+  every pairing that waits. A pairing the sink token started (Setup's "Pair this machine",
+  a machine that has a sink for this GUI, `--token`) gets the link it always did.
+- **Through the proxy of `--public-url`, every request is a visitor's.** The visitor's
+  address is the last one in `X-Forwarded-For`, the one the proxy itself wrote; what
+  stands before it is not read. A request that came through the proxy needs the UI key
+  and is not this machine, whatever address the proxy names for it, and whether the proxy
+  reaches the port on `localhost` or on one of the machine's own addresses. A request
+  marked with `Forwarded`, `X-Real-IP`, `X-Forwarded-Host` or `-Proto` and no
+  `X-Forwarded-For` counts as one too. On the machine that runs the GUI, Setup's actions
+  and the search index's are done at `http://localhost:7373`, not at the proxy's address,
+  and a browser there that a proxy reported as loopback is asked for the key once (the
+  banner's "anywhere" link carries it).
+- **The receiver answers a browser on its own pages, and on its own machine under its own
+  names.** Before any route is reached, a request the browser marks as coming from another
+  origin is refused (403 `cross_site`); a link from another site to a page of the board
+  still opens, and pages are sent with `frame-ancestors 'self'`, so the board is not shown
+  inside another site's frame (an editor's built-in preview is one). A request made on the
+  machine that runs the GUI must name it by a name the GUI hands out or was given (403
+  `unknown_host`, with a page that says where to go): `localhost`, any address and the
+  `<name>.local` secure address are known, and `--allow-host NAME` adds another, such as
+  the machine's hostname or an `/etc/hosts` alias; `http://0.0.0.0:7373` is not one, open
+  `http://localhost:7373`. The public url is answered through its proxy. This covers every
+  route, uploads and deletes among them. Sinks, the daemon, the desktop and phone apps and
+  the CLI send none of what is refused and work as before. A reverse proxy on this machine
+  is answered once `--public-url` names its address and it sends `X-Forwarded-For`; one
+  over plain http must pass on the `Host` it was asked for.
+
+## [0.8.4] - 2026-11-17
+
+The iPhone app on a spacesheep account, refined: every screen agrees on whether the
+phone can send, a prompt can be answered for as long as it waits, and an answer shows as
+sent everywhere; long messages open whole, the board holds still while an account
+catches up, and connecting says what happened in one line.
+
+### Changed
+
+- **A list row offers Allow and Deny only beside a request it shows whole.** The Inbox
+  cut a command to one line, on a phone often before its target, with a one-tap Allow under
+  it. A short, whole request now wraps beside Deny and Allow; anything else, a plan
+  included, takes at most two lines and offers Open, which opens the session where it is
+  shown whole. The row's menu and the a and d keys answer only a request shown whole, and
+  the keys never answer a session open beside the Inbox unless the focus is in it; a board
+  row's menu answers only one its line does not cut. Every shell prompt reads "Allow Bash
+  to run:" (its own shell's name in place of Bash) with the command under it, at every
+  size, and no "?" is left alone on a line after a command that wrapped. A command of one
+  line is shown whole however it wraps, also on a phone, where it was cut at three lines.
+  A Claude Code command over 120 characters, which reaches the app cut with no mark, is
+  shown whole where the session sends its calls' input, and otherwise ends in "…".
+- **A session's subagents open under it on the board only while one of them runs.** A
+  tree whose agents had gone quiet opened by itself; it stays folded now, and the row says
+  only how many run. On a phone an open tree lists the agents at work and one row, "Show n
+  finished", for the rest (a search lists the finished ones it found). A tap on the row's
+  leading 44 points, its glyph included, folds the tree; the title opens the session. On a
+  touch screen a tree's rows are 44 points tall, and no tree hides one agent behind "Show
+  1 more".
+- **On a touch screen, Return in a session's message field starts a new line.** The
+  iPhone's keyboard has no Shift+Return, so a message could not be more than one line, and
+  a stray Return sent half of one. The ↑ button sends now, as in Messages, and ⌘Return
+  (Ctrl+Return) from a keyboard; an iPad with a keyboard attached works the same way. A
+  computer keeps Return to send and Shift+Return for a new line, however narrow its window.
+
+### Fixed
+
+- **A session's tools line says "Asking to run Bash" while the agent waits for your
+  answer, not "Running Bash".** Claude Code asks before a tool runs, yet the line spun and
+  the tool's time kept counting under the Allow it waited for, twelve minutes on. A tool
+  spins and counts now only while its session works. While the session asks, the line
+  reads "Asking to run" and the tool, with the needs-you dot, and once your answer is out,
+  "Running" again; when nothing has come for ten minutes, "Bash · quiet for 12 m", with the
+  quiet ring; on a computer that is offline, its ring stands still and it shows no time.
+  A row that shows no time gives its command the room the time took. A subagent's tools
+  follow the subagent; a stopped turn stops them, unless the subagent works on in the
+  background. "· 2 more tools", which read as tools still to come, is gone, and the words
+  start at the same place whether a tool runs or the turn is over.
+- **A question from Claude Code reads as the question, not as "Allow AskUserQuestion?".**
+  Its row showed only the tool's name, and its card offered Allow and Deny, neither of
+  which can carry the answer. The card now shows the question and its options to read,
+  and says to answer it on its computer; the board and the Inbox show the question after
+  "Question". The Inbox lists it with the prompts waiting in a terminal and treats it as
+  one: the Inbox badge doesn't count it, a browser tab raises no notification for it, and
+  its card, its rows, their menus, the palette, the banners in the app and, on a spacesheep
+  account, the iPhone's notification offer no answer.
+- **An answer to a prompt shows as sent on every screen, in one line: "Allowed · waiting
+  for" its computer.** Only the screen it was pressed on knew it went: the Inbox, the
+  session's page and a reload offered Allow and Deny again, and a second tap cost a Face ID
+  and came back "already answered". The prompt's card keeps its question and says which
+  answer went, and what it waits for, in place of the buttons, the note and the row under
+  the field; its glyph turns while it waits. The Inbox row says the same, and the badge and
+  the count drop the moment the answer goes. An answer the computer refuses gives Allow and
+  Deny back, with why, in the Inbox and on a banner only on that prompt's own row. A
+  disabled Allow no longer looks like the one pressed, and VoiceOver hears why Allow, Deny
+  and Start are off.
+- **On a phone, the link under the message field reads as an action and takes a finger's
+  tap.** "Approve this iPhone", "Unlock now", "Retry now" and "Open on spacesheep.dev" were
+  the grey of the sentence beside them, on a line 18 points tall. They are the orange of
+  the app's other actions now, bolder, and 44 points tall to a finger, without taking a tap
+  from the field above or from Ask another agent… beside them; the line itself is a size
+  larger. New session's Discard draft is orange and 44 points tall too, and Cancel still
+  keeps the draft. VoiceOver and Voice Control name the field by the words it shows
+  ("Message this session…").
+- **In the phone app nothing shows through the tab bar, the navigation bar or the session's
+  control strip.** The bars were meant to blur what ran under them and never did: rows read
+  sharp through the tab labels and into the home-indicator strip, and the transcript
+  through the session's title and the command waiting for Allow or Deny. The bars are
+  solid now.
+- **Connecting a spacesheep account on the iPhone: "Use it" is the answer the question
+  offers first.** Back from Safari, the question put Cancel first, and one tap on it threw
+  the connect away and left a key behind on spacesheep. It now names the account in its
+  title ("Use you@example.com?") and where it is signed in, and offers Use it first.
+  Cancel stays first where a yes would remove another account here (the question says
+  which), and Disconnect's button is red.
+- **Coming back late after confirming is no longer called "Not confirmed in time".** The
+  app asks spacesheep once more after the code's time and takes its word: an approval it
+  still holds is collected, and one it dropped is said, with the key left there to revoke.
+- **Each way a connect can end says what happened in a title and one line.** "Not now" on
+  spacesheep reads as the person's own choice, not a refusal; another open question,
+  "Time ran out" and "Couldn't connect" have titles of their own; and where a key was left
+  on spacesheep, the screen says to revoke it once, with "Open API keys" to do it.
+- **A busy session's row shows the newest words of its reply, and no longer says "waiting
+  for 25703 events" on a spacesheep account.** spacesheep relays a session thinned on
+  purpose, so the numbers it skips are events that were never sent; the row and the
+  session's page read them as missing, and the count only grew. A row's flag now takes at
+  most part of the line instead of pushing the reply out, only a slow tool or a loop is said
+  there (compacting is on the session's page), and a reply still being written starts at
+  its newest sentence, not at a word cut 300 characters back.
+- **A permission prompt is no longer greyed out as "raised before this machine was
+  paired".** On a spacesheep account almost every prompt older than a minute said so, with
+  Allow and Deny off, though the computer was paired long ago. Allow and Deny now stay for
+  as long as Claude Code waits for the answer, two minutes. After that the prompt says "Too
+  late to answer from here; answer it on" its computer, with no buttons, moves to Waiting
+  in a terminal in the Inbox, and no longer counts on the Inbox badge. One that was gone
+  already reads "already answered, or timed out". A line that stands on its own reads as a
+  sentence, whatever the computer's name starts with, and a name such as
+  Misha-Petrov-laptop no longer breaks at its hyphens.
+- **Once the iPhone is approved on a spacesheep account, every screen agrees that it can
+  send.** Machines kept offering "Approve this iPhone", and New session and the composer
+  said a computer did not trust the phone, until the app was opened again: the app had
+  read its own key before the ask made it, and never read it again. It reads it again
+  after the ask, when the approval is first seen and when the app comes back to the
+  front; and on an account, what spacesheep says about the phone decides on every screen.
+- **A phone approved before the app saw it wait is no longer said to wait an hour.**
+  Settings › App said "This iPhone can send by" an hour from then when, say, the app's
+  storage had been cleared. It says "Can send" now; if spacesheep does hold a send back,
+  its answer says until when.
+- **On a spacesheep account the board holds still while the app reads the account's
+  history, and says "Catching up…".** The iPhone app drew the board from part of the
+  history every second and a half, oldest first, so for its first minute the same sessions
+  read as Done, then as needing you (with a badge), then as Working. The board on screen
+  stays as it was, or its loading rows on a first connect, and changes once, when the
+  history is in. Nothing it hands over for notifications comes from the part read so far.
+  Meanwhile a prompt it kept has Allow and Deny off, and nothing says to pair a computer
+  that is paired.
+- **Long messages and long replies are no longer cut at 400 characters.** A session
+  opened again showed a message you sent cut mid-word, with no sign of it, and every reply
+  over 400 characters as a stub that needed its own "Load full text". Both now arrive whole
+  up to 2,048 characters, the newest reply always whole, and a message sent from this
+  device as it was signed. A long message folds to eight lines under "Show all"; an older
+  reply longer than that ends in "…" with "Show more".
+- **Machines on a spacesheep account says in one row whether the iPhone can send, and calls
+  a computer offline when the board does.** Each computer listed its devices by key ids
+  ("Kq3mZ7wP, wDOATr0O (this one)") with an "Approve this iPhone" link of its own, and read
+  "online" while its sessionpipe was down, as long as a session there still sent. One row
+  above the computers now says where the iPhone stands ("This iPhone can send from 5:26
+  AM") and opens Approve this iPhone; each computer has Status and Sessions on a line each,
+  a line only where something is so (an old sessionpipe, a computer that has not approved
+  the iPhone, inherit mode), and the rest behind Details. On every Machines page a paired
+  machine is online only while its sessionpipe is.
+- **An iPhone that isn't approved offers Approve this iPhone instead of an Allow that would
+  only be refused.** Allow, Deny, Send and Stop asked for Face ID twice, then failed with
+  words about a day grant. A prompt now says "This iPhone can't answer yet." with Approve
+  this iPhone in their place, the field is off, and the Inbox says it once, in a panel above
+  Notifications, as it says the hour and any other reason Allow and Deny are off; the Mac app
+  does the same where a computer doesn't trust the Mac, on that computer's prompts only (in
+  the Inbox, on their rows), while another computer's keep Allow and Deny. Where a computer
+  has not added an approved phone's key, Allow and Deny stay, off, the prompt says so once,
+  with Approve this iPhone, and that page says to add it on spacesheep's Devices; a refused
+  send takes one Face ID and says why.
+- **In the app, nothing warns of Face ID ahead of time, and a cancel is not an error.**
+  Every session said "The first send today asks for your passkey. Unlock now" on the
+  iPhone, and New session and Ask another agent each had a note of their own. Now the first
+  Allow, Send, Start or Ask of the day just brings Face ID up (Touch ID on the Mac). While
+  it is up the line says "Confirm with Face ID…", never Touch ID on the iPhone. A
+  cancelled Face ID or passkey leaves everything as it was, typed words included, with no
+  "not sent". In a browser a cancelled Unlock now brings the line back, and a refused one is
+  said until a send goes. Every refusal reads "Not sent: …", in the Inbox too.
+- **In the hour after the iPhone is approved, Allow, Deny, Send and Stop wait instead of
+  asking for Face ID only to be refused.** The app held them back only when it had seen the
+  approval come within 20 seconds, which a trip to Safari to approve it never is, so the
+  first tap got spacesheep's three-sentence refusal. An approval seen within ten minutes now
+  counts, and a send that is still refused says "Not sent. This iPhone can send from 5:26
+  AM." The hour is said once: with a prompt open, on its card with Open on spacesheep.dev
+  (on the phone the card stands alone, and the link takes a line of its own), else under
+  the field. The Inbox says it as it is, without "Allow and Deny are off:" in front. Every
+  screen says it in the same sentence, full stop included, and "by 5:26 AM at the latest"
+  where only the latest time is known.
+- **New session and Ask another agent offer nothing that would only be refused.** On an
+  iPhone that isn't approved they were a whole form with a faded Start and a grey footnote;
+  now each says "This iPhone isn't approved yet" with Approve this iPhone, and a message
+  written earlier is still there once it is. In the hour after approval the form stays and
+  Start waits under "This iPhone can send from 5:26 AM." instead of costing a Face ID, and
+  once the hour is over no refusal from it is left on the sheet. A computer that hasn't
+  added the iPhone is listed, off, as "not approved", and New session opens on one that can
+  start. When all is well the phone's sheet says nothing under the form, the Permission row
+  stays and reads "Safe" in the ink of the other values, and an agent's allowance shows
+  under its name only at 20% or less, never as a bare "Reset".
+
+## [0.8.3] - 2026-11-16
+
+0.8.2 was tagged and never published (its Apple builds could not be made that day); what
+is listed under it below ships in this release, with three fixes to the iPhone app on a
+spacesheep account.
+
+### Fixed
+
+- **Trying to connect a spacesheep account with no signal no longer locks connecting for an
+  hour.** The app counted every try against its limit of three an hour, also one that never
+  left the phone: three taps with no connection, and the fourth said "Too many tries".
+  A try for which no connection could be made is not counted now, for connecting and for
+  asking spacesheep to approve the phone. A try that may have reached spacesheep counts
+  as before.
+- **What spacesheep says when it refuses the phone's request arrives as it wrote it.** Its
+  sentence lost every character outside plain ASCII on the way to the page ("Turn on Talk
+  to your sessions in Settings  Account"): quotes, arrows and letters of other alphabets
+  are kept now, in one plain line.
+- **An account in Settings › App › Receivers is named by its email and reads as connected
+  when its key is in place.** It was named by its host and read "not connected" until
+  something had been asked of it since the app opened.
+
+## [0.8.2] - 2026-11-16
+
+### Added
+
+- **The iPhone app's own screens for a spacesheep account.** The first run offers "Use a
+  spacesheep account" under the ways to a computer: a number to compare, a page in Safari
+  to confirm on, and the board, with each way it can go wrong said with what to do next.
+  Settings › App
+  shows whose account it is, where, since when and how it stands, connects again when its
+  key was refused, and disconnects, saying first what that removes. "Approve this iPhone"
+  lets the phone send: it asks spacesheep, shows the number to type on its Devices page,
+  waits, and says from when the phone can send (a newly approved device waits an hour).
+  A phone that cannot sign yet says so in one line and leads to the session on spacesheep.
+- **The app's page can show a spacesheep account with no GUI server behind it.** With the
+  app's half (the account's key and its doors) and the screens that connect one (the entry
+  above), the phone keeps its own board from the account, shows it again at the next launch
+  before anything is read, and sends through spacesheep as the desktop app does. A message
+  whose answer is lost on the way back is never called not sent: the phone says it may have
+  been sent, holds that session's next send, asks again by itself, and then says which it
+  was. A session the account forgets leaves the phone too.
+  Disconnecting removes the account from the phone: its key, its sessions, labels and read
+  marks, drafts and recent searches; the key itself keeps working until it is revoked on
+  spacesheep. Nothing changes for a browser, the desktop app, or the phone on a receiver.
+- **The iPhone app's own half of a spacesheep account.** The account's key is kept in the
+  iPhone's keychain, on this device only, and never reaches the page: the app itself asks
+  spacesheep for the number to compare, opens Safari, and keeps a key only after its own
+  alert names the account and is answered. It carries five requests for the page and
+  nothing else: the relay, its machines and jobs, a signed command to a computer, and this
+  phone's own key. A command is signed with Face ID by the phone's key in the Secure
+  Enclave, for the account's own host only. A send is called not sent only when nothing of
+  it left the phone. A session that needs you posts a notification while the app is still
+  awake in the background. Not on Android yet, and not in the desktop app, which reaches an
+  account through its own server.
+
+### Fixed
+
+- **A usage report that names its account or its machine with more than a line of text is
+  not kept.** An account id or a machine name past 200 characters (no sender makes one)
+  went into the limits list, its file and every frame at any length.
+- **A send to a computer reached through spacesheep outlives a restart.** Its row was
+  deleted when the app started, because such a computer is never saved here: a start
+  waiting for an offline computer then read "No such session here", and ran anyway when the
+  computer came back. The row is kept, followed again once the account is read, and settled
+  by spacesheep's word on the job. A row the connected account can't speak for (another
+  account) is settled as one this app can no longer follow, and offers no "Edit and start
+  again", since it may still run there. Disconnecting, or starting without an account,
+  leaves the rows waiting and marked as not followed; the same account connecting again
+  picks them up. While spacesheep refuses this app's key the waiting rows are marked so
+  too, rather than reading "Waiting for …" with nothing being read.
+- **A start waiting for a computer through spacesheep is no longer given up after an hour.**
+  The app called it expired on its own clock ("didn't come online in time", with "Edit and
+  start again") while spacesheep kept it for a day and still handed it out, so starting it
+  again meant two runs. Only spacesheep's word on the job settles it now; a job it still
+  lists as waiting, or no longer lists, is called expired here only an hour past
+  spacesheep's day, when spacesheep can no longer hand it out. The job list is read past a
+  job that waits for days, so a newer send's word is never out of reach. A send the
+  computer took and said nothing more of (spacesheep keeps it "running") ends past that
+  day as `unconfirmed` and is no longer read, rather than "Starting…" for ever. A job's
+  age is spacesheep's: its own `created_at` against the time spacesheep's answer carries,
+  so a clock here that jumps ends nothing early; with no time from spacesheep, the send's
+  own time on this clock. A send closed for want of word (`unconfirmed`, or `untracked`
+  while another account was connected) is settled after all when spacesheep later lists
+  its job as finished: an untracked one waits again when its account connects, an
+  unconfirmed one is read once more then and when events arrive for its session.
+- **Waiting sends through spacesheep are read for at a slower pace.** The job list was read
+  every 3 seconds whatever the send waited for (about 200 reads in 10 minutes, now for up
+  to a day). While every waiting send is queued for a computer the machine list shows
+  offline it is read every 45 seconds (about 13 in 10 minutes), and at once after a send,
+  when that computer shows online and when events for that session arrive; every 3
+  seconds only while a send is taken, just made, or its computer is online.
+- **A refusal through spacesheep keeps its reason.** Where spacesheep's job list says why a
+  job ended (`code`: the computer's own refusal code, `cancelled`, `expired`), the row takes
+  it, so the words for a folder, a permission level, a start limit or a model are the ones
+  a computer reached directly gets, and a start that ran out reads as one that expired.
+  Against a spacesheep without the field nothing is guessed from its note.
+- **No attachment is offered for a computer reached through spacesheep.** A start's file
+  stayed on this app's disk, spacesheep looked for it in its own store and refused the
+  start, and the person was told to add the file again. The new session sheet no longer
+  offers files there, and a session's message box offers images only when that computer is
+  this one (the block names files on this disk), until there is a way to carry one. A
+  send that names files for such a computer anyway is refused here (code `relay_files`),
+  never carried to spacesheep.
+- **Events spacesheep no longer holds are reported as a gap.** The gap was noted only when
+  a page came back empty, but spacesheep answers everything after the cursor that it still
+  holds, so an app that was off longer than spacesheep keeps events (7 days, 50 000 events)
+  lost the middle and said "reading". It now says "gap" whenever the first event back is
+  not the one after the cursor, and keeps saying it while it runs.
+- **A send that spacesheep refuses because this app's key was revoked there is no longer
+  mistaken for the page's own key.** spacesheep's 401 was passed on as it was, which a page
+  reads as "this page lost its key". It now comes back with its own code, and Settings →
+  Data says the key was revoked at the same moment, not at the relay's next poll.
+- **When spacesheep asks this app to slow down (HTTP 429), the app waits as long as it
+  says** (its Retry-After, at most 15 minutes) and its state is `limited`, no longer
+  `offline`, which Settings → Data read as "can't be reached".
+- **A steady stream of events no longer freezes the board for minutes.** The reader asked
+  spacesheep once per event, reached its limit (240 reads a key in 10 minutes) in about
+  four minutes at one event a second, and then waited out the rest of the window. It now
+  keeps count of its reads in the last 10 minutes: under a third of its budget of 230 it
+  reads at once; past that it waits between reads, a little more as the budget is spent,
+  so a stream is read in batches about 3 seconds apart (at most about 4 seconds behind)
+  and never meets the limit. The machine list is read every minute on its own, so it
+  stays fresh while the reader waits. The count is kept beside the cursor (every 15
+  seconds and at stop), so a restart in the middle of a stream goes on from it; with none
+  on file a third of the budget is taken as spent.
+- **What spacesheep says of a send is shown as plain text, and a send it took without saying
+  which job it is does not wait for ever.** The note on a job spacesheep carried (a
+  computer's reason for refusing, say) reached the page as it came: with line breaks,
+  characters that reorder text, any length. It is shown as one plain line now, with what
+  cannot be seen taken out, and whole: up to the 500 characters a computer may send, with
+  nothing cut short of that and nothing added, so the sign-in link of a pooled account on
+  such a computer arrives as the computer wrote it. That link is offered only when it
+  reads as an `https:` address; anything else is treated as no link. A code that is not
+  written as one is no longer passed on. A signed command
+  that is not a command is refused as a bad request instead of an error. And when
+  spacesheep takes a send but names no job (a job is one only as a whole number), its row
+  says "Sent, but this app can't follow it. Check spacesheep.dev to see how it went."
+  rather than waiting on a job that cannot be read, and rather than saying a computer took
+  it, which is not known. A handoff's card no longer says "not sent" of a send whose end is
+  not known: it says what is known ("no word · rc-mac took it and said nothing more", or
+  that it is not followed).
+- **Words, plain**: a start called off before it began reads "Cancelled before
+  rc-mac started it." and a message sent to it "Cancelled with its session, before rc-mac got
+  it."; a refusal with no specific reason "rc-mac refused it." plus the receiver's reason when
+  there is one, never "refused: refused"; a file for a computer reached through spacesheep
+  "Files can't be sent to rc-mac through spacesheep yet." (plus "Remove them to start." for a
+  start edited again that carried files, and "Not sent." in front when a send carried one); a
+  revoked key "Not sent. spacesheep no longer takes this app's key: disconnect and connect
+  again in Settings → Data."; a send this app can no longer follow "Sent through a spacesheep
+  account that's no longer connected here. Check spacesheep.dev to see if it started."; a send
+  the computer took and said nothing more of "No word from rc-mac since it took this. Check
+  spacesheep.dev to see how it went."; a send waiting while spacesheep is disconnected "Not
+  being followed while spacesheep is disconnected." (while its key is refused, "Not being
+  followed: spacesheep no longer takes this app's key."); Settings → Data, limited, "this app
+  is reading too often for spacesheep; it catches up by itself"; the activity line of a
+  cancelled start, "cancelled · before the machine started it"; an offline computer through
+  spacesheep is waited for "within a day".
+
+## [0.8.1] - 2026-11-12
+
+### Changed
+
+- The server's store reads its full events through a log it is handed (the session files on
+  disk, as before, or events held in memory), and nothing it imports needs Node, so the same
+  store can later run in the phone app's page. Nothing changes in what the GUI shows or keeps.
+- Checking an incoming event's id and tier no longer loads sessionpipe-core's Node code for two
+  rules: the receiver keeps a copy of them, and a test holds the copy to sessionpipe-core
+  0.13.6, so it runs in a page too. Events are accepted and refused exactly as before.
+
+### Fixed
+
+- **`service install` restarts a receiver that is still running an older copy of itself.**
+  After `npm i -g` put a new sessionpipe-gui over the old one at the same place, the
+  service's file already named the new files, so `service install` said "already running
+  0.7.2" and left the old process running the old code; the page, newer, then called
+  routes that server did not have ("HTTP 404" under Settings › Data › spacesheep). It now
+  restarts it and waits for this version to answer ("updating … 0.7.2 → 0.8.0"), on macOS,
+  Linux and Windows. A receiver on the port that isn't the service's own (one started by
+  hand while the service is down: its `run.json` names a pid that isn't the service
+  manager's, or on Windows a command line that isn't the task's) is left alone, with a line
+  that says so; a receiver that couldn't write its `run.json` counts as the service's when
+  the manager says the service runs. When the new
+  version doesn't come up after the old one was stopped, it says so on stderr and exits 4.
+  An older sessionpipe-gui no longer quietly replaces a newer service that runs from
+  somewhere else (the version read from the `package.json` beside the service's CLI): it
+  says so and leaves it, unless `--downgrade`; nor a service that runs a developer's
+  checkout (a folder with `server/cli.ts` or `.git` beside `dist/`). A re-install with other
+  `--port`, `--state` or `--host` by the same CLI or a newer version works as before. One
+  `service install` or `uninstall` runs at a time (the lock is
+  `service-<label>.lock` in the default state folder, `~/.local/state/sessionpipe-gui`;
+  a crashed run's is taken over), and a `bootout` that finds the job already gone counts as
+  stopped. `--if-installed` acts on a service that is there, installs none, never moves one
+  to an older version, and exits 5 where it did nothing.
+- **A receiver reports the version it is running**, read once when it starts. It read
+  `package.json` on every request, so one whose package was replaced under it answered
+  `/api/ui/info` with the new version while it ran the old code, and nothing could tell it
+  was stale. `service install` takes the version from `run.json` (written once, at start),
+  so it also restarts a receiver of 0.8.0 or earlier that answers with the wrong one.
+- **The desktop app brings an older receiver on this computer up to its own version,**
+  downloading nothing without a click. An app that updated itself kept talking to the
+  receiver it had, which still ran the version that installed it. Once per launch, when
+  this computer's receiver (the one its `run.json` names) first connects and runs an older
+  version than the app: where a `sessionpipe-gui` on PATH is at the app's version or newer,
+  the app runs its `service install --if-installed` in the background (the service upgraded
+  in place, with its port and state folder; none installed where there was none). Where only
+  the app's own release through `npx` would do, that is a download, and nothing runs: the
+  app's log says so and Settings › Data offers it as a click. A failure before the old
+  receiver was stopped leaves it running; one after it (exit 4) is logged as that, and an
+  `--if-installed` that did nothing (exit 5) is logged as nothing done. "Start sessionpipe"
+  and the click prefer the app's release through `npx` over an older CLI on PATH. The click
+  runs a `sessionpipe-gui` on PATH only when its version is known and at least the app's;
+  when `npx` can't download it (offline, GitHub blocked), or there is nothing that could,
+  it changes nothing and says so. "Start sessionpipe" uses the CLI on PATH instead only
+  where that can't make the service older (no service installed, or a CLI at least the
+  version it runs). The app runs one install at a time. An install still downloading when
+  the app stops waiting (180 s) is stopped: on macOS and Linux with what `npx` started, on
+  Windows `npx` alone. One whose `sessionpipe-gui` has begun is never killed: the app stops
+  waiting and says it is still finishing, keeps reading what it prints until it ends, and
+  logs how it ended.
+- **In the app, an option the receiver is too old for says so** instead of the receiver's
+  "HTTP 404". Settings › Data › "Use a spacesheep account" against a receiver older than
+  0.7.5: "sessionpipe on this computer is 0.7.2, which is older than this option." with
+  Connect… off, an **Update sessionpipe** button (the app's release through `npx`, with its
+  progress line), and the command to copy. When the update stopped the old receiver and the
+  new one didn't come up: "The update didn't finish, and sessionpipe isn't running right
+  now. Press Update again." with the log's path under it; any other failure: "Couldn't
+  update it. Press Update again, or run the command below." with the installer's line under
+  it. An update already running when Settings opens shows as working. "This computer" is
+  the receiver the app's launch check found to be this computer's, not any loopback
+  address; any other is "… Update it there." The version is read again after the update,
+  when the connection comes back and when the window comes forward; a notice that a 404
+  brought stays until another receiver process answers. Only the receiver's own 404 counts (not the app proxy's for a receiver it doesn't
+  know), and a version that isn't below the option's is left out of the sentence. A page
+  the receiver serves itself never says it. On a phone a sentence over a command (this one,
+  and About's update command) stays in one column.
+- The help and the authoring guides call what `view`, `skin` and `plugin link` make a link,
+  not a symlink: on Windows it is a junction where a symlink needs Developer Mode.
+- **On Windows, "Start sessionpipe" looks for Node only in absolute folders.** After PATH
+  it tries folders under `ProgramFiles`, `APPDATA`, `LOCALAPPDATA` and `USERPROFILE`, and
+  `NVM_SYMLINK` itself. A value there that is not a full path (`nvm`, `.`, an unexpanded
+  `%NVM_HOME%\nodejs`) was looked up from the folder the app was started in, so a
+  `node.exe` under that folder could be the one it ran. Such a value is now left out, as a
+  `.` on PATH already is (#101); `ProgramFiles` then reads as `C:\Program Files`.
+- **`sessionpipe-gui service` on Windows starts `schtasks`, `taskkill` and PowerShell by their
+  full paths** under `%SystemRoot%\System32`. They were started by bare name, which is looked
+  for first in the folder the command is run from, so a `schtasks.exe` lying there would
+  have been run in their place. The commands it tells you to type name them in full too.
+- **A `!NAME!` in the state folder's path is kept** where the registry turns cmd's delayed
+  expansion on: the Windows task now runs the receiver through `cmd /v:off`. Without it cmd
+  puts a variable's value there when NAME is one that is set (`C:\data\!OS!\state` became
+  `C:\data\Windows_NT\state`), and the receiver was started on another folder. A task that
+  0.8.0 installed gets the new line the next time `service install` rewrites it (a new Node
+  or package path, a changed option, or a receiver that is not running), or at once with
+  `service uninstall` then `service install`. A 0.8.0 `sessionpipe-gui` does not know a
+  task with the new line as its own: remove it with this version.
+- **`service uninstall` on Windows takes the `\sessionpipe\` folder out of Task Scheduler**
+  with its last task, where it left it there empty; one that 0.8.0 left goes on the next
+  `service uninstall`. The folder stays while another task is in it, and where PowerShell
+  is held to constrained language mode, which cannot remove it.
+- **`config.json` is kept readable by you alone.** Node applies a write's mode only when it
+  makes the file, so a `config.json` that already existed with looser bits (recreated at the
+  shell's umask after deleting `uiKey` as SECURITY.md says, for example with
+  `jq … > tmp && mv tmp config.json`, or copied back from a backup) kept them while it held
+  the sink token and the UI key. The GUI now takes the group and other bits off before every
+  write, as it already sets its TLS keys to 0600 when it writes them, and also when it
+  starts; where that fails it says so and starts anyway.
+- **A message that is held for you to confirm can be sent.** When spacesheep's safety check
+  holds a message to a machine paired there, the page now says so where you sent it: the
+  message, spacesheep's reason in its own words, and a "Confirm with your passkey" button. It
+  goes only when you press that button; change the message first and the hold is dropped.
+  It used to say "try again", and every try was held the same way, so such a message could
+  not be sent from the GUI at all.
+- **Child sessions stay under their parent when the GUI restarts.** A session started by
+  another one (a subagent) was counted as its parent's child while the GUI ran, and every
+  restart forgot it: the parent showed no children and the agent row for that child no
+  longer opened the child's page, until the child sent something new.
+
+## [0.8.0] - 2026-11-11
+
+### Added
+
+- The receiver keeps three things a sessionpipe 0.13 machine says. `inbox` among a
+  machine's delivery modes and as the mode of an ack, which it used to drop as a word it
+  did not know: the line under a message a live session took through its own inbox now
+  reads "delivered · inbox" ("taken · … · inbox" on the way), where it read "delivered"
+  with no mode. The other two are kept for the pages that will show them, and nothing
+  draws them yet: the session a copy answered for (an ack's `copy_of`,
+  `ControlActivity.copyOf`), and whether the command line is signed in to each account (a
+  hello's `signed_in`, `HarnessAccount.signedIn`).
+- **`sessionpipe-gui service install` on Windows.** The receiver runs in the background as a
+  scheduled task that starts at your logon (`\sessionpipe\dev.spacesheep.sessionpipe-gui`
+  in Task Scheduler), with no console window and no administrator rights; `uninstall`,
+  `status`, `--dry-run` and the in-place upgrade work as on macOS and Linux, and the output
+  goes to `<state>/service.log`. Until now it said "a background service on Windows is not
+  here yet".
+
+### Changed
+
+- **sessionpipe 0.13.6.** The receiver verifies commands with sessionpipe-core 0.13.6 (it
+  was 0.10.0), pinned to that one version. "Bring the answer back" in the Ask another agent
+  sheet now sends: a machine whose hello says `handoff` used to get "Not sent: this
+  receiver's sessionpipe is older than bringing answers back", because this receiver's own
+  verifier refused `reply_to` before the machine saw it. That line is gone from the sheet;
+  a command the verifier does refuse with the switch on reads there as it does on any
+  send. A pool command is verified by the core itself, and still refused here on a day
+  grant alone where the machine wants a fresh confirm.
+- sessionpipe's conformance fixtures for 0.13.6 (169 control vectors, 33 delivery scenarios)
+  are in the repo under `test/conformance/` and run with `npm test`, in CI too. They were
+  read from a sessionpipe checkout beside the clone and skipped without one, so CI never
+  ran them, and with one the pool vectors failed (#71).
+
+### Fixed
+
+- **A `session.seq` above 2^53 − 1 is refused**, the schema's bound: the receiver answers
+  `bad_seq`, and the outbox reader and the demo drop it. Two such seqs in one session hung
+  the GUI server at 100% CPU while it listed the hole between them; a store an older
+  release already wrote them into now boots instead of hanging.
+- **One session file the outbox can't read no longer stops the outbox.** A file the GUI
+  may not open (its mode, another user's) or a folder named `*.jsonl` made the first read
+  fail, and no session from the outbox reached the board while that file stayed so,
+  restart or not; one that turned unreadable while running kept every older session from
+  being read and the offsets from being saved, with a line on stderr every 500 ms. That
+  file is now skipped for the tick, said once, and read on from its offset once it can be
+  read again.
+- **Setup's "Pair this machine" works on Windows.** The receiver ran `sessionpipe.cmd` through
+  cmd.exe, which never handed its output back (the step sat at "Starting the pairing…") and
+  split a folder with a space, such as `C:\Users\Ann Lee\code`, into two words. It now runs the
+  script the npm shim names under its own node, with no shell, as it does on a Mac.
+- **Setup speaks Windows.** On a Windows receiver the secure-address step pointed at
+  `brew install openssl` and gave Debian and Fedora commands for trusting the certificate; the
+  pair step's button said "Pair this Mac". It now names Git for Windows' openssl (or winget),
+  gives `certutil -user -addstore Root ca.crt` and the Install Certificate… steps (also on the
+  trust page and from `sessionpipe-gui tls trust`), and the button says "Pair this machine"
+  off a Mac.
+- A self-assigned 169.254 address (no DHCP answered on that link) no longer comes first among
+  the receiver's LAN addresses, so the Machines page's pair command, Connect and the phone
+  link name an address the other device can reach.
+- **A virtual adapter no longer comes first.** Windows' "vEthernet (…)" switches (WSL 2,
+  Hyper-V), VirtualBox and VMware host adapters, and Linux's libvirt, LXD, Incus, LXC,
+  Multipass and Podman bridges sort after the real interfaces, whatever their case, so the
+  phone's QR code, Connect and the `sink add` command name an address the other device can
+  reach. No address is dropped: a Hyper-V external switch keeps the host's LAN address on
+  "vEthernet (External…)", after any real-named interface.
+- **`--host 127.0.0.1` (or `::1`, `localhost`) no longer offers LAN URLs nothing listens
+  on.** The banner listed every LAN address as a `network` URL, its phone QR and the sink
+  command pointed at one of them, and a bind to `::1` gave a sink command on `127.0.0.1`;
+  all of them refused connections. A loopback bind now offers no LAN URL, and the sink
+  command names the address it bound, under "from this machine"; a bind to one LAN
+  address lists that address alone as its network URL.
+- **A `config.json` that does not parse is never written over.** A `config.json` left empty or
+  half-written by a write that died, or hand-edited so it no longer parses, was silently
+  replaced with fresh secrets on the next start, so every sender paired with the old sink
+  token got 401 and every phone and browser holding the old UI key was refused, with nothing
+  said. The GUI now stops with a message that names the file and what to do, and leaves it
+  byte for byte as it was; one it cannot read (a folder of that name, no permission) stops
+  it the same way instead of with a stack trace. A `config.json` with a UTF-8 byte-order
+  mark (PowerShell 5's `UTF8` encoding, older Windows editors) is read past it, instead of
+  being replaced the same way. `sessionpipe-gui search` and `index` read the history setting
+  past a byte-order mark too, and stop the same way on a `config.json` the GUI refuses,
+  instead of reading it as history on.
+- A plugin turned on with `sessionpipe-gui plugin enable` while the receiver runs starts
+  on Reload plugins, as the CLI says. And a plugin or view the CLI turns on or off
+  while it runs is no longer undone by the receiver's next write of config.json (a token
+  rotation, a toggle in Settings, a spacesheep connect), which put back the lists it held
+  in memory.
+- **`npx github:spacesheep-dev/sessionpipe-gui` works on Windows.** Its one-time build
+  spawned a bare `npm`, which is `npm.cmd` there and can't start without a shell, so the
+  command exited 1 with no message. The build now runs npm through npm's own entry under the
+  same node, and says why if npm can't be started. Its check for the build tools also looked
+  for `@vitejs/plugin-react/package.json` through the package's exports, which leave it out,
+  so on every platform the tools were installed a second time; on Windows that install ran
+  the build script again, and again, until the PATH outgrew cmd.exe.
+- **The desktop app on Windows tells a stale receiver from a live one.** It decides whether
+  the receiver that wrote `run.json` still runs by its process id, and on Windows that check
+  always said yes. It now asks Windows, so a file left by a receiver that has stopped is no
+  longer taken for the one that dropped. The hand-run Desktop workflow also passes on
+  `windows-latest`: its `npm ci` skips the prepare build, as desktop-release does, two tests
+  no longer assume macOS, and the four that run a shell script are compiled on Unix only.
+- **The desktop app's first-run sheet speaks Windows and Linux.** The New session shortcut
+  reads Ctrl+Alt+N there (it read ⌃⌥N, the Mac's symbols, everywhere), as does the
+  recorder in Settings › App; the sheet says sessionpipe is in your system tray, not your
+  menu bar; and a refused notification points at Windows' Settings, not System Settings.
+- **The desktop app's welcome and tray say "this computer" off a Mac.** On Windows and
+  Linux the welcome offered to start sessionpipe on "This Mac" ("so this Mac's sessions show
+  up here", "Nothing leaves this Mac"), and the tray listed an unreachable local receiver as
+  "This Mac". A Mac still reads exactly as before.
+- Search no longer says "“c:” isn't a filter" over a pasted Windows path (`C:\Users\…`,
+  `D:/repo`) or a URL (`https://…`). They were, and still are, searched as text; the notice
+  now stays for something that looks like a filter, such as `foo:bar` or `cwd:/x`.
+- **The tier lens shows prompts, turn ends and attentions as a lower-tier receiver gets
+  them:** under a lens below tier 3, who submitted a prompt (`submitted_by`, `injected`)
+  and the background work still running when a turn ends (`background`) now stay, and an
+  attention's `turn_id` and `call_id`, which the client never sends, go, as does its
+  `agent_id` at tier 0.
+- Board filters apply immediately even while focus or the pointer holds the row order.
+- **Search shows a message just indexed at once when the indexer runs inside the server.**
+  Where the indexer cannot be forked it runs in the server's own process, and there a
+  request to commit that arrived while an earlier commit was being published was dropped:
+  the new messages then waited for the timed commit, up to a minute. The forked indexer
+  never dropped one.
+- **Turning history search off works on Windows.** With Node 20, Settings › Data answered
+  "internal", left the history index on disk and stopped the indexer until the GUI was
+  restarted: the server still had that index open while it deleted it, which Windows
+  refused. It now lets go of it first. If another program still holds a file of it, the
+  setting is saved anyway, indexing goes on, and the status is an error naming the index
+  left on disk until a later try (the indexer's next start, or Rebuild) deletes it.
+- **A Windows file is listed once.** A full path from Claude Code on Windows
+  (`C:\Users\…\acme\src\index.ts`, with either slash or the drive in another case) is shown
+  relative to the session's folder, as `src/index.ts`, as on a Mac, so the Files drawer, the
+  Review page and the changed-files count no longer give one file a row for each
+  spelling of its full path.
+- **`view`, `skin` and `plugin add` and `link` work on Windows.** A .zip is unpacked with
+  the tar.exe Windows ships instead of failing with "unzip is not installed"; an npm
+  package or a git URL runs npm's own script under the GUI's node instead of failing with
+  "npm is not installed" while npm is on PATH; and `link` makes a junction where Windows
+  refuses a symlink, so it no longer fails with EPERM when Developer Mode is off.
+- **A finished session stays finished.** A sender records a hook when it gets to it, so a
+  tool call that fired just before a turn's Stop can be recorded after it; the receiver
+  read that late event as a new turn, and the session went back to "working" (then
+  "stale") until its next prompt. An event from before the last end of the turn, or of the
+  session, now takes nothing back: it is filed and counted, and the session stays idle or
+  done. The same for an agent whose start is recorded after its end, and for the end of a
+  run recorded after the session started again. Only an event timed within two seconds
+  before that end is read so (the furthest a hook was found recorded behind, on a real
+  machine, is 1.3 s). Further back than that it is the sender's clock that moved: a clock
+  that stepped back, a session resumed where the clock is behind, or a batch from a clock
+  ahead of the receiver's is read in the order it was recorded, so a running session never
+  reads idle or done because of its clock.
+- **A page that was away shows what is true now.** After the live stream dropped and came
+  back, an open session page kept the events it had: a turn still drawn as running, a
+  message still "handing it over", a reply missing, until a reload. The page now reads
+  what it missed, once, when the stream is back, with nothing redrawn, the scroll where it
+  was and the draft in the composer kept. A tab shown again after a long time hidden, a
+  page restored by Back, a laptop awake again and a network that returned all ask for a
+  fresh stream instead of trusting the old one, and coming back online no longer waits
+  out a retry timer.
+- While the stream is down a session page stops its spinners and its clocks where they
+  were, as the board's rows do, and the page counts as live again when the fresh state
+  has arrived, not when the connection opens: nothing reads as running, or can be sent
+  or stopped, on what the page knew before.
+- An event that arrived in the instant a session page finished loading no longer goes
+  missing from its timeline.
+- **One conversation, drawn once.** A message sent from a session's page and the turn it
+  became are one block, in the cases where they were two or the wrong one. A message
+  handed to a terminal session at its turn's Stop (sessionpipe 0.13.4) is its own exchange
+  after that turn, "Turn 4, continued": it used to take the typed turn's place, so the
+  typed prompt and its reply were gone, or, when that turn had begun over a minute
+  before, to be drawn again at the end for two minutes. A prompt the machine scrubbed a
+  secret, an email address or a phone number out of, and any message to a machine whose
+  clock is behind, is its turn (both showed twice while the turn ran). A refused or
+  expired message no longer takes a later turn that says the same words, which drew the
+  refusal on a turn that ran; and a machine whose clock is ahead no longer hides it. The
+  turn after one that was stopped keeps its own words, which were drawn on the stopped turn.
+- **A stopped turn reads as stopped.** After Stop the turn stays where it was, with what
+  it had written and a quiet "Stopped" where a running turn says "Running"; one stopped
+  before it wrote anything says "Stopped before the first word.", and so does a message
+  stopped before its turn began, which read "Delivered. Its turn shows here when it
+  begins." The daemon's "(The turn was cancelled.)" and Claude Code's "No response
+  requested." are never shown as what the agent said, a turn stopped at its terminal no
+  longer shows the raw word "interrupt" beside a duration that ran to the next prompt, and
+  a tool call the stop cut off no longer spins.
+- **The desktop app's "Start sessionpipe" finds Node on Windows.** It looked through a login
+  shell and for `node` and `npx` in Homebrew, nvm and Volta folders only, so on Windows it
+  always said "sessionpipe needs Node 20 or later". It now reads the app's own PATH, then
+  Program Files, `%APPDATA%\npm`, nvm-windows, Volta and Scoop; runs the scripts behind
+  npm's `.cmd` shims under node; and starts them with no console window. It takes only the
+  absolute folders of PATH, for the search and for the PATH it hands the installer, so a
+  `.` there is never where it finds `node.exe`. The button then runs `sessionpipe-gui
+  service install` (the scheduled task above) and opens the board. Opened again, the app
+  finds the receiver on this computer (it looked for it only under HOME, which Windows
+  doesn't set, and showed the welcome instead).
+- **The Windows app's updater reads update archives with `zip` 9.5.1** (it was 4.6.1), which
+  has the fixes for an archive whose two headers disagree writing files outside the update
+  folder (GHSA-m665-v7pm-7grj, CVE-2026-115905), a symlink target that aborts extraction or
+  exhausts memory (GHSA-q7v9-x93c-xqv3, CVE-2026-115909), and an AES entry passing its HMAC
+  check when the file ends early (GHSA-8hxf-qr8p-62x4, CVE-2026-115906). It comes with
+  `tauri-plugin-updater` 2.14.1, whose own code is unchanged. The macOS and Linux apps never
+  read update archives with `zip`.
+
+## [0.7.5] - 2026-11-06
+
+### Added
+
+- **spacesheep as the backend (an option).** Settings → spacesheep connects this GUI to a
+  spacesheep account: the GUI asks for a code, the account's page shows the same four
+  digits, one confirm, and from then on the account's sessions and paired machines arrive
+  here through spacesheep's relay, no receiver of your own to host. The machines paired
+  there show on Machines as remote ones; a message to one of their sessions goes through
+  spacesheep's jobs door, signed by the app's own device key, which "Approve this app on
+  spacesheep" asks to be trusted (approved once per machine on spacesheep's Devices with
+  the two-digit number the app shows). How each send went (delivered, refused, why)
+  settles from spacesheep's word. Not a default: a GUI that never connects works as before
+  (docs/rfcs/08).
+
+### Fixed
+
+- The desktop release workflow retries `stapler staple` and `stapler validate`, which
+  Apple's ticket service failed twice in a row with the dmg already notarized.
+
+## [0.7.4] - 2026-11-03
+
+### Added
+
+- **Sending from the iPhone app.** The phone app signs with a device key in the iPhone's
+  Secure Enclave, Face ID (or the passcode) on each send, the same signer as the Mac app's:
+  "Add this iPhone" on Machines makes the key, a passkey approves it once per machine on
+  the computer's Devices, and from then on the phone answers prompts and sends messages
+  like the Mac. Until now the phone said "Sending from this phone comes in a later
+  version", and "Add this iPhone" met the plugin's ACL.
+
+### Fixed
+
+- **The pairing link the terminal prints carries the board's key** (`&k=…`), so a browser
+  that never saw this board opens it and is let in, instead of "This board needs its key";
+  the pair page also draws itself as a QR for the phone that holds the passkey.
+- **The app says it can't approve its own key**, and hands off to the browser or phone
+  that holds a trusted passkey, instead of "not sent · the machine doesn't trust this Mac
+  yet" on its own request.
+- The iOS release workflow reads altool's verdict ("UPLOAD SUCCEEDED") rather than failing
+  on a transient status-poll error on the way.
+
+## [0.7.3] - 2026-11-03
+
+### Fixed
+
+- **The pairing link the terminal prints names a passkey origin.** `sessionpipe control
+  pair` printed the address the daemon reached the GUI on (a tailnet IP, a LAN name), and
+  a page on that address can neither read the board without its key nor make or use a
+  passkey, which belongs to the https host or to localhost. The link now names an origin
+  passkeys work on: the daemon's own when it is one, else the first. Seen pairing a Mac
+  mini with the GUI on a laptop: the printed `http://100.68.187.81:7373/pair` link met the
+  key wall, then "Sending works from https://…; open it there".
+
+## [0.7.2] - 2026-11-02
+
+### Fixed
+
+- **Files shows the text of a file the agent read.** Claude Code hands a Read's result
+  to its hooks as an object (the file's lines, from the line it started at), and the
+  drawer only knew the numbered text older builds sent, so every file the agent only read
+  said "Nothing to show yet", and an edited one showed its edits with no text around them.
+  Both forms read now, and the edits apply to the text they changed.
+- **The app says "confirm with Touch ID" only when Touch ID will ask.** With the day's
+  grant held, an answer or a message is signed with the day key and no sheet comes, but
+  the app said "confirm with Touch ID" while it signed, so a slow send read as a Touch ID
+  prompt that never showed. It now says so only for a confirm, a fresh grant, or when no
+  grant is held, as the browser does.
+
+## [0.7.1] - 2026-11-02
+
+### Fixed
+
+- **A harness that a program starts and stops no longer fills the board.** An IDE that
+  probes its provider (bb's `provider-maintenance-workspace`, for one) starts Claude Code
+  and stops it without a prompt, many times a day, and each probe was a row: untitled,
+  "unattended", under Idle or Done. A session nothing has happened in (no turn, tool,
+  subagent, prompt or ask) that is unattended or has already ended now stays off the
+  board, the palette, and the folders and agents New session, Ask another agent and a
+  workflow step offer, until its first turn; its end is no longer news. The receiver
+  keeps it, so its page and Search still find it. A terminal someone has just opened
+  stays on the board, so its first message can come from here.
+
 ## [0.7.0] - 2026-10-31
 
 ### Added
@@ -634,7 +1439,18 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.4...v0.8.5
+[0.8.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.3...v0.8.4
+[0.8.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.2...v0.8.3
+[0.8.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.1...v0.8.2
+[0.8.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.5...v0.8.0
+[0.7.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.4...v0.7.5
+[0.7.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.3...v0.7.4
+[0.7.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.6.0...v0.6.1

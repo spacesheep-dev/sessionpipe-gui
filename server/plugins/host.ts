@@ -148,7 +148,18 @@ export class PluginHost {
   async setEnabled(id: string, on: boolean): Promise<void> {
     if (!this.deps.registry.has(id)) throw new Error(`no plugin "${id}"`);
     this.deps.setEnabled?.(id, on);
+    const was = new Map(this.deps.registry.list().map((e) => [e.id, e.disabled === true]));
     this.deps.registry.scan();
+    // The rescan also reads what `sessionpipe-gui plugin enable|disable` changed since the
+    // last one: every other plugin turned on or off follows it, so none is listed off
+    // while it still runs (or on while it does not).
+    for (const other of this.deps.registry.list()) {
+      if (other.id === id || !was.has(other.id) || was.get(other.id) === (other.disabled === true)) continue;
+      if (other.disabled) {
+        await this.deactivate(other.id);
+        this.errors.delete(other.id);
+      } else if (this.started) await this.activate(other);
+    }
     const entry = this.deps.registry.get(id);
     if (!on || !entry || entry.disabled) {
       await this.deactivate(id);
@@ -338,6 +349,11 @@ export class PluginHost {
     if (att?.kind !== "permission") throw new Error(`suggest: ${s.attentionId} is not an open permission`);
     if (!(att.answerable ?? !att.attentionId.startsWith("notif-"))) {
       throw new Error(`suggest: ${s.attentionId} cannot be answered from here (a notification twin)`);
+    }
+    // Claude Code's question (AskUserQuestion): its answer is the option chosen, which an
+    // allow or a deny cannot carry, so it is answered on its computer and never suggested.
+    if (att.tool === "AskUserQuestion") {
+      throw new Error(`suggest: ${s.attentionId} is a question, answered on its computer`);
     }
     const suggestion: Suggestion = {
       session: s.session,

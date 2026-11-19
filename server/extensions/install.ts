@@ -4,6 +4,9 @@
 // URL (downloaded, extracted with tar / unzip), or an npm spec (package name, git URL,
 // file:…) which goes through `npm install` into <dir>/.npm and is copied from there. The
 // id always comes from the package's own manifest; the installed copy records `source`.
+// On Windows, which has no unzip and whose npm is a .cmd that spawn cannot run without a
+// shell, archives go through the tar.exe Windows ships and npm runs as its own script
+// under this node; `link` makes a junction where a symlink needs Developer Mode.
 import { spawnSync } from "node:child_process";
 import {
   cpSync,
@@ -14,6 +17,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -75,7 +79,7 @@ export function linkExtension<M extends BaseManifest>(kind: ExtensionKind<M>, fo
   mkdirSync(kind.dir, { recursive: true });
   const dest = path.join(kind.dir, manifest.id);
   const replaced = removeDir(dest);
-  symlinkSync(abs, dest, "dir");
+  linkFolder(abs, dest);
   return {
     manifest,
     dir: dest,
@@ -188,12 +192,79 @@ async function download(url: string, tmp: string): Promise<string> {
   return file;
 }
 
+/** Link `dest` to the folder `abs` with a directory symlink. Windows allows one only with
+ *  Developer Mode or admin rights; without them (EPERM) the link is a junction, which
+ *  needs neither and which list and remove see as a symlink too. The symlink goes first
+ *  because a junction to a network share is made but cannot be followed. */
+export function linkFolder(
+  abs: string,
+  dest: string,
+  platform: NodeJS.Platform = process.platform,
+  symlink: (target: string, path: string, type: "dir" | "junction") => void = symlinkSync,
+): void {
+  try {
+    symlink(abs, dest, "dir");
+  } catch (e) {
+    if (platform !== "win32" || (e as NodeJS.ErrnoException).code !== "EPERM") throw e;
+    const refused = `cannot link ${abs}: Windows allows a symlink only with Developer Mode on or as an administrator`;
+    try {
+      symlink(abs, dest, "junction");
+    } catch (j) {
+      throw new InstallError(`${refused}, and a junction failed too (${(j as Error).message})`);
+    }
+    // A junction to a network folder is made but cannot be followed: take it away again.
+    if (!existsSync(dest)) {
+      try {
+        rmdirSync(dest);
+      } catch {}
+      throw new InstallError(`${refused}, and a junction cannot reach a network folder`);
+    }
+  }
+}
+
+/** The command that unpacks an archive. Windows has no unzip; it ships bsdtar as
+ *  %SystemRoot%\System32\tar.exe, which reads a .zip too. That one is named in full, as
+ *  a GNU tar from Git earlier on PATH would take `C:\…` for a remote host. */
+export function extractCommand(
+  file: string,
+  out: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): [string, string[]] {
+  const zip = /\.zip$/i.test(file);
+  if (platform === "win32") {
+    const tar = path.win32.join(env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
+    return [tar, [zip ? "-xf" : "-xzf", file, "-C", out]];
+  }
+  return zip ? ["unzip", ["-q", "-o", file, "-d", out]] : ["tar", ["-xzf", file, "-C", out]];
+}
+
+/** How to run npm. On Windows npm is npm.cmd, which spawn cannot run without a shell, so
+ *  npm's own script runs under this node instead: npm-cli.js beside node.exe (where Node's
+ *  installer puts it), else beside an npm on PATH. `where` is what was looked for when
+ *  neither is there. */
+export function npmCommand(
+  platform: NodeJS.Platform = process.platform,
+  execPath: string = process.execPath,
+  env: NodeJS.ProcessEnv = process.env,
+): { cmd: string; args: string[] } | { where: string } {
+  if (platform !== "win32") return { cmd: "npm", args: [] };
+  const cli = (dir: string) => path.join(dir, "node_modules", "npm", "bin", "npm-cli.js");
+  const beside = cli(path.dirname(execPath));
+  if (existsSync(beside)) return { cmd: execPath, args: [beside] };
+  const exts = (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  for (const dir of (env.PATH ?? "").split(";").map((d) => d.replace(/"/g, ""))) {
+    if (!dir || !exts.some((e) => existsSync(path.join(dir, `npm${e.toLowerCase()}`)))) continue;
+    if (existsSync(cli(dir))) return { cmd: execPath, args: [cli(dir)] };
+  }
+  return { where: `${beside}, or beside an npm on PATH` };
+}
+
 function extract(file: string, tmp: string): string {
   const out = path.join(tmp, "unpacked");
   mkdirSync(out, { recursive: true });
-  const zip = /\.zip$/i.test(file);
-  const [cmd, args] = zip ? ["unzip", ["-q", "-o", file, "-d", out]] : ["tar", ["-xzf", file, "-C", out]];
-  const r = spawnSync(cmd, args, { encoding: "utf8" });
+  const [cmd, args] = extractCommand(file, out);
+  const r = spawnSync(cmd, args, { encoding: "utf8", windowsHide: true });
   if (r.error && (r.error as NodeJS.ErrnoException).code === "ENOENT") {
     throw new InstallError(`${cmd} is not installed; it is needed to extract ${path.basename(file)}`);
   }
@@ -208,14 +279,25 @@ function npmInstall(kind: ExtensionKind, spec: string): string {
   const pkgFile = path.join(prefix, "package.json");
   if (!existsSync(pkgFile)) writeFileSync(pkgFile, `{ "name": "sessionpipe-gui-${kind.noun}s", "private": true }\n`);
   const before = depsOf(pkgFile);
-  const r = spawnSync(
-    "npm",
-    ["install", "--prefix", prefix, spec, "--no-audit", "--no-fund", "--ignore-scripts", "--no-package-lock"],
-    { encoding: "utf8", env: { ...process.env, NODE_ENV: "production" } },
-  );
-  if (r.error && (r.error as NodeJS.ErrnoException).code === "ENOENT") {
-    throw new InstallError("npm is not installed; it is needed to install a package or a git URL");
-  }
+  const npm = npmCommand();
+  const missing = "npm is not installed; it is needed to install a package or a git URL";
+  if ("where" in npm) throw new InstallError(`${missing} (looked for ${npm.where})`);
+  const args = [
+    "install",
+    "--prefix",
+    prefix,
+    spec,
+    "--no-audit",
+    "--no-fund",
+    "--ignore-scripts",
+    "--no-package-lock",
+  ];
+  const r = spawnSync(npm.cmd, [...npm.args, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, NODE_ENV: "production" },
+    windowsHide: true,
+  });
+  if (r.error && (r.error as NodeJS.ErrnoException).code === "ENOENT") throw new InstallError(missing);
   if (r.status !== 0) throw new InstallError(`npm install ${spec} failed:\n${(r.stderr || r.stdout).trim()}`);
   const after = depsOf(pkgFile);
   const added = Object.keys(after).filter((k) => !(k in before));

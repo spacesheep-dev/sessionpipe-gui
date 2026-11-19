@@ -1,0 +1,24 @@
+{
+  "name": "control-cancel-not-ours",
+  "spec": "CONTROL.md §6 cancel, §10 unsupported",
+  "capability": "control",
+  "note": "A Stop for a session whose turn runs in a process the machine did not start: here, one open in its own window. Nothing is signalled. The cancel is acked `unsupported` once, and its `detail` says who has the session in words the person can act on. The receiver's part is to show those words as they are, beside the Stop that did nothing, and not to send the cancel again.",
+  "steps": [
+    {
+      "enqueue": {
+        "machine": "{machine}",
+        "sign": { "session": "claude-code:{uuid}", "kind": "cancel" },
+        "expires_in_s": 60
+      }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 200 } },
+    {
+      "ack": {
+        "outcome": "unsupported",
+        "detail": "that session is open in Claude Code on this computer (a terminal window or the Claude app), and a turn there can only be stopped in its own window: press Esc there"
+      },
+      "expect": { "status": 202 }
+    },
+    { "poll": { "machine": "{machine}", "wait": 1 }, "expect": { "status": 204 } }
+  ]
+}

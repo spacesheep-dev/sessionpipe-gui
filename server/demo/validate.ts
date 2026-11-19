@@ -277,7 +277,7 @@ export function validate(event: unknown): string[] {
   else {
     const s = e.session;
     if (typeof s.id !== "string" || !SESSION_ID_RE.test(s.id)) out.push("session.id: not [A-Za-z0-9._:-]{1,128}");
-    if (!isInt(s.seq)) out.push("session.seq: not an integer >= 0");
+    if (!isInt(s.seq) || s.seq > Number.MAX_SAFE_INTEGER) out.push("session.seq: not an integer from 0 to 2^53 - 1");
     for (const k of ["machine", "cwd", "repo", "branch", "model", "title", "url", "account_id"])
       if (s[k] !== undefined && typeof s[k] !== "string") out.push(`session.${k}: not a string`);
     if (s.title_source !== undefined && !TITLE_SOURCES.includes(s.title_source as string))

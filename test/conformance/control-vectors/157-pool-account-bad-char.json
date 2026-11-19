@@ -1,0 +1,31 @@
+{
+  "name": "pool-account-bad-char",
+  "description": "An account id with a space and a slash.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"pool\",\"session\":\"sessionpipe:pool\",\"nonce\":\"0rCVdxauaaLtufScBLR01Q\",\"iat\":1790800000000,\"pool_action\":\"remove\",\"pool_account\":\"acc 1/2\"}",
+      "csig": "NhG3kRp3eOQ7mBJfplRS3Z6wk7fAi86bt7h4SJIchQsCmXVakoDZx0Ly2q5zmYEwwJY_Z9ZUuWp_ooHAKcQyDw",
+      "grant": {
+        "cred": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiaGVBUjh4c21ScjM0MmJ5QXM2RUdtMjFWcU5xX2ctSWgycl9ReHR1VExnWSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIBM8psSGTJEqFOzDJ2_x3WzUqOpDWVJitHVmpqmolu1kAiEAtdef8zMVc8U6kHVLUDgLnWGJHOvBe4yyHo_rV51OkgA",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE3LRphQ8Tu3hwfO3l10QT-ymYuFMqIXM4NZ3qYUa8uuQcQGT1R-m4le19ttipt0maUgg6UC-j6TRO821MsozEBA\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "6FP630vse6D271_LP5YxQhiH7Ro9Ew0a",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2U3x1j5ZGN8EVblGBeu875Wx5uTrMdyAsI4SehypmilhtnYsCBuPwkDLH7UH1L0U6C11cpV-G2dJkzNuIp29XQ"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

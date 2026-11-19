@@ -6,7 +6,10 @@
 // The real shell (apps/desktop) is checked by hand and in screenshots; this pins the page's
 // half of the contract (NATIVE-SPEC §2.5, §11.1). The last test proves a browser without
 // the flag never loads a byte of the native code.
-import { expect, type Page, test } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { expect, type Locator, type Page, test } from "@playwright/test";
+import { EVENTS, INFO, sessionUrl, ulid } from "./helpers.js";
+import { openInPhone } from "./phone-shell.js";
 
 interface FakeOptions {
   receiver?: boolean;
@@ -20,13 +23,15 @@ interface FakeOptions {
    *  way through the channel, as a busy Mac's is; "silent" opens and sends nothing;
    *  "down" fails every attempt. */
   stream?: "real" | "big" | "silent" | "down";
+  /** The shell's platform; "macos" unless a test plays another computer. */
+  platform?: string;
 }
 
 /** The fake shell, as an init script (runs before any page script, as the shell's does). */
-type FakeArgs = [boolean, boolean, string[] | undefined, FakeOptions["discover"], FakeOptions["stream"]];
+type FakeArgs = [boolean, boolean, string[] | undefined, FakeOptions["discover"], FakeOptions["stream"], string];
 
 function fakeShell() {
-  return ([hasReceiver, firstRunDone, features, discover, stream = "real"]: FakeArgs) => {
+  return ([hasReceiver, firstRunDone, features, discover, stream = "real", platform]: FakeArgs) => {
     const KINDS = [
       "snapshot",
       "event",
@@ -45,14 +50,14 @@ function fakeShell() {
     const receiver = hasReceiver || sessionStorage.getItem("fake.selected") === "1";
     w.sessionpipeShell = {
       v: 1,
-      platform: "macos",
+      platform,
       appVersion: "0.3.0",
       features: features ?? ["tray", "notifications", "hotkey", "autostart", "deeplink", "updater"],
       receiver: receiver ? { id: "e2erx00001", name: "This Mac", origin: location.origin, local: true } : null,
       rxBase: receiver ? "" : null,
     };
     // Before the document exists there is no <html> yet (shell.ts sets the attribute too).
-    if (document.documentElement) document.documentElement.dataset.shell = "macos";
+    if (document.documentElement) document.documentElement.dataset.shell = platform;
     const callbacks = new Map<number, (raw: unknown) => void>();
     const listeners = new Map<string, number[]>();
     const streams = new Map<number, EventSource>();
@@ -168,7 +173,14 @@ function fakeShell() {
 }
 
 async function openInShell(page: Page, path: string, opts: FakeOptions = {}) {
-  const arg: FakeArgs = [opts.receiver ?? true, opts.firstRunDone ?? true, opts.features, opts.discover, opts.stream];
+  const arg: FakeArgs = [
+    opts.receiver ?? true,
+    opts.firstRunDone ?? true,
+    opts.features,
+    opts.discover,
+    opts.stream,
+    opts.platform ?? "macos",
+  ];
   await page.addInitScript(fakeShell(), arg);
   await page.goto(path);
 }
@@ -269,6 +281,24 @@ test.describe("inside the native shell", () => {
     expect(await calls(page)).toContain("app_first_run_done");
   });
 
+  test("on Windows the first-run sheet says system tray and Ctrl+Alt+N, not menu bar and ⌃⌥N", async ({ page }) => {
+    await openInShell(page, "/", { firstRunDone: false, platform: "windows" });
+    const sheet = page.getByRole("dialog", { name: "sessionpipe is in your system tray" });
+    await expect(sheet).toBeVisible({ timeout: 15_000 });
+    await expect(sheet.locator("kbd")).toHaveText("Ctrl+Alt+N");
+  });
+
+  test("on Windows the shortcut recorder writes Ctrl+Alt+N", async ({ page }) => {
+    await openInShell(page, "/settings?section=app", { platform: "windows" });
+    const pane = page.getByRole("tabpanel", { name: "App" });
+    await expect(pane).toBeVisible({ timeout: 15_000 });
+    await pane.getByRole("button", { name: "Record shortcut" }).click();
+    await page.keyboard.press("Control+Alt+KeyN");
+    await expect(
+      pane.getByRole("button", { name: "New session shortcut: Ctrl+Alt+N. Click to record another" }),
+    ).toBeVisible();
+  });
+
   test("Settings › App renders", async ({ page }) => {
     await openInShell(page, "/settings?section=app");
     const pane = page.getByRole("tabpanel", { name: "App" });
@@ -357,12 +387,126 @@ test.describe("inside the native shell", () => {
     await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Start sessionpipe" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect…" })).toBeVisible();
+    // A Mac's welcome names the Mac.
+    await expect(page.getByText("This Mac", { exact: true })).toBeVisible();
+    await expect(page.getByText("so this Mac's sessions show up here")).toBeVisible();
+    await expect(page.getByText("Nothing leaves this Mac.")).toBeVisible();
     expect(hits).toEqual([]);
     // Offline from here on: the demo needs no receiver.
     await page.route(/\/(api|\.well-known|themes|skins|attachments)\//, (r) => r.abort());
     await page.getByRole("button", { name: "Try the demo" }).click();
     await expect(page).toHaveURL(/\?mock=1/);
     await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("on Windows the welcome says this computer, not this Mac", async ({ page }) => {
+    await openInShell(page, "/", { receiver: false, platform: "windows" });
+    await expect(page.getByRole("heading", { name: "Welcome to sessionpipe" })).toBeVisible();
+    await expect(page.getByText("This computer", { exact: true })).toBeVisible();
+    await expect(page.getByText("so this computer's sessions show up here")).toBeVisible();
+    await expect(page.getByText("Nothing leaves this computer.")).toBeVisible();
+    await expect(page.locator("main")).not.toContainText("Mac");
+  });
+});
+
+// The phone app (phone-shell.ts) at a phone's width: its bars are solid, so a list that runs
+// under the tab bar, the collapsed navigation bar or the session's control strip never shows
+// through them (native/mobile.css).
+test.describe("inside the phone app", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  /** The bar's own ground as a pixel's alpha (255: opaque), and what its ::before draws. */
+  const ground = (bar: Locator) =>
+    bar.evaluate((el) => {
+      const c = document.createElement("canvas").getContext("2d")!;
+      c.fillStyle = getComputedStyle(el).backgroundColor;
+      c.fillRect(0, 0, 1, 1);
+      return { alpha: c.getImageData(0, 0, 1, 1).data[3], before: getComputedStyle(el, "::before").content };
+    });
+  const SOLID = { alpha: 255, before: "none" };
+
+  test("the tab bar, the collapsed bar and the session's strip are solid over a list; a grouped bar keeps its ground", async ({
+    page,
+    request,
+  }) => {
+    await openInPhone(page, "/", { receiver: true });
+    // A long board: Done open, scrolled so its rows run under the tab bar.
+    const done = page.locator("section.group--done button.group-toggle");
+    await done.click({ timeout: 15_000 });
+    await expect(page.locator("section.group--done article.card").first()).toBeVisible();
+    const tabbar = page.locator("nav.tabbar");
+    const bar = page.locator(".main > .page > .bar");
+    await page.evaluate(() => window.scrollBy(0, 400));
+    await expect(bar).toHaveAttribute("data-collapsed", "");
+    const under = await tabbar.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return document.elementsFromPoint(r.left + r.width / 2, r.top + 8).some((e) => !!e.closest("article.card"));
+    });
+    expect(under, "a row of the board is under the tab bar").toBe(true);
+    await expect.poll(() => ground(tabbar)).toEqual(SOLID);
+    await expect.poll(() => ground(bar)).toEqual(SOLID);
+
+    // A session waiting on a Bash prompt: the command and Allow/Deny sit in the strip.
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const id = randomUUID();
+    const turn = randomUUID();
+    let seq = 0;
+    const ev = (type: string, data: Record<string, unknown>, hook: string) => ({
+      protocol: 1,
+      id: ulid(),
+      type,
+      time: new Date().toISOString(),
+      tier: 1,
+      harness: { name: "claude-code", version: "2.1.296", event: hook },
+      session: { id, seq: seq++, machine: "e2e-box", cwd: "~/code/e2e", title: "Solid bars", title_source: "custom" },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    });
+    const post = async (...events: ReturnType<typeof ev>[]) => {
+      const res = await request.post(EVENTS, {
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${sinkToken}`,
+          "sessionpipe-protocol": "1",
+        },
+        data: { events },
+      });
+      expect(res.status()).toBe(202);
+    };
+    const attention = `perm-${id.slice(0, 8)}`;
+    await post(
+      ev("session.started", { source: "startup" }, "SessionStart"),
+      ev("turn.started", { turn_id: turn, prompt_chars: 20 }, "UserPromptSubmit"),
+      ev(
+        "attention.needed",
+        { attention_id: attention, kind: "permission", tool: "Bash", message: "npm run deploy" },
+        "PermissionRequest",
+      ),
+    );
+    try {
+      await page.goto(sessionUrl("claude-code", id));
+      const strip = page.locator(".sess-ctl");
+      await expect(strip).toContainText("npm run deploy", { timeout: 15_000 });
+      await expect(strip.getByRole("button", { name: /^Allow/ })).toBeVisible();
+      await expect(bar).toHaveAttribute("data-collapsed", "");
+      for (const b of [tabbar, bar, strip]) await expect.poll(() => ground(b)).toEqual(SOLID);
+    } finally {
+      // Cleared, so the inbox spec, which waits for nothing to be left to answer, is not
+      // left waiting on this one.
+      await post(
+        ev("attention.cleared", { attention_id: attention, how: "answered" }, "PreToolUse"),
+        ev("turn.ended", { turn_id: turn, reason: "stop", ms: 1200 }, "Stop"),
+      );
+    }
+
+    // A grouped page (Machines) keeps its own ground under its collapsed bar: no grey band.
+    await page.setViewportSize({ width: 390, height: 420 });
+    await page.goto("/machines");
+    await expect(page.locator("section.machine").first()).toBeVisible({ timeout: 15_000 });
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect(bar).toHaveAttribute("data-collapsed", "");
+    const grouped = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    await expect.poll(() => bar.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(grouped);
   });
 });
 

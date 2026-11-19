@@ -1,0 +1,31 @@
+{
+  "name": "model-on-permission-answer",
+  "description": "Only a start carries a model.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"permission.answer\",\"session\":\"claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e\",\"nonce\":\"YrAiUxmLw8bYD-dDFxXQOg\",\"iat\":1790800000000,\"for\":\"perm-1\",\"decision\":\"deny\",\"model\":\"sonnet\"}",
+      "csig": "ndpC3zjfAPDjlXMtLQwU4W_L_QXJfutdv9tjCiy6h0m88aFvh2S2_UVPwXsMAE-vi23-2X9xViPXBy50AbmGww",
+      "grant": {
+        "cred": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiV3VNUUpFYTZPMFIxRjg3MzFHLWhheVlNa3RpUTRXcWRUMjh2eHpxeTBlOCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIAJIRCLRpDKMzVixCAb2c8eEqXTjfROsz20YmpfI3o5oAiEAonJ389YxwNOek0h3NhUfgTAMVWAoBDV-ZVMS0krVztg",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEp5HQwvAkp-apR6WkrQdF7RplNelBCtZ6_wCaAZJs7wrxsAIT_vlyLqZYbvXj1qMDM7iJPtE3fZMwiO-eUzo1Xw\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "Z06m_POo6nuq-svh-BgXNta2sx1nz0To",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4887MC68Vfbb2iYIKfVZ3p-757sPNy-3vpRc-Xu6dKn6CfbemFsJ9IXCiSYcyd9rqfkFC4G-ADShR-8dbNYjqA"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

@@ -9,7 +9,15 @@ import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { DEFAULT_PORT, type ExtraEntry, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
-import { defaultStateDir, packageVersion, readGuiConfig, setDisabled, setEnabled, setTlsPreference } from "./config.js";
+import {
+  ConfigError,
+  defaultStateDir,
+  packageVersion,
+  readGuiConfig,
+  setDisabled,
+  setEnabled,
+  setTlsPreference,
+} from "./config.js";
 import { findExtra, formatCatalog, installableExtras } from "./extensions/catalog.js";
 import { extraInstalled, installExtra } from "./extensions/extras.js";
 import { InstallError } from "./extensions/install.js";
@@ -55,6 +63,10 @@ usage: sessionpipe-gui [options]
                     https://<name>.<tailnet>.ts.net); remembered until --no-public-url.
                     Passkeys are made for its host; the proxy's X-Forwarded-* are trusted
   --no-public-url   forget the public url (remembered)
+  --allow-host NAME another name this machine is opened by from itself (its hostname, an
+                    /etc/hosts alias, a name your network's DNS gives it); may be
+                    repeated. localhost, any address and the <name>.local name of --tls
+                    are known already
   --test-door       loopback-only test door for the conformance runner
   --themes-dir DIR  where views (themes) are installed (default <state>/themes)
   --plugins-dir DIR where plugins are installed (default <state>/plugins)
@@ -74,7 +86,7 @@ views (themes: pages kept outside the GUI, loaded by the board at runtime):
   sessionpipe-gui view list                  installed views
   sessionpipe-gui view add <source>          install: a folder, a .tgz/.zip (path or URL),
                                              an npm package name or a git URL
-  sessionpipe-gui view link <folder>         symlink a folder, for development
+  sessionpipe-gui view link <folder>         link a folder in place, for development
   sessionpipe-gui view remove <id>           uninstall
   sessionpipe-gui view disable|enable <id>   hide a view (Canvas and Office ship bundled and
                                              cannot be removed) or show it again
@@ -119,22 +131,35 @@ search (every session's prompts, replies and tool calls; works offline, no brows
                                              bring the search index up to date (asks the
                                              running GUI when there is one)
 
-service (the receiver in the background: started at login, restarted if it stops):
+service (the receiver in the background: started at login; on macOS and Linux also
+         restarted if it stops):
 
-  sessionpipe-gui service install            a LaunchAgent (macOS, dev.spacesheep.sessionpipe-gui)
-                                             or a systemd --user unit (Linux) running this
+  sessionpipe-gui service install            a LaunchAgent (macOS, dev.spacesheep.sessionpipe-gui),
+                                             a systemd --user unit (Linux) or a scheduled
+                                             task at your logon (Windows, under \\sessionpipe\\
+                                             in Task Scheduler; no admin) running this
                                              node and this sessionpipe-gui; --port N,
                                              --state DIR and --host H as for the receiver,
                                              receiver options after -- passed on. A service
                                              of ours already there is upgraded in place (its
                                              options kept unless flags say otherwise, then
-                                             restarted); one that runs something else, or
-                                             another program on the port, is refused
+                                             restarted), and so is one still running another
+                                             version of this same install; one that runs
+                                             something else, a receiver on the port that
+                                             isn't the service's, or another program there,
+                                             is refused. A newer one that runs from elsewhere,
+                                             or a developer's checkout, is kept (a newer one
+                                             unless --downgrade); --if-installed never
+                                             installs one and never moves one back. Exit 4:
+                                             it stopped the old receiver and the new one
+                                             isn't running; exit 5 (--if-installed): it
+                                             did nothing. One install or uninstall at a
+                                             time (a lock in the default state folder)
   sessionpipe-gui service uninstall          stop it and remove it
   sessionpipe-gui service status             the label, pid, running version, port and url
                                              (exit 3: not running)
   --dry-run prints the file and the commands and changes nothing. Logs go to
-  <state>/service.log. Windows: not yet; run sessionpipe-gui in a terminal.
+  <state>/service.log.
   A running receiver writes <state>/run.json (port, pid, version, url) so the desktop
   app finds it on any port; it is removed when the receiver stops.
 
@@ -165,6 +190,8 @@ interface Args {
   /** `--public-url URL` a string; `--no-public-url` null; neither undefined (the remembered one). */
   publicUrl?: string | null;
   testDoor: boolean;
+  /** `--allow-host NAME`, each one. */
+  allowHosts?: string[];
   open: boolean;
   quiet: boolean;
   themesDir?: string;
@@ -184,12 +211,25 @@ interface Args {
   /** `service install|uninstall|status`: a subcommand instead of the server. */
   service?: Verb;
   dryRun: boolean;
+  /** `service install --downgrade`: an older CLI may replace a newer service. */
+  downgrade: boolean;
+  /** `service install --if-installed`: upgrade a service of ours, install none. */
+  ifInstalled: boolean;
   /** After `--` (service install only): passed on to the service's receiver. */
   extra?: string[];
 }
 
 function parseArgs(argv: string[]): Args | "help" | "version" {
-  const a: Args = { outbox: true, demo: false, testDoor: false, open: false, quiet: false, dryRun: false };
+  const a: Args = {
+    outbox: true,
+    demo: false,
+    testDoor: false,
+    open: false,
+    quiet: false,
+    dryRun: false,
+    downgrade: false,
+    ifInstalled: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const f = argv[i]!;
     const next = (): string => {
@@ -243,6 +283,9 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       case "--rp-id":
         a.rpId = next();
         break;
+      case "--allow-host":
+        a.allowHosts = [...(a.allowHosts ?? []), next()];
+        break;
       case "--tls":
         a.tls = true;
         break;
@@ -294,6 +337,12 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       }
       case "--dry-run":
         a.dryRun = true;
+        break;
+      case "--downgrade":
+        a.downgrade = true;
+        break;
+      case "--if-installed":
+        a.ifInstalled = true;
         break;
       case "--":
         if (a.service !== "install") fail("-- is only for `service install` (receiver options for the service)");
@@ -358,7 +407,8 @@ async function banner(app: App): Promise<string> {
     const qr = await QRCode.toString(phoneUrl, { type: "terminal", small: true });
     for (const l of qr.split("\n")) lines.push(`  ${l}`);
   }
-  lines.push("  from another machine:");
+  // No LAN URL (a loopback --host, or no network): the sink command reaches this machine only.
+  lines.push(info.urls.lan.length ? "  from another machine:" : "  from this machine:");
   lines.push(`    ${info.sinkCommand}`);
   if (info.remote) {
     lines.push("  from a machine anywhere (through the proxy):");
@@ -397,11 +447,7 @@ async function extensionCommand(parsed: Args): Promise<void> {
   const out = (s: string) => process.stdout.write(s.endsWith("\n") ? s : `${s}\n`);
   const bundled = bundledDirs(parsed.bundledDir);
   const disabled = () => readGuiConfig(stateDir).disabled ?? [];
-  const pluginOpts = () => ({
-    bundledDir: bundled.plugin,
-    disabled,
-    enabled: () => readGuiConfig(stateDir).enabled ?? [],
-  });
+  const pluginOpts = () => ({ bundledDir: bundled.plugin, lists: () => readGuiConfig(stateDir) });
   const skinOpts = () => ({ bundledDir: bundled.skin, disabled });
   const viewOpts = () => ({ bundledDir: bundled.view, disabled });
   const ops =
@@ -585,6 +631,13 @@ function tlsCommand(parsed: Args): void {
           throw e;
         }
       }
+      if (process.platform === "win32") {
+        out(`On Windows add the CA by hand: ${m.caCertPath}`);
+        out(`  certutil -user -addstore Root "${m.caCertPath}"   (Windows asks once; Edge and Chrome read this store)`);
+        out("  or open ca.crt → Install Certificate… → Current User → Trusted Root Certification Authorities.");
+        out("  Firefox keeps its own store: Settings → Privacy & Security → Certificates → Authorities → Import.");
+        return;
+      }
       if (process.platform !== "darwin") {
         out(`On this platform add the CA by hand: ${m.caCertPath}`);
         out(
@@ -665,6 +718,8 @@ async function main(): Promise<void> {
   if (parsed.ext) return extensionCommand(parsed);
   if (parsed.extras) return extrasCommand(parsed);
   if (parsed.tlsCommand !== undefined) return tlsCommand(parsed);
+  if ((parsed.downgrade || parsed.ifInstalled) && parsed.service !== "install")
+    fail(`${parsed.downgrade ? "--downgrade" : "--if-installed"} is only for \`service install\``);
   if (parsed.service) {
     process.exitCode = await runService(
       {
@@ -674,6 +729,8 @@ async function main(): Promise<void> {
         state: parsed.state,
         extra: parsed.extra,
         dryRun: parsed.dryRun,
+        downgrade: parsed.downgrade,
+        ifInstalled: parsed.ifInstalled,
       },
       processEnv(defaultStateDir()),
     );
@@ -702,6 +759,7 @@ async function main(): Promise<void> {
       rpId: parsed.rpId,
       publicUrl: parsed.publicUrl,
       testDoor: parsed.testDoor,
+      allowHosts: parsed.allowHosts,
       quiet: parsed.quiet,
       themesDir: parsed.themesDir,
       pluginsDir: parsed.pluginsDir,
@@ -757,4 +815,9 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
-void main();
+main().catch((e: unknown) => {
+  // A config.json that cannot be read stops every command the same way, before it writes
+  // anything: the message says what the file holds and what to do.
+  if (e instanceof ConfigError) fail(e.message);
+  throw e;
+});

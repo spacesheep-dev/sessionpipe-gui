@@ -1,0 +1,39 @@
+{
+  "name": "key-add-device-rs256",
+  "description": "A device key with alg -257.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"key.add\",\"session\":\"sessionpipe:keys\",\"nonce\":\"9FUv5ZdKafWoXkxe0y2Zbw\",\"iat\":1790800000000,\"key\":{\"id\":\"XPcZ7XeLI9lljQ_ck8zZWAlX6E0vFjkSNv2iZEYwy7k\",\"alg\":-257,\"spki\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE9Z16in88XYz_ezFJGWmyxefIiq1UcvXAovg_t4QI8gNZtigCujoJeAUEpQVSMAMM3YtFKjRGpcgvQmFXn65DDA\",\"type\":\"device\",\"store\":\"hardware\",\"uv\":\"each-use\"},\"name\":\"Mac app\"}",
+      "csig": "s1jRt_YUGrZvY1iLvBbjjds3fnh81sSHUAnhz_b9wq8UwR9hYPmD5iEPYGTHWyICc5AvS7zIqZVbLaVOep0eww",
+      "grant": {
+        "cred": "-XI3B3JNIS6D9Ft-nSQ9nzDMQdIQzjCB",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiWUNCaWFIYTROdFpiU0Z5R21lcTVyM3VVZGVQSGF3LU5RRHpQU0NuV08yWSIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCICr4C2l8MqXD3dgwDlXLWnnhXEoPyOmsSKWBz81kOmovAiEAuo9n3GNI0vdeftqNJNtVBmksw7TYu_n1m8g8i3iYyCo",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4lrecDEerGRu-OqPHkl4nxvfdteUDFSjP7O4JlW4gPKMxK3F2BLw8OACnCy7wxa-F2Z8J81xTm-JasGu3_JIrw\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "-XI3B3JNIS6D9Ft-nSQ9nzDMQdIQzjCB",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEnBYOZ9CSzoMtBlJ-WUR6uE2Hwtrt6r_7d9YkrKFQvDLp6uHGzGrVGRG0gP7UrdEkfnK4VYXJD3MizA7AOsabLg"
+      },
+      {
+        "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+        "type": "device",
+        "store": "hardware",
+        "uv": "each-use"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": false,
+    "code": "bad_fields"
+  }
+}

@@ -147,15 +147,16 @@ export function canAskFrom(
   return askableSessions(sessions, s, now).length > 0;
 }
 
-/** A refusal only a handoff meets, in words (the rest are `sendErrorWords`): the machine
- *  did not say it takes answers back (`handoff`, the receiver's own check), or this
- *  receiver's sessionpipe-core predates `reply_to` and refused the field (`bad_fields`
- *  with the switch on). Null for any other error. */
-export function handoffRefusalWords(e: unknown, machine: string, bringBack: boolean): string | null {
+/** The one refusal only a handoff meets, in words (the rest are `sendErrorWords`): the
+ *  machine did not say it takes answers back (`handoff`, the receiver's own check). Null
+ *  for any other error. A `bad_fields` is one of those, switch on or off: the receiver's
+ *  verifier takes `reply_to`, so with it the code is about the command (a session id its
+ *  harness does not take, a model, a `reply_to` that names the session itself), from this
+ *  receiver or from the relay a remote machine's command goes through, and it reads as
+ *  it does on every other send. */
+export function handoffRefusalWords(e: unknown, machine: string): string | null {
   if (!(e instanceof ControlError) || e.status !== 422) return null;
   if (e.code === "handoff")
     return `Not sent: ${machine} didn't say it brings answers back. Turn the switch off to ask without that.`;
-  if (e.code === "bad_fields" && bringBack)
-    return "Not sent: this receiver's sessionpipe is older than bringing answers back. Turn the switch off, or update it.";
   return null;
 }

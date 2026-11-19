@@ -4,7 +4,11 @@
 // rebuild, merges, the live tail, the LOCK and recovery.
 import {
   appendFileSync,
+  chmodSync,
+  closeSync,
+  mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -179,6 +183,36 @@ describe("runIndexer once", () => {
     await removeIndex(w.dir, "history");
   });
 
+  it("history off: a history/ it cannot delete is left for the next start, the rest still indexed", async () => {
+    if (process.platform !== "win32" && process.getuid?.() === 0) return; // root deletes it anyway
+    const w = world();
+    writeFileSync(w.file("a"), fakeLine({ k: "p", text: "secret history", at }));
+    const events = fakeAdapter("sessionpipe", "claude-code", "events-fake");
+    mkdirSync(join(w.home, "events-fake"), { recursive: true });
+    writeFileSync(join(w.home, "events-fake", "e.jsonl"), fakeLine({ k: "p", text: "delivered webhook", at }));
+    await runIndexer({ dir: w.dir, env: w.env, adapters: [w.adapter], history: true, mode: "once" });
+    // Held open by another process, as Windows sees it (EPERM); off Windows, a read-only folder.
+    const hist = join(w.dir, "history");
+    const seg = readdirSync(hist).find((f) => f.startsWith("seg-"))!;
+    const fd = process.platform === "win32" ? openSync(join(hist, seg), "r") : -1;
+    if (fd < 0) chmodSync(hist, 0o500);
+    try {
+      const off = { dir: w.dir, env: w.env, adapters: [w.adapter, events], history: false, mode: "once" } as const;
+      await runIndexer(off);
+      expect(readdirSync(w.dir)).toContain("history");
+      const r = await openReader({ dir: w.dir, sources: ["sessionpipe"] });
+      expect(r.search(q("webhook", ["sessionpipe"])).total).toBe(1);
+      r.close();
+      await runIndexer({ ...off, rebuild: true });
+      expect(readdirSync(w.dir)).toContain("history");
+    } finally {
+      if (fd >= 0) closeSync(fd);
+      else chmodSync(hist, 0o700);
+    }
+    await runIndexer({ dir: w.dir, env: w.env, adapters: [w.adapter, events], history: false, mode: "once" });
+    expect(readdirSync(w.dir)).not.toContain("history");
+  });
+
   it("takes the LOCK; a second writer is refused, a stale lock taken over", async () => {
     const w = world();
     const release = acquireLock(w.dir);
@@ -252,6 +286,45 @@ describe("watch mode", () => {
     ix.send({ t: "stop" });
     await ix.done;
     r.close();
+  });
+
+  it("keeps a commit request received while publishing the previous commit", async () => {
+    const w = world();
+    writeFileSync(w.file("a"), fakeLine({ k: "p", text: "first marker", at }));
+    let commits = 0;
+    const ix = startIndexer(
+      {
+        dir: w.dir,
+        env: w.env,
+        adapters: [w.adapter],
+        history: true,
+        mode: "watch",
+        onCommit: () => {
+          commits++;
+          if (commits !== 2) return;
+          appendFileSync(w.file("a"), fakeLine({ k: "p", text: "third marker", at: at + 2 }));
+          ix.send({ t: "hint", path: w.file("a") });
+          ix.send({ t: "commit" });
+        },
+      },
+      { inProcess: true, tickMs: 10, sweepMs: 50, idleExitMs: 60_000 },
+    );
+    const r = await openReader({ dir: w.dir, sources: ["history"] });
+    const matched = () => {
+      r.refresh();
+      return r.search(q("marker")).matches[0]?.matched;
+    };
+    try {
+      await expect.poll(matched, { timeout: 5000 }).toBe(1);
+      appendFileSync(w.file("a"), fakeLine({ k: "p", text: "second marker", at: at + 1 }));
+      ix.send({ t: "hint", path: w.file("a") });
+      ix.send({ t: "commit" });
+      await expect.poll(matched, { timeout: 5000 }).toBe(3);
+    } finally {
+      ix.send({ t: "stop" });
+      await ix.done;
+      r.close();
+    }
   });
 
   it("exits on its own after the idle time", async () => {

@@ -34,6 +34,10 @@ tauri-plugin-notification = "2.7"
 tauri-plugin-barcode-scanner = "2.5"
 
 [target.'cfg(target_os = "ios")'.dependencies]
+# The signer (NATIVE-SPEC §5): the same crate as the Mac app's, its Swift built by the
+# crate's build.rs for iOS. Face ID on a device; the simulator can make no presence key,
+# and the status says so.
+sp-identity = { path = "../../crates/sp-identity" }
 objc2 = "0.6"
 block2 = "0.6"
 

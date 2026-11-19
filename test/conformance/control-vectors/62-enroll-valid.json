@@ -1,0 +1,23 @@
+{
+  "name": "enroll-valid",
+  "description": "A passkey proves itself over sha256(\"sessionpipe.pair:<machine>:<code>\").",
+  "input": {
+    "machine": "m_testmachine0000000001",
+    "code": "K7Q2-9XMV",
+    "key": {
+      "id": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+      "alg": -7,
+      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE6-lmO3JqCG-_5N3JNsB8iUax3_uanPDsgI59MfrVdaS4NVnpXNvOdLp09PSFZ9nFlyG_iFwKgGy13d7vNrzvtQ"
+    },
+    "proof": {
+      "cred": "R-G5hFIrMqTcJn7PTP-RDr_ZZWqrcQMy",
+      "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+      "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiUHlBYzEtVUl1Vi1SUDluTklRNjZXMU9ubnlJcndpai1WZ0ZHWW9qTl90MCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+      "sig": "MEUCIQCcX3iubAvykgD-CO2H4m1N98wX7oKn70somYvSRe0hYQIgGbPF90B59ufC3Kp_Cng9r7sg5_lj3Aeyy1U14VSB2H0"
+    },
+    "rp_id": "receiver.example"
+  },
+  "expect": {
+    "ok": true
+  }
+}

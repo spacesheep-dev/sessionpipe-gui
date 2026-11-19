@@ -1,0 +1,24 @@
+{
+  "name": "enroll-device-store-software",
+  "description": "A valid proof from a key that declares software storage.",
+  "input": {
+    "machine": "m_testmachine0000000001",
+    "code": "K7Q2-9XMV",
+    "key": {
+      "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+      "alg": -7,
+      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+      "type": "device",
+      "store": "software",
+      "uv": "each-use"
+    },
+    "proof": {
+      "cred": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+      "sig": "iORnCdfACKaC4WLA8324v3tgFfs4NHTfRqg35TWvLP5LIVY8UbBNVFXf8m84N5pH-9uIPnrEf-NAI1xsLHNH7A"
+    },
+    "rp_id": "receiver.example"
+  },
+  "expect": {
+    "ok": false
+  }
+}

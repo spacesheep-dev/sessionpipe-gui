@@ -8,29 +8,16 @@ import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isLoopback } from "../http/net.js";
+import { isThisMachine } from "../http/net.js";
 import type { Handler } from "../http/router.js";
 
-/** Every address of this machine's interfaces, IPv4 and IPv6, zone ids dropped. */
-export function ownAddresses(): string[] {
-  const out: string[] = [];
-  for (const addrs of Object.values(os.networkInterfaces()))
-    for (const a of addrs ?? []) out.push(a.address.replace(/%.*$/, ""));
-  return out;
-}
-
-const plainIp = (ip: string): string => ip.replace(/^::ffff:/i, "").replace(/%.*$/, "");
-
-/** A request from `ip` was made on this machine. */
-export function isThisMachine(ip: string, addresses: string[] = ownAddresses()): boolean {
-  if (isLoopback(ip)) return true;
-  const p = plainIp(ip);
-  return addresses.some((a) => plainIp(a) === p);
-}
+export { isThisMachine, ownAddresses } from "../http/net.js";
 
 /** The guard every route that acts on this machine wears (the setup actions, the phone
- *  page's Tailscale click): 403 `local_only` for anyone else, UI key or not. With the test
- *  door on, `x-spgui-test-remote` stands in for the remote address (e2e). */
+ *  page's Tailscale click): 403 `local_only` for anyone else, UI key or not. A request
+ *  that came through the proxy is someone else whatever address the proxy names for it
+ *  (router.ts `trustProxy`). With the test door on, `x-spgui-test-remote` stands in for
+ *  the remote address (e2e). */
 export function thisMachineOnly(o: { testDoor: boolean; port: () => number }): (h: Handler) => Handler {
   return (h) => (ctx) => {
     let ip = ctx.remote.ip;
@@ -38,7 +25,7 @@ export function thisMachineOnly(o: { testDoor: boolean; port: () => number }): (
       const over = ctx.req.headers["x-spgui-test-remote"];
       if (typeof over === "string" && over) ip = over;
     }
-    if (!isThisMachine(ip))
+    if (ctx.remote.forwarded || !isThisMachine(ip))
       return {
         status: 403,
         json: {
@@ -85,6 +72,55 @@ export function findCli(env: NodeJS.ProcessEnv = process.env, home: string = os.
     }
   return null;
 }
+
+/** The script an npm-style `.cmd` shim runs on Windows: the one `"%dp0%\…"` or
+ *  `"%~dp0\…"` word before `%*` (npm's cmd-shim, old and new; pnpm's is the same shape),
+ *  resolved beside the shim. Null when the file is no such shim, or names nothing there. */
+export function cmdShimTarget(shim: string): string | null {
+  let text = "";
+  try {
+    text = readFileSync(shim, "utf8");
+  } catch {
+    return null;
+  }
+  const m = /"%(?:~dp0|dp0%)\\([^"]+)"\s+%\*/.exec(text);
+  if (!m) return null;
+  const target = path.resolve(path.dirname(shim), (m[1] as string).split("\\").join(path.sep));
+  return existsSync(target) ? target : null;
+}
+
+/** How to run the CLI as a child with no shell. A JavaScript entry (the installed CLI is
+ *  `#!/usr/bin/env node`; a GUI started by launchd may have no node on its PATH) runs
+ *  under our own node. On Windows an `npm install -g` leaves `sessionpipe.cmd`, which
+ *  node refuses to spawn bare (CVE-2024-27980): the script the shim names runs under our
+ *  node instead. A shim that names no script runs as one quoted command under a shell,
+ *  since a shell given the arguments splits one with a space (`--folder C:\sp user\code`)
+ *  into two words; `cmdArg` says what its quoting covers. */
+export function cliCommand(
+  cli: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): { file: string; args: string[]; shell: boolean } {
+  try {
+    const real = realpathSync(cli);
+    if (/\.(c|m)?js$/.test(real)) return { file: process.execPath, args: [real, ...args], shell: false };
+  } catch {}
+  if (platform !== "win32" || !/\.(cmd|bat)$/i.test(cli)) return { file: cli, args, shell: false };
+  const target = cmdShimTarget(cli);
+  if (target && /\.[cm]?js$/i.test(target)) return { file: process.execPath, args: [target, ...args], shell: false };
+  return { file: [cli, ...args].map(cmdArg).join(" "), args: [], shell: true };
+}
+
+/** One word for cmd.exe: as it is when it is plainly safe, else in double quotes, inside
+ *  which & | < > ( ) ^ and spaces are literal. A double quote would end that quoting and
+ *  hand the rest of the word to cmd.exe, which has no escape for one there, and a line
+ *  break ends the command; no Windows path holds either, and the folders come from a
+ *  request body, not from the file system, so both are dropped. Trailing backslashes are
+ *  doubled, so the script's argv parser doesn't read the last one as escaping the closing
+ *  quote. `%NAME%` still expands inside quotes when NAME is set; cmd.exe has no escape for
+ *  it there. */
+const cmdArg = (a: string): string =>
+  /^[\w.:\\/=@+-]+$/.test(a) ? a : `"${a.replace(/["\p{Cc}]/gu, "").replace(/(\\+)$/, "$1$1")}"`;
 
 export function cliVersion(bin: string): string | undefined {
   try {

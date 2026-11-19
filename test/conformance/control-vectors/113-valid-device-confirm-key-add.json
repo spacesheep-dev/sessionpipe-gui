@@ -1,0 +1,36 @@
+{
+  "name": "valid-device-confirm-key-add",
+  "description": "The app's device key vouches for a phone's passkey, with a confirm.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"key.add\",\"session\":\"sessionpipe:keys\",\"nonce\":\"fzOxyEj9nB9snyiqA-Zn0A\",\"iat\":1790800000000,\"key\":{\"id\":\"m6iMFVNcoLxr6Gjikj36sw-HgEXlG9Kc\",\"alg\":-7,\"spki\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEUhcHAxmlH6BevLKL8CTcL4yoYCArLpRd3rRAjYaazQNdpqX5GClhywzSvvXoJhjvsUEokP97xAFgL_taCJticQ\"},\"name\":\"iPhone\"}",
+      "confirm": {
+        "cred": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "sig": "3OhxUoNbs70sayb0D-dxTYYRIANiRi01-_EgHQGRJECMxaMTCJFCbwRWekCF2W67wiUXWyI4TNlzjumkuT_9Bw"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "-XI3B3JNIS6D9Ft-nSQ9nzDMQdIQzjCB",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEnBYOZ9CSzoMtBlJ-WUR6uE2Hwtrt6r_7d9YkrKFQvDLp6uHGzGrVGRG0gP7UrdEkfnK4VYXJD3MizA7AOsabLg"
+      },
+      {
+        "id": "twjWJAKfxDk54apU5fqDVrdePYcZKxhwq6_t7R82g4s",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgDnTWZNrbM16SqfjnsZdCU_qNtzB0bdkXDpBZfAja2bd9ozG1YsA6gOkaqWBSt0MaHSLKJKB3ZILVnuBHzkcA",
+        "type": "device",
+        "store": "hardware",
+        "uv": "each-use"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "confirm",
+    "kind": "key.add"
+  }
+}

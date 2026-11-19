@@ -260,7 +260,7 @@ test.describe("session page", () => {
     await more(page).click();
     await expect(follow).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Back" }).click();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator("section.group").first()).toBeVisible();
   });
@@ -274,7 +274,7 @@ test.describe("session page", () => {
     await expect(link).toBeVisible({ timeout: 30_000 });
     await link.click();
     await expect(page).toHaveURL(/\/s\//);
-    const back = page.getByRole("button", { name: "Back" });
+    const back = page.getByRole("button", { name: "Back", exact: true });
     await expect(back.locator(".bar-back-label")).toHaveText("Board");
     // The label ends before the centred title starts: cut with an ellipsis, never under it.
     const title = page.locator(".sess-bar .bar-title");
@@ -291,7 +291,7 @@ test.describe("session page", () => {
     await expect(row).toBeVisible({ timeout: 30_000 });
     await row.click();
     await expect(page).toHaveURL(/\/s\//);
-    await expect(page.getByRole("button", { name: "Back" }).locator(".bar-back-label")).toHaveText("Feed");
+    await expect(page.getByRole("button", { name: "Back", exact: true }).locator(".bar-back-label")).toHaveText("Feed");
   });
 
   test("Forget asks first, then POSTs and removes the session from the board", async ({ page, request }) => {
