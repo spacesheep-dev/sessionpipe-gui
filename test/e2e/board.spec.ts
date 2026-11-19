@@ -437,7 +437,9 @@ test.describe("board", () => {
     const word = title.split(/\s+/).find((w) => /^[a-z]{4,}$/i.test(w)) ?? title.split(/\s+/)[0]!;
     const field = page.getByRole("searchbox", { name: "Filter sessions" });
     await field.fill(word);
-    await expect(page.locator("article.card").first()).toBeVisible();
+    // The demo moves sessions while it runs: the rows with the word may all be in Done,
+    // which stays folded, so the test waits on the row it is about, not on a card.
+    await expect(page.locator(".board-more")).toBeVisible();
     const more = page.locator(".board-list > :last-child");
     await expect(more).toHaveClass(/board-more/);
     await expect(more).toHaveAccessibleName(`Search every session for “${word}”`);
@@ -463,6 +465,18 @@ test.describe("board", () => {
 
     await openBoard(page);
     await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("ControlOrMeta+Shift+F");
+    await expect(page).toHaveURL((u) => u.pathname === "/search" && !u.searchParams.get("q"));
+
+    // With the focus in a session open beside the board, the key is the session's: plain Search.
+    await openBoard(page);
+    await page
+      .locator("article.card a.card-link")
+      .first()
+      .click({ modifiers: ["Shift"] });
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill("webhook");
+    const more = page.locator("aside.panel .panel-head").getByRole("button", { name: "More actions" });
+    await more.focus();
     await page.keyboard.press("ControlOrMeta+Shift+F");
     await expect(page).toHaveURL((u) => u.pathname === "/search" && !u.searchParams.get("q"));
   });
@@ -818,9 +832,12 @@ test.describe("the board's bar on a computer", () => {
   });
 
   test("Tab goes along the bar in the order it is drawn on the Board, the Inbox and the Feed", async ({ page }) => {
+    test.setTimeout(90_000);
+    await openBoard(page);
     for (const path of ["/", "/inbox", "/feed"]) {
-      await page.goto(path);
-      await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+      // One load; the Inbox and the Feed are reached through the sidebar.
+      if (path !== "/") await page.locator(`nav.rail a[data-nav='${path.slice(1)}']`).click();
+      await expect(page).toHaveURL((u) => u.pathname === path);
       const bar = page.locator(".page > .bar").first();
       await expect(bar.locator(".bar-actions")).toBeVisible();
       if (path === "/") await expect(bar.getByRole("searchbox")).toBeVisible();

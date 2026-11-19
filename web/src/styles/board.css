@@ -689,7 +689,8 @@
 /* The end of a list the field narrows: the way on to Search, at the Done band's metrics
    and in its quiet ink (orange is for what needs you). Only the words searched are cut,
    so the closing quote stays; the key cap is the field's "/" cap's, a finger's is the
-   chevron. */
+   chevron. With a pointer the rows keep a slot for "Open beside" at their end, so the
+   key cap ends where their time and meta do. */
 .board-more {
   display: flex;
   align-items: center;
@@ -705,6 +706,9 @@
   transition: background-color var(--dur-fast) var(--ease-out);
 }
 @media (hover: hover) {
+  .board-more {
+    padding-right: calc(var(--control) + 8px);
+  }
   .board-more:hover {
     background: var(--hover);
     color: var(--fg);

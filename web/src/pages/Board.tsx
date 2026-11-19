@@ -442,11 +442,12 @@ export function Board() {
     () => follow(inItsPlace(hrefs, cursor)),
   );
   const hiddenByLens = useMemo(() => ordered.reduce((n, h) => n + cardHides(h.item, lens), 0), [ordered, lens]);
-  // ⇧⌘F with words in the field takes them to Search; with none it is Search as anywhere.
+  // ⇧⌘F with words in the field takes them to Search; with none, or with the focus in a
+  // session open beside the board, it is Search as anywhere.
   useShortcut(
     "search.global",
     () => {
-      if (!lq.rest.trim()) return false;
+      if (!lq.rest.trim() || inPanel()) return false;
       searchAll(q);
       requestAnimationFrame(() => focusSearch());
     },
@@ -801,13 +802,7 @@ function SearchMore({ q }: { q: string }) {
         Search every session for “<span className="board-more-q">{q}</span>”
       </span>
       {key && <kbd className="board-more-key">{key}</kbd>}
-      <svg
-        className={`board-more-go${key ? "" : " board-more-go--always"}`}
-        viewBox="0 0 16 16"
-        width="12"
-        height="12"
-        aria-hidden="true"
-      >
+      <svg className="board-more-go" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
         <path
           d="M6 4l4 4-4 4"
           fill="none"

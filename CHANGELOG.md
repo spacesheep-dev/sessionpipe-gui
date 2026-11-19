@@ -353,8 +353,9 @@ pairing link that carries the board's key only for a pairing the sink token star
   nothing to narrow there is no button. The field is called Filter and sits at the bar's
   right end, so it no longer moves when a filter is set, and beside a session the bar
   stays one row. The Inbox's label filter and the Feed's are the same button, the Feed's
-  with Label › in it; Tab follows the bar from left to right. A phone keeps its chips,
-  under the field now called Filter, and its agent chip reads "All agents".
+  with Label › in it; the Inbox's lens now comes before the bell, and Tab follows the bar
+  from left to right. A phone keeps its chips, under the field now called Filter, and its
+  agent chip reads "All agents".
 - **A filtered Board ends with "Search every session for “webhook”",** which opens Search
   with the words, and ⇧⌘F in the field does the same. When nothing matches, the title says
   so with no paragraph under it, then "Search every session for …" and Clear filter. The
