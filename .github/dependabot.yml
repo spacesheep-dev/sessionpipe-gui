@@ -4,9 +4,30 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # An update joins the first group it matches; one that matches none gets a PR of its own.
+    # Majors, and a Biome minor, change what the checks see: in the routine group one of them
+    # held all the others (#135: 13 updates, 7 of them majors, red at the first step).
     groups:
+      # New lint rules, formatter changes and a new config schema: alone, with `biome migrate`.
+      biome:
+        patterns: ["@biomejs/biome"]
+        update-types: ["minor"]
+      # The web UI ships React and hands it to views (`api.react`): runtime and types together.
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+        update-types: ["major"]
+      # @vitejs/plugin-react follows Vite's major, and Vitest runs on Vite.
+      vite:
+        patterns: ["vite", "@vitejs/plugin-react", "vitest"]
+        update-types: ["major"]
       dev-dependencies:
         dependency-type: development
+        update-types: ["minor", "patch"]
+    ignore:
+      # The types of the oldest Node this package runs on (engines, .nvmrc), not the newest:
+      # newer ones would let the code call what that Node does not have.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
   - package-ecosystem: github-actions
     directory: /

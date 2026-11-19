@@ -35,6 +35,24 @@ All notable changes to `sessionpipe-gui`. The format follows
 - A session's "missing events" flag waits 30 s from when each hole opened. When an older
   hole filled while a newer one was still open, the newer one kept the older one's time,
   so it was flagged at once, with a "since" from before it opened.
+- **An event the store can't write is read from the outbox again, not lost.** When the
+  store failed to take a batch from this machine's outbox (a full disk, a store file the
+  GUI may not write), the reader had already moved past it, so those events never reached
+  the board, even once there was room again; the same failure during the first read at
+  start left the outbox off until a restart. The batch is now read again on the next tick,
+  said once, and the other sessions carry on meanwhile.
+- **A color theme, skin, view or plugin saved by Notepad or PowerShell 5 loads.** Those
+  editors start a UTF-8 file with a byte-order mark, and the receiver refused it: a theme
+  in `color-themes/` was listed as "not JSON: Unexpected token", and a `skin.json`,
+  `theme.json` or `plugin.json` as "not valid JSON". It now reads past the mark, as it
+  already did for `config.json`.
+- **A `control/machines.json` that does not read no longer unpairs every machine.** One
+  saved with a UTF-8 byte-order mark (PowerShell 5's `-Encoding UTF8`, older Windows
+  editors) is now read past it. One left empty, cut short, unreadable or without a list of
+  machines was read as "no machines": the receiver deleted every machine's queued sends at
+  start, and the next pairing or hello wrote the file over, so every machine had to pair
+  again. The receiver now stops at start with a message naming the file and what to do, as
+  it does for `config.json`, and leaves the file as it was.
 
 ## [0.8.5] - 2026-11-18
 
