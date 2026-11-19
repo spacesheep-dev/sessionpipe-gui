@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-11-19
+
+The web app is built on React 19 and Vite 8, and the receiver runs sessionpipe-core 0.17.0;
+with them sessionpipe-gui needs Node 22.12 or later, or Node 20 from 20.19 on. And a round
+of fixes, most of them from contributors: files a Windows editor saved with a byte-order
+mark load, a `--host` or `--port` the receiver cannot listen on is named, an event the
+store could not write is read from the outbox again, and Search says which filter value it
+could not read.
+
 ### Changed
 
 - **sessionpipe 0.17.0.** The receiver runs sessionpipe-core 0.17.0 (it was 0.13.6), and its
@@ -1541,7 +1550,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.6...HEAD
+[0.8.6]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.2...v0.8.3
