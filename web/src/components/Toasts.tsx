@@ -321,7 +321,13 @@ function useStackHold(stack: RefObject<HTMLElement | null>, on: boolean, shown: 
         const card = slot.firstElementChild;
         if (card instanceof HTMLElement) card.inert = slot.hasAttribute("data-closing");
       }
-    if (!id || shown.some((e) => e.toast.id === id && !e.closing)) return;
+    if (!id) {
+      // Nothing is the keyboard's: the focus hold ends once focus is no longer in the stack
+      // (a card that left with it took its blur along).
+      if (!el?.contains(document.activeElement)) holdToasts("focus", false);
+      return;
+    }
+    if (shown.some((e) => e.toast.id === id && !e.closing)) return;
     focused.current = null;
     const a = document.activeElement;
     if (a && a !== document.body && !el?.contains(a)) {
@@ -354,12 +360,13 @@ function useStackHold(stack: RefObject<HTMLElement | null>, on: boolean, shown: 
       release.current = window.setTimeout(() => holdToasts("pointer", false), POINTER_RELEASE_MS);
     },
     onFocus: (e: FocusEvent) => {
-      // The keyboard's focus only: a click that focuses a button (Chromium) is the pointer's.
+      // The keyboard's focus only: a click that focuses a button (Chromium) is the pointer's,
+      // and the pointer's own hold covers it, so the keyboard's lets go.
       const keys = viaKeys.current;
       focused.current = keys
         ? ((e.target as HTMLElement).closest<HTMLElement>("[data-toast-id]")?.dataset.toastId ?? null)
         : null;
-      if (keys) holdToasts("focus", true);
+      holdToasts("focus", keys);
     },
     onBlur: (e: FocusEvent) => {
       if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;

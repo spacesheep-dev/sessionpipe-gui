@@ -669,6 +669,35 @@ test.describe("toasts: the stack holds still", TEST_DOOR, () => {
     await expect(link).toBeFocused();
   });
 
+  test("⌘⇧T, then × with the mouse: once the pointer leaves, nothing stays held", async ({ page, request }) => {
+    test.setTimeout(60_000);
+    const bearer = await sinkToken();
+    const one = ours(request, bearer, "Hold mouse one");
+    const two = ours(request, bearer, "Hold mouse two");
+    const three = ours(request, bearer, "Hold mouse three");
+    await openOurs(page, `${CONTROL_BASE}/feed`, [one.key, two.key, three.key]);
+    await one.start();
+    await two.start();
+    await three.start();
+    await one.failed("api_overloaded");
+    const first = page.locator(`.toast[data-session="${one.key}"]`);
+    await expect(first).toBeVisible();
+    await two.failed("rate_limit");
+    const card = page.locator(`.toast[data-session="${two.key}"]`);
+    await expect(card).toBeVisible();
+    await page.keyboard.press("ControlOrMeta+Shift+t");
+    await expect(page.locator(".toasts :focus")).toHaveCount(1);
+    // A click moves focus onto the × (Chromium): the pointer's, not the keyboard's.
+    const slot = page.locator(".toast-slot", { has: card });
+    await card.getByRole("button", { name: "Dismiss" }).click();
+    await away(page);
+    // The kept room closes, the error left leaves by itself, and a new card comes in.
+    await expect(slot).toHaveCount(0, { timeout: 3_000 });
+    await expect(first).toHaveCount(0, { timeout: 12_000 });
+    await three.failed("api_overloaded");
+    await expect(page.locator(`.toast[data-session="${three.key}"]`)).toBeVisible({ timeout: 5_000 });
+  });
+
   test("Esc in the notifications goes back to the page and leaves the panel open", async ({ page, request }) => {
     const bearer = await sinkToken();
     const side = ours(request, bearer, "Hold side");

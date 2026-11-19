@@ -175,7 +175,7 @@ function ToastAnswer({
     <span className="toast-actions" data-answer={tag}>
       {!shut && !whole && (
         // Deny's face: it answers nothing, it opens the session where the request is whole.
-        <button type="button" className="btn btn--sm toast-open" onClick={onOpen}>
+        <button type="button" className="btn btn--sm btn--deny toast-open" onClick={onOpen}>
           {NEW_WORDS.inboxOpen}
         </button>
       )}
