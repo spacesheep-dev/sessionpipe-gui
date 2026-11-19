@@ -9,10 +9,19 @@
 // machine's own acks, never here. On the phone, unpaired with a prompt to answer, the
 // bar is the card alone: one sentence says how to pair (for answering and messaging
 // both), and the composer, which could do nothing, takes no room.
+// Allow and Deny are hidden where only something done elsewhere brings them back (this
+// device is not approved, or its request waits): the card says so and offers the way to
+// approve it in their place, and on the phone it stands alone, as unpaired. They are
+// disabled where they come back by themselves (the hour a new device waits, reconnecting, a
+// send under way), and where this device is approved and the computer has not added its key
+// (the card says so, with Approve this iPhone). Each of those is said once: on the card,
+// with its way on, while it has a prompt to answer (in the hour, on the phone, the card then
+// stands alone too), else under the field. A question from the agent has no
+// pair at all: its card is the question and its options to read, and where to answer it.
 // The draft is kept per session. Disabled with its reason until the machine paired and
 // `onSend` is wired (web/src/control/SessionControl.tsx signs and sends). Keep this
 // component self-contained: everything it needs comes through props.
-import type { Attention, MachineControl, SessionSummary, Suggestion } from "@shared/api";
+import type { Attention, MachineControl, SessionSummary, StartFile, Suggestion } from "@shared/api";
 import {
   type KeyboardEvent,
   lazy,
@@ -25,18 +34,40 @@ import {
   useRef,
   useState,
 } from "react";
-import { AttachButton, AttachmentTray, useAttachments } from "../control/Attachments";
+import { type Approval, type SendState, sendWords } from "../account/sendable";
+import {
+  AttachButton,
+  AttachmentTray,
+  pictureMode,
+  picturesOffWords,
+  useAttachments,
+  useThisMachine,
+} from "../control/Attachments";
+import type { AnswerOut } from "../control/answers";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
-import { deviceWords, setupLabel, signerKind } from "../control/signer";
+import { deviceWords, setupLabel, signerKind, signerLabel } from "../control/signer";
+import { receiptWords } from "../control/words";
+import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
-import { usePhoneLayout } from "../lib/device";
-import { attentionMessage, isPlanReview, toolLabel } from "../lib/format";
+import { usePhoneLayout, useTouchKeys } from "../lib/device";
+import {
+  askCut,
+  askedQuestion,
+  attentionMessage,
+  CC_COMMAND_MAX,
+  isPlanReview,
+  isQuestion,
+  isShellTool,
+  saidCommand,
+  toolLabel,
+} from "../lib/format";
 
 import { Link } from "../lib/router";
 import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
-import { ActionButton, Spinner, StateDot } from "./bits";
+import { NEW_WORDS, ThisPhone } from "../native/accountWords";
+import { ActionButton, Spinner, StateDot, WithName } from "./bits";
 import "../control/control.css";
 
 // The plan reads as Markdown, whose renderer stays out of the first paint (PlanText.tsx).
@@ -45,13 +76,23 @@ const PlanText = lazy(() => import("./PlanText").then((m) => ({ default: m.PlanT
 /** `composer`: what it signs was typed in the composer (a message, Keep planning's note),
  *  so a hold of it depends on the composer and goes when the composer changes. */
 export type ControlAction =
-  /** `attached`: the attachment lines this page wrote into `text` (Attachments compose). */
-  | { kind: "prompt"; text: string; composer?: boolean; attached?: string[] }
+  /** `files`: the pictures sent beside the message, as the command's signed `files`
+   *  (CONTROL.md §3.1); nothing of them is in `text`. `attached`: the attachment lines this
+   *  page wrote into `text` instead, for a machine that takes no files on a prompt
+   *  (Attachments compose). */
+  | { kind: "prompt"; text: string; composer?: boolean; files?: StartFile[]; attached?: string[] }
   | { kind: "permission.answer"; attentionId: string; allow: boolean; note?: string; composer?: boolean }
   | { kind: "cancel"; note?: string };
 
 /** The event that clears a session's composer once a message it held went another way. */
 export const COMPOSER_SENT = "sp:composer-sent";
+
+/** Why Allow / Deny are off where the page cannot send: at the wrong address, where it
+ *  can; where the block has a sentence of its own that is as true of an answer as of a
+ *  message (the hour a newly approved phone waits), that sentence; else that the page
+ *  cannot sign one. */
+export const blockedAnswer = (wrong: string | null | undefined, says?: string): string =>
+  wrong ? "answer it where sending works" : (says ?? "this page cannot sign an answer");
 
 export interface ControlStripProps {
   session: SessionSummary;
@@ -67,32 +108,46 @@ export interface ControlStripProps {
   working?: boolean;
   /** Why nothing here can work (no secure context): replaces the hint and disables the strip. */
   blocked?: string;
+  /** Where this session can be answered when this page cannot sign: its page on the
+   *  spacesheep account the window shows. */
+  elsewhere?: { href: string; host: string };
   /** The line under the field while it says something now: the last send's refusal, or a
    *  passkey prompt being up. It wins over every other reason. */
   note?: string;
   noteKind?: "info" | "err";
   /** The composer's words and attachments, as one string, each time they change: a held
    *  message (control/HeldNotice.tsx) depends on them. */
+  /** The block in a sentence that holds for an answer too (blockedAnswer). */
+  blockedSays?: string;
   onDraft?: (draft: string) => void;
-  /** This browser holds no passkey the machine trusts (in the app: the machine doesn't
-   *  trust this Mac's device key): a send would be refused. */
-  untrusted?: boolean;
+  /** Whether this device can send to the machine (account/sendable.ts): where it is not
+   *  approved, waits for approval, or the machine does not trust its key yet, the line
+   *  says so, with the way on where there is one. Absent where the page cannot sign. */
+  send?: SendState;
+  /** What of `send` turns the strip off (sendable.ts approvalOf): "unapproved" puts the way
+   *  to approve this device in place of Allow and Deny, "catching-up" disables them. */
+  approval?: Approval;
+  /** On an account, history is still being read: with no `control`, the machine is not known
+   *  yet, not unpaired, and nothing says to pair it (the page bar says "Catching up…"). */
+  catching?: boolean;
   /** The app's stream to the receiver is down ("reconnecting" or "offline"): the strip
    *  waits for it, with Retry now. */
   stream?: { state: "reconnecting" | "offline"; retry: () => void };
-  /** The next send asks for the passkey (no day grant yet): the line offers Unlock now. */
+  /** The next send asks for the passkey (no day grant yet): the line offers Unlock now. A
+   *  browser's only: the app's first send brings up its own prompt, which says what it is. */
   unlock?: () => void;
   /** Opens the Ask another agent sheet (orchestrate/handoff), at the right end of the line
    *  under the field; absent, no button (hidden, never disabled: the line's own reason
    *  already says why sending is off). */
   ask?: () => void;
-  /** Per attention id: "sent" while an answer is out (no second one goes), "closed" once
-   *  the machine said the prompt is no longer open (answered in its terminal, or expired). */
-  answers?: Readonly<Record<string, "sent" | "closed">>;
+  /** Per attention id: "sent" while an answer is out (no second one goes; the card says
+   *  which, in place of the pair), "closed" once the machine said the prompt is no longer
+   *  open (already answered, or timed out). */
+  answers?: Readonly<Record<string, AnswerOut>>;
   /** Plugins' suggested answers for this session's attentions (shared/plugin-api.ts).
    *  Advice only: Confirm sends the ordinary signed answer through `onSend`. */
   suggestions?: readonly Suggestion[];
-  /** The textarea's placeholder; one voice in both modes. */
+  /** The textarea's placeholder, and its name; one voice in both modes. */
   placeholder?: string;
   /** Simple mode's composer (its class only: the words are the same). */
   chat?: boolean;
@@ -153,38 +208,58 @@ function StopIcon() {
   );
 }
 
-/** An attention raised before the daemon said hello cannot be answered from here: the hook
- *  only waits on the daemon when it was already running. A minute of slack covers the two
- *  clocks (the sender stamps `at`, the receiver stamps the hello). */
-export const preHello = (a: Attention, control: MachineControl | undefined): boolean =>
-  !!control && (!control.lastHelloAt || Date.parse(a.at) < Date.parse(control.lastHelloAt) - 60_000);
-
 /** Whether a control answer can reach this prompt (shared/api.ts `answerable`). Claude Code
  *  raises two attentions per permission: the hook's (answerable) and a notification about
  *  it (`notif-…`, nobody can answer). An older server leaves the field unset. */
 export const answerable = (a: Attention): boolean => a.answerable ?? !a.attentionId.startsWith("notif-");
 
-/** A shell tool, whose message is the command it wants to run. */
-const SHELL = /^(bash|shell|sh|zsh|powershell|run_shell_command|exec|terminal)$/i;
-
 /** What the machine says of a command it cut: a message is its first 200 characters. */
 const CUT = "The machine sends the first 200 characters";
+
+/** A shell prompt's command as its card shows it: the whole command from the call's own
+ *  input where the session sent it (lib/askedInput.ts) and it is the one the message names,
+ *  else the message's, ending in "…" where the machine cut it (lib/format.ts askCut), with
+ *  `cut` saying how much it keeps (Claude Code's 120 characters, or the server's 200).
+ *  Undefined where the message is no command. */
+export function shownCommand(
+  a: Pick<Attention, "tool" | "message">,
+  harness: string | undefined,
+  input: Record<string, unknown> | undefined,
+): { cmd: string; cut: string | null } | undefined {
+  const said = saidCommand(attentionMessage(a));
+  // Cut is read off the message as sent: neither the server nor Claude Code marks it.
+  const cutMsg = askCut(a, harness);
+  const whole = askedCommand(input, said, cutMsg);
+  if (whole) return { cmd: whole, cut: null };
+  if (!said) return undefined;
+  if (!cutMsg) return { cmd: said, cut: null };
+  const short = (a.message?.length ?? 0) < 200 && said.length >= CC_COMMAND_MAX && harness === "claude-code";
+  return { cmd: said.endsWith("…") ? said : `${said}…`, cut: short ? NEW_WORDS.commandCut : CUT };
+}
 /** A command block shows this many steps until "Show more". */
 const CMD_LINES = 4;
 
-/** "Allow Bash to run `npm run deploy`?", or "Allow Write?" with its message after it. A
- *  long chained command reads one step per line under "Allow Shell to run:", four steps
- *  until "Show more"; the whole command comes from the call's own input when the session
- *  sent it (lib/askedInput.ts), else from the message, cut at 200 characters. A plan
- *  review asks about the plan, from the same input, and shows it under the question. */
-function Question({ a, session }: { a: Attention; session: SessionSummary }) {
+/** "Allow Bash to run:" with the command on its own lines under it, or "Allow Write?" with
+ *  its message after it. A long chained command reads one step per line, four steps until
+ *  "Show more"; the whole command comes from the call's own input when the session sent it
+ *  (lib/askedInput.ts), else from the message, cut at 200 characters. A plan review asks
+ *  about the plan, from the same input, and shows it under the question. A question from
+ *  the agent is its own words, with the labels of its options under it to read (they are
+ *  answered on its computer), or one sentence where its input was not sent. Its glyph is
+ *  the orange one while it asks; with an answer out, the working ring, or a still hollow
+ *  one while the computer is offline (`out`). */
+function Question({ a, session, out }: { a: Attention; session: SessionSummary; out?: "going" | "held" }) {
   const { input } = useAskedInput(session, a);
   // The prompt whose steps are all shown: another prompt starts folded.
   const [unfolded, setUnfolded] = useState<string | null>(null);
   const blockId = useId();
   const line = (words: ReactNode) => (
     <p className="ctl-q">
-      <StateDot state="needs_you" size={8} decorative />
+      {out === "held" ? (
+        <span className="dot dot--held" style={{ width: 8, height: 8 }} aria-hidden="true" />
+      ) : (
+        <StateDot state={out === "going" ? "working" : "needs_you"} size={8} decorative />
+      )}
       <span className="ctl-q-text">{words}</span>
     </p>
   );
@@ -206,6 +281,23 @@ function Question({ a, session }: { a: Attention; session: SessionSummary }) {
       </>
     );
   }
+  if (isQuestion(a)) {
+    const q = askedQuestion(input);
+    if (!q) return line(NEW_WORDS.questionAsked);
+    return (
+      <>
+        {line(q.text)}
+        {q.options.length > 0 && (
+          <ul className="ctl-options" aria-label={NEW_WORDS.questionOptions}>
+            {q.options.map((o, i) => (
+              <li key={i}>{o}</li>
+            ))}
+          </ul>
+        )}
+        {q.more > 0 && <p className="ctl-questions-more">{NEW_WORDS.questionMore(q.more)}</p>}
+      </>
+    );
+  }
   if (!a.tool)
     return line(
       <>
@@ -214,39 +306,35 @@ function Question({ a, session }: { a: Attention; session: SessionSummary }) {
     );
   const tool = <span className="ctl-tool">{toolLabel(a.tool)}</span>;
   const msg = attentionMessage(a);
-  const shell = SHELL.test(a.tool);
-  const said = msg && shell && !/\b(permission|wants|needs)\b/i.test(msg) ? msg : undefined;
-  // Cut is read off the message as sent: the server keeps 200 characters and adds no mark,
-  // and `said` has the tool's name taken off, so its own length never says.
-  const cutMsg = (a.message?.length ?? 0) >= 200 || !!said?.endsWith("…");
-  const whole = shell ? askedCommand(input, said, cutMsg) : undefined;
-  const cmd = whole ?? said;
-  if (!cmd)
+  const shown = isShellTool(a.tool) ? shownCommand(a, session.harness, input) : undefined;
+  if (!shown)
     return line(
       <>
         Allow {tool}?{msg ? <span className="ctl-answer-msg"> {msg}</span> : null}
       </>,
     );
-  const steps = shellLines(cmd);
-  if (!steps)
-    return line(
-      <>
-        Allow {tool} to run <code className="ctl-cmd">{cmd}</code>?
-      </>,
-    );
-  const cut = !whole && cutMsg;
-  if (cut && !steps[steps.length - 1]!.endsWith("…")) steps[steps.length - 1] += "…";
+  // One shape for every command, at every size: the question, then the command under it.
+  const steps = shellLines(shown.cmd) ?? [shown.cmd];
+  const cut = shown.cut;
   const more = steps.length - CMD_LINES;
   const all = more <= 0 || unfolded === a.attentionId;
+  // A command of one step on one line is shown whole, however it wraps: nothing caps it.
+  const one = steps.length === 1 && !steps[0]!.includes("\n");
   return (
     <>
       {line(<>Allow {tool} to run:</>)}
       {/* biome-ignore lint/a11y/useSemanticElements: lines of text, not form controls a fieldset would hold */}
-      <div id={blockId} className="ctl-cmd-block" role="group" aria-label="Command" title={cut ? CUT : undefined}>
+      <div
+        id={blockId}
+        className={one ? "ctl-cmd-block ctl-cmd-block--one" : "ctl-cmd-block"}
+        role="group"
+        aria-label="Command"
+        title={cut ?? undefined}
+      >
         {(all ? steps : steps.slice(0, CMD_LINES)).map((step, i) => (
           <div key={i}>{step}</div>
         ))}
-        {cut && <span className="sr-only">{CUT}</span>}
+        {cut && <span className="sr-only">{cut}</span>}
       </div>
       {more > 0 && (
         <button
@@ -294,16 +382,20 @@ export function ControlStrip({
   onSend,
   working,
   blocked,
+  elsewhere,
   note,
   noteKind = "info",
   answers,
   suggestions,
   placeholder = "Message this session…",
   chat = false,
-  untrusted = false,
+  send,
+  approval = "ok",
+  catching = false,
   stream,
   unlock,
   ask,
+  blockedSays,
   onDraft,
 }: ControlStripProps) {
   const [text, setText] = useState(() => readDraft(session.key));
@@ -315,6 +407,13 @@ export function ControlStrip({
   }
   const [busy, setBusy] = useState<string | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  // The line under the field describes it: why it is off, or what a send will ask for.
+  const reasonId = useId();
+  // Each prompt's card line describes its Allow and Deny (`${cardId}-${attentionId}`).
+  const cardId = useId();
+  /** The prompt an answer was pressed for here: its receipt takes the focus the pressed
+   *  button had, as it takes the button's place. */
+  const refocus = useRef<string | null>(null);
   useGrow(field, text);
   useEffect(() => {
     const t = window.setTimeout(() => writeDraft(session.key, text), 300);
@@ -334,14 +433,28 @@ export function ControlStrip({
   }, [session.key]);
   const paired = !!control;
   const phone = usePhoneLayout();
+  const touch = useTouchKeys();
   // The wrong address (control/origin.ts): the hint is the one line naming where sending
   // works, as a link to this very page there; never an offer to add a device.
   const wrong = blocked ? wrongOriginHere() : null;
   const httpsHref = blocked ? (wrong ? wrongOriginHref() : httpsHere()) : null;
-  const enabled = paired && !!onSend && !blocked && !stream;
-  // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's picker.
-  // Not offered for a computer reached through spacesheep, unless it is this one (paths).
-  const att = useAttachments({ machine: session.machine, enabled, localOnly: !!control?.remote });
+  const enabled = paired && !!onSend && !blocked && !stream && approval === "ok";
+  // Not approved: the way to approve it stands where Allow and Deny would.
+  const approve = paired && !blocked && approval === "unapproved";
+  // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's
+  // picker. How they go is the machine's: as the command's files where its sessionpipe takes
+  // them, as paths for an older one on this machine, and not at all anywhere else. There a
+  // picture pasted or dropped is answered by the line under the field, until the words change.
+  const mode = pictureMode(control, useThisMachine(session.machine));
+  const refusedKey = `${session.key}\n${text}`;
+  const [refusedAt, setRefusedAt] = useState<string | null>(null);
+  const picturesOff = mode === "off" && refusedAt === refusedKey;
+  const att = useAttachments({
+    machineId: control?.machineId,
+    enabled,
+    mode,
+    onRefused: () => setRefusedAt(refusedKey),
+  });
   // A held message confirmed from its notice (control/HeldNotice.tsx) went: the composer
   // is clear, as after Send. Until then its words stayed here.
   const clearAtt = att.clear;
@@ -368,21 +481,45 @@ export function ControlStrip({
   // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,
   // the notification is shown as what it is: a prompt waiting in the terminal.
   const open = permissions.some(answerable) ? permissions.filter(answerable) : permissions;
+  // Each prompt's hook waits a while for an answer (lib/answerWindow.ts); past it, the card
+  // turns late on its own.
+  const now = useAnswerClock(open);
+  const late = (a: Attention) => answerable(a) && answerLate(a, control, session.harness, now);
   // A plan review this strip can answer: the composer then says what should change, and
   // sending it is Keep planning. A prompt could not reach the agent anyway, blocked on it.
   const review = open.find(
-    (a) => isPlanReview(a) && answerable(a) && !preHello(a, control) && answers?.[a.attentionId] !== "closed",
+    (a) => isPlanReview(a) && answerable(a) && !late(a) && answers?.[a.attentionId]?.status !== "closed",
   );
   const tooLong = text.trim().length > NOTE_MAX;
   // Approve plan carries no note (an allow reaches Claude Code with none), so while the
   // composer holds one it waits: the words would otherwise stay behind as the next prompt.
   const noted = !!review && !!text.trim();
+  // A prompt whose card says why it can't be answered from here (`offWhy`): one that is not
+  // late, waiting in a terminal, a question, or answered already.
+  const asks = open.some((a) => answerable(a) && !isQuestion(a) && !late(a) && !answers?.[a.attentionId]);
+  // Inside the hour a new device waits, with such a prompt: the card says the hour, once,
+  // with the way to answer it on spacesheep, and the line under the field does not.
+  const hourOnCard = paired && !!blockedSays && !wrong && asks;
   // One reason at a time, most fundamental first (the wrong address or an insecure page
   // come before pairing, which needs the right address too), each with its one way out; none when
   // sending simply works (the composer then carries no caption at all).
   const reason = ((): Reason | null => {
     if (note)
       return { kind: noteKind === "err" ? "error" : "note", text: note, tone: noteKind === "err" ? "err" : undefined };
+    if (picturesOff) {
+      // The sentence, with the command it names set as one.
+      const [words, command, rest] = picturesOffWords(name, !!control?.remote).split("`");
+      return {
+        kind: "pictures-off",
+        text: (
+          <>
+            <WithName text={words ?? ""} name={session.machine} />
+            {command && <code>{command}</code>}
+            {rest}
+          </>
+        ),
+      };
+    }
     if (wrong)
       return {
         kind: "wrong-origin",
@@ -396,6 +533,7 @@ export function ControlStrip({
           </>
         ),
       };
+    if (blocked && hourOnCard) return null;
     if (blocked)
       return {
         kind: "blocked",
@@ -404,29 +542,41 @@ export function ControlStrip({
           <a className="ctl-open-https" href={httpsHref}>
             Open on {new URL(httpsHref).host}
           </a>
+        ) : elsewhere ? (
+          <a className="ctl-open-https" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+            Open on {elsewhere.host}
+          </a>
         ) : undefined,
       };
+    if (!paired && catching) return null;
     if (!paired)
       return {
         kind: "unpaired",
         text: (
           <>
-            Pair <strong>{name}</strong> to message this session from here.
+            Pair <strong className="whole-name">{name}</strong> to message this session from here.
           </>
         ),
-        action: (
+        // On a spacesheep account a computer is paired on spacesheep, not here: no page of
+        // this app says how, and the session's own page there is the way on.
+        action: elsewhere ? (
+          <a className="ctl-open-https" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+            Open on {elsewhere.host}
+          </a>
+        ) : (
           <Link to="/connect" className="ctl-link">
             How to pair
           </Link>
         ),
       };
-    if (untrusted)
+    // Off an account: the machine's key list has no key of this device.
+    if (send?.kind === "catching-up" && !send.account)
       return signerKind() === "device"
         ? {
             kind: "untrusted",
             text: (
               <>
-                <strong>{name}</strong> doesn't trust {deviceWords().this} yet.
+                <strong className="whole-name">{name}</strong> doesn't trust {deviceWords().this} yet.
               </>
             ),
             action: (
@@ -439,7 +589,7 @@ export function ControlStrip({
             kind: "untrusted",
             text: (
               <>
-                <strong>{name}</strong> trusts no passkey from this browser.
+                <strong className="whole-name">{name}</strong> trusts no passkey from this browser.
               </>
             ),
             action: (
@@ -448,6 +598,23 @@ export function ControlStrip({
               </Link>
             ),
           };
+    // Approved, and this machine has not added the key: beside a prompt to answer the card
+    // says it, with the way on, and this line does not.
+    if (approval === "catching-up" && asks) return null;
+    // On an account: not approved, waiting for it, or approved and this machine has not
+    // added the key yet. Nothing where it can send, or inside the hour (`blocked` says that).
+    const trust = send?.kind === "unapproved" || send?.kind === "waiting" || send?.kind === "catching-up" ? send : null;
+    const says = trust ? sendWords(trust, name) : null;
+    if (trust && says?.long)
+      return {
+        kind: trust.kind,
+        text: says.long,
+        action: says.approve ? (
+          <Link to="/add-device" className="ctl-link">
+            {setupLabel()}
+          </Link>
+        ) : undefined,
+      };
     if (!onSend) return null;
     if (review && tooLong) return { kind: "too-long", text: "Keep it under 2,000 characters", tone: "err" };
     if (noted) return { kind: "plan-note", text: NOTED };
@@ -469,7 +636,7 @@ export function ControlStrip({
         kind: "offline",
         text: (
           <>
-            <strong>{name}</strong> is offline. A message waits until it's back.
+            <strong className="whole-name">{name}</strong> is offline. A message waits until it's back.
           </>
         ),
       };
@@ -485,41 +652,80 @@ export function ControlStrip({
       };
     return null;
   })();
-  // The phone, unpaired, with a prompt to answer: one state, one sentence (on the card),
-  // and no composer. A desktop keeps its field and the line under it.
-  const folded = phone && !paired && !blocked && open.some(answerable);
+  // The phone, unpaired, not approved or inside the hour, with a prompt to answer: one state,
+  // one sentence (on the card), and no composer. A desktop keeps its field and the line under
+  // it, and so does the phone where every prompt is late: that card says only that it is too late.
+  const folded = phone && asks && ((((!paired && !catching) || approve) && !blocked) || hourOnCard);
+  // A card note's sentence and its way on: on the phone the link takes a line of its own;
+  // wider, it follows a "·" that never starts a line.
+  const withWay = (sentence: string, way: ReactNode): ReactNode =>
+    phone ? (
+      <>
+        <WithName text={sentence} name={session.machine} /> <br />
+        {way}
+      </>
+    ) : (
+      <>
+        <WithName text={`${sentence.replace(/\.$/, "")}\u00a0·`} name={session.machine} /> {way}
+      </>
+    );
+  const notAdded = approval === "catching-up" && send ? sendWords(send, name)?.long : null;
   // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
   const offWhy: ReactNode = enabled ? null : !paired ? (
-    folded ? (
+    catching ? null : folded ? (
       <>
-        Pair <strong>{name}</strong> to answer and message from here ·{"\u00a0"}
-        <Link to="/connect" className="ctl-link">
-          How to pair
-        </Link>
+        Pair <strong className="whole-name">{name}</strong> to answer and message from here ·{"\u00a0"}
+        {elsewhere ? (
+          <a className="ctl-link" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+            Open on {elsewhere.host}
+          </a>
+        ) : (
+          <Link to="/connect" className="ctl-link">
+            How to pair
+          </Link>
+        )}
       </>
     ) : (
       `pair ${name} to answer here`
     )
   ) : blocked ? (
-    wrong ? (
-      "answer it where sending works"
+    hourOnCard && elsewhere && blockedSays ? (
+      withWay(
+        blockedSays,
+        <a className="ctl-link" href={elsewhere.href} target="_blank" rel="noreferrer noopener" data-elsewhere>
+          Open on {elsewhere.host}
+        </a>,
+      )
     ) : (
-      "this page cannot sign an answer"
+      blockedAnswer(wrong, blockedSays)
     )
+  ) : approve ? (
+    `${NEW_WORDS.answerNotYet(ThisPhone())}.`
   ) : stream ? (
     "waiting for the connection"
+  ) : notAdded ? (
+    withWay(
+      notAdded,
+      <Link to="/add-device" className="ctl-link">
+        {setupLabel()}
+      </Link>,
+    )
   ) : null;
   const canSend = review
-    ? enabled && !busy && !!text.trim() && !tooLong && answers?.[review.attentionId] !== "sent"
+    ? enabled && !busy && !!text.trim() && !tooLong && answers?.[review.attentionId]?.status !== "sent"
     : enabled && !busy && !att.uploading && (!!text.trim() || att.items.length > 0);
 
   const run = (id: string, action: ControlAction, after?: () => void) => {
     if (!enabled || busy) return;
     if (action.kind === "permission.answer" && answers?.[action.attentionId]) return;
+    refocus.current = action.kind === "permission.answer" ? action.attentionId : null;
     setBusy(id);
     void onSend?.(action)
       .then(after)
-      .catch(() => {})
+      .catch(() => {
+        // Not sent from here: no receipt is this press's to take the focus.
+        refocus.current = null;
+      })
       .finally(() => setBusy(null));
   };
   // Keep planning with what the composer says; once it went, the composer is clear again.
@@ -533,21 +739,35 @@ export function ControlStrip({
     if (review) return canSend ? keep("prompt", review.attentionId) : undefined;
     const t = text.trim();
     if (!t && att.items.length === 0) return;
-    // The signed text: the message, then the attachments block (or null while an upload runs).
+    // What is signed: the message and its pictures, as files or as the block of paths (null
+    // while an upload runs or one failed).
     const composed = att.compose(t);
     if (!composed) return;
-    run("prompt", { kind: "prompt", text: composed.text, composer: true, attached: composed.lines }, () => {
+    const action: ControlAction = {
+      kind: "prompt",
+      text: composed.text,
+      composer: true,
+      ...(composed.files?.length ? { files: composed.files } : {}),
+      attached: composed.lines,
+    };
+    run("prompt", action, () => {
       setText("");
       writeDraft(session.key, "");
       att.clear();
     });
   };
+  // Return sends and Shift+Return is a new line; on a touch screen, whose keyboard has no
+  // Shift+Return, Return is the new line (as in Messages) and ⌘/Ctrl+Return sends.
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    const sends = touch ? e.metaKey || e.ctrlKey : !e.shiftKey;
+    if (sends) {
       e.preventDefault();
       sendText();
     }
   };
+  // The field's name is the words it shows, so saying them (Voice Control) finds it.
+  const named = review ? "What should change?" : placeholder;
 
   return (
     <form
@@ -560,37 +780,84 @@ export function ControlStrip({
       }}
     >
       {open.map((a) => {
-        const status = answers?.[a.attentionId];
+        const out = answers?.[a.attentionId];
+        const status = out?.status;
         const plan = isPlanReview(a);
-        const terminal = !answerable(a);
-        const early = !terminal && preHello(a, control);
-        const off = !enabled || !!busy || status === "sent" || early;
+        // A question is read here and answered on its computer: Allow cannot carry the
+        // option chosen. `answerable` stays the protocol's, for the twin above.
+        const question = isQuestion(a);
+        const terminal = !answerable(a) || question;
+        // Its hook let go: an answer from here would only be refused, so none is offered.
+        const gone = late(a);
+        const off = !enabled || !!busy;
         const suggested = suggestions?.find((s) => s.attentionId === a.attentionId);
-        const shut = terminal || status === "closed";
-        const why: ReactNode = terminal
-          ? "waiting in the terminal"
-          : status === "closed"
-            ? "answered in the terminal, or expired"
-            : early
-              ? "raised before this machine was paired; answer it in its terminal"
-              : status === "sent"
-                ? `answer sent · waiting for ${session.machine ?? "the machine"}`
+        // An answer is out: one line says which, and what it waits for, in the pair's place.
+        const sent = !terminal && !gone && out?.status === "sent";
+        const offline = control?.online === false;
+        const receipt =
+          sent && out?.status === "sent"
+            ? receiptWords({ decision: out.decision, plan, machine: session.machine, offline })
+            : null;
+        const shut = terminal || gone || status === "closed" || sent;
+        // On a line of its own: where it is answered, and that it is too late, as sentences.
+        const said = question
+          ? NEW_WORDS.questionWhereLine(session.machine ?? undefined)
+          : terminal
+            ? "waiting in the terminal"
+            : gone
+              ? NEW_WORDS.answerLateLine(session.machine ?? undefined)
+              : status === "closed"
+                ? NEW_WORDS.answerClosed
                 : offWhy;
+        const why: ReactNode = typeof said === "string" ? <WithName text={said} name={session.machine} /> : said;
+        // The card's line describes both buttons; a button's own reason is its alone.
+        const noteId = `${cardId}-${a.attentionId}`;
+        const denyWhy = plan && tooLong ? "Keep it under 2,000 characters" : null;
+        const allowWhy = plan && noted && !off ? NOTED : null;
+        const describedBy = (own: string | null, side: string) =>
+          [why ? noteId : null, own ? `${noteId}-${side}` : null].filter(Boolean).join(" ") || undefined;
         return (
           <div
             className={plan ? "ctl-answer ctl-answer--plan" : "ctl-answer"}
             key={a.attentionId}
             data-attention={a.attentionId}
-            data-answer={terminal ? "terminal" : (status ?? (early ? "pre-hello" : "open"))}
+            data-answer={
+              question
+                ? "question"
+                : terminal
+                  ? "terminal"
+                  : gone
+                    ? "late"
+                    : (status ?? (approve ? "unapproved" : "open"))
+            }
           >
-            <Question a={a} session={session} />
-            {why ? (
-              <span className="ctl-answer-note">{why}</span>
+            <Question a={a} session={session} out={sent ? (offline ? "held" : "going") : undefined} />
+            {receipt ? (
+              <p
+                className="ctl-answer-receipt"
+                role="status"
+                aria-live="polite"
+                tabIndex={-1}
+                ref={(el) => {
+                  // The pressed button went with the pair: its focus comes here.
+                  if (!el || refocus.current !== a.attentionId) return;
+                  refocus.current = null;
+                  const at = document.activeElement;
+                  if (!at || at === document.body) el.focus({ preventScroll: true });
+                }}
+              >
+                <span className="ctl-answer-receipt-what">{receipt.what}</span>
+                <WithName text={receipt.text.slice(receipt.what.length)} name={session.machine} />
+              </p>
+            ) : why ? (
+              <span className="ctl-answer-note" id={noteId}>
+                {why}
+              </span>
             ) : suggested && !shut ? (
               <span
                 className="ctl-suggestion"
                 data-suggestion={suggested.decision}
-                title={`Suggested by the ${suggested.plugin} plugin${suggested.note ? ` · ${suggested.note}` : ""}. Nothing is sent until you confirm with your passkey.`}
+                title={`Suggested by the ${suggested.plugin} plugin${suggested.note ? ` · ${suggested.note}` : ""}. Nothing is sent until you confirm with ${signerLabel()}.`}
               >
                 <span className="ctl-suggestion-text">
                   {suggested.decision === "allow" ? "Allow" : "Deny"} suggested by {suggested.by}
@@ -612,7 +879,13 @@ export function ControlStrip({
                 </button>
               </span>
             ) : null}
-            {!shut && (
+            {!shut && approve ? (
+              // Never just "Approve": beside a question, that word is the agent's action. A plain
+              // `btn` (Deny's face), not `btn--deny`: Deny's key (d) and a menu's Deny look for that.
+              <Link to="/add-device" className="btn ctl-approve">
+                {setupLabel()}
+              </Link>
+            ) : !shut ? (
               <span className="ctl-answer-btns">
                 <ActionButton
                   className="btn btn--deny"
@@ -620,7 +893,7 @@ export function ControlStrip({
                   pending={busy === `deny:${a.attentionId}`}
                   pendingLabel={plan ? "Sending…" : "Denying…"}
                   data-tip-keys={hintFor("session.deny") || undefined}
-                  aria-description={plan && tooLong ? "Keep it under 2,000 characters" : undefined}
+                  aria-describedby={describedBy(denyWhy, "deny")}
                   onClick={() =>
                     plan
                       ? keep(`deny:${a.attentionId}`, a.attentionId)
@@ -639,7 +912,7 @@ export function ControlStrip({
                   pending={busy === `allow:${a.attentionId}`}
                   pendingLabel={plan ? "Approving…" : "Allowing…"}
                   data-tip-keys={hintFor("session.allow") || undefined}
-                  aria-description={plan && noted && !off ? NOTED : undefined}
+                  aria-describedby={describedBy(allowWhy, "allow")}
                   onClick={() =>
                     run(`allow:${a.attentionId}`, {
                       kind: "permission.answer",
@@ -650,8 +923,18 @@ export function ControlStrip({
                 >
                   {plan ? "Approve plan" : "Allow"}
                 </ActionButton>
+                {denyWhy && (
+                  <span className="sr-only" id={`${noteId}-deny`}>
+                    {denyWhy}
+                  </span>
+                )}
+                {allowWhy && (
+                  <span className="sr-only" id={`${noteId}-allow`}>
+                    {allowWhy}
+                  </span>
+                )}
               </span>
-            )}
+            ) : null}
           </div>
         );
       })}
@@ -665,11 +948,12 @@ export function ControlStrip({
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={onKey}
-              placeholder={review ? "What should change?" : placeholder}
+              placeholder={named}
               disabled={!enabled}
-              aria-label="Message for the next turn"
+              aria-label={named}
+              aria-describedby={reason ? reasonId : undefined}
               rows={1}
-              enterKeyHint="send"
+              enterKeyHint={touch ? "enter" : "send"}
             />
             {working && (
               <button
@@ -690,7 +974,7 @@ export function ControlStrip({
               disabled={!canSend}
               aria-label={review ? "Keep planning" : "Send"}
               aria-busy={busy === "prompt" || undefined}
-              data-tip-keys="↩"
+              data-tip-keys={touch ? "⌘↩" : "↩"}
             >
               {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
             </button>
@@ -701,8 +985,11 @@ export function ControlStrip({
         <p className="ctl-foot" data-reason={reason?.kind}>
           {reason && (
             <span
+              id={reasonId}
               className={`ctl-hint ctl-context ${reason.tone === "err" ? "ctl-note--err" : ""}`}
               data-wrong-origin={reason.kind === "wrong-origin" ? "" : undefined}
+              // It answers something just done (a picture pasted or dropped), so it is said.
+              role={reason.kind === "pictures-off" ? "status" : undefined}
             >
               {reason.text}
             </span>

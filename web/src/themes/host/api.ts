@@ -31,7 +31,7 @@ import { harnessMark, repoBranch, sessionTitle } from "../../lib/format";
 import { harnessIconSvg } from "../../lib/harnessIcons";
 import { labelName, requestLabelRename } from "../../lib/labels";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../../lib/menus";
-import { apiUrl } from "../../lib/net";
+import { apiFetch } from "../../lib/net";
 import { agentPath, navigate, sessionPath } from "../../lib/router";
 import { type AppSettings, effectiveLens, getSettings, subscribeSettings } from "../../lib/settings";
 import { activeMap, registerViewActions } from "../../lib/shortcuts";
@@ -172,7 +172,7 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
   // with another one is another device's write.
   let etag: string | null = null;
   const readState = async (): Promise<{ value: unknown; etag: string | null }> => {
-    const res = await fetch(apiUrl(statePath), { headers: { accept: "application/json" } });
+    const res = await apiFetch(statePath, { headers: { accept: "application/json" } });
     if (res.status === 204) return { value: null, etag: res.headers.get("etag") };
     if (!res.ok) throw new Error(`theme storage: ${res.status} ${res.statusText}`);
     return { value: await res.json(), etag: res.headers.get("etag") };
@@ -183,7 +183,7 @@ export function createThemeApi(opts: ThemeApiOptions): { api: ThemeApi; dispose:
   const writeState = async (value: unknown, ifMatch?: string | null): Promise<boolean> => {
     writing++;
     try {
-      const res = await fetch(apiUrl(statePath), {
+      const res = await apiFetch(statePath, {
         method: "PUT",
         headers: { "content-type": "application/json", ...(ifMatch ? { "if-match": ifMatch } : {}) },
         body: JSON.stringify(value === undefined ? null : value),

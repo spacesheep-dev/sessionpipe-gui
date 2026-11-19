@@ -68,6 +68,32 @@ pub async fn target(
     Ok(Target { rp: known, host })
 }
 
+/// This device's own key for the rp id `receiver` signs for (made on first use, with no
+/// prompt), read natively. The shell hands it to the Hub when a spacesheep account is
+/// asked to trust this device: the key that is enrolled there is the one in this
+/// device's hardware, never one a page named.
+pub async fn device_key(
+    lookup: &dyn ReceiverLookup,
+    receiver: &str,
+) -> Result<crate::device::DeviceKey, Error> {
+    let signer = SIGNER
+        .get()
+        .cloned()
+        .ok_or_else(|| Error::new("unavailable", "the signer is not ready"))?;
+    device_key_of(signer, lookup, receiver).await
+}
+
+/// `device_key` for a given signer: the rp id is the receiver's own, checked against its
+/// URL as for any signature, so no key is handed out for an rp the receiver cannot claim.
+async fn device_key_of(
+    signer: Arc<Signer>,
+    lookup: &dyn ReceiverLookup,
+    receiver: &str,
+) -> Result<crate::device::DeviceKey, Error> {
+    let t = target(lookup, receiver, None).await?;
+    blocking(move || signer.key(&t.rp)).await
+}
+
 /// A machine's name as the receiver lists it, for a prompt; its id's start when unknown.
 pub async fn machine_name(lookup: &dyn ReceiverLookup, receiver: &str, machine: &str) -> String {
     let fallback = || format!("machine {}", machine.get(..10).unwrap_or(machine));
@@ -435,6 +461,130 @@ mod tests {
                 .host,
             "app.spacesheep.dev"
         );
+    }
+
+    #[test]
+    fn this_devices_key_is_for_the_receivers_own_rp_and_no_other() {
+        let (s, _, _) = signer();
+        let s = Arc::new(s);
+        let account = rx("https://spacesheep.dev", Some("spacesheep.dev"), false);
+        let k = run(device_key_of(s.clone(), &account, "rx1")).unwrap();
+        assert_eq!(k, s.key("spacesheep.dev").unwrap());
+        assert_eq!((k.kind.as_str(), k.alg, k.id.len()), ("device", -7, 43));
+        // A receiver that claims an rp id its URL cannot have gets no key at all.
+        let liar = rx("https://evil.example", Some("spacesheep.dev"), false);
+        assert_eq!(
+            run(device_key_of(s.clone(), &liar, "rx1"))
+                .unwrap_err()
+                .code,
+            "rp_mismatch"
+        );
+        assert_eq!(
+            run(device_key_of(s, &account, "nobody")).unwrap_err().code,
+            "unknown_receiver"
+        );
+        // Before the plugin made a signer there is none to ask.
+        if SIGNER.get().is_none() {
+            assert_eq!(
+                run(device_key(&account, "rx1")).unwrap_err().code,
+                "unavailable"
+            );
+        }
+    }
+
+    /// A phone on a spacesheep account can send. Its page names the ACCOUNT as the
+    /// receiver (the Hub lists it at the account's own origin, with the rp id its
+    /// machines door gave, never as local), so the rp id a command is signed for is
+    /// held to that origin by the same rule as any receiver's, and the page's own word
+    /// for it counts for nothing beyond having to agree. (The Mac app's page names its
+    /// local receiver and asks for spacesheep's rp id, which is the `rp_mismatch` in the
+    /// test above: that refusal is right, and is not this path.)
+    #[test]
+    fn a_command_for_a_computer_on_an_account_is_signed_for_the_accounts_own_rp() {
+        use crate::validate::Mode;
+        let (s, hw, clock) = signer();
+        clock.store(now_ms(), std::sync::atomic::Ordering::SeqCst);
+        let s = Arc::new(s);
+        let account = rx("https://spacesheep.dev", Some("spacesheep.dev"), false);
+        let t = run(target(&account, "rx1", Some("spacesheep.dev"))).unwrap();
+        assert_eq!(
+            t,
+            Target {
+                rp: "spacesheep.dev".into(),
+                host: "spacesheep.dev".into()
+            }
+        );
+        assert_eq!(run(target(&account, "rx1", None)).unwrap(), t);
+        // The page cannot have it signed for any other rp id, whatever it names.
+        for asked in ["localhost", "evil.example", "app.spacesheep.dev", "dev", ""] {
+            assert_eq!(
+                run(target(&account, "rx1", Some(asked))).unwrap_err().code,
+                "rp_mismatch",
+                "{asked}"
+            );
+        }
+        // Nor can a server: an rp id the account's own origin cannot claim signs nothing,
+        // whether the page agrees with it or not.
+        for (origin, rp) in [
+            ("https://spacesheep.dev", "evil.example"),
+            ("https://evil.example", "spacesheep.dev"),
+            ("https://spacesheep.dev.evil.example", "spacesheep.dev"),
+            ("http://spacesheep.dev", "spacesheep.dev"),
+        ] {
+            let liar = rx(origin, Some(rp), false);
+            for asked in [None, Some(rp)] {
+                assert_eq!(
+                    run(target(&liar, "rx1", asked)).unwrap_err().code,
+                    "rp_mismatch",
+                    "{origin} {rp}"
+                );
+            }
+        }
+
+        // The key spacesheep was asked to trust (`device_key`, what `acct_device_ask`
+        // hands the Hub) is the key that signs.
+        let enrolled = run(device_key_of(s.clone(), &account, "rx1")).unwrap();
+        let cmd = command(
+            &NativeAnswer::Reply {
+                machine: M.into(),
+                session: "claude-code:s".into(),
+                text: "ok go".into(),
+            },
+            &b64::enc(&s.random(16)),
+            now_ms(),
+        )
+        .unwrap();
+        // Under the day's grant: one prompt, naming the account's host, and the three
+        // fields the Hub's send door takes (`{ cmd, csig, grant }`).
+        let signed = s
+            .sign(&t.rp, &t.host, Some(&cmd), Mode::Grant, false, "")
+            .unwrap();
+        let mut fields: Vec<&String> = signed.as_object().unwrap().keys().collect();
+        fields.sort();
+        assert_eq!(fields, ["cmd", "csig", "grant"]);
+        assert_eq!(signed["cmd"], cmd);
+        assert_eq!(signed["grant"]["cred"], enrolled.id);
+        assert!(signed["csig"].is_string() && signed["grant"]["str"].is_string());
+        {
+            let prompts = hw.prompts.lock().unwrap();
+            assert_eq!(prompts.len(), 1);
+            assert!(prompts[0].contains("spacesheep.dev"), "{}", prompts[0]);
+        }
+        // A fresh confirmation: `{ cmd, confirm }`, by the same key.
+        let confirmed = s
+            .sign(
+                &t.rp,
+                &t.host,
+                Some(&cmd),
+                Mode::Confirm,
+                false,
+                "studio-mac",
+            )
+            .unwrap();
+        let mut fields: Vec<&String> = confirmed.as_object().unwrap().keys().collect();
+        fields.sort();
+        assert_eq!(fields, ["cmd", "confirm"]);
+        assert_eq!(confirmed["confirm"]["cred"], enrolled.id);
     }
 
     #[test]

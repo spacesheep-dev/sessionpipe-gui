@@ -19,19 +19,17 @@ import { sendCommand } from "./command";
 import { useControlActivity } from "./hooks";
 import "./newSession.css";
 import { openNewSession } from "./newSessionState";
+import { isCancel } from "./signer";
 import {
   harnessCommand,
   isFinal,
+  notSentWords,
   outcomeWords,
   PERMISSION_LABEL,
-  reasonOf,
-  refusalWords,
-  sendErrorWords,
+  promptFailureWords,
   sentLine,
   shownState,
   startFailureWords,
-  UNTRACKED_WORDS,
-  unconfirmedWords,
 } from "./words";
 
 /** The start this device (or another) sent that names `key`, newest first. */
@@ -201,32 +199,6 @@ export function sentRow(
   };
 }
 
-/** A prompt that did not reach its session, in the words the timeline shows under it. */
-export function promptFailureWords(a: ControlActivity, machine: string): string | null {
-  const detail = a.detail?.trim();
-  if ((a.outcome === "refused" || a.outcome === "failed") && a.code === "cancelled")
-    return `Cancelled with its session, before ${machine} got it.`;
-  if (a.outcome === "failed" && a.code === "untracked") return UNTRACKED_WORDS;
-  if (a.outcome === "unconfirmed") return unconfirmedWords(machine);
-  switch (a.outcome) {
-    case "refused": {
-      // No code (spacesheep before its `code`): the reason when there is one, never twice.
-      const reason = reasonOf(a);
-      if (!a.code)
-        return `${machine} refused it.${reason ? ` ${(reason.charAt(0).toUpperCase() + reason.slice(1)).replace(/[.!?…]?$/, ".")}` : ""}`;
-      return `${machine} refused it: ${refusalWords(a.code)}.`;
-    }
-    case "failed":
-      return `It didn't reach the session${detail ? `: ${detail.replace(/[.!?…]?$/, ".")}` : "."}`;
-    case "expired":
-      return `${machine} didn't take it in time.`;
-    case "unsupported":
-      return `${machine} can't hand messages to this session's agent.`;
-    default:
-      return null;
-  }
-}
-
 /** The `backticked` command a machine's words carry, the first one. */
 const commandIn = (text: string): string | null => /`([^`]+)`/.exec(text)?.[1] ?? null;
 
@@ -273,9 +245,7 @@ export function SentFailure({
           <ActionButton
             className="btn btn--sm"
             pendingLabel="Starting…"
-            onClick={() =>
-              startAtSafe(a, control).catch((e) => setErr(sendErrorWords(e).replace(/^not sent · /, "Not sent: ")))
-            }
+            onClick={() => startAtSafe(a, control).catch((e) => setErr(isCancel(e) ? null : notSentWords(e)))}
           >
             Start in Safe instead
           </ActionButton>

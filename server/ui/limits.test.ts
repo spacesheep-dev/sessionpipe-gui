@@ -18,6 +18,7 @@ import { Router } from "../http/router.js";
 import { Store } from "../store/store.js";
 import { uiGuard } from "./index.js";
 import { LimitsStore, registerLimits } from "./limits.js";
+import { LIMITS_NAME_MAX, readWindows } from "./limitsCore.js";
 
 const FIVE = { id: "five_hour", used_percent: 23.5, window_minutes: 300, resets_at: "2026-10-28T19:43:49.000Z" };
 const WEEK = { id: "seven_day", used_percent: 41.2, window_minutes: 10_080, resets_at: "2026-10-31T11:30:29.000Z" };
@@ -146,6 +147,40 @@ describe("LimitsStore", () => {
     expect(e?.windows.map((w) => w.id)).toEqual(["spend_limit", "w0", "w1", "w2", "w3", "w4", "w5", "w6"]);
     expect(e?.windows[0]).toEqual({ id: "spend_limit", usedPercent: 112 });
     expect(e?.plan).toBeUndefined();
+  });
+
+  it("an account id or a machine name longer than a line is not one: its report is not kept, under any key", () => {
+    const long = "a".repeat(LIMITS_NAME_MAX + 1);
+    // The account that served it, the session's own, the machine: each too long, each refused.
+    expect(limits.observe(observed({ windows: [FIVE], account_id: long }))).toBe(false);
+    expect(limits.observe(observed({ windows: [FIVE] }, { account: long }))).toBe(false);
+    expect(limits.observe(observed({ windows: [FIVE] }, { machine: long }))).toBe(false);
+    expect(limits.observe(observed({ windows: [FIVE], account_id: "acct\u0000one" }))).toBe(false);
+    // Not kept under the machine either: the numbers were an account's.
+    expect(limits.list()).toEqual([]);
+    // A name of exactly a line is one.
+    const line = "b".repeat(LIMITS_NAME_MAX);
+    expect(limits.observe(observed({ windows: [FIVE], account_id: line }))).toBe(true);
+    expect(limits.list().map((e) => e.accountId)).toEqual([line]);
+    // A hello's pooled accounts, the same.
+    const hello = (id: string, machine = "lab-mac") =>
+      ({
+        name: machine,
+        control: {
+          machineId: "m_0123456789abcdefghij",
+          lastHelloAt: new Date().toISOString(),
+          pool: { on: true, harness: "claude-code", accounts: [{ id, windows: readWindows([WEEK]) }] },
+        },
+      }) as never;
+    expect(limits.observeMachine(hello(long))).toBe(false);
+    expect(limits.observeMachine(hello("pooled@example.com", long))).toBe(false);
+    expect(limits.observeMachine(hello("pooled@example.com"))).toBe(true);
+    expect(limits.list()).toHaveLength(2);
+    // However many senders and however long their names, the whole list stays small.
+    for (let i = 0; i < LIMITS_MAX + 20; i++)
+      limits.observe(observed({ windows: [FIVE, WEEK], account_id: `${"c".repeat(LIMITS_NAME_MAX - 4)}${i}` }));
+    expect(limits.list()).toHaveLength(LIMITS_MAX);
+    expect(JSON.stringify(limits.list()).length).toBeLessThan(400_000);
   });
 
   it(`keeps ${LIMITS_MAX} entries, dropping the one reported longest ago`, () => {

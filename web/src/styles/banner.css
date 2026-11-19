@@ -102,3 +102,30 @@
     animation: none;
   }
 }
+
+/* The app's own notice, with no session to open (toast--told, Banner.tsx): the title has
+   its line and what follows wraps under it. Neither sentence is cut. */
+.toast--banner.toast--told .toast-main {
+  overflow: visible;
+  white-space: normal;
+  text-align: left;
+}
+.toast--banner.toast--told .toast-top {
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+.toast--banner.toast--told .toast-title {
+  flex: 1 1 100%;
+  overflow: visible;
+  white-space: normal;
+  color: var(--fg);
+}
+.toast--banner.toast--told .toast-detail {
+  flex: 1 1 100%;
+  overflow: visible;
+  white-space: normal;
+  color: var(--fg-2);
+}
+.toast--banner.toast--told .toast-detail::before {
+  content: none;
+}

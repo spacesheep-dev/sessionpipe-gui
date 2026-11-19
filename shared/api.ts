@@ -312,7 +312,8 @@ export interface Delegation {
  *  3+ tool.ended were `ok: false`. loop: within the last 10 tool.started the same tool
  *  ran 3+ times on an identical input (tier 3 only). compacting: 2+ context.compacted
  *  within COMPACTING_WINDOW_MS of the last event. gap: seqs are missing behind the
- *  highest one for longer than GAP_AFTER_MS (they clear when they arrive). */
+ *  highest one for longer than GAP_AFTER_MS (they clear when they arrive). spacesheep
+ *  thins what it relays, so its events open no hole. */
 export type SessionFlagKind = "slow_tool" | "error_streak" | "loop" | "compacting" | "gap";
 
 export interface SessionFlag {
@@ -594,8 +595,9 @@ export const MODEL_MAX = 100;
 export const validModel = (m: unknown): m is string =>
   typeof m === "string" && m.length >= 1 && m.length <= MODEL_MAX && MODEL_RE.test(m);
 
-/** One file a `start` names (CONTROL.md §3.1 `files`): the receiver holds the bytes under
- *  `sha256` (base64url, 43 characters) and the machine fetches them with its token. */
+/** One file a `start` or a `prompt` names (CONTROL.md §3.1 `files`): the receiver holds the
+ *  bytes under `sha256` (base64url, 43 characters) and the machine fetches them with its
+ *  token. */
 export interface StartFile {
   name: string;
   type: string;
@@ -606,6 +608,13 @@ export interface StartFile {
 export const START_FILES_MAX = 10;
 export const START_FILE_MAX_BYTES = 26_214_400;
 export const START_FILES_TOTAL_BYTES = 52_428_800;
+/** What POST ROUTES.ui.control + "/files" answers: the entry a signed command names, and
+ *  for a picture (PNG, JPEG, GIF, WebP) its size in pixels, read from its own bytes. Only
+ *  the four fields of `StartFile` go into a command; an older receiver sends no pixels. */
+export interface UploadedFile extends StartFile {
+  width?: number;
+  height?: number;
+}
 
 export interface Stats {
   events: number;
@@ -839,7 +848,8 @@ export interface DetailQuery {
   limit?: number;
   /** Slim events (big strings cut to a 2 KB preview) instead of the full lines from disk. */
   slim?: boolean;
-  /** With `slim`: a shorter cut, 200–2048 chars, for list pages. */
+  /** With `slim`: a shorter cut of tool input/output, 200–2048 chars, for list pages. The
+   *  turn's own words keep the 2 KB preview (an older receiver cuts them too). */
   preview?: number;
   /** Only this subagent's events (an AgentRun id): its subagent.started / .ended, the
    *  tool calls stamped with its `agent_id`, and the Agent / Task call that launched it.
@@ -1334,9 +1344,10 @@ export interface RemoteInfo {
 
 export type AttachmentType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
-/** An image uploaded from the composer (POST ROUTES.ui.attachments). The control
- *  protocol carries text only, so the prompt names it instead: by `path` when the
- *  session runs on this machine, by `url` otherwise (shared/attachments.ts). */
+/** An image uploaded from the composer (POST ROUTES.ui.attachments) for a session whose
+ *  daemon takes no files on a prompt and runs on this machine: the prompt's text names it
+ *  by `path` (shared/attachments.ts). Every other machine gets pictures as the command's
+ *  `files` (`UploadedFile`), and nothing of them is in the text. */
 export interface Attachment {
   /** A ULID; the file is `<id>.<ext>` under `<stateDir>/attachments`. */
   id: string;
@@ -1344,17 +1355,19 @@ export interface Attachment {
   ext: "png" | "jpg" | "gif" | "webp";
   /** Absolute path on the machine the GUI runs on. */
   path: string;
-  /** Absolute URL another machine can fetch: the https origin when TLS is on, else the
-   *  first LAN URL, with `?k=<ui key>` so no cookie is needed. */
+  /** Where this board's own pages show it from: `/attachments/<id>.<ext>`, a path with no
+   *  origin and no key in it (the page's cookie or loopback lets it in). Never written into
+   *  a prompt. */
   url: string;
   width: number;
   height: number;
   bytes: number;
 }
 
-/** One image at most; the composer refuses a bigger file before uploading. */
+/** One image at most where the prompt names it by path; the composer refuses a bigger file
+ *  before uploading. A picture that goes as a file may be START_FILE_MAX_BYTES. */
 export const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
-/** Images per message. */
+/** Images per message, either way. */
 export const ATTACHMENTS_PER_MESSAGE = 6;
 export const ATTACHMENT_TYPES: Record<AttachmentType, Attachment["ext"]> = {
   "image/png": "png",
@@ -1540,9 +1553,12 @@ export interface Applied {
  *  `key.add` (server/control/pool.ts); its fields are `pool_action`, `pool_account`,
  *  `pool_order` and `pool_code`. */
 export type ControlKind = "prompt" | "permission.answer" | "cancel" | "start" | "key.add" | "pool";
-/** `unconfirmed` is this receiver's own, never a machine's ack: a send spacesheep carried
- *  that the computer took and said nothing more of within spacesheep's day (state.ts
- *  applyRemoteJobs). Final; whether it ran is spacesheep's to say. */
+/** `unconfirmed` is this app's own, never a machine's ack: a send spacesheep carried whose
+ *  end nobody here can say. Either the computer took it and said nothing more within
+ *  spacesheep's day (server/control/remote.ts applyRemoteJobs; a later read of its job may
+ *  still settle it), or spacesheep took the send without naming its job, so there was never
+ *  anything to follow (enqueueRemote; the row's `code` is then `no_job`, and it is not
+ *  known that a computer took it). Final here; whether it ran is spacesheep's to say. */
 export type ControlOutcome =
   | "progress"
   | "taken"
@@ -1566,8 +1582,18 @@ export interface ControlActivity {
   /** A send carried by spacesheep, waiting while this app follows no account that can say
    *  how it went (disconnected): it is picked up again when that account connects. */
   unfollowed?: "disconnected" | "revoked";
+  /** A send of a page on a spacesheep account whose answer nobody heard
+   *  (web/src/account/unheard.ts); a receiver never sets it. `asking`: it may have been
+   *  sent, and the page is finding out (the row waits, `detail` is what the app said of the
+   *  asking). `unsent`: no job was made of it: `status`, `reason`, `code` and `detail` are
+   *  the refusal a send answers with. `unknown`: nobody can say any more. Once spacesheep is
+   *  known to hold it, the row is a send like any other and says none of this. */
+  unheard?: { state: "asking" | "unsent" | "unknown"; status?: number; reason?: string };
   /** The delivery mode the machine acked, one of `DELIVERY_MODES`. */
   mode?: string;
+  /** A `permission.answer`'s prompt and decision, as signed (`for`, `decision`): every
+   *  surface reads from it which prompt has an answer out, also after a reload. */
+  answer?: { for: string; decision: "allow" | "deny" };
   code?: string;
   detail?: string;
   reply?: string;
@@ -1586,7 +1612,7 @@ export interface ControlActivity {
   /** A start's level and model, as signed (what was asked, never what ran). */
   permission?: StartPermission;
   model?: string;
-  /** A start's files, as signed. */
+  /** A start's files, or a prompt's (the pictures sent beside a message), as signed. */
   files?: StartFile[];
   /** What the machine ran it with, from its `taken` / `delivered` ack (sessionpipe 0.10);
    *  `inherit` when it ran with no permission flag. */
@@ -1772,7 +1798,9 @@ export const ROUTES = {
     /** GET → image/svg+xml: the LAN URL with the UI key, for a phone camera. */
     qr: "/api/ui/qr.svg",
     /** Everything under it is the control channel's UI side (server/control/README.md),
-     *  POST /files among it: one file a start will carry, as the raw body → StartFile. */
+     *  POST /files?name=&machine= among it: one file a start or a prompt will carry, as the
+     *  raw body → UploadedFile. `machine` (the machine it is for) is taken and not read yet.
+     *  415 `not_an_image` for bytes that are not the picture their content-type says. */
     control: "/api/ui/control",
     /** GET → { viewers: Viewer[] } */
     viewers: "/api/ui/viewers",

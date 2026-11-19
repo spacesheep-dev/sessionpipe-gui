@@ -1,0 +1,75 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "sh \"$(git rev-parse --show-toplevel)/.graphide/agent-signal\" edit codex; exit 0",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch"
+      },
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "sh \"$(git rev-parse --show-toplevel)/.graphide/agent-signal\" shell codex; exit 0",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$(git rev-parse --show-toplevel)/.graphide/agent-signal\" run-prep codex; exit 0",
+            "timeout": 25,
+            "type": "command"
+          }
+        ],
+        "matcher": "^mcp__.*__ci_run_tests$"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$(git rev-parse --show-toplevel)/.graphide/agent-signal\" end codex; exit 0",
+            "timeout": 2,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "sh \"$(git rev-parse --show-toplevel)/.graphide/agent-signal\" start codex; exit 0",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "sh \"$(git rev-parse --show-toplevel)/.graphide/agent-signal\" prompt codex; exit 0",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

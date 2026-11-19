@@ -6,6 +6,8 @@
 import "../native/test-env";
 import { type MachineControl, POOL_SESSION } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AccountBackend } from "../account/backend";
+import { setAccountBackend } from "../account/current";
 import { ControlError, type SendBody } from "./api";
 import { b64url, sha256 } from "./bytes";
 import { commandString, HeldForConfirm, sendCommand, signAndDeliver } from "./command";
@@ -31,6 +33,57 @@ vi.mock("./daykey", () => ({
   grantExpiry: async () => Date.now() + 3_600_000,
   dropGrant: async () => {},
 }));
+
+describe("commandString for a prompt with files (CONTROL.md §3.1)", () => {
+  const SID = "claude-code:8c132906-8c3f-4814-870a-afc3d05e1d2e";
+  const OTHER = "codex:019a0000-0000-7000-8000-000000000001";
+  const kiwi = { name: "kiwi.png", type: "image/png", size: 33_112, sha256: "k".repeat(43) };
+  const birch = { name: "birch.jpg", type: "image/jpeg", size: 7_402_118, sha256: "b".repeat(43) };
+
+  it("writes v, t, machine, kind, session, text, files in that order, and reply_to after files", () => {
+    const cmd = commandString(M, { kind: "prompt", session: SID, text: "What colour is it?", files: [kiwi, birch] });
+    const o = JSON.parse(cmd);
+    expect(Object.keys(o)).toEqual(["v", "t", "machine", "kind", "session", "text", "files", "nonce", "iat"]);
+    expect(o).toMatchObject({ v: 1, t: "sessionpipe.control", machine: M, kind: "prompt", session: SID });
+    expect(o.text).toBe("What colour is it?");
+    // In the order given, which is the tray's.
+    expect(o.files).toEqual([kiwi, birch]);
+    const handed = JSON.parse(
+      commandString(M, { kind: "prompt", session: SID, text: "Second opinion?", files: [kiwi], replyTo: OTHER }),
+    );
+    expect(Object.keys(handed)).toEqual([
+      "v",
+      "t",
+      "machine",
+      "kind",
+      "session",
+      "text",
+      "files",
+      "reply_to",
+      "nonce",
+      "iat",
+    ]);
+    expect(handed.reply_to).toBe(OTHER);
+  });
+
+  it("writes no files key for an empty list, or none", () => {
+    for (const files of [[], undefined]) {
+      const o = JSON.parse(commandString(M, { kind: "prompt", session: SID, text: "Just words", files }));
+      expect(Object.keys(o)).toEqual(["v", "t", "machine", "kind", "session", "text", "nonce", "iat"]);
+    }
+  });
+
+  it("writes each file's name, type, size and sha256 only, whatever else an upload's answer held", () => {
+    const answered = { ...kiwi, width: 640, height: 400, url: "/attachments/x.png", path: "/tmp/x.png" };
+    for (const kind of ["prompt", "start"] as const) {
+      const o = JSON.parse(
+        commandString(M, { kind, session: SID, text: "Look", cwd: "/Users/demo/acme/web", files: [answered] }),
+      );
+      expect(o.files).toEqual([kiwi]);
+      expect(Object.keys(o.files[0])).toEqual(["name", "type", "size", "sha256"]);
+    }
+  });
+});
 
 describe("commandString for a pool command", () => {
   it("names the pool's session and carries only the action's fields", () => {
@@ -241,6 +294,41 @@ describe("a send a receiver holds for a confirm (CONTROL.md §3.2: a receiver's 
     expect(passkey.asked).toHaveLength(0);
     await expect((e as HeldForConfirm<string>).confirm()).resolves.toBe("taken");
     expect(posted.map((b) => (b.confirm ? "confirm" : "grant"))).toEqual(["grant", "grant", "confirm"]);
+  });
+
+  it("a key the machine does not trust is signed for once, never again under a new grant, and an account reads its machines again", async () => {
+    inApp();
+    const machinesNow = vi.fn(async () => {});
+    setAccountBackend({ machinesNow } as unknown as AccountBackend);
+    try {
+      // A refused grant earns one fresh grant (a second Face ID); a key nobody trusts, none.
+      for (const [code, signs] of [
+        ["untrusted_key", 1],
+        ["bad_grant", 2],
+      ] as const) {
+        native = [];
+        posted = [];
+        const deliver = vi.fn(async (body: SendBody) => {
+          posted.push(body);
+          throw Object.assign(new Error(code), { status: 422, code, reason: code });
+        });
+        const e = await signAndDeliver(
+          "localhost",
+          LOCAL,
+          { kind: "permission.answer", session: "claude-code:s1", for: "a1", decision: "allow" },
+          deliver,
+        ).catch((x: unknown) => x);
+        expect(e).toMatchObject({ code });
+        expect(
+          native.map((n) => n.mode),
+          code,
+        ).toEqual(Array(signs).fill("grant"));
+        expect(posted, code).toHaveLength(signs);
+      }
+      expect(machinesNow).toHaveBeenCalledTimes(1);
+    } finally {
+      setAccountBackend(null);
+    }
   });
 
   it("a caller that may not prompt (the workflows runner) gets the refusal itself, and nothing asks", async () => {

@@ -8,29 +8,16 @@ import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isLoopback } from "../http/net.js";
+import { isThisMachine } from "../http/net.js";
 import type { Handler } from "../http/router.js";
 
-/** Every address of this machine's interfaces, IPv4 and IPv6, zone ids dropped. */
-export function ownAddresses(): string[] {
-  const out: string[] = [];
-  for (const addrs of Object.values(os.networkInterfaces()))
-    for (const a of addrs ?? []) out.push(a.address.replace(/%.*$/, ""));
-  return out;
-}
-
-const plainIp = (ip: string): string => ip.replace(/^::ffff:/i, "").replace(/%.*$/, "");
-
-/** A request from `ip` was made on this machine. */
-export function isThisMachine(ip: string, addresses: string[] = ownAddresses()): boolean {
-  if (isLoopback(ip)) return true;
-  const p = plainIp(ip);
-  return addresses.some((a) => plainIp(a) === p);
-}
+export { isThisMachine, ownAddresses } from "../http/net.js";
 
 /** The guard every route that acts on this machine wears (the setup actions, the phone
- *  page's Tailscale click): 403 `local_only` for anyone else, UI key or not. With the test
- *  door on, `x-spgui-test-remote` stands in for the remote address (e2e). */
+ *  page's Tailscale click): 403 `local_only` for anyone else, UI key or not. A request
+ *  that came through the proxy is someone else whatever address the proxy names for it
+ *  (router.ts `trustProxy`). With the test door on, `x-spgui-test-remote` stands in for
+ *  the remote address (e2e). */
 export function thisMachineOnly(o: { testDoor: boolean; port: () => number }): (h: Handler) => Handler {
   return (h) => (ctx) => {
     let ip = ctx.remote.ip;
@@ -38,7 +25,7 @@ export function thisMachineOnly(o: { testDoor: boolean; port: () => number }): (
       const over = ctx.req.headers["x-spgui-test-remote"];
       if (typeof over === "string" && over) ip = over;
     }
-    if (!isThisMachine(ip))
+    if (ctx.remote.forwarded || !isThisMachine(ip))
       return {
         status: 403,
         json: {

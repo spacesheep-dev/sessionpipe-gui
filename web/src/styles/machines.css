@@ -33,15 +33,6 @@
   -webkit-user-select: none;
   user-select: none;
 }
-/* Only a quiet machine carries a mark, the hollow ring of the glyph grammar; online is
-   the normal case and needs none. */
-.online {
-  flex: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 1.5px solid var(--fg-4);
-}
 .machine-name {
   flex: none;
   max-width: 100%;
@@ -143,4 +134,130 @@
   display: flex;
   flex-wrap: wrap;
   gap: 2px 16px;
+}
+
+/* ---------- on a spacesheep account (MachinesPage.tsx AccountMachine) ---------- */
+/* One row for this phone above the computers; each computer its name and ⋯, then iOS
+   right-detail rows: the key in the ink, the value right-aligned in the second tier, one
+   line, cut at its end. A row's shape is decided per row, never by the width: a sentence
+   row and a stacked row (Harnesses, Folders) wrap, the rest never do. Scoped here, so
+   the grouped form's other rows (a fingerprint, the folders of a pairing) keep wrapping. */
+.machine--account .machine-name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.machine--account .machine-head .icon-btn {
+  margin-left: auto;
+}
+.machine--account .machine-facts .form-row--kv {
+  flex-wrap: nowrap;
+  gap: 12px;
+}
+.machine--account .machine-facts .form-key {
+  flex: none;
+  width: auto;
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+.machine--account .machine-facts .form-kv {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Offline is the exception, so it alone takes the ink, after the ring a stale row has. */
+.machine--account .machine-facts [data-status="offline"] .form-kv {
+  color: var(--fg);
+}
+.machine--account .machine-facts .form-kv .dot {
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+.machine--account .machine-facts .form-row--stack {
+  gap: 4px;
+}
+.machine--account .machine-facts .form-row--stack .form-key {
+  align-self: auto;
+}
+/* A sentence row: a mark and words that wrap, or the inherit caution. */
+.machine-line .acct-state,
+.machines-phone .acct-state,
+.machines-phone-ask {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  text-wrap: pretty;
+}
+.machines-phone-ask {
+  color: var(--tint-fg);
+}
+.machine-line .machine-caution {
+  margin-top: 0;
+}
+/* A row that is a link (This iPhone, Not approved on this computer): the whole row, with
+   the chevron at its end. */
+.machine-line-link {
+  color: var(--fg);
+  cursor: pointer;
+}
+.machine-line-link:active,
+.machine-more summary:active {
+  background: var(--press);
+}
+.machines-chev {
+  flex: none;
+  width: 8px;
+  height: 13px;
+  margin-left: auto;
+  background: var(--fg-4);
+  -webkit-mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M1.5 1.5 6 6l-4.5 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M1.5 1.5 6 6l-4.5 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+/* Details: a 44 pt row whose chevron turns down as it opens; its rows hang under it. */
+.machine-more summary {
+  list-style: none;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.machine-more summary::-webkit-details-marker {
+  display: none;
+}
+.machine-more summary .form-label {
+  flex: 1 1 auto;
+}
+.machine-more summary .machines-chev {
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.machine-more details[open] > summary .machines-chev {
+  transform: rotate(90deg);
+}
+.machine-more-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.machine-more-list > li {
+  border-top: var(--hairline) solid var(--line);
+}
+@media (prefers-reduced-motion: reduce) {
+  .machine-more summary .machines-chev {
+    transition: none;
+  }
+}
+@media (max-width: 839px) {
+  /* A pressed row is lit to the group's edge, under the inset its text keeps. */
+  .machines .machine-line-link,
+  .machine-more summary {
+    margin-left: -16px;
+    padding-left: 16px;
+  }
 }

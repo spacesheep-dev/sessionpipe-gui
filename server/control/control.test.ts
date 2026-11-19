@@ -47,7 +47,15 @@ interface Booted {
 }
 
 async function boot(
-  o: { stateDir?: string; rpId?: string; testDoor?: boolean; uiAuth?: boolean; deviceKeys?: boolean } = {},
+  o: {
+    stateDir?: string;
+    rpId?: string;
+    testDoor?: boolean;
+    uiAuth?: boolean;
+    deviceKeys?: boolean;
+    /** The board's key and the origins a pairing link may name, as app.ts passes them. */
+    uiKey?: string;
+  } = {},
 ): Promise<Booted> {
   const stateDir = o.stateDir ?? mkdtempSync(path.join(os.tmpdir(), "spgui-control-"));
   const control = createControl({
@@ -57,6 +65,7 @@ async function boot(
     testDoor: o.testDoor ?? true,
     uiAuth: (ctx) => (o.uiAuth ?? true) && ctx.remote.loopback,
     ...(o.deviceKeys !== undefined ? { deviceKeys: o.deviceKeys } : {}),
+    ...(o.uiKey !== undefined ? { uiKey: () => o.uiKey as string, origins: () => ["http://localhost:7373"] } : {}),
   });
   const router = new Router();
   control.register(router);
@@ -262,6 +271,111 @@ describe("open pairing", () => {
       expect(paired.body).toMatchObject({ status: "paired", key: pk.key, sink_token: SINK, account: "misha" });
       expect(paired.body.token).toMatch(/^mt_/);
       expect((await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: pollKey })).status).toBe(404);
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+describe("the pairing link and the board's key", () => {
+  const KEY = "uik_test_board_key";
+
+  it("carries the key for a pairing the sink token started, and the code alone for an open one", async () => {
+    const b = await boot({ uiKey: KEY });
+    tmpDirs.push(b.stateDir);
+    try {
+      const keyed = await call(b.url, "POST", `${CONTROL}/pair`, { bearer: SINK, body: facts });
+      expect(keyed.status).toBe(201);
+      expect(keyed.body.url).toBe(`http://localhost:7373/pair?code=${keyed.body.code}&k=${KEY}`);
+      // No token, and a poll key of the caller's own making.
+      const pollKey = "p".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
+      expect(open.status).toBe(201);
+      expect(open.body.url).toBe(`http://localhost:7373/pair?code=${open.body.code}`);
+      expect(JSON.stringify(open.body)).not.toContain(KEY);
+      // Its status says no more while it waits, and a renewal under the same poll key gets the same link.
+      const waiting = await call(b.url, "GET", `${CONTROL}/pair?code=${open.body.code}`, { bearer: pollKey });
+      expect(waiting.body).toEqual({ status: "pending" });
+      const renewed = await call(b.url, "POST", `${CONTROL}/pair`, {
+        body: { ...facts, poll_key: pollKey, machine: open.body.machine },
+      });
+      expect(renewed.status).toBe(201);
+      expect(JSON.stringify(renewed.body)).not.toContain(KEY);
+      // A bearer that is not the sink token starts nothing, with or without a poll key.
+      const wrong = await call(b.url, "POST", `${CONTROL}/pair`, {
+        bearer: "nope",
+        body: { ...facts, poll_key: pollKey },
+      });
+      expect(wrong.status).toBe(401);
+      expect(JSON.stringify(wrong.body)).not.toContain(KEY);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("an open pairing is approved on its code by a browser the board already lets in", async () => {
+    const b = await boot({ uiKey: KEY });
+    tmpDirs.push(b.stateDir);
+    try {
+      const pollKey = "p".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
+      const code = open.body.code as string;
+      const machine = open.body.machine as string;
+      // The page the link opens reads the pairing by its code, and the board lists it.
+      const view = await call(b.url, "GET", `${UI}/pair/${code}`);
+      expect(view).toMatchObject({ status: 200, body: { code, open: true, check: open.body.check } });
+      const list = await call(b.url, "GET", `${UI}/pairings`);
+      expect((list.body.pairings as { code: string }[]).map((p) => p.code)).toContain(code);
+      const pk = await TestPasskey.create();
+      const ok = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+        body: { key: pk.key, proof: await pk.enroll(machine, code) },
+      });
+      expect(ok.status).toBe(200);
+      // The daemon's next poll is the paired answer: the key, its proof, the machine's own
+      // token and the sink token, and still no key of the board's.
+      const paired = await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: pollKey });
+      expect(paired.body).toMatchObject({ status: "paired", key: pk.key, sink_token: SINK });
+      expect(paired.body.token).toMatch(/^mt_/);
+      expect(JSON.stringify(paired.body)).not.toContain(KEY);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it("the pairing page and its approval need the board's own sign-in", async () => {
+    const b = await boot({ uiKey: KEY, uiAuth: false });
+    tmpDirs.push(b.stateDir);
+    try {
+      const pollKey = "p".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: pollKey } });
+      expect(open.status).toBe(201);
+      const code = open.body.code as string;
+      const pk = await TestPasskey.create();
+      expect((await call(b.url, "GET", `${UI}/pair/${code}`)).status).toBe(401);
+      expect((await call(b.url, "GET", `${UI}/challenge`)).status).toBe(401);
+      const approve = await call(b.url, "POST", `${UI}/pair/${code}/approve`, {
+        body: { key: pk.key, proof: await pk.enroll(open.body.machine as string, code) },
+      });
+      expect(approve.status).toBe(401);
+      expect((await call(b.url, "GET", `${CONTROL}/pair?code=${code}`, { bearer: pollKey })).body).toEqual({
+        status: "pending",
+      });
+    } finally {
+      await b.close();
+    }
+  });
+});
+
+describe("the origin a request came in on", () => {
+  it("is read from the forwarding headers only through a trusted proxy", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    try {
+      // No proxy is trusted here: what a caller says of its own origin is not read.
+      const r = await fetch(`${b.url}${UI}/challenge`, {
+        headers: { "x-forwarded-proto": "https", "x-forwarded-host": "board.example" },
+      });
+      expect(((await r.json()) as { origin: string }).origin).toBe(b.url);
     } finally {
       await b.close();
     }
@@ -1558,6 +1672,32 @@ describe("a start's options, files and applied, through POST send", () => {
     expect((await get("not-a-hash", m.token)).status).toBe(404);
   });
 
+  it("files: an upload is taken from the board's own page, and one from another origin is not held", async () => {
+    const m = await enrolled(b, pk, "m_startfiles0000000002");
+    const bytes = new TextEncoder().encode("notes from elsewhere\n");
+    const sha = fileHash(bytes);
+    const held = () => fetch(`${b.url}${CONTROL}/files/${sha}`, { headers: { authorization: `Bearer ${m.token}` } });
+    const send = (headers: Record<string, string>) =>
+      fetch(`${b.url}${UI}/files?name=notes.txt`, {
+        method: "POST",
+        headers: { "content-type": "text/plain;charset=UTF-8", ...headers },
+        body: bytes,
+      });
+    const others: Record<string, string>[] = [
+      { origin: "https://other.example", "sec-fetch-site": "cross-site" },
+      { origin: "https://other.example" },
+      { origin: "null" },
+    ];
+    for (const headers of others) {
+      const r = await send(headers);
+      expect(r.status).toBe(403);
+      expect(await r.json()).toMatchObject({ reason: "cross_site" });
+      expect((await held()).status).toBe(404);
+    }
+    expect((await send({ origin: b.url, "sec-fetch-site": "same-origin" })).status).toBe(201);
+    expect((await held()).status).toBe(200);
+  });
+
   it("an upload over 25 MiB, without a type, empty, or with a bad name is refused", async () => {
     // The router answers 413 and drops the connection mid-body, so the client may only see the drop.
     const big = await upload(new Uint8Array(26_214_401), "application/octet-stream", "big.bin").then(
@@ -1640,6 +1780,105 @@ describe("a start's options, files and applied, through POST send", () => {
     await hello(m, { files: true, prompt_files: true });
     const ok = await prompt();
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+  });
+
+  /** The first bytes of a PNG, which is all the receiver reads of one: the signature and
+   *  the IHDR's width and height. */
+  const pngHead = (w: number, h: number): Uint8Array => {
+    const head = Buffer.alloc(33);
+    head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    head.writeUInt32BE(13, 8);
+    head.write("IHDR", 12, "latin1");
+    head.writeUInt32BE(w, 16);
+    head.writeUInt32BE(h, 20);
+    return new Uint8Array(head);
+  };
+
+  it("a picture is held to its own bytes: the answer says its pixels, and a file that is not the picture its type says is refused", async () => {
+    const up = await upload(pngHead(640, 400), "image/png", "kiwi.png");
+    expect(up.status).toBe(201);
+    const entry = (await up.json()) as Record<string, unknown>;
+    expect(entry).toEqual({
+      name: "kiwi.png",
+      type: "image/png",
+      size: 33,
+      sha256: fileHash(pngHead(640, 400)),
+      width: 640,
+      height: 400,
+    });
+    // `machine` (the machine it is for) is taken, and changes nothing here.
+    const forOne = await fetch(`${b.url}${UI}/files?name=kiwi.png&machine=m_promptfiles000000002`, {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: pngHead(640, 400) as BodyInit,
+    });
+    expect(forOne.status).toBe(201);
+    expect(await forOne.json()).toEqual(entry);
+
+    // Words sent as a PNG, and a PNG sent as a JPEG: neither is the picture its type says.
+    for (const [bytes, type] of [
+      ["just words, not a picture", "image/png"],
+      [pngHead(640, 400), "image/jpeg"],
+      ["<svg xmlns='http://www.w3.org/2000/svg'/>", "image/webp"],
+      ["GIF8 almost", "image/gif"],
+    ] as const) {
+      const lying = await upload(bytes, type, "kiwi.png");
+      expect(lying.status, type).toBe(415);
+      expect(await lying.json()).toEqual({
+        reason: "not_an_image",
+        error: "This file isn't the picture its type says.",
+      });
+    }
+    // Nothing of a refused upload is held.
+    const m = await enrolled(b, pk, "m_promptfiles000000002");
+    const held = await fetch(
+      `${b.url}${CONTROL}/files/${fileHash(new TextEncoder().encode("just words, not a picture"))}`,
+      {
+        headers: { authorization: `Bearer ${m.token}` },
+      },
+    );
+    expect(held.status).toBe(404);
+    // Any other kind of file is taken as before, with no pixels in its answer.
+    const notes = await upload("# notes", "text/markdown", "notes.md");
+    expect(notes.status).toBe(201);
+    expect(Object.keys((await notes.json()) as object).sort()).toEqual(["name", "sha256", "size", "type"]);
+  });
+
+  it("a prompt's pictures: only their four fields are signed, the row names them, and their bytes are kept as long as the row", async () => {
+    const m = await enrolled(b, pk, "m_promptfiles000000003");
+    await hello(m, { files: true, prompt_files: true });
+    const up = (await (await upload(pngHead(800, 600), "image/png", "birch.png")).json()) as Record<string, unknown>;
+    const send = async (files: unknown[], expires_in_s?: number) =>
+      call(b.url, "POST", `${UI}/send`, {
+        body: {
+          machineId: m.machine,
+          ...(await signedPrompt(pk, day, m.machine, { text: "Look at the attached picture.", files })),
+          ...(expires_in_s ? { expires_in_s } : {}),
+        },
+      });
+    // The upload's answer as it is, pixels and all, is not a file a command may name.
+    expect((await send([up])).body.code).toBe("bad_fields");
+    const entry = { name: up.name, type: up.type, size: up.size, sha256: up.sha256 };
+    const before = Date.parse(
+      JSON.parse(readFileSync(path.join(b.stateDir, "control", "files", `${up.sha256}.json`), "utf8")).expiresAt,
+    );
+    const ok = await send([entry], 24 * 3600);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body).toMatchObject({ kind: "prompt", text: "Look at the attached picture.", files: [entry] });
+    expect(b.control.activity().find((a) => a.id === ok.body.id)?.files).toEqual([entry]);
+    // Uploaded a moment before the send, it would have gone a moment before the row does.
+    const after = Date.parse(
+      JSON.parse(readFileSync(path.join(b.stateDir, "control", "files", `${up.sha256}.json`), "utf8")).expiresAt,
+    );
+    expect(after).toBe(Date.parse(ok.body.expiresAt as string));
+    expect(after).toBeGreaterThanOrEqual(before);
+    // The machine fetches it with its own token, as a start's file.
+    const got = await fetch(`${b.url}${CONTROL}/files/${up.sha256}`, {
+      headers: { authorization: `Bearer ${m.token}` },
+    });
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await got.arrayBuffer())).toEqual(pngHead(800, 600));
   });
 
   it("the well-known says control.files and control.inherit", () => {

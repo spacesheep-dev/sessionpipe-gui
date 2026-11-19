@@ -2,10 +2,12 @@
 // What a turn said: never Claude Code's stand-in for a reply that never came, never the
 // daemon's note that a turn was cancelled, and a stopped turn's words once, from the ack
 // that carried them. The session is the one sessionpipe 0.13.4 was stopped on (2026-11-10,
-// 3e846aae): a turn told to count to 1500, stopped at 144, then a one-word turn.
+// 3e846aae): a turn told to count to 1500, stopped at 144, then a one-word turn. And words
+// the receiver cut short end cleanly, never inside a word or with a code block left open.
 import type { StoredEvent } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { said, stoppedWords, turnWords } from "./replies";
+import { parseMarkdown } from "./markdown";
+import { cutReply, cutReplyStart, cutWords, said, stoppedWords, turnWords } from "./replies";
 import { groupTurns, sentTurns, turnPrompt } from "./turns";
 
 const nums = (n: number) => Array.from({ length: n }, (_, i) => i + 1).join("\n");
@@ -204,5 +206,48 @@ describe("the session sessionpipe 0.13.4 was stopped on", () => {
       ack: nums(144),
       stopped: true,
     });
+  });
+});
+
+describe("cutWords, cutReply, cutReplyStart", () => {
+  const para = (n: number) => `Paragraph ${n} says what changed and why it changed.`;
+
+  it("ends cut words at their last space, then …", () => {
+    expect(cutWords("The retry queue is emp")).toBe("The retry queue is…");
+    expect(cutWords("The retry queue \n")).toBe("The retry…");
+    expect(cutWords("Unbroken")).toBe("Unbroken…");
+  });
+
+  it("ends a cut reply at its last paragraph break in the final quarter, else at its last space", () => {
+    const paras = [1, 2, 3, 4, 5, 6, 7, 8].map(para).join("\n\n");
+    // The last break is in the final quarter: the reply ends after paragraph 8, whose full
+    // stop the … follows, and the piece of paragraph 9 is left out.
+    expect(cutReply(`${paras}\n\nParagraph 9 was cu`)).toBe(`${paras}…`);
+    // The last break is further back: it ends at the last whole word.
+    expect(cutReply(`${para(1)}\n\n${"long words ".repeat(30)}and the qu`)).toBe(
+      `${para(1)}\n\n${"long words ".repeat(29)}long words and the…`,
+    );
+  });
+
+  it("closes a code block it cuts open, and puts … under a code block", () => {
+    const open = `${para(1)}\n\n\`\`\`ts\nconst done = await state.lastBatch(runId);\nfor (const batch of batch`;
+    const shown = cutReply(open);
+    expect(shown).toBe(
+      `${para(1)}\n\n\`\`\`ts\nconst done = await state.lastBatch(runId);\nfor (const batch of\n\`\`\`\n\n…`,
+    );
+    expect(parseMarkdown(shown).map((b) => b.type)).toEqual(["paragraph", "code", "paragraph"]);
+    // A tilde fence closes with tildes; a closed block before the cut stays closed.
+    expect(cutReply("~~~~\nlet a = 1;\nlet b = 2")).toBe("~~~~\nlet a = 1;\nlet b =\n~~~~\n\n…");
+    const closed = `${para(1)}\n\n\`\`\`\nnpm test\n\`\`\`\n\n${para(2)}`;
+    expect(cutReply(`${closed}\n\nPara`)).toBe(`${closed}…`);
+    // Ending on a code block's closing line, the … can't share it.
+    const block = `${para(1)}\n\n\`\`\`\nnpm test\n\`\`\``;
+    expect(cutReply(`${block}\n\nThe tests pa`)).toBe(`${block}\n\n…`);
+  });
+
+  it("starts a running reply's kept end at its first whole word, after …", () => {
+    expect(cutReplyStart("plicate event id threw before the check")).toBe("…event id threw before the check");
+    expect(cutReplyStart(" event id threw")).toBe("…event id threw");
+    expect(cutReplyStart("e.\n\n## Next\n\nDeploying")).toBe("…\n\n## Next\n\nDeploying");
   });
 });
