@@ -337,6 +337,12 @@ pairing link that carries the board's key only for a pairing the sink token star
   dividers and the edges of fields and buttons step up, in every skin and both schemes, as
   soon as it is switched. Before, only the focus ring got thicker: a skin's own colours
   outranked the rest.
+- **A switch reads on or off at a glance, in both schemes.** In dark mode a switch that was
+  on was a pale grey track under a white knob, which reads as greyed out on a Mac; it is
+  now a mid grey the knob stands out on. A switch that was off was a faint pill, in dark
+  mode a white dot with no track: on a computer it now has a thin grey edge, so the knob
+  is seen to sit left. The Text size slider's knob gets the same edge. The phone's
+  switches are as they were.
 - **A new board names the agent this machine has hooked, and the command that starts
   it.** With only Codex hooked it read "Start Codex in any terminal…" over `$ claude`. The
   line now reads "Start a new Codex session in any terminal on studio-mac." over `$ codex`

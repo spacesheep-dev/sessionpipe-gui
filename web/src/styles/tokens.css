@@ -202,8 +202,9 @@
   --sel: color-mix(in oklch, var(--fg) 9%, transparent);
   --press: color-mix(in oklch, var(--fg) 13%, transparent);
   --scrim: oklch(0.191 0 0 / 0.24);
-  /* A switch's track off and on (ink on a desktop; the phone's is the tint, shared.css), and
-     the knob of a switch or a slider: always light. */
+  /* A switch's track off and on: ink on a light desktop; on a dark one the marks tier (--fg-4),
+     so the always-light knob still stands out; the phone's on is the tint (shared.css). The
+     knob of a switch or a slider: always light. */
   --switch-off: var(--line-2);
   --switch-on: var(--fg);
   --knob: oklch(0.99 0 0);
@@ -272,7 +273,7 @@
 
     --raised: var(--bg-4);
     --switch-off: var(--bg-4);
-    --switch-on: var(--fg-2);
+    --switch-on: var(--fg-4);
     --grouped-ground: var(--bg);
     --scrim: oklch(0 0 0 / 0.5);
     --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);
@@ -322,7 +323,7 @@
 
   --raised: var(--bg-4);
   --switch-off: var(--bg-4);
-  --switch-on: var(--fg-2);
+  --switch-on: var(--fg-4);
   --grouped-ground: var(--bg);
   --scrim: oklch(0 0 0 / 0.5);
   --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);
@@ -346,5 +347,19 @@
     --line: color-mix(in oklab, var(--fg-2) 40%, var(--bg)) !important;
     /* biome-ignore-end lint/complexity/noImportantStyles: the four above */
     --focus-width: 3px;
+  }
+}
+
+/* Increase contrast lifts the marks tier to a light grey, which the always-light knob would
+   sit on at 2.5:1: a dark switch that is on takes the control edges' tier instead (both dark
+   sets, which outrank :root). */
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --switch-on: var(--line-2);
+  }
+}
+@media (prefers-contrast: more) {
+  :root[data-theme="dark"] {
+    --switch-on: var(--line-2);
   }
 }

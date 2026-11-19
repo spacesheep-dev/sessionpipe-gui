@@ -168,6 +168,32 @@ test.describe("phone", () => {
     await expect(page.getByRole("dialog", { name: "More" })).toHaveCount(0);
   });
 
+  test("a switch is drawn as iOS draws it: on in the tint, off with no edge", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openPage(page, "/settings");
+    await page.getByRole("dialog", { name: "Settings" }).getByRole("tab", { name: "General" }).click();
+    const flip = page.getByRole("switch", { name: "Usage in the sidebar" });
+    await expect(flip).toHaveAttribute("aria-checked", "true");
+    await flip.click();
+    await expect(flip).toHaveAttribute("aria-checked", "false");
+    const look = await page.locator(".toggle").evaluateAll(async (els) => {
+      await Promise.all(els.flatMap((el) => el.getAnimations().map((a) => a.finished)));
+      const probe = document.body.appendChild(document.createElement("i"));
+      probe.style.backgroundColor = "var(--tint)";
+      const tint = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return els.map((el) => {
+        const s = getComputedStyle(el);
+        return { on: el.getAttribute("aria-checked") === "true", bg: s.backgroundColor, shadow: s.boxShadow, tint };
+      });
+    });
+    expect(look.some((s) => s.on) && look.some((s) => !s.on)).toBe(true);
+    for (const s of look) {
+      expect(s.shadow, "no edge").toBe("none");
+      if (s.on) expect(s.bg, "on is the tint").toBe(s.tint);
+    }
+  });
+
   test("the session page keeps its control strip above the tab bar", async ({ page }) => {
     await openBoard(page);
     const link = page.locator("article.card a.card-link").first();
