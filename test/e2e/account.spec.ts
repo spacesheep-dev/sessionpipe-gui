@@ -1237,7 +1237,7 @@ test.describe("pictures another surface sent, on an account", () => {
     // Every message of the person's has something in it: its words, or its pictures.
     const prompts = page4.locator("blockquote.prompt, blockquote.chat-bubble");
     await expect(prompts).toHaveCount(2);
-    for (const p of await prompts.all()) expect((await p.innerText()).trim()).not.toBe("");
+    for (const p of await prompts.all()) expect((await p.textContent())?.trim()).not.toBe("");
     const html = await page4.content();
     for (const no of [STATE, LOCAL, "/attachments/"]) expect(html).not.toContain(no);
     expect(server4.seen.filter((r) => r.includes("/attachments/"))).toEqual([]);
