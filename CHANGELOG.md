@@ -65,6 +65,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
   date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
   lists the fields or indexes), and keep the old words for a key that is not a filter.
+- **Search finds Gemini CLI history when `GEMINI_CLI_HOME` is set.** Gemini CLI keeps
+  its `.gemini` folder inside that path, but search took `$GEMINI_CLI_HOME` to be the
+  `.gemini` folder itself, so it found none of those sessions. It now reads
+  `$GEMINI_CLI_HOME/.gemini`; with the variable unset nothing changes (`~/.gemini`).
 - **Labels, read marks and usage limits saved with a byte-order mark are kept.** A
   `labels.json`, `marks.json` or `limits.json` saved by Notepad or PowerShell 5 (which
   start a UTF-8 file with a byte-order mark) was taken for a broken file: it was set aside
