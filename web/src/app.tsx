@@ -17,7 +17,7 @@ import { AddDevicePage } from "./control/AddDevice";
 import { resetInfoCache } from "./control/api";
 import { PairPage } from "./control/Pair";
 import { useStartTitles } from "./control/Starting";
-import { useAnswerableCount, useAppState } from "./data/hooks";
+import { useAppState, useNeedsYouCount } from "./data/hooks";
 import { markRestoring } from "./lib/keys";
 import { landingFor, type Opened } from "./lib/landing";
 import { accountMode } from "./lib/net";
@@ -97,8 +97,8 @@ export function App() {
   }, [infoRev]);
   const { themes } = useThemes();
   const themeName = route.name === "theme" ? themes.find((t) => t.id === route.id)?.name : undefined;
-  // "(n) " ahead of every title while n answerable prompts are open (lib/notify.ts).
-  const open = useAnswerableCount();
+  // "(n) " ahead of every title while n sessions need you (lib/notify.ts).
+  const open = useNeedsYouCount();
   useAttentionEffects();
   useEffect(() => {
     // On a spacesheep account that address is the page that approves this phone, and is

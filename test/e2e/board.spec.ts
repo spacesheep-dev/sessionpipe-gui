@@ -6,9 +6,11 @@
 // live counts without a reload (with Advanced → Show counts), a list that holds still
 // under the pointer, the search that finds nothing, the keyboard (e with Hidden open
 // too), the Hidden header's own menu, and a row's menu that the click which opened it
-// chooses nothing from.
+// chooses nothing from. One needs-you number: the Inbox badge, the title's "(n)" and Needs
+// you's own count agree.
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
 import { EVENTS, holdBoard, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 test.describe("board", () => {
@@ -569,5 +571,87 @@ test.describe("board", () => {
     await release(at.x + 9, at.y + 9);
     await expect(page.getByRole("menu")).toHaveCount(0);
     await expect(page).toHaveURL(/\/s\//);
+  });
+});
+
+test.describe("board: one needs-you number", () => {
+  test("the Inbox badge, the title's (n) and Needs you's count agree with a question open, and drop together after Allow and after Hide", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `count-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    // A question waits in its terminal, a command takes an answer from here.
+    const question = await postPrompt(token, {
+      machine: d.name,
+      title: "Which voice?",
+      agoMs: 3_000,
+      tool: "AskUserQuestion",
+      message: "AskUserQuestion",
+    });
+    const command = await postPrompt(token, { machine: d.name, title: "Deploy it", agoMs: 4_000 });
+    /** The three numbers, and Needs you's rows less those with an answer out, read at once
+     *  (other tests on this receiver raise prompts of their own meanwhile). */
+    const counts = () =>
+      page.evaluate(() => {
+        const num = (sel: string) => Number(document.querySelector(sel)?.textContent ?? 0);
+        const group = document.querySelector("section.group--needs_you");
+        const rows = group?.querySelectorAll("article.card").length ?? 0;
+        const out = group?.querySelectorAll("article.card .card-attn[data-said='receipt']").length ?? 0;
+        return {
+          badge: num("nav.rail a[data-nav='inbox'] .nav-badge"),
+          title: Number(/^\((\d+)\) /.exec(document.title)?.[1] ?? 0),
+          heading: num("section.group--needs_you .group-count"),
+          waiting: rows - out,
+        };
+      });
+    const agree = () =>
+      expect
+        .poll(
+          async () => {
+            const c = await counts();
+            return c.badge > 0 && c.title === c.badge && c.heading === c.badge && c.waiting === c.badge
+              ? "agree"
+              : JSON.stringify(c);
+          },
+          { timeout: 15_000 },
+        )
+        .toBe("agree");
+    const card = (p: { key: string }) => page.locator(`article.card[data-flip="${p.key}"]`);
+    const needsYou = page.locator("section.group--needs_you");
+    try {
+      await page.goto(`${CONTROL_BASE}/`);
+      await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+      await page.mouse.move(0, 0);
+      await expect(needsYou.locator(`article.card[data-flip="${question.key}"]`)).toBeVisible({ timeout: 15_000 });
+      await expect(needsYou.locator(`article.card[data-flip="${command.key}"]`)).toBeVisible();
+      // The question counts on the badge and in the title, as it does under Needs you.
+      await agree();
+      // Read out as the Inbox and its number: "Inbox, 3 need you".
+      await expect(page.locator("nav.rail a[data-nav='inbox']")).toHaveAccessibleName(/^Inbox\s*, \d+ needs? you$/);
+      await expect(page.locator("nav.rail a[data-nav='inbox'] .nav-badge")).toHaveAttribute("aria-hidden", "true");
+      // Allow: its answer is out, the row keeps its place, and no number counts it.
+      await card(command).locator("a.card-link").click({ button: "right" });
+      await page.getByRole("menuitem", { name: /^Allow/ }).click();
+      await expect(card(command).locator(".card-attn[data-said='receipt']")).toBeVisible({ timeout: 15_000 });
+      await expect(needsYou.locator(`article.card[data-flip="${command.key}"]`)).toBeVisible();
+      await page.mouse.move(0, 0);
+      await agree();
+      // Hide: the question leaves Needs you on this device, and every number with it.
+      await card(question).locator("a.card-link").click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Hide", exact: true }).click();
+      await expect(needsYou.locator(`article.card[data-flip="${question.key}"]`)).toHaveCount(0);
+      await page.mouse.move(0, 0);
+      const after = await counts();
+      if (after.badge > 0) await agree();
+      else expect(after).toEqual({ badge: 0, title: 0, heading: 0, waiting: 0 });
+    } finally {
+      await question.clear();
+      await command.clear();
+      await d.stop();
+    }
   });
 });

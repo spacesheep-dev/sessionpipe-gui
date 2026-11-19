@@ -43,12 +43,13 @@ import {
   useStickyTop,
 } from "../components/SessionCard";
 import { machineHome, tildify } from "../control/folders";
-import { useControlActivity } from "../control/hooks";
+import { useAnswersOut, useControlActivity } from "../control/hooks";
 import { ComposeButton } from "../control/NewSession";
 import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
 import { useStartTitles } from "../control/Starting";
 import { cliCommand, isFinal } from "../control/words";
 import {
+  answeredAll,
   byStateThenRecent,
   useAppState,
   useFirstLoad,
@@ -368,6 +369,14 @@ export function Board() {
     for (const h of held) g.get(h.group as SessionState)?.push(h);
     return g;
   }, [held]);
+  // Needs you counts what still needs you, as the Inbox badge does: a row whose every
+  // prompt has its answer out, or that has moved on under the hand, keeps its place and
+  // counts no more.
+  const asked = useMemo(() => groups.get("needs_you")!.flatMap((h) => h.item.openAttentions), [groups]);
+  const answered = useAnswersOut(asked);
+  const stillNeeds = groups
+    .get("needs_you")!
+    .filter((h) => !h.gone && h.item.state === "needs_you" && !answeredAll(h.item, answered)).length;
 
   const [showHidden, setShowHiddenState] = useState(hiddenOpen);
   const toggleHidden = useCallback(() => {
@@ -601,14 +610,20 @@ export function Board() {
             const list = groups.get(st)!;
             const starting = st === "working" ? pending : [];
             if (list.length === 0 && starting.length === 0) return null;
-            const n = list.length + starting.length;
+            const n = st === "needs_you" ? stillNeeds : list.length + starting.length;
             return (
-              <section key={st} className={`group group--${st}`} aria-label={`${n} ${STATE_HEADING[st](n)}`}>
+              <section
+                key={st}
+                className={`group group--${st}`}
+                aria-label={n > 0 ? `${n} ${STATE_HEADING[st](n)}` : STATE_HEADING[st](n)}
+              >
                 <h2 className="group-head" title={STATE_HINT[st]}>
                   {STATE_HEADING[st](n)}
-                  <span key={n} className="group-count num">
-                    {n}
-                  </span>
+                  {n > 0 && (
+                    <span key={n} className="group-count num">
+                      {n}
+                    </span>
+                  )}
                 </h2>
                 <div className="grid">
                   {starting.map((a) => (

@@ -130,12 +130,12 @@ test.describe("inbox", () => {
         badge: expect.stringMatching(/^[1-9]\d*$/),
       });
     // The row leaves with the demo's attention.cleared, live, and the title drops its count
-    // once nothing answerable is left.
+    // once no session needs you: nothing is left in the Inbox.
     await expect(page.locator(`.inbox-row[data-attention="${seen!.id}"]`)).toHaveCount(0, { timeout: 20_000 });
     await expect
       .poll(
         async () => {
-          const n = await page.locator(".inbox-row--answerable").count();
+          const n = await page.locator(".inbox-row").count();
           const t = await page.title();
           return n === 0 ? t : `${n} rows: ${t}`;
         },

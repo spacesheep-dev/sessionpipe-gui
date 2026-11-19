@@ -15,7 +15,7 @@ import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
-import { useAnswerableCount, useAppState, useStore, useStreamMark } from "../data/hooks";
+import { useAppState, useNeedsYouCount, useStore, useStreamMark } from "../data/hooks";
 import { phoneLayout, reachName, usePanelCovers, usePhoneLayout } from "../lib/device";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
@@ -445,9 +445,14 @@ function NavEntry({
       <NavGlyph n={n} />
       <span className="nav-label">{n.label}</span>
       {n.key === "inbox" && needs > 0 ? (
-        <span className="nav-badge num" role="img" aria-label={`${needs} need you`}>
-          {needs}
-        </span>
+        <>
+          <span className="nav-badge num" aria-hidden="true">
+            {needs}
+          </span>
+          <span className="sr-only">
+            , {needs} {needs === 1 ? "needs" : "need"} you
+          </span>
+        </>
       ) : null}
       {/* A quiet dot, not orange: steps to go is not a thing that needs you. */}
       {n.key === "setup" ? <span className="nav-dot" role="img" aria-label="steps to go" /> : null}
@@ -560,7 +565,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         : route.name === "workflow" || route.name === "workflowRun"
           ? "workflows"
           : route.name;
-  const needs = useAnswerableCount();
+  const needs = useNeedsYouCount();
   // The Setup entry, with its orange dot, while this machine (and only from this machine:
   // elsewhere the status is 403) still has steps to go.
   const setup = useSetupStatus();

@@ -368,6 +368,14 @@ pairing link that carries the board's key only for a pairing the sink token star
   on its fill (2 px with Increase contrast on), and a Files row no longer gets a ring of
   its own. Selected text is the system's own colour on a computer; the phone app keeps its
   tint.
+- **The Inbox badge counts the sessions that need you, as Needs you, the Dock and the menu
+  bar do.** It counted only the prompts you could answer from here, so it said 2 beside
+  "Needs you 3", and went dark once a prompt waited past its two minutes. The badge, the
+  title's "(n)" and the phone's app badge now count every session in Needs you, a
+  question and a prompt waiting in a terminal too (0.8.4 left both out). A session whose
+  answer has gone, or that you hid, counts no more, and the Board's Needs you drops it
+  from its number at once, its row in its place. VoiceOver reads "Inbox, 3 need you".
+  Notifications are as they were: only a prompt you can answer here raises one.
 
 ### Fixed
 
