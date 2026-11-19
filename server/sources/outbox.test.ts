@@ -25,6 +25,8 @@ afterEach(async () => {
 const write = (s: Session, events: ReturnType<Session["ev"]>[]) =>
   new Outbox(spState).append({ harness: s.harness, session: s.id }, events as never);
 
+const size = (id: string) => statSync(path.join(spState, "outbox", "claude-code", `${id}.jsonl`)).size;
+
 describe("outbox source", () => {
   it("reads every file from the start on first run, then only what is new", () => {
     const a = new Session("aaa");
@@ -70,6 +72,89 @@ describe("outbox source", () => {
     expect(second.status().events).toBe(1);
     expect(store.session("claude-code:resume")!.counts.events).toBe(3);
     expect(store.stats().events).toBe(3);
+  });
+
+  it("reads a batch again on the next tick when the store can't write it", () => {
+    const a = new Session("full");
+    const b = new Session("long");
+    const src = startOutboxSource(store, { path: spState });
+    try {
+      write(a, [a.ev("session.started"), a.ev("turn.started"), a.ev("turn.ended", { reason: "stop" })]);
+      // The second batch of a 250-line file fails too: the first batch's offset may move, not the second's.
+      const long = [b.ev("session.started")];
+      for (let i = 0; i < 249; i++) long.push(b.ev("tool.ended", { tool: "Bash", ok: true }));
+      write(b, long);
+      const enospc = Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+      const real = store.ingest.bind(store);
+      // Fail once on session "full", and once on the second batch of "long" (seq 200 on).
+      const failed = new Set<string>();
+      const ingest = vi.spyOn(store, "ingest").mockImplementation((evs, source) => {
+        const which = evs[0]!.session.id === "full" ? "full" : evs[0]!.session.seq >= 200 ? "long#2" : "";
+        if (which && !failed.has(which)) {
+          failed.add(which);
+          throw enospc;
+        }
+        return real(evs, source);
+      });
+      const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      src.tick();
+      src.tick();
+      err.mockRestore();
+      expect([...failed].sort()).toEqual(["full", "long#2"]);
+      ingest.mockRestore();
+      expect(store.session("claude-code:full")!.counts.events).toBe(3);
+      expect(store.session("claude-code:long")!.counts.events).toBe(250);
+      expect(store.stats().events).toBe(253);
+      const offsets = JSON.parse(readFileSync(path.join(store.dir, "outbox-offsets.json"), "utf8"));
+      expect(offsets["claude-code/full"]).toBe(size("full"));
+      expect(offsets["claude-code/long"]).toBe(size("long"));
+    } finally {
+      src.stop();
+    }
+  });
+
+  it("keeps the other sessions flowing while one can't be stored, and logs that once", () => {
+    const a = new Session("stuck");
+    const b = new Session("fine");
+    const src = startOutboxSource(store, { path: spState });
+    try {
+      write(a, [a.ev("session.started")]);
+      write(b, [b.ev("session.started")]);
+      const eacces = Object.assign(new Error("EACCES: permission denied, open"), { code: "EACCES" });
+      const real = store.ingest.bind(store);
+      const ingest = vi.spyOn(store, "ingest").mockImplementation((evs, source) => {
+        if (evs[0]!.session.id === "stuck") throw eacces;
+        return real(evs, source);
+      });
+      const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      src.tick();
+      src.tick();
+      write(b, [b.ev("turn.started")]);
+      src.tick();
+      expect(err.mock.calls.filter(([m]) => String(m).includes("can't store claude-code/stuck"))).toHaveLength(1);
+      err.mockRestore();
+      expect(store.session("claude-code:fine")!.counts.events).toBe(2);
+      expect(store.session("claude-code:stuck")?.counts.events ?? 0).toBe(0);
+      const offsets = JSON.parse(readFileSync(path.join(store.dir, "outbox-offsets.json"), "utf8"));
+      expect(offsets["claude-code/fine"]).toBe(size("fine"));
+      expect(offsets["claude-code/stuck"]).toBeUndefined();
+      ingest.mockRestore();
+      src.tick();
+      expect(store.session("claude-code:stuck")!.counts.events).toBe(1);
+    } finally {
+      src.stop();
+    }
+  });
+
+  it("moves past a batch with no valid events without asking the store", () => {
+    const a = new Session("junk");
+    write(a, [{ ...a.ev("turn.started"), id: "bad" } as never]);
+    const ingest = vi.spyOn(store, "ingest");
+    const src = startOutboxSource(store, { path: spState });
+    src.stop();
+    expect(ingest).not.toHaveBeenCalled();
+    const offsets = JSON.parse(readFileSync(path.join(store.dir, "outbox-offsets.json"), "utf8"));
+    expect(offsets["claude-code/junk"]).toBe(size("junk"));
   });
 
   it("copes with no outbox at all", () => {
