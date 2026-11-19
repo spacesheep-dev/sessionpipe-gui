@@ -74,6 +74,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   start a UTF-8 file with a byte-order mark) was taken for a broken file: it was set aside
   as `<file>.bad-<time>` and the board started without its label names and colours, read
   marks and notification levels. It is now read past the mark, as `config.json` is.
+- **A GUI that stops at "port N is in use" ends there.** The search indexer it had already
+  started then printed a Node crash (`Error: write EPIPE`) on the same terminal. It now
+  stops quietly once the GUI has gone, as it does when a GUI is stopped while indexing.
 
 ## [0.8.5] - 2026-11-18
 
