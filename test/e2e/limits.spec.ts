@@ -110,6 +110,56 @@ test("the sidebar says what each account has left, in the wide sidebar only", as
   await expect(row).toHaveAttribute("aria-current", "page");
 });
 
+/** Watches the sidebar from navigation on: whether its first drawn list (the app's, not the
+ *  boot frame's) had a Usage row, and whether one was ever there before the lines were. */
+async function watchUsageRow(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { usageRow: { first: boolean | null; early: boolean } };
+    w.usageRow = { first: null, early: false };
+    let lines = false;
+    const look = () => {
+      const row = !!document.querySelector(".rail-nav [data-nav=usage]");
+      if (w.usageRow.first === null && document.querySelector(".rail-nav a[data-nav]")) w.usageRow.first = row;
+      lines ||= !!document.querySelector(".glance");
+      if (!lines && row) w.usageRow.early = true;
+    };
+    new MutationObserver(look).observe(document, { childList: true, subtree: true });
+  });
+}
+const usageRow = (page: Page) =>
+  page.evaluate(() => (window as unknown as { usageRow: { first: boolean | null; early: boolean } }).usageRow);
+
+test("Usage is drawn once: no row the lines then replace, and with the lines hidden the row from the start", async ({
+  page,
+}) => {
+  // The first snapshot comes 300 ms late, as from a receiver far away: the store has no
+  // numbers until then, and the sidebar must not take that for "none".
+  await page.route("**/api/ui/stream", async (route) => {
+    await new Promise((r) => setTimeout(r, 300));
+    await route.continue();
+  });
+  await watchUsageRow(page);
+  // A first visit, then a reload that remembers there were numbers.
+  for (const go of [() => openPage(page, "/"), () => page.reload()]) {
+    await go();
+    await expect(page.locator(".glance-line").first()).toBeVisible({ timeout: 15_000 });
+    expect(await usageRow(page)).toEqual({ first: false, early: false });
+  }
+
+  // With the lines hidden, the row is there from the app's first frame.
+  await page.evaluate(() => {
+    const key = "sessionpipe-gui.settings";
+    localStorage.setItem(
+      key,
+      JSON.stringify({ ...JSON.parse(localStorage.getItem(key) || "{}"), usageInSidebar: false }),
+    );
+  });
+  await page.reload();
+  await expect(page.locator(".rail-nav > a[data-nav=usage]")).toBeVisible({ timeout: 15_000 });
+  expect((await usageRow(page)).first).toBe(true);
+  await page.unroute("**/api/ui/stream");
+});
+
 test("with no numbers there is no sidebar block, and the page says how to get them", async ({ context, page }) => {
   // The control instance runs no demo and no hello there names an account.
   await seenSetupHere(context);

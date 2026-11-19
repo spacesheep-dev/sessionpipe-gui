@@ -480,7 +480,7 @@
   /* A hairline between groups; in the sidebar the views' groups carry a label under it. */
   .rail-group {
     width: 32px;
-    margin: 10px auto;
+    margin: 6px auto;
     border: 0;
     border-top: var(--hairline) solid var(--line);
   }

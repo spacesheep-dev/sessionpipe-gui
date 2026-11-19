@@ -6,13 +6,14 @@
 // under them. When none is left the reset takes the bar's place; a report older than 15
 // minutes says how old there instead. The line's tooltip has every window; a click opens
 // the account on /usage. Drawn in the wide sidebar only, while there are numbers and this
-// device has not hidden it (Settings › General); wherever it is not, Usage is a sidebar row. A machine that switches between pooled
-// accounts takes one line, its current account's, and those accounts take none of their own
-// (lib/glance.ts). The accounts as both surfaces list them, and their menu, live here too.
+// device has not hidden it (Settings › General); wherever it is not, Usage is a sidebar
+// row. A machine that switches between pooled accounts takes one line, its current
+// account's, and those accounts take none of their own (lib/glance.ts). The accounts as
+// both surfaces list them, and their menu, live here too.
 import type { LimitsEntry, MachineSummary } from "@shared/api";
-import { type MouseEvent, useMemo } from "react";
+import { type MouseEvent, useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { openNewSession } from "../control/newSessionState";
-import { useLimits, useMachines } from "../data/hooks";
+import { useLimits, useMachines, useStore } from "../data/hooks";
 import { glanceLines, type PoolLine } from "../lib/glance";
 import {
   accountNames,
@@ -122,22 +123,57 @@ function useLines(): number {
   return tall ? 4 : short ? 0 : 2;
 }
 
-/** The block's lines and whether it is drawn: there are numbers, this device has not
- *  hidden it, and the window has the height. */
+/** Whether there were numbers at the last visit: until the first snapshot lands the
+ *  store has none, and the block (or the Usage row in its place) is drawn from this, so
+ *  the sidebar does not swap one for the other a moment after the first paint. A device
+ *  on its first visit draws the block. */
+const GLANCE_KEY = "sessionpipe-gui.usage.glance";
+const readGlanceHint = (): boolean => {
+  try {
+    return localStorage.getItem(GLANCE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+};
+const writeGlanceHint = (on: boolean): void => {
+  try {
+    localStorage.setItem(GLANCE_KEY, on ? "1" : "0");
+  } catch {
+    // a private window: the first paint just guesses
+  }
+};
+
+/** Whether the first snapshot has landed (re-renders once, when it does). */
+function useLoaded(): boolean {
+  const store = useStore();
+  const read = useCallback(() => store.get().snapshotAt !== null, [store]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** The block's lines and whether it is drawn: there are numbers (before the first
+ *  snapshot: there were at the last visit), this device has not hidden it, and the
+ *  window has the height. */
 function useGlance() {
   const on = useAppSettings().usageInSidebar;
   const { accounts, short } = useReported();
   const machines = useMachines();
   const limits = useLimits();
+  const loaded = useLoaded();
   const all = useMemo(() => glanceLines(accounts, machines, limits), [accounts, machines, limits]);
   const lines = useLines();
-  return { shown: on && all.length > 0 && lines > 0, all, short, machines, lines };
+  const numbers = loaded ? all.length > 0 : readGlanceHint();
+  return { shown: on && numbers && lines > 0, all, short, machines, lines, loaded };
 }
 
 /** Whether the block would draw (in the wide sidebar): where it does not, the sidebar
  *  has a Usage row instead (Shell.tsx). */
 export function useGlanceShown(): boolean {
-  return useGlance().shown;
+  const { shown, all, loaded } = useGlance();
+  const numbers = all.length > 0;
+  useEffect(() => {
+    if (loaded) writeGlanceHint(numbers);
+  }, [loaded, numbers]);
+  return shown;
 }
 
 export function UsageGlance({ here }: { here: boolean }) {

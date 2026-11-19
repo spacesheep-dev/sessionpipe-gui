@@ -423,7 +423,9 @@ function NavEntry({
     <Link
       to={n.to}
       plainClick={here ? (covered ? closeSplit : toTop) : undefined}
-      className={`nav-link ${active ? "nav-link--on" : ""} ${n.group === undefined ? "nav-link--pinned" : ""}`}
+      className={["nav-link", active && "nav-link--on", n.group === undefined && "nav-link--pinned"]
+        .filter(Boolean)
+        .join(" ")}
       aria-current={active ? "page" : undefined}
       data-nav={n.key}
       data-tip={tip ? (keys ? `${n.label}   ${keys}` : n.label) : undefined}
