@@ -314,7 +314,7 @@ export function resolveSearchDate(
 
 /** The notice under a search (page and CLI) for what the query had that was not used: a filter
  *  value that did not read (that filter was left out), then a key that is not a filter (that
- *  token was searched as text). Undefined when there is neither. */
+ *  token was searched as text), with a full stop between the two. Undefined when there is neither. */
 export function searchQueryNote(p: Pick<ParsedSearch, "unknown" | "bad">): string | undefined {
   const notes: string[] = [];
   const b = p.bad?.[0];
@@ -324,7 +324,7 @@ export function searchQueryNote(p: Pick<ParsedSearch, "unknown" | "bad">): strin
     notes.push(
       `“${unknown}:” isn't a filter, so it was searched as text. Filters: agent machine repo label since until in source`,
     );
-  return notes.length ? notes.join(" ") : undefined;
+  return notes.length ? notes.join(". ") : undefined;
 }
 
 function badFilterNote(b: SearchBadFilter): string {

@@ -148,6 +148,8 @@ describe("sessionpipe-gui search", () => {
     expect(r.out).not.toContain("isn't a filter");
     const bad = await run(runSearchCli, ["webhook in:everything"]);
     expect(bad.out).toContain("“in:everything” isn't a field, so it was left out. in: prompt reply tool title");
+    const both = await run(runSearchCli, ["webhook in:everything foo:bar"]);
+    expect(both.out).toContain("in: prompt reply tool title. “foo:” isn't a filter, so it was searched as text.");
     const none = await run(runSearchCli, ["zzzz since:3days"]);
     expect(none.code).toBe(1);
     expect(none.out).toContain("“since:3days” isn't a date, so it was left out.");
