@@ -48,6 +48,7 @@ import {
   oneLine,
   plainEmphasis,
   plainLead,
+  plainTitle,
   repoShort,
   rowTime,
   STATE_LABEL,
@@ -211,12 +212,9 @@ export const SessionCard = memo(function SessionCard({
   const unread = useUnread(s);
   const showText = lens === null || lens >= 2;
   const showTools = lens === null || lens >= 1;
-  // The prompt as the preview, unless the title already is it (lib/format.ts uncutTitle):
-  // then only what follows its first line, never the same sentence twice.
-  const ask = (s.progress?.user || s.lastUser || "").trim();
-  const askRest = ask && ask.split("\n")[0]!.trim() === title ? ask.split("\n").slice(1).join(" ").trim() : ask;
+  const rest = askRest((s.progress?.user || s.lastUser || "").trim(), title);
   const liveText = showText
-    ? s.progress?.assistant?.trim() || s.lastAssistant?.trim() || (askRest ? `“${askRest}”` : "")
+    ? s.progress?.assistant?.trim() || s.lastAssistant?.trim() || (rest ? `“${rest}”` : "")
     : "";
   const isLiveText = !!s.progress?.assistant?.trim();
   // A stale row names its tool too, with no age: the time already says how long it is quiet.
@@ -1088,6 +1086,14 @@ export function newest(text: string): string {
   const off = (at: number) => Math.abs(text.length - at - 90);
   const word = ends(/\s+/g).sort((a, b) => off(a) - off(b))[0];
   return `…${text.slice(word ?? -89)}`;
+}
+
+/** The prompt as a row's preview, unless the title already is it (lib/format.ts
+ *  uncutTitle): then only what follows its first line, never the same sentence twice. The
+ *  title is plain words, so the first line is compared as plain words too. */
+export function askRest(ask: string, title: string): string {
+  const [first = "", ...more] = ask.split("\n");
+  return ask && plainTitle(first.trim()) === title ? more.join(" ").trim() : ask;
 }
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;

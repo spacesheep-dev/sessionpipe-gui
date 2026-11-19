@@ -269,6 +269,12 @@ describe("plainTitle", () => {
     for (const t of ["Fix __init__.py imports", "Why is __main__ slow", "Parse a[0](x) call", "rename snake_case_name"])
       expect(plainTitle(t)).toBe(t);
   });
+  it("drops marks around or across a code span, never inside one", () => {
+    expect(plainTitle("Use **`npm ci`** now")).toBe("Use npm ci now");
+    expect(plainTitle("**Run `npm ci` first**")).toBe("Run npm ci first");
+    expect(plainTitle("Why does `a*b*c` fail")).toBe("Why does a*b*c fail");
+    expect(plainTitle("`*a b*` stays")).toBe("*a b* stays");
+  });
   it("keeps text that is nothing but marks", () => {
     expect(plainTitle("``")).toBe("``");
   });

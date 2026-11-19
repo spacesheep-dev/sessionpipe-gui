@@ -11,7 +11,8 @@ vi.hoisted(() => {
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { answerItems, Inline, newest } from "./SessionCard";
+import { AgentText } from "./AgentRow";
+import { answerItems, askRest, Inline, newest } from "./SessionCard";
 
 describe("answerItems", () => {
   it("names the tool by its label", () => {
@@ -121,5 +122,26 @@ describe("Inline", () => {
   });
   it("drops a leading mark once and reads emphasis as words", () => {
     expect(html("- **Done**: `x` moved")).toBe('Done: <code class="inline-code">x</code> moved');
+  });
+});
+
+describe("askRest", () => {
+  it("shows no preview when the prompt's one line is the plain title", () => {
+    expect(askRest("Fix `foo` in bar", "Fix foo in bar")).toBe("");
+    expect(askRest("Fix `foo` in bar\nand **then** the docs", "Fix foo in bar")).toBe("and **then** the docs");
+  });
+  it("shows the whole prompt under a title that is not its first line", () => {
+    expect(askRest("Fix `foo` in bar", "Rename the store")).toBe("Fix `foo` in bar");
+  });
+});
+
+describe("AgentText", () => {
+  const html = (a: { type?: string; description?: string }, title?: string) =>
+    renderToStaticMarkup(createElement(AgentText, { a, title }));
+  it("reads a description as plain words", () => {
+    expect(html({ type: "Explore", description: "Find `formatMoney` calls" })).toContain("Find formatMoney calls");
+  });
+  it("shows a child's title, already plain, as it is", () => {
+    expect(html({ type: "Explore" }, "*a b*")).toContain(" · *a b*");
   });
 });

@@ -87,12 +87,17 @@ export const isCodeSpan = (p: string): boolean => p.length > 2 && p.startsWith("
 
 /** A session's title as plain words, wherever it is shown: a `code` span keeps its text
  *  and loses its ticks, the rest loses inline Markdown (as the preview line does), and a
- *  tick a cut left open goes. Text that is nothing but marks stays as it came. */
+ *  tick a cut left open goes. Each code span stands in as one private-use character while
+ *  the marks go, so marks around or across one go too ("**`npm ci`** now") and its own
+ *  text is never read as marks. Text that is nothing but marks stays as it came. */
 export function plainTitle(t: string): string {
-  const out = codeSpans(plainLead(t))
-    .map((p) => (isCodeSpan(p) ? p.slice(1, -1) : plainEmphasis(p)))
-    .join("")
+  const code: string[] = [];
+  const held = codeSpans(plainLead(t.replace(/[\uE000-\uF8FF]/g, "")))
+    .map((p) => (isCodeSpan(p) ? String.fromCharCode(0xe000 + code.push(p.slice(1, -1)) - 1) : p))
+    .join("");
+  const out = plainEmphasis(held)
     .replace(/`/g, "")
+    .replace(/[\uE000-\uF8FF]/g, (c) => code[c.charCodeAt(0) - 0xe000] ?? "")
     .trim();
   return out || t.trim();
 }

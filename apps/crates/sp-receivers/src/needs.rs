@@ -63,16 +63,158 @@ impl NeedsYouItem {
 }
 
 /// A title as words, as web/src/lib/format.ts `plainTitle` makes it for the menu bar and
-/// notifications: one leading heading, quote or list mark goes, and so does every
-/// backtick (a `code` span keeps its text). Text that is nothing but marks stays.
+/// notifications: one leading heading, quote or list mark goes; a `code` span keeps its
+/// text; links, bold, italic and strike read as their words; a tick a cut left open goes.
+/// Code written without ticks (`__init__.py`, `a[0](x)`) stays. Text that is nothing but
+/// marks stays.
 pub fn plain_title(t: &str) -> String {
     let t = t.trim();
-    let rest = strip_lead(t).unwrap_or(t);
-    let out: String = rest.chars().filter(|&c| c != '`').collect();
+    let rest: String = strip_lead(t)
+        .unwrap_or(t)
+        .chars()
+        .filter(|c| !('\u{E000}'..='\u{F8FF}').contains(c))
+        .collect();
+    // Each code span stands in as one private-use character while the marks go, so marks
+    // around or across one go too and its own text is never read as marks.
+    let mut code: Vec<&str> = Vec::new();
+    let mut held = String::new();
+    let mut i = 0;
+    while let Some(o) = rest[i..].find('`') {
+        let open = i + o;
+        let inner = &rest[open + 1..];
+        match inner.find(['`', '\n']) {
+            Some(c) if c > 0 && inner[c..].starts_with('`') && code.len() < 0x1900 => {
+                held.push_str(&rest[i..open]);
+                held.push(char::from_u32(0xE000 + code.len() as u32).unwrap_or('\u{E000}'));
+                code.push(&inner[..c]);
+                i = open + 1 + c + 1;
+            }
+            _ => {
+                held.push_str(&rest[i..=open]);
+                i = open + 1;
+            }
+        }
+    }
+    held.push_str(&rest[i..]);
+    let out: String =
+        plain_emphasis(&held)
+            .chars()
+            .filter(|&c| c != '`')
+            .fold(String::new(), |mut o, c| {
+                match (c as u32)
+                    .checked_sub(0xE000)
+                    .and_then(|n| code.get(n as usize))
+                {
+                    Some(span) if (c as u32) < 0xF900 => o.push_str(span),
+                    _ => o.push(c),
+                }
+                o
+            });
     match out.trim() {
         "" => t.to_string(),
         o => o.to_string(),
     }
+}
+
+/// A word character as JavaScript's `\w` reads one.
+fn word(c: Option<char>) -> bool {
+    c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Inline emphasis down to its words, by the rules of format.ts `plainEmphasis`, in its
+/// order: `[text](url)`, `**b**`, `*i*`, `__b__` / `_i_` (with a space inside), `~~s~~`.
+fn plain_emphasis(t: &str) -> String {
+    let t = links(t);
+    let t = pairs(&t, "**", Edge::None);
+    let t = pairs(&t, "*", Edge::Word('*'));
+    let t = pairs(&t, "__", Edge::Spaced);
+    let t = pairs(&t, "_", Edge::Spaced);
+    pairs(&t, "~~", Edge::None)
+}
+
+#[derive(Clone, Copy)]
+enum Edge {
+    /// Anywhere.
+    None,
+    /// Not after a word character or `c`, and not before a word character.
+    Word(char),
+    /// As `Word('_')`, with a space inside.
+    Spaced,
+}
+
+/// `[text](url)` (or `![text](url)`) as its text, unless a word or `]` comes right before.
+fn links(t: &str) -> String {
+    let mut out = String::new();
+    let mut prev: Option<char> = None;
+    let mut i = 0;
+    while i < t.len() {
+        let at = &t[i..];
+        let bang = at.starts_with("![");
+        let open = if bang { 1 } else { 0 };
+        if (bang || at.starts_with('[')) && !word(prev) && prev != Some(']') {
+            let body = &at[open + 1..];
+            if let Some(close) = body.find(']') {
+                if let Some(url) = body[close + 1..].strip_prefix('(') {
+                    if let Some(end) = url.find(')') {
+                        out.push_str(&body[..close]);
+                        let used = open + 1 + close + 2 + end + 1;
+                        prev = at[..used].chars().last();
+                        i += used;
+                        continue;
+                    }
+                }
+            }
+        }
+        let c = at.chars().next().unwrap_or_default();
+        out.push(c);
+        prev = Some(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// Every `mark`…`mark` pair read as its words: the inner text starts and ends with a
+/// non-space and holds no character of the mark.
+fn pairs(t: &str, mark: &str, edge: Edge) -> String {
+    let m = mark.chars().next().unwrap_or('*');
+    let mut out = String::new();
+    let mut prev: Option<char> = None;
+    let mut i = 0;
+    while i < t.len() {
+        let at = &t[i..];
+        let before_ok = match edge {
+            Edge::None => true,
+            Edge::Word(c) => !word(prev) && prev != Some(c),
+            Edge::Spaced => !word(prev),
+        };
+        if before_ok && at.starts_with(mark) {
+            let body = &at[mark.len()..];
+            let end = body.find(m).unwrap_or(body.len());
+            let inner = &body[..end];
+            let closes = body[end..].starts_with(mark);
+            let after = body[end..].get(mark.len()..).and_then(|a| a.chars().next());
+            let ok = closes
+                && inner.starts_with(|c: char| !c.is_whitespace())
+                && inner.ends_with(|c: char| !c.is_whitespace())
+                && match edge {
+                    Edge::None => true,
+                    Edge::Word(_) => !word(after),
+                    Edge::Spaced => !word(after) && inner.contains(char::is_whitespace),
+                };
+            if ok {
+                out.push_str(inner);
+                let used = mark.len() + end + mark.len();
+                prev = at[..used].chars().last();
+                i += used;
+                continue;
+            }
+        }
+        let c = at.chars().next().unwrap_or_default();
+        out.push(c);
+        prev = Some(c);
+        i += c.len_utf8();
+    }
+    out
 }
 
 /// `t` after a leading "# " (to "###### "), ">" or "- " / "* " / "+ " before a word.
@@ -372,6 +514,26 @@ mod tests {
         assert_eq!(plain_title("-v flag"), "-v flag");
         assert_eq!(plain_title("#123 fails"), "#123 fails");
         assert_eq!(plain_title("``"), "``");
+        assert_eq!(
+            plain_title("Which docs still say `--sink`? **Fix** them"),
+            "Which docs still say --sink? Fix them"
+        );
+        assert_eq!(
+            plain_title("See [the guide](https://x.test) and ~~old~~ *new* notes"),
+            "See the guide and old new notes"
+        );
+        assert_eq!(plain_title("Use **`npm ci`** now"), "Use npm ci now");
+        assert_eq!(plain_title("Why does `a*b*c` fail"), "Why does a*b*c fail");
+        assert_eq!(plain_title("_a b_ and __c d__"), "a b and c d");
+        for t in [
+            "Fix __init__.py imports",
+            "Why is __main__ slow",
+            "Parse a[0](x) call",
+            "rename snake_case_name",
+            "2*3*4 is 24",
+        ] {
+            assert_eq!(plain_title(t), t);
+        }
     }
 
     fn session(key: &str, state: &str, att: &[&str]) -> String {
