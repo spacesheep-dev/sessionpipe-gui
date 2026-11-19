@@ -4,7 +4,7 @@
 // that shows the first key of a sequence while the second is awaited ("g …"), and the
 // pieces the Shortcuts page and Settings share (a binding as caps, the actions grouped).
 // Mounted once, in the shell.
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { usePresence } from "../lib/motion";
 import { type Action, formatBinding, usePendingChord, useShortcut } from "../lib/shortcuts";
@@ -13,7 +13,9 @@ import { Kbd } from "./bits";
 const dialogModule = lazyModule(() => import("./ShortcutHelpDialog"));
 whenIdle(() => void dialogModule.preload().catch(() => {}));
 
-/** One binding as chips: <kbd>g</kbd> <kbd>f</kbd>; `caps` draws each as a key cap. */
+/** One binding as chips: <kbd>g</kbd> <kbd>f</kbd>; `caps` draws each as a key cap. A space
+ *  between the chips makes the text read "g f", as a button's name says it, not "gf"; the
+ *  row is inline-flex, where a space between items is never drawn. */
 export function Keys({
   binding,
   className = "",
@@ -26,7 +28,12 @@ export function Keys({
   const parts = formatBinding(binding);
   return (
     <span className={`${caps ? "kbd-row" : "keys"} ${className}`}>
-      {parts.map((p, i) => (caps ? <Kbd key={`${p}-${i}`}>{p}</Kbd> : <kbd key={`${p}-${i}`}>{p}</kbd>))}
+      {parts.map((p, i) => (
+        <Fragment key={`${p}-${i}`}>
+          {i > 0 && " "}
+          {caps ? <Kbd>{p}</Kbd> : <kbd>{p}</kbd>}
+        </Fragment>
+      ))}
     </span>
   );
 }
