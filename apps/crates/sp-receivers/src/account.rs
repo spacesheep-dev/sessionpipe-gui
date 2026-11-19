@@ -42,8 +42,15 @@ pub const RELAY_PAGE_MAX: u64 = 500;
 /// The Hub's own limit for a relay request is the wait it asked for plus this: the time
 /// to reach spacesheep and to read a page of events on a slow network.
 pub const RELAY_GRACE_S: u64 = 20;
-/// Every other door, and connect and its poll.
+/// Every other door but the files door (`proxy::send_timeout`), and connect and its poll.
 pub const REQUEST_TIMEOUT_S: u64 = 15;
+/// The largest file the files door carries: CONTROL.md's limit for one file (25 MiB).
+pub const FILE_MAX: usize = 26_214_400;
+/// A file's media type, as the files door forwards it: CONTROL.md's `type`, at most this
+/// long.
+pub const FILE_TYPE_MAX: usize = 100;
+/// A file's name, as the page percent-encodes it in `x-file-name`: at most this long.
+pub const FILE_NAME_MAX: usize = 1024;
 /// JavaScript's largest exact integer: a relay cursor or a job id is at most this.
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -246,6 +253,10 @@ pub enum Door {
     RelayJobs,
     /// `POST /api/machines/<id>/jobs`: a signed command for a machine.
     MachineJobs,
+    /// `POST /api/machines/files`: a file a command names (a picture), kept on spacesheep
+    /// for the machine to fetch. The body is the file's bytes; its type and name are the
+    /// two headers the Hub forwards (`Opened::with_headers`).
+    MachineFiles,
     /// `POST /api/gui/device`: this device's own key, asked to be trusted. The Hub's own
     /// request (`Hub::account_device_ask`), with a body the Hub wrote: never the page's.
     DeviceAsk,
@@ -258,6 +269,7 @@ const RELAY: &str = "/api/sessionpipe/v1/relay";
 const RELAY_MACHINES: &str = "/api/sessionpipe/v1/relay/machines";
 const RELAY_JOBS: &str = "/api/sessionpipe/v1/relay/jobs";
 const DEVICE: &str = "/api/gui/device";
+const MACHINE_FILES: &str = "/api/machines/files";
 
 impl Door {
     /// For a log line: never the query, never an id.
@@ -267,16 +279,19 @@ impl Door {
             Door::RelayMachines => "relay/machines",
             Door::RelayJobs => "relay/jobs",
             Door::MachineJobs => "machines/:id/jobs",
+            Door::MachineFiles => "machines/files",
             Door::DeviceAsk => "gui/device (ask)",
             Door::DeviceStatus => "gui/device",
         }
     }
 
     /// The largest body sent. A send is the GUI server's own limit for one
-    /// (`SEND_BODY_MAX`); a device key is a few hundred bytes.
+    /// (`SEND_BODY_MAX`); a file is CONTROL.md's for one; a device key is a few hundred
+    /// bytes.
     pub fn max_request(self) -> usize {
         match self {
             Door::MachineJobs => 256 * 1024,
+            Door::MachineFiles => FILE_MAX,
             Door::DeviceAsk => 16 * 1024,
             _ => 0,
         }
@@ -300,15 +315,49 @@ pub struct Opened {
     pub path_and_query: String,
     /// Seconds spacesheep may hold the request (the relay's `wait`).
     pub wait_s: u64,
+    /// The page's headers the Hub forwards, checked: the files door's type and name. No
+    /// other door forwards any.
+    pub headers: Vec<(&'static str, String)>,
 }
 
 impl Opened {
-    /// The Hub's limit for the whole request.
-    pub fn timeout_s(&self) -> u64 {
+    /// The Hub's limit for the whole request, which carries `body_len` bytes: for a file,
+    /// as long as they take on a slow uplink (`proxy::send_timeout`).
+    pub fn timeout_s(&self, body_len: usize) -> u64 {
         match self.door {
             Door::Relay => self.wait_s + RELAY_GRACE_S,
+            Door::MachineFiles => crate::proxy::send_timeout(body_len).as_secs(),
             _ => REQUEST_TIMEOUT_S,
         }
+    }
+
+    /// The page's headers this door forwards, from `header` (a request's header by its
+    /// name in lower case). The files door takes `content-type`, a media type as
+    /// CONTROL.md has a file's `type`, and may take `x-file-name`, the file's name as the
+    /// page percent-encoded it: visible ASCII and nothing else. Either one otherwise is
+    /// `bad_header`. Every other door forwards none, whatever the page sent.
+    pub fn with_headers<'a>(
+        mut self,
+        header: impl Fn(&str) -> Option<&'a [u8]>,
+    ) -> Result<Opened, Refused> {
+        if self.door != Door::MachineFiles {
+            return Ok(self);
+        }
+        let kind = header("content-type")
+            .and_then(|v| std::str::from_utf8(v).ok())
+            .filter(|v| is_media_type(v))
+            .ok_or(Refused::BadHeader)?;
+        self.headers.push(("content-type", kind.to_string()));
+        if let Some(name) = header("x-file-name") {
+            let ok = (1..=FILE_NAME_MAX).contains(&name.len())
+                && name.iter().all(|c| (0x21..=0x7e).contains(c));
+            if !ok {
+                return Err(Refused::BadHeader);
+            }
+            let name = String::from_utf8_lossy(name).into_owned();
+            self.headers.push(("x-file-name", name));
+        }
+        Ok(self)
     }
 
     /// The machines door, for the Hub's own questions.
@@ -317,6 +366,7 @@ impl Opened {
             door: Door::RelayMachines,
             path_and_query: RELAY_MACHINES.into(),
             wait_s: 0,
+            headers: Vec::new(),
         }
     }
 
@@ -326,6 +376,7 @@ impl Opened {
             door: Door::DeviceAsk,
             path_and_query: DEVICE.into(),
             wait_s: 0,
+            headers: Vec::new(),
         }
     }
 
@@ -348,6 +399,8 @@ pub enum Refused {
     BadQuery,
     /// A body where none is taken, or one that is not a JSON object.
     BadBody,
+    /// A file whose type is not a media type, or whose name is not one a header carries.
+    BadHeader,
     /// A send that is not a signed command: no `cmd`, no signature beside it, or a field
     /// a signed command does not have.
     NotSigned,
@@ -391,6 +444,7 @@ impl Refused {
             Refused::NotADoor => "not_a_door",
             Refused::BadQuery => "bad_query",
             Refused::BadBody => "bad_body",
+            Refused::BadHeader => "bad_header",
             Refused::NotSigned => "not_signed",
             Refused::TooLarge => "too_large",
             Refused::ForbiddenOrigin => "forbidden_origin",
@@ -416,7 +470,9 @@ impl Refused {
             | Refused::ForbiddenOrigin
             | Refused::AccountOff
             | Refused::BadAccount => S::FORBIDDEN,
-            Refused::BadQuery | Refused::BadBody | Refused::NotSigned => S::BAD_REQUEST,
+            Refused::BadQuery | Refused::BadBody | Refused::BadHeader | Refused::NotSigned => {
+                S::BAD_REQUEST
+            }
             Refused::TooLarge => S::PAYLOAD_TOO_LARGE,
             Refused::NotConnected => S::UNAUTHORIZED,
             Refused::NoDeviceKey => S::CONFLICT,
@@ -438,6 +494,7 @@ impl Refused {
             Refused::NotADoor => "The app does not forward this to a spacesheep account.",
             Refused::BadQuery => "That request has a parameter the app does not forward.",
             Refused::BadBody => "That request's body is not one the app forwards.",
+            Refused::BadHeader => "That file's type or name is not one the app forwards.",
             Refused::NotSigned => "The app forwards only a signed command to a machine.",
             Refused::TooLarge => "That is too large to send.",
             Refused::ForbiddenOrigin => "Only the app's own page may ask.",
@@ -528,12 +585,26 @@ fn pairs<'a>(query: &'a str, names: &[&str]) -> Result<Vec<(&'a str, &'a str)>, 
     Ok(out)
 }
 
+/// A media type as CONTROL.md has a file's `type`: `type/subtype`, 1 to 100 characters
+/// of `^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$`, in any case. No
+/// parameter (`; charset=`), no space.
+pub fn is_media_type(s: &str) -> bool {
+    let part = |p: &str| {
+        let mut b = p.bytes();
+        b.next().is_some_and(|c| c.is_ascii_alphanumeric())
+            && b.all(|c| c.is_ascii_alphanumeric() || b"!#$&^_.+-".contains(&c))
+    };
+    (1..=FILE_TYPE_MAX).contains(&s.len())
+        && s.split_once('/')
+            .is_some_and(|(t, sub)| part(t) && part(sub))
+}
+
 /// Is this request of the page's a door? `path_and_query` is what followed the
 /// receiver's id in the `rx:` URL, as the page wrote it. A path matches only when it is
 /// written exactly as the door is: no `..`, no `//`, no encoded character, no trailing
 /// slash, no other case.
 ///
-/// Five doors are the page's. The sixth, asking spacesheep to trust a device key, is not:
+/// Six doors are the page's. The seventh, asking spacesheep to trust a device key, is not:
 /// whoever chose that key could sign for the person afterwards, so the Hub asks itself,
 /// with this device's own (`Opened::device_ask`).
 pub fn open_door(method: &str, path_and_query: &str) -> Result<Opened, Refused> {
@@ -549,6 +620,7 @@ pub fn open_door(method: &str, path_and_query: &str) -> Result<Opened, Refused> 
             door,
             path_and_query,
             wait_s,
+            headers: Vec::new(),
         })
     };
     match (method, path) {
@@ -600,6 +672,10 @@ pub fn open_door(method: &str, path_and_query: &str) -> Result<Opened, Refused> 
         ("GET", DEVICE) => {
             pairs(query, &[])?;
             opened(Door::DeviceStatus, DEVICE.into(), 0)
+        }
+        ("POST", MACHINE_FILES) => {
+            pairs(query, &[])?;
+            opened(Door::MachineFiles, MACHINE_FILES.into(), 0)
         }
         ("POST", p) => {
             let id = p
@@ -657,7 +733,9 @@ fn is_signed_command(o: &serde_json::Map<String, serde_json::Value>) -> bool {
         && (by_grant || by_confirm)
 }
 
-/// The body a door takes: none for a GET; for a send, a signed command within the limit.
+/// The body a door takes: none for a GET; for a send, a signed command within the limit;
+/// for a file, its bytes, at least one and within the limit (never read: spacesheep
+/// checks what it keeps, and the machine checks it against the signed hash).
 pub fn check_body(door: Door, body: &[u8]) -> Result<(), Refused> {
     let max = door.max_request();
     if max == 0 {
@@ -669,6 +747,13 @@ pub fn check_body(door: Door, body: &[u8]) -> Result<(), Refused> {
     }
     if body.len() > max {
         return Err(Refused::TooLarge);
+    }
+    if door == Door::MachineFiles {
+        return if body.is_empty() {
+            Err(Refused::BadBody)
+        } else {
+            Ok(())
+        };
     }
     match serde_json::from_slice::<serde_json::Value>(body) {
         Ok(serde_json::Value::Object(o)) => {
@@ -871,10 +956,12 @@ pub fn parse_poll(status: u16, body: &[u8], retry_after_s: Option<u64>) -> PollA
 
 /// Does a 401 on this door mean the key is dead? On the jobs door spacesheep also answers
 /// 401 for a grant that needs unlocking (`code: "unlock"`), which is the signer's matter
-/// and not the key's; only its `code: "unauthorized"` is. On the other doors a 401 is
-/// always the key.
+/// and not the key's; only its `code: "unauthorized"` is. On the files door a 401 never
+/// is: a spacesheep that does not take a key there yet answers `code: "unauthorized"`
+/// for a key that is alive, and a dead key is still seen on the next read of any other
+/// door. On the other doors a 401 is always the key.
 pub fn key_refused(door: Door, status: u16, body: &[u8]) -> bool {
-    if status != 401 {
+    if status != 401 || door == Door::MachineFiles {
         return false;
     }
     if door != Door::MachineJobs {
@@ -1210,8 +1297,13 @@ mod tests {
             Ok((Door::MachineJobs, format!("/api/machines/{m}/jobs")))
         );
         let o = open_door("GET", "/api/sessionpipe/v1/relay?wait=25").unwrap();
-        assert_eq!((o.wait_s, o.timeout_s()), (25, 45));
-        assert_eq!(open_door("GET", RELAY_JOBS).unwrap().timeout_s(), 15);
+        assert_eq!((o.wait_s, o.timeout_s(0)), (25, 45));
+        assert_eq!(open_door("GET", RELAY_JOBS).unwrap().timeout_s(0), 15);
+        // Only a file's limit grows with what it carries.
+        assert_eq!(
+            open_door("GET", RELAY_JOBS).unwrap().timeout_s(FILE_MAX),
+            15
+        );
         // The Hub's own: the machines door, the device door with a body it wrote, and the
         // status door about one key.
         assert_eq!(Opened::machines().path_and_query, RELAY_MACHINES);
@@ -1292,7 +1384,6 @@ mod tests {
             ("POST", "/api/keys"),
             ("GET", "/api/sessionpipe/v1/events"),
             ("POST", "/api/sessionpipe/v1/events"),
-            ("POST", "/api/machines/files"),
             ("GET", "/api/gui/connect/poll"),
             ("POST", "/api/gui/connect"),
             ("POST", "/api/gui/connect/approve"),
@@ -1349,6 +1440,161 @@ mod tests {
             );
         }
         assert!(door("POST", &format!("/api/machines/{m}/jobs")).is_ok());
+    }
+
+    /// The files door: a picture's bytes for spacesheep to keep, with its type and name.
+    #[test]
+    fn the_files_door_takes_a_files_bytes_type_and_name() {
+        assert_eq!(
+            door("POST", "/api/machines/files"),
+            Ok((Door::MachineFiles, "/api/machines/files".to_string()))
+        );
+        assert_eq!(Door::MachineFiles.name(), "machines/files");
+        assert_eq!(Door::MachineFiles.max_request(), 26_214_400);
+        assert_eq!(Door::MachineFiles.max_response(), SMALL_ANSWER_MAX);
+        // Exactly so: no other method, no query, no other spelling.
+        for (method, path) in [
+            ("GET", "/api/machines/files"),
+            ("PUT", "/api/machines/files"),
+            ("DELETE", "/api/machines/files"),
+            ("post", "/api/machines/files"),
+            ("POST", "/api/machines/files/"),
+            ("POST", "/api/machines/files/x"),
+            ("POST", "/api/machines/Files"),
+            ("POST", "/api/machines/%66iles"),
+            ("POST", "/api/machines//files"),
+            ("POST", "/api/machines/files#x"),
+        ] {
+            assert_eq!(
+                door(method, path),
+                Err(Refused::NotADoor),
+                "{method} {path}"
+            );
+        }
+        for q in ["?", "?x=1", "?name=a.png", "?since=1"] {
+            let path = format!("/api/machines/files{q}");
+            let want = if q == "?" {
+                Ok((Door::MachineFiles, "/api/machines/files".to_string()))
+            } else {
+                Err(Refused::BadQuery)
+            };
+            assert_eq!(door("POST", &path), want, "{q}");
+        }
+        // The body is the bytes, whatever they are: one to 25 MiB.
+        assert_eq!(check_body(Door::MachineFiles, b"\x89PNG\r\n"), Ok(()));
+        assert_eq!(check_body(Door::MachineFiles, b"not json"), Ok(()));
+        assert_eq!(check_body(Door::MachineFiles, &vec![0; FILE_MAX]), Ok(()));
+        assert_eq!(
+            check_body(Door::MachineFiles, &vec![0; FILE_MAX + 1]),
+            Err(Refused::TooLarge)
+        );
+        assert_eq!(check_body(Door::MachineFiles, b""), Err(Refused::BadBody));
+        // As long as the bytes take at 256 kbit/s.
+        let files = open_door("POST", "/api/machines/files").unwrap();
+        assert_eq!(files.timeout_s(0), 15);
+        assert_eq!(files.timeout_s(5_000_000), 168);
+        assert_eq!(files.timeout_s(FILE_MAX), 600);
+    }
+
+    #[test]
+    fn the_files_door_forwards_a_type_and_a_name_and_nothing_else() {
+        let files = open_door("POST", "/api/machines/files").unwrap();
+        let with = |headers: &[(&str, &[u8])]| {
+            let headers: Vec<(String, Vec<u8>)> = headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_vec()))
+                .collect();
+            files
+                .clone()
+                .with_headers(|name| {
+                    headers
+                        .iter()
+                        .find(|(k, _)| k == name)
+                        .map(|(_, v)| v.as_slice())
+                })
+                .map(|o| o.headers)
+        };
+        let h = |pairs: &[(&'static str, &str)]| -> Vec<(&'static str, String)> {
+            pairs.iter().map(|(k, v)| (*k, v.to_string())).collect()
+        };
+        assert_eq!(
+            with(&[
+                ("content-type", b"image/png"),
+                ("x-file-name", b"screen%20shot.png")
+            ]),
+            Ok(h(&[
+                ("content-type", "image/png"),
+                ("x-file-name", "screen%20shot.png")
+            ]))
+        );
+        // A name is the page's to give or not.
+        assert_eq!(
+            with(&[("content-type", b"image/webp")]),
+            Ok(h(&[("content-type", "image/webp")]))
+        );
+        // Any media type CONTROL.md takes, in any case; a name up to 1024 characters.
+        let long = "a".repeat(1024);
+        for (kind, name) in [
+            ("IMAGE/JPEG", "x.jpg"),
+            ("application/vnd.example+json", "%E2%9C%93.json"),
+            ("text/x-c++src", "a!b~c"),
+            ("image/png", long.as_str()),
+        ] {
+            assert!(
+                with(&[
+                    ("content-type", kind.as_bytes()),
+                    ("x-file-name", name.as_bytes())
+                ])
+                .is_ok(),
+                "{kind} {name}"
+            );
+        }
+        let long_type = format!("image/{}", "p".repeat(95));
+        let too_long = "a".repeat(1025);
+        #[rustfmt::skip]
+        let refused: Vec<Vec<(&str, &[u8])>> = vec![
+            // No type, or one that is not a media type.
+            vec![],
+            vec![("x-file-name", b"a.png")],
+            vec![("content-type", b"")],
+            vec![("content-type", b"image")],
+            vec![("content-type", b"image/")],
+            vec![("content-type", b"/png")],
+            vec![("content-type", b"image/png; charset=utf-8")],
+            vec![("content-type", b"image/png ")],
+            vec![("content-type", b"image/png/x")],
+            vec![("content-type", b".image/png")],
+            vec![("content-type", b"image/p\xc3\xa9")],
+            vec![("content-type", b"image/png\r\nx-evil: 1")],
+            vec![("content-type", long_type.as_bytes())],
+            // A name that is not visible ASCII, or none at all.
+            vec![("content-type", b"image/png"), ("x-file-name", b"")],
+            vec![("content-type", b"image/png"), ("x-file-name", b"a b.png")],
+            vec![("content-type", b"image/png"), ("x-file-name", b"a.png\r")],
+            vec![("content-type", b"image/png"), ("x-file-name", b"a\r\nx-evil: 1")],
+            vec![("content-type", b"image/png"), ("x-file-name", b"a\n.png")],
+            vec![("content-type", b"image/png"), ("x-file-name", b"a\t.png")],
+            vec![("content-type", b"image/png"), ("x-file-name", "é.png".as_bytes())],
+            vec![("content-type", b"image/png"), ("x-file-name", too_long.as_bytes())],
+        ];
+        assert_eq!(long_type.len(), 101);
+        for headers in refused {
+            assert_eq!(with(&headers), Err(Refused::BadHeader), "{headers:?}");
+        }
+        assert_eq!(Refused::BadHeader.code(), "bad_header");
+        assert_eq!(Refused::BadHeader.status(), 400);
+        // No other door forwards a header of the page's.
+        let jobs = open_door("POST", "/api/machines/m_0123456789abcdefABCD/jobs").unwrap();
+        let o = jobs
+            .with_headers(|_| Some(b"image/png".as_slice()))
+            .unwrap();
+        assert!(o.headers.is_empty());
+        assert!(open_door("GET", RELAY)
+            .unwrap()
+            .with_headers(|_| None)
+            .unwrap()
+            .headers
+            .is_empty());
     }
 
     #[test]
@@ -1740,7 +1986,7 @@ mod tests {
     }
 
     #[test]
-    fn a_401_is_the_key_except_a_grant_that_needs_unlocking() {
+    fn a_401_is_the_key_except_a_grant_that_needs_unlocking_or_on_the_files_door() {
         let unauthorized = br#"{"error":"Unknown or revoked API key.","code":"unauthorized"}"#;
         let unlock = br#"{"error":"Unlock first.","code":"unlock","refusal":"bad_grant"}"#;
         assert!(key_refused(Door::Relay, 401, unauthorized));
@@ -1749,6 +1995,11 @@ mod tests {
         assert!(key_refused(Door::MachineJobs, 401, unauthorized));
         assert!(!key_refused(Door::MachineJobs, 401, unlock));
         assert!(!key_refused(Door::MachineJobs, 401, b""));
+        // A spacesheep that takes no key on the files door yet says "Sign in first." there.
+        let sign_in = br#"{"error":"Sign in first.","code":"unauthorized"}"#;
+        assert!(!key_refused(Door::MachineFiles, 401, sign_in));
+        assert!(!key_refused(Door::MachineFiles, 401, unauthorized));
+        assert!(!key_refused(Door::MachineFiles, 401, b""));
         // A 403 is Pro or Talk being off, or the key's scope: the key itself is alive.
         assert!(!key_refused(Door::Relay, 403, unauthorized));
         assert!(!key_refused(Door::Relay, 200, unauthorized));

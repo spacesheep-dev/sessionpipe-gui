@@ -4,7 +4,7 @@
 // are answered from the page's own store and control, with the shapes the receiver answers
 // (server/ui, server/control/ui.ts); a send goes to the jobs door; this phone's own device
 // key goes through the hub. Every other path is answered 404 here, in the page: nothing but
-// the five doors ever reaches the network in this mode.
+// the six doors ever reaches the network in this mode (docs/rfcs/08, "The doors").
 import type { ControlActivity, Info, LimitsEntry, Snapshot, SpacesheepSourceStatus } from "@shared/api";
 import { ROUTES } from "@shared/api";
 import { cleanReason } from "@shared/reason";

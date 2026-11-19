@@ -110,7 +110,7 @@ const ALLOWED: Record<string, { n: number; why: string }> = {
   },
   "account/doors.ts": {
     n: 1,
-    why: "the five doors of a spacesheep account, through the native hub: the only requests a page on an account makes",
+    why: "the six doors of a spacesheep account, through the native hub: the only requests a page on an account makes",
   },
 };
 

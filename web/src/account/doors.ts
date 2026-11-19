@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: web. The account's five doors (docs/rfcs/08, "The doors"): the page asks
+// Owned by: web. The account's six doors (docs/rfcs/08, "The doors"): the page asks
 // `${rxBase}<path>`, the native hub adds the account's key and forwards these and nothing
 // else. An answer with the header `x-sessionpipe-hub` is the hub's own (`{ hub: true,
 // reason, error }`), one without it is spacesheep's; the two are told apart here, once,

@@ -9,7 +9,8 @@
 // doors an app uses before and beside the relay: the connect (a code and four digits, a
 // poll that hands the key over once approved) and the app's own device key (asked to be
 // trusted, and where it stands; approved or removed on its Devices page; the hour a newly
-// approved device waits before it can send). Nothing here is Node's: a unit test and a
+// approved device waits before it can send), and a file kept for a machine to fetch (its
+// SHA-256, size and type, as `POST /api/machines/files` answers). Nothing here is Node's: a unit test and a
 // browser test's server both run it.
 
 export interface FakeClock {
@@ -31,6 +32,9 @@ export interface FakeRequest {
   /** The Authorization header's value, when one was sent. */
   authorization?: string;
   body?: string;
+  /** A file's bytes (the files door), with its `content-type` and `x-file-name` headers. */
+  bytes?: Uint8Array;
+  headers?: Record<string, string>;
   signal?: AbortSignal;
 }
 
@@ -118,6 +122,10 @@ export class FakeSpacesheep {
   saysCooling = true;
   /** What the next ask of the device door (POST) gets instead, once. */
   deviceAnswer: FakeAnswer | null = null;
+  /** The files kept for the machines, as they came: their type, name (decoded) and size. */
+  files: { sha256: string; size: number; type: string; name: string }[] = [];
+  /** What the next file kept gets instead, once. */
+  fileAnswer: FakeAnswer | null = null;
 
   constructor(
     private readonly clock: FakeClock = realClock,
@@ -270,6 +278,7 @@ export class FakeSpacesheep {
     const send = /^\/api\/machines\/([^/]+)\/jobs$/.exec(p);
     if (req.method === "POST" && send) return this.send(decodeURIComponent(send[1]!), req.body);
     if (p === "/api/gui/device") return this.device(req, url);
+    if (req.method === "POST" && p === "/api/machines/files") return this.file(req);
     return json({ error: "This key doesn't open that.", code: "scope" }, 403);
   }
 
@@ -306,6 +315,31 @@ export class FakeSpacesheep {
       headers: { "content-type": "application/json", "cache-control": "no-store" },
       body: `{"events":[${rows.map((r) => r.body).join(",")}],"next":${next},"oldest":${oldest ?? "null"},"protocol":1}`,
     };
+  }
+
+  /** A file for a machine to fetch: kept by its SHA-256 (base64url), answered with it. */
+  private async file(req: FakeRequest): Promise<FakeAnswer> {
+    if (this.fileAnswer) {
+      const a = this.fileAnswer;
+      this.fileAnswer = null;
+      return a;
+    }
+    const bytes = req.bytes ?? new Uint8Array();
+    const type = req.headers?.["content-type"] ?? "";
+    if (!bytes.length) return json({ error: "The file is empty.", code: "empty" }, 400);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes)));
+    const sha256 = btoa(String.fromCharCode(...digest))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    let name = "";
+    try {
+      name = decodeURIComponent(req.headers?.["x-file-name"] ?? "");
+    } catch {
+      /* not encoded: no name */
+    }
+    this.files.push({ sha256, size: bytes.length, type, name });
+    return json({ sha256, size: bytes.length, type });
   }
 
   /** The app's own device key: asked to be trusted (POST), and where it stands (GET). */

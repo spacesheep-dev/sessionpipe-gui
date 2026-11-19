@@ -202,6 +202,14 @@ fn route(w: &World, origin: &str, s: &Seen) -> Reply {
         ),
         ("GET", JOBS_DOOR) => Reply::json(200, r#"{"jobs":[]}"#),
         ("POST", p) if p == jobs => Reply::json(202, r#"{"job":7}"#),
+        ("POST", "/api/machines/files") => Reply::json(
+            200,
+            json!({
+                "sha256": "Q".repeat(43), "size": s.body.len(),
+                "type": s.header("content-type").unwrap_or(""),
+            })
+            .to_string(),
+        ),
         // A cloud box runs what it is sent, signed or not: the Hub must never get here.
         ("POST", p) if p.starts_with("/api/machines/m_box") => {
             Reply::json(202, r#"{"ok":true,"ran":"unsigned"}"#)
@@ -1827,7 +1835,6 @@ async fn what_is_not_a_door_is_refused_before_any_network() {
         ("GET", "/api/keys", b"", 403, "not_a_door"),
         ("POST", "/api/keys", b"{}", 403, "not_a_door"),
         ("POST", "/api/sessionpipe/v1/events", b"{}", 403, "not_a_door"),
-        ("POST", "/api/machines/files", b"{}", 403, "not_a_door"),
         ("POST", "/api/gui/connect", b"{}", 403, "not_a_door"),
         ("GET", "/api/gui/connect/poll?code=x", b"", 403, "not_a_door"),
         ("GET", "/connect/gui", b"", 403, "not_a_door"),
@@ -1942,6 +1949,237 @@ async fn what_is_not_a_door_is_refused_before_any_network() {
     assert_eq!(pre.headers()["access-control-allow-origin"], APP);
     assert_eq!(fake.count(), rest);
     fake.absent(&logged().join("\n"), "a log line");
+}
+
+/// A picture through the files door, as the page sends one.
+fn file_request(
+    id: &str,
+    path: &str,
+    kind: Option<&[u8]>,
+    name: Option<&[u8]>,
+    body: Vec<u8>,
+) -> http::Request<Vec<u8>> {
+    let mut b = http::Request::builder()
+        .method("POST")
+        .uri(format!("rx://localhost/{id}{path}"))
+        .header("origin", APP);
+    if let Some(k) = kind {
+        b = b.header("content-type", http::HeaderValue::from_bytes(k).unwrap());
+    }
+    if let Some(n) = name {
+        b = b.header("x-file-name", http::HeaderValue::from_bytes(n).unwrap());
+    }
+    b.body(body).unwrap()
+}
+
+#[tokio::test]
+async fn a_picture_goes_through_the_files_door_with_the_key_its_type_and_its_name() {
+    let t = TempDir::new("acct-files");
+    let fake = Fake::start("files").await;
+    let h = hub_in(t.path());
+    let id = connected(&h, &fake).await;
+    let picture = b"\x89PNG\r\n\x1a\n picture bytes".to_vec();
+    let mut req = file_request(
+        &id,
+        "/api/machines/files",
+        Some(b"image/png"),
+        Some(b"screen%20shot%201.png"),
+        picture.clone(),
+    );
+    // What else the page sends stays here.
+    for (k, v) in [
+        ("authorization", "Bearer ss_the-pages-own-idea"),
+        ("cookie", "session=abc"),
+        ("x-forwarded-host", "evil.example"),
+        ("accept", "text/html"),
+    ] {
+        req.headers_mut()
+            .insert(k, http::HeaderValue::from_static(v));
+    }
+    let res = h.proxy(req).await;
+    assert_eq!(said(&res), (200, None), "{}", dump(&res));
+    let v: Value = serde_json::from_slice(res.body()).unwrap();
+    assert_eq!(
+        (v["size"].as_u64(), v["type"].as_str()),
+        (Some(picture.len() as u64), Some("image/png"))
+    );
+    let s = fake.last();
+    assert_eq!((s.method(), s.target()), ("POST", "/api/machines/files"));
+    assert_eq!(
+        header_names(&s),
+        vec![
+            "accept",
+            "accept-encoding",
+            "authorization",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent",
+            "x-file-name"
+        ],
+        "{}",
+        s.head
+    );
+    assert_eq!(
+        s.header("authorization"),
+        Some(format!("Bearer {}", fake.key()).as_str())
+    );
+    assert_eq!(s.header("content-type"), Some("image/png"));
+    assert_eq!(s.header("x-file-name"), Some("screen%20shot%201.png"));
+    assert_eq!(s.body, picture, "the bytes as the page sent them");
+    assert_eq!(res.headers()["access-control-allow-origin"], APP);
+    fake.absent(&dump(&res), "an answer");
+    // A name is the page's to give or not.
+    let res = h
+        .proxy(file_request(
+            &id,
+            "/api/machines/files",
+            Some(b"image/webp"),
+            None,
+            b"RIFF".to_vec(),
+        ))
+        .await;
+    assert_eq!(said(&res), (200, None));
+    assert_eq!(fake.last().header("x-file-name"), None);
+    assert_eq!(fake.last().header("content-type"), Some("image/webp"));
+
+    // Refused here, before any network.
+    let rest = fake.count();
+    let over = vec![0u8; account::FILE_MAX + 1];
+    let png: Option<&[u8]> = Some(b"image/png");
+    // The path, the type and the name the page sends, the body; the Hub's answer.
+    type Case<'a> = (
+        &'a str,
+        Option<&'a [u8]>,
+        Option<&'a [u8]>,
+        Vec<u8>,
+        u16,
+        &'a str,
+    );
+    #[rustfmt::skip]
+    let table: Vec<Case> = vec![
+        ("/api/machines/files?name=a.png", png, None, b"x".to_vec(), 400, "bad_query"),
+        ("/api/machines/files", png, None, over, 413, "too_large"),
+        ("/api/machines/files", png, None, vec![], 400, "bad_body"),
+        ("/api/machines/files", None, None, b"x".to_vec(), 400, "bad_header"),
+        ("/api/machines/files", Some(b"image/png; charset=utf-8"), None, b"x".to_vec(), 400, "bad_header"),
+        ("/api/machines/files", Some(b"picture"), None, b"x".to_vec(), 400, "bad_header"),
+        ("/api/machines/files", png, Some(b"a b.png"), b"x".to_vec(), 400, "bad_header"),
+        ("/api/machines/files", png, Some(b"\xc3\xa9.png"), b"x".to_vec(), 400, "bad_header"),
+        ("/api/machines/files/", png, None, b"x".to_vec(), 403, "not_a_door"),
+    ];
+    for (path, kind, name, body, status, code) in table {
+        let res = h.proxy(file_request(&id, path, kind, name, body)).await;
+        assert_eq!(said(&res), (status, Some(code)), "{path} {kind:?} {name:?}");
+        let v: Value = serde_json::from_slice(res.body()).unwrap();
+        assert_eq!(v["reason"], code);
+    }
+    let get = ask(&h, "GET", &id, "/api/machines/files", b"").await;
+    assert_eq!(said(&get), (403, Some("not_a_door")));
+    assert_eq!(fake.count(), rest, "spacesheep heard none of it");
+
+    // spacesheep's answer is a small one: over a megabyte is not passed on.
+    fake.hook(|s| {
+        (s.target() == "/api/machines/files")
+            .then(|| Reply::json(200, vec![b' '; account::SMALL_ANSWER_MAX + 1]))
+    });
+    let res = h
+        .proxy(file_request(
+            &id,
+            "/api/machines/files",
+            png,
+            None,
+            b"x".to_vec(),
+        ))
+        .await;
+    assert_eq!(said(&res), (502, Some("answer_too_large")));
+    fake.absent(&logged().join("\n"), "a log line");
+}
+
+/// A spacesheep that takes no key on the files door yet answers one there as it answers
+/// a visitor who is not signed in. That 401 is passed on to the page as it is, and the
+/// key stays alive: the next read of any other door would tell a dead one.
+#[tokio::test]
+async fn an_older_spacesheeps_401_on_the_files_door_leaves_the_key_alone() {
+    let t = TempDir::new("acct-files-older");
+    let fake = Fake::start("files-older").await;
+    let h = hub_in(t.path());
+    let id = connected(&h, &fake).await;
+    let mut events = h.subscribe();
+    fake.hook(|s| {
+        (s.target() == "/api/machines/files")
+            .then(|| Reply::json(401, r#"{"error":"Sign in first.","code":"unauthorized"}"#))
+    });
+    let res = h
+        .proxy(file_request(
+            &id,
+            "/api/machines/files",
+            Some(b"image/png"),
+            Some(b"a.png"),
+            b"\x89PNG".to_vec(),
+        ))
+        .await;
+    assert_eq!(said(&res), (401, None), "spacesheep's 401, not the Hub's");
+    assert!(text(&res).contains("Sign in first."));
+    assert_eq!(fake.last().target(), "/api/machines/files");
+    assert_eq!(account(&h, &id).unwrap().state, AccountState::Ok);
+    assert_eq!(
+        h.receiver(&id).unwrap().account.unwrap().state,
+        AccountState::Ok
+    );
+    assert!(h.is_connected(&id));
+    let mut told = false;
+    while let Ok(e) = events.try_recv() {
+        told |= e == HubEvent::Account;
+    }
+    assert!(!told, "nothing changed for the page to hear about");
+    let saved: Value =
+        serde_json::from_slice(&std::fs::read(t.path().join("receivers.json")).unwrap()).unwrap();
+    assert!(!saved.to_string().contains("unauthorized"), "{saved}");
+    assert_eq!(
+        account(&hub_in(t.path()), &id).unwrap().state,
+        AccountState::Ok,
+        "and after a restart"
+    );
+}
+
+/// A picture has as long as its bytes take on a slow uplink (`proxy::send_timeout`): an
+/// answer later than the fifteen seconds of the other doors is waited for when there is
+/// a megabyte to carry, and not when there is a byte.
+#[tokio::test]
+async fn the_files_door_waits_as_long_as_the_bytes_take() {
+    let t = TempDir::new("acct-files-time");
+    let fake = Fake::start("files-time").await;
+    let h = hub_in(t.path());
+    let id = connected(&h, &fake).await;
+    let late = SECOND * (account::REQUEST_TIMEOUT_S as u32 + 10);
+    fake.hook(move |s| {
+        (s.target() == "/api/machines/files").then(|| Reply::json(200, r#"{"size":1}"#).after(late))
+    });
+    let png: Option<&[u8]> = Some(b"image/png");
+    let megabyte = vec![1u8; 1024 * 1024];
+    let res = h
+        .proxy(file_request(
+            &id,
+            "/api/machines/files",
+            png,
+            None,
+            megabyte,
+        ))
+        .await;
+    assert_eq!(said(&res), (200, None), "{}", dump(&res));
+    let t0 = Instant::now();
+    let res = h
+        .proxy(file_request(
+            &id,
+            "/api/machines/files",
+            png,
+            None,
+            b"x".to_vec(),
+        ))
+        .await;
+    assert_eq!(said(&res), (504, Some("timeout")));
+    assert!(t0.elapsed() < late, "cut off, not waited out");
 }
 
 #[tokio::test]

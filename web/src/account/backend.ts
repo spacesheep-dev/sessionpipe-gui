@@ -5,7 +5,7 @@
 // own file: the store's core over a log of the page's own, the labels, the marks and the limits,
 // the machines and sends of the account (MemoryControl), and the relay's reader. What is
 // the page's own is where they are kept (IndexedDB for the relay's pages, the hub's
-// documents for what is the person's) and how spacesheep is reached (the hub's five doors).
+// documents for what is the person's) and how spacesheep is reached (the hub's six doors).
 //
 // It answers the page two ways: as a Transport (data/transport.ts), with its own event bus
 // where the receiver has a stream, and as the answer to the page's plain requests of

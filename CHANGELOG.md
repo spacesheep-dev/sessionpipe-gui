@@ -203,6 +203,12 @@ could not read.
   picture the receiver no longer keeps, is a chip with its name, type and size
   (`kiwi.png · PNG · 32 KB`). The receiver keeps a picture you sent for 30 days to show it,
   and makes room among those, oldest first, before it refuses an upload for space.
+- **In the desktop and phone apps, a picture on a slow connection has time to arrive.** A
+  request to a receiver was cut off after 15 seconds, so a large photo on a slow uplink
+  failed with `http_504`; it now has 15 seconds and one more for each 32 KiB it carries (up
+  to ten minutes), and an answer that keeps coming, such as a large picture on a slow
+  downlink, is read for as long as it does. An answer that stops for 15 seconds is still
+  cut off.
 
 ## [0.8.5] - 2026-11-18
 
