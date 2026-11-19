@@ -140,7 +140,9 @@ describe("sessionpipe-gui on a --host it cannot listen on", () => {
     return spawnSync(
       process.execPath,
       [cli, "--demo", "--no-outbox", "--quiet", "--host", host, "--port", "0", "--state", path.join(tmp.dir, "s")],
-      { encoding: "utf8", timeout: 15_000, env },
+      // On a busy machine the start up to the bind, and a name that does not look up, can
+      // each take many seconds.
+      { encoding: "utf8", timeout: 90_000, env },
     );
   };
 
@@ -150,7 +152,7 @@ describe("sessionpipe-gui on a --host it cannot listen on", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/^sessionpipe-gui: --host 192\.0\.2\.1 is not an address of this machine \(/m);
     expect(r.stderr).not.toMatch(/EADDRNOTAVAIL/);
-  }, 20_000);
+  }, 120_000);
 
   it("a name that does not look up: exit 2 and a line naming --host", () => {
     const r = start("not-a-real-host.invalid");
@@ -160,5 +162,5 @@ describe("sessionpipe-gui on a --host it cannot listen on", () => {
       /^sessionpipe-gui: --host not-a-real-host\.invalid (is not a name|could not be looked up)/m,
     );
     expect(r.stderr).not.toMatch(/getaddrinfo/);
-  }, 20_000);
+  }, 120_000);
 });
