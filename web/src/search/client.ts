@@ -285,7 +285,8 @@ export function noteStatus(s: SearchIndexStatus): void {
     status.history === next.history &&
     status.updatedAt === next.updatedAt &&
     status.local === next.local &&
-    status.error === next.error
+    status.error === next.error &&
+    status.historyLeft === next.historyLeft
   )
     return;
   status = next;

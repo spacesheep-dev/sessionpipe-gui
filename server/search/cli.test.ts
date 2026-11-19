@@ -255,6 +255,36 @@ describe("sessionpipe-gui index", () => {
     expect(r.out).toContain("9 sessions · up to date");
   });
 
+  it("--status from a running GUI with history off and its index left on disk says so", async () => {
+    mkdirSync(path.join(tmp.dir, "search"), { recursive: true });
+    writeFileSync(path.join(tmp.dir, "search", "server.json"), JSON.stringify({ pid: process.ppid, port: 7999 }));
+    const status = {
+      state: "error",
+      sessions: 9,
+      messages: 1,
+      bytes: 1,
+      history: false,
+      sources: [],
+      error: "History search is off, but its index is still on disk: it could not be deleted (EPERM).",
+      historyLeft: true,
+    };
+    const fake = (async () => new Response(JSON.stringify(status))) as unknown as typeof fetch;
+    const r = await run(runIndexCli, ["--status"], { fetch: fake });
+    expect(r.out).toContain(
+      "History search is off, but its index could not be deleted (EPERM). sessionpipe-gui index --rebuild tries again",
+    );
+    expect(r.out).not.toContain("needs rebuilding");
+    // after a restart the server's sentence has no code: none is shown
+    const noCode = {
+      ...status,
+      error: "History search is off, but its index is still on disk: it could not be deleted.",
+    };
+    const r2 = await run(runIndexCli, ["--status"], {
+      fetch: (async () => new Response(JSON.stringify(noCode))) as unknown as typeof fetch,
+    });
+    expect(r2.out).toContain("its index could not be deleted. sessionpipe-gui index --rebuild tries again");
+  });
+
   it("--status reads the index; unknown options are a usage error", async () => {
     const r = await run(runIndexCli, ["--status"]);
     expect(r.code).toBe(0);
