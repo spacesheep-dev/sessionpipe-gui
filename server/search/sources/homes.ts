@@ -64,15 +64,23 @@ export function codexHome(env: SourceEnv): string {
   return h ? path.resolve(h.startsWith("~") ? path.join(env.home, h.slice(1)) : h) : path.join(env.home, ".codex");
 }
 
-/** `$GEMINI_CLI_HOME`, else `~/.gemini` (Gemini CLI and Antigravity share it). */
-export function geminiHome(env: SourceEnv): string {
+/** `$GEMINI_CLI_HOME` resolved (`~` is the home), or undefined when unset. */
+function geminiCliHome(env: SourceEnv): string | undefined {
   const h = env.env.GEMINI_CLI_HOME;
-  return h ? path.resolve(h.startsWith("~") ? path.join(env.home, h.slice(1)) : h) : path.join(env.home, ".gemini");
+  return h ? path.resolve(h.startsWith("~") ? path.join(env.home, h.slice(1)) : h) : undefined;
 }
 
-/** Antigravity's data dirs: `antigravity`, `antigravity-cli`, `antigravity-ide` under ~/.gemini. */
+/** Gemini CLI's `.gemini` folder: `$GEMINI_CLI_HOME/.gemini`, else `~/.gemini`. Gemini CLI
+ *  reads GEMINI_CLI_HOME as the home that holds `.gemini`, not as `.gemini` itself. */
+export function geminiHome(env: SourceEnv): string {
+  return path.join(geminiCliHome(env) ?? env.home, ".gemini");
+}
+
+/** Antigravity's data dirs: `antigravity`, `antigravity-cli`, `antigravity-ide` under ~/.gemini.
+ *  With GEMINI_CLI_HOME set they are looked for directly under it, as before: whether
+ *  Antigravity reads that variable at all is unverified, so its folders stay where they were. */
 export function antigravityDirs(env: SourceEnv): string[] {
-  const g = geminiHome(env);
+  const g = geminiCliHome(env) ?? path.join(env.home, ".gemini");
   return ["antigravity", "antigravity-cli", "antigravity-ide"].map((n) => path.join(g, n)).filter(isDir);
 }
 
