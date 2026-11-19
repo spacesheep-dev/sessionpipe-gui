@@ -62,7 +62,7 @@ Testing a global install from a local checkout: `npm i -g git+file://…` symlin
 temporary clone instead of installing (an npm quirk for local git URLs), so pack first:
 `npm pack git+file://$PWD && npm i -g --prefix /tmp/x ./sessionpipe-gui-*.tgz`.
 
-On an old Node the first line must read `sessionpipe-gui needs Node 20 or newer (you have v18.x)`.
+On an old Node the first line must read `sessionpipe-gui needs Node 22.12 or later, or Node 20 from 20.19 on (you have v18.x)`.
 
 ## Publishing to npm, when the time comes
 

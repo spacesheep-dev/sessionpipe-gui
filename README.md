@@ -30,7 +30,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <a href="package.json"><img alt="Node 20 or newer" src="https://img.shields.io/badge/node-%E2%89%A5%2020-brightgreen"></a>
+  <a href="package.json"><img alt="Node 22.12 or later, or Node 20 from 20.19 on" src="https://img.shields.io/badge/node-22.12%2B%20%7C%2020.19%2B-brightgreen"></a>
   <a href="DCO"><img alt="DCO" src="https://img.shields.io/badge/contributions-DCO-informational"></a>
 </p>
 
@@ -132,7 +132,7 @@ same repo or machine.
 
 ## Install
 
-You need Node 20 or newer, and [sessionpipe](https://github.com/spacesheep-dev/sessionpipe)
+You need Node 22.12 or later, or Node 20 from 20.19 on, and [sessionpipe](https://github.com/spacesheep-dev/sessionpipe)
 on each machine whose live sessions you want to see (`npx sessionpipe install`; the first-run
 page says so if it is missing). Search of this machine's own history works without it.
 
@@ -331,7 +331,7 @@ device.
 The same UI in a small [Tauri 2](https://tauri.app) app that uses the system's own web view
 (the AppImage carries WebKitGTK with it, which is why it is larger). It connects to the
 receiver on this machine; on first run it can start one for you as a service, which needs
-Node 20 or newer (`sessionpipe-gui service install` does the same from a terminal: a
+Node 22.12 or later, or Node 20 from 20.19 on (`sessionpipe-gui service install` does the same from a terminal: a
 LaunchAgent on macOS, a systemd user unit on Linux, a scheduled task at logon on Windows; a
 newer version upgrades the service it finds in place). It
 keeps a menu bar item and a Dock badge that count what needs you, notifies you, launches at

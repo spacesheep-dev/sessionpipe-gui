@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
+import { NODE_FLOOR, nodeSupported } from "../scripts/node-floor.mjs";
 import { DEFAULT_PORT, type ExtraEntry, ROUTES, UI_KEY_PARAM } from "../shared/api.js";
 import { type App, createApp } from "./app.js";
 import {
@@ -34,9 +35,8 @@ import { ensureCerts, localHostname, readCerts, resetCerts, TlsError } from "./t
 
 // Before anything else: an old Node fails somewhere deep with a stack trace; say it plainly.
 // (Imports are hoisted above this line, but the two external ones load on any Node.)
-const NODE_MAJOR = Number(process.versions.node.split(".")[0]);
-if (NODE_MAJOR < 20) {
-  process.stderr.write(`sessionpipe-gui needs Node 20 or newer (you have v${process.versions.node})\n`);
+if (!nodeSupported(process.versions.node)) {
+  process.stderr.write(`sessionpipe-gui needs ${NODE_FLOOR} (you have v${process.versions.node})\n`);
   process.exit(1);
 }
 

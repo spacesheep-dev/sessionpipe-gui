@@ -25,7 +25,7 @@ export const WORDS = {
     steps: [
       {
         label: "Install sessionpipe on your computer",
-        caption: "Download it from sessionpipe.org/gui, or with Node 20 in a terminal:",
+        caption: "Download it from sessionpipe.org/gui, or with Node 22.12 or later in a terminal:",
       },
       { label: "Open sessionpipe there and choose Connect", caption: "Connect shows a code made for this phone." },
       { label: "Scan it with this phone", caption: "The board opens here." },

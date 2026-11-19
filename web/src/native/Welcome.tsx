@@ -91,7 +91,7 @@ export function Welcome({ info }: { info: ShellInfo }) {
                     : start.kind === "failed"
                       ? `It didn't start: ${start.message}`
                       : start.kind === "needsNode"
-                        ? "sessionpipe needs Node 20 or later. Install it from nodejs.org, then run:"
+                        ? "sessionpipe needs Node 22.12 or later, or Node 20 from 20.19 on. Install it from nodejs.org, then run:"
                         : `Runs sessionpipe in the background, so this ${here}'s sessions show up here.`}
                 </span>
               </span>

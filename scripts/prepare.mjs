@@ -13,11 +13,20 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { NODE_FLOOR, nodeSupported } from "./node-floor.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 if (process.env.SPGUI_SKIP_PREPARE === "1") process.exit(0);
 if (existsSync(path.join(root, "dist", "cli.js")) && existsSync(path.join(root, "dist", "web", "index.html"))) {
   process.exit(0);
+}
+// The build needs Vite's Node: an older one would install the tools and then fail in Vite
+// with a stack trace, so it stops here with the one thing to do.
+if (!nodeSupported(process.versions.node)) {
+  console.error(
+    `sessionpipe-gui: building it needs ${NODE_FLOOR} (you have v${process.versions.node}); install a newer Node from nodejs.org and run the command again.`,
+  );
+  process.exit(1);
 }
 // Each tool's package.json on disk, not require.resolve("<tool>/package.json"): a package
 // whose "exports" leave package.json out (@vitejs/plugin-react) never resolves that way,

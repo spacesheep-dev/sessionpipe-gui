@@ -21,7 +21,7 @@ client against a receiver you can see into.
 
 | Topic | Decision | Why |
 |---|---|---|
-| Runtime | Node ≥ 20, ESM, TypeScript, `node:http` | Same floor as sessionpipe; nothing to install beyond `npx` |
+| Runtime | Node 22.12 or later, or Node 20 from 20.19 on (`scripts/node-floor.mjs`), ESM, TypeScript, `node:http` | Vite's floor, since `npx github:` builds the web app on the user's Node; nothing to install beyond `npx`. Working on the code needs 22.12 or later (Vitest) |
 | Deps | `sessionpipe-core` (types, `filterEvent`, `Outbox`, control verifier), `qrcode`. Nothing else at runtime | Keep it as light as the client |
 | Web | React 19 + Vite, hand-written CSS with design tokens, no component library | Distinctive, fast, small |
 | Live updates | SSE `GET /api/ui/stream`: a snapshot first, then deltas | Works through any proxy, reconnects by itself |

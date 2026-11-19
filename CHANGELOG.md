@@ -20,6 +20,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   `defaultProps` are ignored, and an element made by another copy of React is not drawn.
   A view that bundles its own React, and the bundled Canvas and Office, draw as before.
   [docs/theme-authoring.md](docs/theme-authoring.md) lists what to use instead.
+- **sessionpipe-gui needs Node 22.12 or later, or Node 20 from 20.19 on** (it was any Node
+  20): what the web app's build (Vite 8) needs, and `npx github:spacesheep-dev/sessionpipe-gui`
+  builds it on your Node. An older Node is told so in one line, before anything is installed.
+  Working on the code needs 22.12 or later.
 
 ### Fixed
 
