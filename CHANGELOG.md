@@ -59,6 +59,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
   code when there is one, and points at `index --rebuild`. The status carries a new
   `historyLeft` field for it.
+- **Search finds Gemini CLI history when `GEMINI_CLI_HOME` is set.** Gemini CLI keeps
+  its `.gemini` folder inside that path, but search took `$GEMINI_CLI_HOME` to be the
+  `.gemini` folder itself, so it found none of those sessions. It now reads
+  `$GEMINI_CLI_HOME/.gemini`; with the variable unset nothing changes (`~/.gemini`).
 
 ## [0.8.5] - 2026-11-18
 
