@@ -166,6 +166,8 @@ describe("harnessMark", () => {
   it("names the ACP registry's agents once lib/acp.ts is loaded, with a monogram from the name", async () => {
     const { harnessMark } = await import("./format");
     expect(harnessMark("qwen-code")).toMatchObject({ glyph: "Qc", label: "qwen-code" });
+    // A hook adapter since sessionpipe 0.16: named on the board too, in the colour it had.
+    expect(harnessMark("grok-build")).toMatchObject({ glyph: "Gb", label: "Grok Build", hue: 168 });
     await import("./acp");
     expect(harnessMark("qwen-code")).toMatchObject({ glyph: "Qc", label: "Qwen Code" });
     expect(harnessMark("goose")).toMatchObject({ glyph: "Go", label: "goose" });

@@ -1,0 +1,32 @@
+{
+  "name": "start-fx-harness",
+  "description": "A new session of fx, an ACP agent the registry doesn't list (ADAPTERS.md names its launch line): its harness name verifies like any other row's.",
+  "input": {
+    "signed": {
+      "cmd": "{\"v\":1,\"t\":\"sessionpipe.control\",\"machine\":\"m_testmachine0000000001\",\"kind\":\"start\",\"session\":\"fx:0199c\",\"text\":\"Add the Oct 8 row\",\"nonce\":\"OhIbCLRkADESK5bJdBPxrQ\",\"iat\":1790800000000,\"cwd\":\"/tmp\"}",
+      "csig": "W51OXf7brL7JyQbmJr2hiQzlltHYDpPyZL-Ae28scFznUxdYCy7DPoZvaBSqSXU2jL0N9Mhz4Mg-Qq7ajIqQ6g",
+      "grant": {
+        "cred": "4hBdecObrgxoeW_-B-BEybzDSU0KIZ3I",
+        "ad": "tq21o0mX3Y6Rfy9222k5JGexApF1SebHaw_vL_v20iMFAAAABw",
+        "cd": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiYXczUmR0al9PLS1wazJWUUlFTkNoOXhYaXBtalZxemphck1DVUhzX3ZLMCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVjZWl2ZXIuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEUCIQD_rpU-CKkkWzqU5ThhueFNvADu111oKdlkM9_Bg6sH2QIgbc1tEhiBezUd2zVZsHYSr8ikc8JmrfjKfLDGM4Z6_6U",
+        "str": "{\"v\":1,\"t\":\"sessionpipe.grant\",\"pub\":\"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE0QhS_NfJ2tja6XsvnDe6RC2V2WKCwjhBnFIKMaJcfYvOaRabjLgem7AncICJYBsaljtgSu4EIQdRRAs9RqciTw\",\"iat\":1790799940000,\"exp\":1790843140000,\"rp\":\"receiver.example\"}"
+      }
+    },
+    "machine": "m_testmachine0000000001",
+    "rp_id": "receiver.example",
+    "trusted": [
+      {
+        "id": "4hBdecObrgxoeW_-B-BEybzDSU0KIZ3I",
+        "alg": -7,
+        "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVdw4yQXUaVhtcnfFSsv0mQw-wpeVbEz0gJuKiinKwYNs1lClpo3fehvi7D7fJmt4lJ2Mh4HCiPu0iJyylaDYbw"
+      }
+    ],
+    "now": 1790800060000
+  },
+  "expect": {
+    "ok": true,
+    "via": "grant",
+    "kind": "start"
+  }
+}

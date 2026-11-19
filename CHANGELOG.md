@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **sessionpipe 0.17.0.** The receiver runs sessionpipe-core 0.17.0 (it was 0.13.6), and its
+  conformance fixtures are that version's (170 control vectors, 33 delivery scenarios). A
+  session of Grok Build, whose hooks sessionpipe reads from 0.16, is named "Grok Build" on
+  the board and in search's agent chips, where it read `grok-build`; fx, which a 0.16
+  machine can start and message, is listed under its own name. Events and commands are
+  accepted and refused as before.
+
 ### Fixed
 
 - **Turn on (the secure address) finds openssl on Windows.** The receiver looked for

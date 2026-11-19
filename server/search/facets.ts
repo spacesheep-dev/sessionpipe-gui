@@ -24,6 +24,7 @@ export const HARNESS_LABELS: Readonly<Record<string, string>> = {
   droid: "Droid",
   kiro: "Kiro",
   opencode: "OpenCode",
+  "grok-build": "Grok Build",
 };
 
 /** At most this many values per facet (the completion shows 8; the chip menus scroll). */
