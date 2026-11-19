@@ -655,3 +655,68 @@ test.describe("board: one needs-you number", () => {
     }
   });
 });
+
+// A paired machine that stopped polling, with a turn running on it: the board's quiet line.
+test.describe("board: the offline line", () => {
+  test("Machines follows the sentence, and × keeps the trailing edge", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(
+      key,
+      { name: `gone-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] },
+      { offline: true },
+    );
+    try {
+      const id = randomUUID();
+      let seq = 0;
+      const ev = (type: string, data: Record<string, unknown>, hook: string) => ({
+        protocol: 1,
+        id: ulid(),
+        type,
+        time: new Date().toISOString(),
+        tier: 1,
+        harness: { name: "claude-code", version: "2.1.296", event: hook },
+        session: { id, seq: seq++, machine: d.name, cwd: "~/code/e2e", title: "Run the suite", title_source: "custom" },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data,
+      });
+      const r = await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${await sinkToken()}`,
+          "sessionpipe-protocol": "1",
+        },
+        body: JSON.stringify({
+          events: [
+            ev("session.started", { source: "startup" }, "SessionStart"),
+            ev("turn.started", { turn_id: "p0", prompt_chars: 20, submitted_by: "user" }, "UserPromptSubmit"),
+          ],
+        }),
+      });
+      expect(r.status).toBe(202);
+      await page.goto(`${CONTROL_BASE}/`);
+      await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+      const line = page.locator(".offline-line").filter({ hasText: d.name });
+      await expect(line).toBeVisible();
+      const box = async (sel: string) => (await line.locator(sel).boundingBox())!;
+      // Where the sentence's words end, not its button's box.
+      const words = await line.locator(".offline-line-text").evaluate((el) => {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        const b = r.getBoundingClientRect();
+        return { x: b.x, width: b.width };
+      });
+      const open = await box(".offline-line-open");
+      const x = await box(".offline-line-x");
+      const all = (await line.boundingBox())!;
+      // The next step beside its sentence, × at the end of the line.
+      expect(open.x - (words.x + words.width)).toBeLessThanOrEqual(24);
+      expect(open.x).toBeGreaterThanOrEqual(words.x + words.width);
+      expect(all.x + all.width - (x.x + x.width)).toBeLessThanOrEqual(24);
+      expect(x.x - (open.x + open.width)).toBeGreaterThan(200);
+    } finally {
+      await d.stop();
+    }
+  });
+});

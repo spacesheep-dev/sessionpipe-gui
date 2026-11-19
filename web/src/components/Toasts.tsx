@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // The toast stack, as the OS's notification banners: top-right on a desktop (left of an
-// open panel), a compact banner under the status bar on a phone. One banner per moment
+// open panel), prompts nearest the corner, newest first, and passing cards (an error,
+// Delivered, "Hidden · Undo") under them; a compact banner under the status bar on a
+// phone. On a desktop the stack holds still while it is in use (lib/toasts.ts
+// holdToasts): the pointer over it, keyboard focus in it, the window hidden. Nothing
+// leaves by itself then, a new card waits, and a card that goes keeps its room until the
+// hold ends, so no Allow moves under the hand. Focus that was on a card that goes moves to
+// the card now in its place, else back where ⌘⇧T took it from. One banner per moment
 // the stream brings after the first snapshot, about a session that is not already on
 // screen: an attention opened (Allow / Deny right on it when a control answer can reach
 // it, through control/useSend.ts), a turn that ended with an error, a control reply that
@@ -17,7 +23,15 @@
 // macOS sounds for is a silent banner here (lib/systemSound.ts).
 import type { ControlActivity, SessionKey, SessionSummary, StoredEvent } from "@shared/api";
 import { splitKey } from "@shared/api";
-import { useEffect, useRef, useState } from "react";
+import {
+  type FocusEvent,
+  type PointerEvent,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { type OpenAttention, openAttentions, useAppState, useStore } from "../data/hooks";
 import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { ATTENTION_LABEL, attentionMessage, isQuestion, oneLine, sessionTitle, toolLabel } from "../lib/format";
@@ -32,13 +46,16 @@ import { followSystemSound, systemSound } from "../lib/systemSound";
 import {
   dismissForSession,
   dismissToast,
+  holdToasts,
   isOwnSend,
   pruneAttentionToasts,
   pushToast,
+  returnFromToasts,
   runUndo,
   type Toast,
   undoLatest,
   useToasts,
+  useToastsHeld,
 } from "../lib/toasts";
 import { answerable } from "./ControlStrip";
 import type { ToastCard as ToastCardType } from "./ToastCard";
@@ -208,32 +225,135 @@ function useToastEffects(): void {
 }
 
 /** The banners on screen: the live ones, and for a moment the ones that just left, so
- *  each plays its exit (pop-out, then the stack closes over its height) where it stood. */
-function useLeaving(list: readonly Toast[]): { toast: Toast; closing: boolean }[] {
+ *  each plays its exit (pop-out, then the stack closes over its height) where it stood.
+ *  While `held` one that left keeps its room (its slot `data-held`) and closes over it
+ *  once the hold ends. */
+function useLeaving(list: readonly Toast[], held = false): { toast: Toast; closing: boolean }[] {
   const shown = useRef<{ toast: Toast; closing: boolean; at: number }[]>([]);
+  const wasHeld = useRef(held);
   const [, bump] = useState(0);
   const ids = new Set(list.map((t) => t.id));
   const byId = new Map(list.map((t) => [t.id, t]));
   const now = Date.now();
+  // Let go: the rooms kept start closing now.
+  const released = wasHeld.current && !held;
+  wasHeld.current = held;
   const next = shown.current
     .map((e) =>
       ids.has(e.toast.id)
         ? { toast: byId.get(e.toast.id)!, closing: false, at: 0 }
         : e.closing
-          ? e
+          ? released
+            ? { ...e, at: now }
+            : e
           : { ...e, closing: true, at: now },
     )
-    .filter((e) => !e.closing || (!reducedMotion() && now - e.at < LEAVE_MS));
+    .filter((e) => !e.closing || held || (!reducedMotion() && now - e.at < LEAVE_MS));
   const had = new Set(next.map((e) => e.toast.id));
   for (const t of list) if (!had.has(t.id)) next.push({ toast: t, closing: false, at: 0 });
   shown.current = next;
-  const closing = next.some((e) => e.closing);
+  const closing = !held && next.some((e) => e.closing);
   useEffect(() => {
     if (!closing) return;
     const t = window.setTimeout(() => bump((n) => n + 1), LEAVE_MS);
     return () => window.clearTimeout(t);
   });
   return next;
+}
+
+/** How long after the pointer leaves the stack it lets go: the gap between two cards is
+ *  not a leaving. */
+const POINTER_RELEASE_MS = 300;
+
+/** The desktop stack's hold (lib/toasts.ts holdToasts) and its focus: held while a mouse
+ *  is over it, keyboard focus is in it, or the window is hidden. Focus on a card that goes
+ *  moves to the card now in its place, else back where it came from (returnFromToasts).
+ *  Only while focus is still the stack's or nobody's: what took it (Open beside) keeps it. */
+function useStackHold(stack: RefObject<HTMLElement | null>, on: boolean, shown: { toast: Toast; closing: boolean }[]) {
+  const release = useRef<number | undefined>(undefined);
+  /** The card keyboard focus is on. */
+  const focused = useRef<string | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    const vis = () => holdToasts("hidden", document.visibilityState === "hidden");
+    vis();
+    document.addEventListener("visibilitychange", vis);
+    return () => {
+      document.removeEventListener("visibilitychange", vis);
+      window.clearTimeout(release.current);
+      holdToasts("hidden", false);
+      holdToasts("pointer", false);
+      holdToasts("focus", false);
+    };
+  }, [on]);
+  const live = shown.length > 0;
+  useEffect(() => {
+    if (!live) return;
+    // A stack taken away under the pointer or focus fires no leave: it lets go here.
+    return () => {
+      window.clearTimeout(release.current);
+      holdToasts("pointer", false);
+      holdToasts("focus", false);
+    };
+  }, [live]);
+  useLayoutEffect(() => {
+    // Read before a card goes inert: that can blur its button at once.
+    const id = focused.current;
+    const el = stack.current;
+    // A card on its way out can neither keep focus nor take it. The card, not its slot: a
+    // held slot still holds the pointer (an inert one is not under it).
+    if (el)
+      for (const slot of el.querySelectorAll<HTMLElement>(".toast-slot")) {
+        const card = slot.firstElementChild;
+        if (card instanceof HTMLElement) card.inert = slot.hasAttribute("data-closing");
+      }
+    if (!id || shown.some((e) => e.toast.id === id && !e.closing)) return;
+    focused.current = null;
+    const a = document.activeElement;
+    if (a && a !== document.body && !el?.contains(a)) {
+      holdToasts("focus", false);
+      return;
+    }
+    // The card now in its place: the next one down the list, else the one before it.
+    const slots = el ? [...el.querySelectorAll<HTMLElement>(".toast-slot")] : [];
+    const at = slots.findIndex((s) => s.dataset.toastId === id);
+    const alive = (s: HTMLElement) => !s.hasAttribute("data-closing");
+    const after = at < 0 ? slots.filter(alive) : slots.slice(at + 1).filter(alive);
+    const before = at < 0 ? [] : slots.slice(0, at).filter(alive).reverse();
+    const to = [...after, ...before]
+      .map((s) => s.querySelector<HTMLElement>("button:not([disabled])"))
+      .find((b): b is HTMLElement => !!b);
+    if (to) to.focus({ preventScroll: true });
+    else returnFromToasts();
+  });
+  if (!on) return {};
+  return {
+    onPointerEnter: (e: PointerEvent) => {
+      if (e.pointerType !== "mouse") return;
+      window.clearTimeout(release.current);
+      holdToasts("pointer", true);
+    },
+    onPointerLeave: (e: PointerEvent) => {
+      if (e.pointerType !== "mouse") return;
+      window.clearTimeout(release.current);
+      release.current = window.setTimeout(() => holdToasts("pointer", false), POINTER_RELEASE_MS);
+    },
+    onFocus: (e: FocusEvent) => {
+      // The keyboard's focus only: a click that focuses a button (Chromium) is the pointer's.
+      const keys = (e.target as HTMLElement).matches?.(":focus-visible") ?? false;
+      focused.current = keys
+        ? ((e.target as HTMLElement).closest<HTMLElement>("[data-toast-id]")?.dataset.toastId ?? null)
+        : null;
+      if (keys) holdToasts("focus", true);
+    },
+    onBlur: (e: FocusEvent) => {
+      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+      // A card going takes its focus with it: the layout effect above says where it goes.
+      if (!e.relatedTarget && (e.target as HTMLElement).closest("[data-closing]")) return;
+      focused.current = null;
+      holdToasts("focus", false);
+    },
+  };
 }
 /** The exit (--dur-exit) and the collapse after it. */
 const LEAVE_MS = tokenMs("--dur-exit", 140) + 140;
@@ -289,19 +409,26 @@ export function Toasts() {
   });
   // ⌘Z: the newest undo on screen (a text field keeps its own).
   useShortcut("undo", () => (undoLatest() ? undefined : false));
-  const leaving = useLeaving(visible);
-  // The phone's undo sits at the bottom, after the banner.
+  const held = useToastsHeld() && !phone;
+  const leaving = useLeaving(visible, held);
+  // The phone's undo sits at the bottom, after the banner. On a desktop the prompts come
+  // last, which the stack (column-reverse) draws nearest the corner, the passing cards
+  // under them: a card that passes never moves a prompt's Allow.
   const shown = phone
     ? [...leaving.filter((e) => e.toast.kind !== "undo"), ...leaving.filter((e) => e.toast.kind === "undo")]
-    : leaving;
+    : [...leaving.filter((e) => !e.toast.sticky), ...leaving.filter((e) => e.toast.sticky)];
+  const stackRef = useRef<HTMLElement>(null);
+  const hold = useStackHold(stackRef, !phone, shown);
   if (shown.length === 0) return null;
   return (
-    <section className={`toasts${phone ? " toasts--phone" : ""}`} aria-label="Notifications">
+    <section ref={stackRef} className={`toasts${phone ? " toasts--phone" : ""}`} aria-label="Notifications" {...hold}>
       {shown.map(({ toast: t, closing }) => (
         <div
           key={t.id}
           className={`toast-slot${t.kind === "undo" ? " toast-slot--undo" : ""}`}
+          data-toast-id={t.id}
           data-closing={closing ? "" : undefined}
+          data-held={closing && held ? "" : undefined}
         >
           {t.kind === "undo" ? (
             <UndoCard toast={t} />

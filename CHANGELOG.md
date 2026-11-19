@@ -169,6 +169,23 @@ answers: a browser on its own pages, a proxy's visitor by the proxy's own word, 
 pairing link that carries the board's key only for a pairing the sink token started.
 
 ### Changed
+- **On a computer, the notifications hold still under your hand.** Prompts sit nearest the
+  corner, newest first, and a failed turn, Delivered and "Hidden · Undo" sit under them,
+  so a passing card never pushes a prompt's Allow down. While the pointer is on the
+  stack, focus is in it or the window is hidden, nothing leaves by itself and a new card
+  waits (its sound plays as it comes); a card you dismiss keeps its room until the
+  pointer leaves, and each card then goes on with the time it had left, at least 2 s.
+  On a phone a finger on a banner holds it the same way.
+- **Allow and Deny on a notification stand only beside a command shown whole.** "Bash
+  wants to run:" has the command on its own line under it; one too long to show whole is
+  two lines and "…" with one Open, which opens the session beside the page, and its menu
+  has no Allow or Deny.
+- **⌘⇧T and back.** With focus in the notifications, × moves it to the card now in its
+  place, and from the last one back where ⌘⇧T was pressed; Esc goes back there too and
+  closes nothing (it used to close the panel beside the page), and Enter, a or d no
+  longer reach past the cards to the row under the cursor.
+- **The offline line's Machines follows its sentence** ("old-mbp is offline. Machines"),
+  where it sat at the far right under the notifications; × stays at the end of the line.
 
 - **A picture sent from a session's message box reaches the agent as a file in the
   session's own folder.** Until now the message named it: by a path in the GUI's own

@@ -642,9 +642,10 @@
   line-height: var(--lh-tight);
   animation: fade-in var(--dur) var(--ease-out) both;
 }
-/* The sentence opens Machines on a phone only; a desktop has the button and the menu. */
+/* The sentence opens Machines on a phone only; a desktop has the button and the menu.
+   On a desktop Machines follows the sentence, × at the trailing edge. */
 .offline-line-text {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   font-size: inherit;
@@ -657,11 +658,15 @@
   color: var(--fg-2);
   font-weight: 500;
 }
+.offline-line-x {
+  margin-left: auto;
+}
 @media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .offline-line {
     padding-right: calc(var(--gutter) - 12px);
   }
   .offline-line-text {
+    flex: 1;
     display: -webkit-box;
     padding: 6px 0;
     white-space: normal;

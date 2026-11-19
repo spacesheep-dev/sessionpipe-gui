@@ -356,7 +356,7 @@ export const ACTIONS: readonly Action[] = [
     scope: "global",
     keys: ["esc"],
     inInputs: true,
-    hint: "leaves a text field first; then closes a popover, the panel or a confirm; on a list clears its filter, then its cursor; then goes back",
+    hint: "leaves a text field or the notifications first; then closes a popover, the panel or a confirm; on a list clears its filter, then its cursor; then goes back",
   },
   { id: "appearance.toggle", label: "Dark / light", group: "Everywhere", scope: "global", keys: ["t"] },
   { id: "colorTheme.next", label: "Next skin", group: "Everywhere", scope: "global", keys: ["shift+t"] },
@@ -1159,7 +1159,11 @@ function onKeyDown(e: KeyboardEvent): void {
   const typing = isTyping(e.target);
   const arrows = claimsArrows(e.target, chord.key);
   const inView = viewOwns(e, chord);
-  const allowed = (a: Action) => (a.inInputs || !typing) && !(arrows && !a.inInputs);
+  // In the notifications their buttons have Enter and Space: no list's, page's or panel's
+  // key reaches past them to the row under the cursor, only the global ones.
+  const inToasts = !!(e.target as Element | null)?.closest?.(".toasts");
+  const allowed = (a: Action) =>
+    (a.inInputs || !typing) && !(arrows && !a.inInputs) && (!inToasts || a.scope === "global");
   // On a view's page only its own actions, the host's two-key sequences and Esc are in play
   // (mod chords never count as the view's: `viewOwns` is false for them).
   const all = candidates().filter(

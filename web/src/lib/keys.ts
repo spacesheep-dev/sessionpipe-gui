@@ -17,6 +17,7 @@ import { installDispatcher, isTyping, registerHandler, useShortcut } from "./sho
 import { isPlain, useSkins } from "./skins";
 import { openSplit } from "./split";
 import { setSkin, setTheme, useSettings } from "./theme";
+import { rememberToastReturn, returnFromToasts } from "./toasts";
 
 export { isTyping };
 
@@ -91,6 +92,11 @@ export function useGlobalKeys(onBack: () => void = () => back("/")) {
       (e.target as HTMLElement).blur();
       return;
     }
+    // In the notifications, Esc leaves them for where ⌘⇧T came from; it closes nothing.
+    if ((e.target as HTMLElement | null)?.closest?.(".toasts")) {
+      returnFromToasts();
+      return;
+    }
     // Only one that is drawn: the panel keeps its Close in the DOM while it is shut.
     const open = [...document.querySelectorAll<HTMLElement>("[data-dismiss]")].find(drawn);
     if (open) {
@@ -125,8 +131,14 @@ export function useGlobalKeys(onBack: () => void = () => back("/")) {
   useShortcut("toasts.focus", () => {
     const stack = document.querySelector<HTMLElement>('.toasts, [role="region"][aria-label="Notifications"]');
     if (!stack) return false;
-    const target = stack.querySelector<HTMLElement>("button:not([disabled])") ?? stack;
+    // Not a card on its way out (inert): it cannot take focus.
+    const target =
+      stack.querySelector<HTMLElement>(".toast-slot:not([data-closing]) button:not([disabled])") ??
+      stack.querySelector<HTMLElement>("button:not([disabled])") ??
+      stack;
     if (target === stack && !stack.hasAttribute("tabindex")) stack.tabIndex = -1;
+    // Where focus goes back to when the cards go, or on Esc.
+    if (!stack.contains(document.activeElement)) rememberToastReturn(document.activeElement);
     target.focus();
   });
 }

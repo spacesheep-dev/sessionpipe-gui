@@ -9,7 +9,7 @@ import { copyItem } from "../lib/menus";
 import { tokenMs } from "../lib/motion";
 import { navigate } from "../lib/router";
 import { openSplit } from "../lib/split";
-import { dismissToast, type Toast } from "../lib/toasts";
+import { dismissToast, holdToasts, type Toast } from "../lib/toasts";
 import { useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
 import "../styles/banner.css";
@@ -34,6 +34,28 @@ export function Banner({ toast: t, closing }: { toast: Toast; closing: boolean }
   };
   const drag = useRef<{ y: number; t: number; dy: number; v: number; moved: boolean } | null>(null);
   const held = useRef(false);
+  // A finger on it holds the stack's timers too (lib/toasts.ts), and lets go when it lifts,
+  // wherever it lifts, or when the banner goes from under it.
+  const hold = (on: boolean) => {
+    if (held.current === on) return;
+    held.current = on;
+    holdToasts("finger", on);
+    if (on) {
+      const lift = () => {
+        window.removeEventListener("pointerup", lift, true);
+        window.removeEventListener("pointercancel", lift, true);
+        hold(false);
+      };
+      window.addEventListener("pointerup", lift, true);
+      window.addEventListener("pointercancel", lift, true);
+    }
+  };
+  useEffect(
+    () => () => {
+      if (held.current) holdToasts("finger", false);
+    },
+    [],
+  );
   // It leaves by itself; never while a finger is on it.
   useEffect(() => {
     if (closing) return;
@@ -64,7 +86,7 @@ export function Banner({ toast: t, closing }: { toast: Toast; closing: boolean }
   };
   const down = (e: ReactPointerEvent) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    held.current = true;
+    hold(true);
     drag.current = { y: e.clientY, t: e.timeStamp, dy: 0, v: 0, moved: false };
   };
   const move = (e: ReactPointerEvent) => {
@@ -84,7 +106,7 @@ export function Banner({ toast: t, closing }: { toast: Toast; closing: boolean }
     place(dy, false);
   };
   const up = () => {
-    held.current = false;
+    hold(false);
     const d = drag.current;
     if (!d?.moved) return;
     if (d.dy < -BANNER_FLICK_PX || d.v < -FLICK) {
