@@ -35,6 +35,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 - A session's "missing events" flag waits 30 s from when each hole opened. When an older
   hole filled while a newer one was still open, the newer one kept the older one's time,
   so it was flagged at once, with a "since" from before it opened.
+- **An event the store can't write is read from the outbox again, not lost.** When the
+  store failed to take a batch from this machine's outbox (a full disk, a store file the
+  GUI may not write), the reader had already moved past it, so those events never reached
+  the board, even once there was room again; the same failure during the first read at
+  start left the outbox off until a restart. The batch is now read again on the next tick,
+  said once, and the other sessions carry on meanwhile.
 
 ## [0.8.5] - 2026-11-18
 
