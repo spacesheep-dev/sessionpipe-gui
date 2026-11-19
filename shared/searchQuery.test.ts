@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
+import type { SearchFilterKey } from "./api.js";
 import {
   freeText,
   isBrowse,
@@ -140,7 +141,7 @@ describe("searchQueryNote", () => {
       "“since:2026-2-1” isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01",
     );
     expect(searchQueryNote({ unknown: ["foo", "since"], bad: [{ key: "since", value: "2026-2-1" }] })).toBe(
-      "“since:2026-2-1” isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01 " +
+      "“since:2026-2-1” isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01. " +
         "“foo:” isn't a filter, so it was searched as text. Filters: agent machine repo label since until in source",
     );
     expect(searchQueryNote({ unknown: ["until"], bad: [{ key: "until", value: "3days" }] })).toMatch(
@@ -163,5 +164,23 @@ describe("searchQueryNote", () => {
     expect(searchQueryNote({ unknown: ["label"], bad: [{ key: "label", value: "x" }] })).toBe(
       "“label:x” didn't read, so it was left out",
     );
+  });
+
+  it("puts a full stop between the two notes, never a doubled one", () => {
+    const foo =
+      "“foo:” isn't a filter, so it was searched as text. Filters: agent machine repo label since until in source";
+    const both = (key: SearchFilterKey, value: string) =>
+      searchQueryNote({ unknown: ["foo", key], bad: [{ key, value }] });
+    expect(both("in", "everything")).toBe(
+      `“in:everything” isn't a field, so it was left out. in: prompt reply tool title. ${foo}`,
+    );
+    expect(both("source", "mars")).toBe(
+      `“source:mars” isn't an index, so it was left out. source: history sessionpipe. ${foo}`,
+    );
+    expect(both("until", "3days")).toBe(
+      `“until:3days” isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01. ${foo}`,
+    );
+    expect(both("label", "x")).toBe(`“label:x” didn't read, so it was left out. ${foo}`);
+    for (const key of ["in", "source", "since", "until", "label"] as const) expect(both(key, "x")).not.toContain("..");
   });
 });
