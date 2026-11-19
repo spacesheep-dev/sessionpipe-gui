@@ -9,7 +9,7 @@
 // launch lands on the page Settings › General › Open on names with the tabs put back.
 import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { SETTINGS_KEY } from "../../playwright.config.js";
-import { EVENTS, holdBoard, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
+import { EVENTS, holdBoard, INFO, openBoard, openPage, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
@@ -171,6 +171,25 @@ const simpleMode = (page: Page) =>
 test.describe("split panel", () => {
   test.describe("desktop", () => {
     test.skip(({ isMobile }) => !!isMobile, "desktop project only");
+
+    test("a title is plain words on its row, beside and on its page: no Markdown ticks", async ({ page, request }) => {
+      const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+      const b = tier1Batch({ title: "Which docs still say the old `--sink` flag? **Fix** them" });
+      const res = await request.post(EVENTS, {
+        headers: { authorization: `Bearer ${sinkToken}` },
+        data: { events: b.events },
+      });
+      expect(res.status()).toBe(202);
+      const words = "Which docs still say the old --sink flag? Fix them";
+      const href = sessionUrl(b.harness, b.sessionId);
+      await openBoard(page);
+      const link = page.locator(`a.card-link[href="${href}"]`);
+      await expect(link.locator(".card-title")).toHaveText(words);
+      await clickOn(link, ["Shift"]);
+      await expect(panel(page).locator(".panel-title")).toHaveText(words);
+      await openPage(page, href);
+      await expect(page.locator(".sess-title-text")).toHaveText(words);
+    });
 
     test("steps aside on pages that list no sessions, and comes back on the board", async ({ page }) => {
       await openBeside(page);

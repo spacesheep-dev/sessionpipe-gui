@@ -13,7 +13,7 @@ import { useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useStore } from "../data/hooks";
 import { wideLayout } from "../lib/device";
 import { focusTab, tablistKey } from "../lib/focus";
-import { cleanTitle, repoShort } from "../lib/format";
+import { cleanTitle, plainTitle, repoShort } from "../lib/format";
 import { copyItem, openOutside } from "../lib/menus";
 import { navigate, sessionPath } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
@@ -228,6 +228,9 @@ function FilesView({ range, setRange }: { range: Range; setRange: (r: Range) => 
 /** The sessions a path row names before "+n" (the row's menu has them all). */
 const TOUCHED = 2;
 
+/** A session's title as every other page shows it: plain words, a cut marked once. */
+const titleOf = (t: string) => plainTitle(cleanTitle(t));
+
 function PathRow({ p, repo, now }: { p: FilesPage["repos"][number]["paths"][number]; repo: string; now: number }) {
   const menu = useContextMenu(
     () => [
@@ -237,7 +240,7 @@ function PathRow({ p, repo, now }: { p: FilesPage["repos"][number]["paths"][numb
       {
         label: "Open session",
         items: p.sessions.map((s) => ({
-          label: s.count > 1 ? `${cleanTitle(s.title)} ×${s.count}` : cleanTitle(s.title),
+          label: s.count > 1 ? `${titleOf(s.title)} ×${s.count}` : titleOf(s.title),
           run: () => openAt(s.key, undefined),
         })),
       },
@@ -257,11 +260,11 @@ function PathRow({ p, repo, now }: { p: FilesPage["repos"][number]["paths"][numb
             key={s.key}
             type="button"
             className="rv-sess"
-            title={`Open ${cleanTitle(s.title)} beside`}
+            title={`Open ${titleOf(s.title)} beside`}
             onClick={() => openAt(s.key, undefined)}
           >
             <LabelDot session={s.key} />
-            {cleanTitle(s.title)}
+            {titleOf(s.title)}
             {s.count > 1 && <span className="num"> ×{s.count}</span>}
           </button>
         ))}
@@ -423,7 +426,7 @@ function DayView({ day, setDay }: { day: string; setDay: Dispatch<SetStateAction
 
 function DayRow({ s }: { s: Digest["sessions"][number] }) {
   const { harness, id } = splitKey(s.key);
-  const title = cleanTitle(s.title);
+  const title = titleOf(s.title);
   const path = sessionPath(harness, id);
   const menu = useContextMenu(
     () => [

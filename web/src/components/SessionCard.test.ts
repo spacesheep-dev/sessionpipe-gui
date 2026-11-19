@@ -9,7 +9,9 @@ vi.hoisted(() => {
   Object.assign(globalThis, { window: new EventTarget() });
 });
 
-import { answerItems, newest } from "./SessionCard";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { answerItems, Inline, newest } from "./SessionCard";
 
 describe("answerItems", () => {
   it("names the tool by its label", () => {
@@ -107,5 +109,17 @@ describe("newest", () => {
       const at = cut.length - rest.length;
       expect(at === 0 || /\s/.test(cut[at - 1]!), `${n}: ${out}`).toBe(true);
     }
+  });
+});
+
+describe("Inline", () => {
+  const html = (text: string) => renderToStaticMarkup(createElement(Inline, { text }));
+  it("keeps the words between code spans, a dash after one too", () => {
+    expect(html("Fix `a.ts` - then `b`")).toBe(
+      'Fix <code class="inline-code">a.ts</code> - then <code class="inline-code">b</code>',
+    );
+  });
+  it("drops a leading mark once and reads emphasis as words", () => {
+    expect(html("- **Done**: `x` moved")).toBe('Done: <code class="inline-code">x</code> moved');
   });
 });

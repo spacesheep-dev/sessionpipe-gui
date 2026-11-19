@@ -40,10 +40,14 @@ import {
   askedQuestion,
   askFitsRow,
   attentionMessage,
+  codeSpans,
   harnessMark,
+  isCodeSpan,
   isPlanReview,
   isQuestion,
   oneLine,
+  plainEmphasis,
+  plainLead,
   repoShort,
   rowTime,
   STATE_LABEL,
@@ -949,34 +953,24 @@ export function AskedLine({ s, a, className }: { s: SessionSummary; a: Attention
   ) : null;
 }
 
+/** A preview line's inline Markdown: `code` spans in mono, the rest down to its words
+ *  (lib/format.ts plainLead and plainEmphasis, as a title is). */
 export function Inline({ text }: { text: string }) {
-  const parts = text.split(/(`[^`\n]+`)/g);
-  if (parts.length === 1) return <Redacted text={plainMarkdown(text)} />;
+  const parts = codeSpans(plainLead(text));
+  if (parts.length === 1) return <Redacted text={plainEmphasis(parts[0]!)} />;
   return (
     <>
       {parts.map((p, i) =>
-        p.length > 2 && p.startsWith("`") && p.endsWith("`") ? (
+        isCodeSpan(p) ? (
           <code key={i} className="inline-code">
             <Redacted text={p.slice(1, -1)} />
           </code>
         ) : (
-          <Redacted key={i} text={plainMarkdown(p)} />
+          <Redacted key={i} text={plainEmphasis(p)} />
         ),
       )}
     </>
   );
-}
-
-/** Inline Markdown down to its words: `**b**`, `*i*`, `__b__`, `_i_` (between word edges,
- *  so snake_case stays), `~~s~~`, `[text](url)`, a leading `#`, `>` or list mark. */
-export function plainMarkdown(t: string): string {
-  return t
-    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+(?=\S))/, "")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/(\*\*|__)(?=\S)([^*_]*?\S)\1/g, "$2")
-    .replace(/(^|[^\w*])\*(?=\S)([^*]*?\S)\*(?!\w)/g, "$1$2")
-    .replace(/(^|[^\w])_(?=\S)([^_]*?\S)_(?!\w)/g, "$1$2")
-    .replace(/~~(?=\S)([^~]*?\S)~~/g, "$1");
 }
 
 // ----- Advanced → "Show counts", per device -----

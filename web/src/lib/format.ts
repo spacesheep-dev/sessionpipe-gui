@@ -63,6 +63,40 @@ export function cleanTitle(t: string): string {
   return `${cut.replace(/[\s,;:–—-]+$/, "")}…`;
 }
 
+/** A leading heading, quote or list mark ("# ", "> ", "- "), dropped once from the whole
+ *  text and not from each piece between code spans, so "`a` - then" keeps its " - ". */
+export function plainLead(t: string): string {
+  return t.replace(/^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+(?=\S))/, "");
+}
+
+/** Inline Markdown emphasis down to its words: `**b**`, `*i*`, `__b__`, `_i_`, `~~s~~`,
+ *  `[text](url)`. Underscores and brackets inside a word are code, not marks, so
+ *  snake_case, __init__.py and a[0](x) stay as they are. */
+export function plainEmphasis(t: string): string {
+  return t
+    .replace(/(^|[^\w\]])!?\[([^\]]*)\]\([^)]*\)/g, "$1$2")
+    .replace(/\*\*(?=\S)([^*]*?\S)\*\*/g, "$1")
+    .replace(/(^|[^\w*])\*(?=\S)([^*]*?\S)\*(?!\w)/g, "$1$2")
+    .replace(/(^|[^\w])(__?)(?=\S)([^_]*?\s[^_]*?\S)\2(?!\w)/g, "$1$3")
+    .replace(/~~(?=\S)([^~]*?\S)~~/g, "$1");
+}
+
+/** Text split at its `code` spans: [plain, code, plain, …], a code piece with its ticks. */
+export const codeSpans = (t: string): string[] => t.split(/(`[^`\n]+`)/g);
+export const isCodeSpan = (p: string): boolean => p.length > 2 && p.startsWith("`") && p.endsWith("`");
+
+/** A session's title as plain words, wherever it is shown: a `code` span keeps its text
+ *  and loses its ticks, the rest loses inline Markdown (as the preview line does), and a
+ *  tick a cut left open goes. Text that is nothing but marks stays as it came. */
+export function plainTitle(t: string): string {
+  const out = codeSpans(plainLead(t))
+    .map((p) => (isCodeSpan(p) ? p.slice(1, -1) : plainEmphasis(p)))
+    .join("")
+    .replace(/`/g, "")
+    .trim();
+  return out || t.trim();
+}
+
 /** A title the summariser cut ("Before I merge the BM25 cache, review it from...") is the
  *  start of the session's first ask. While that ask is still the prompt the summary
  *  carries, its whole first line is the title, so CSS cuts it at the real column width
@@ -105,7 +139,7 @@ function keptUncut(s: Pick<SessionSummary, "title" | "lastUser" | "progress"> & 
 export function sessionTitle(
   s: Pick<SessionSummary, "title" | "cwd" | "id" | "lastUser" | "progress"> & { key?: string },
 ): string {
-  if (s.title?.trim()) return keptUncut(s) ?? cleanTitle(s.title);
+  if (s.title?.trim()) return plainTitle(keptUncut(s) ?? cleanTitle(s.title));
   const started = s.key ? startTitles.get(s.key) : undefined;
   if (started) return started;
   if (s.cwd) return basename(s.cwd);

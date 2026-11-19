@@ -19,7 +19,7 @@ import {
   openAgent,
   subscribeAgentsChoice,
 } from "../lib/agents";
-import { sessionTitle } from "../lib/format";
+import { plainTitle, sessionTitle } from "../lib/format";
 import { agentItems, sessionItems, sessionMenuSubtitle } from "../lib/menus";
 import { agentPath, Link, sessionPath } from "../lib/router";
 import { useNow } from "../lib/time";
@@ -55,7 +55,7 @@ export function AgentNow({ a, className = "agent-now" }: { a: AgentRun; classNam
 
 /** "Type · description", the type in the row's weight and the description a tier down. */
 export function AgentText({ a }: { a: Pick<AgentRun, "type" | "description"> }) {
-  const d = a.description?.trim();
+  const d = a.description ? plainTitle(a.description.trim()) : "";
   return (
     <span className="agent-text ellipsis">
       <span className="agent-type">{agentType(a)}</span>

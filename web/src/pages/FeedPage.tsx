@@ -20,7 +20,16 @@ import { PageBar } from "../components/PageBar";
 import { BesideButton, Inline, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useAppState, useLabels, useStore } from "../data/hooks";
 import { wideLayout } from "../lib/device";
-import { eventSummary, harnessMark, isQuestion, oneLine, sessionTitle, storedKey, toolLabel } from "../lib/format";
+import {
+  eventSummary,
+  harnessMark,
+  isQuestion,
+  oneLine,
+  plainTitle,
+  sessionTitle,
+  storedKey,
+  toolLabel,
+} from "../lib/format";
 import { useListNav } from "../lib/keys";
 import { type LabelFilter, labelPasses, labelQuery } from "../lib/labels";
 import { absoluteUrl, copyItem, openOutside } from "../lib/menus";
@@ -515,7 +524,7 @@ export function Feed() {
               e={e}
               current={i === cur}
               day={showDay ? sentence(day) : undefined}
-              title={s ? sessionTitle(s) : (e.session.title ?? e.session.id.slice(0, 8))}
+              title={s ? sessionTitle(s) : e.session.title ? plainTitle(e.session.title) : e.session.id.slice(0, 8)}
               agent={agent}
               beside={beside}
               ctx={ctx}

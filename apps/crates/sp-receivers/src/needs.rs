@@ -41,8 +41,8 @@ pub struct NeedsYouItem {
 }
 
 impl NeedsYouItem {
-    /// The title as the web shows it (web/src/lib/format.ts `sessionTitle`): the title,
-    /// else the folder's name, else the id's first 8 characters.
+    /// The title as the web shows it (web/src/lib/format.ts `sessionTitle`): the title as
+    /// plain words, else the folder's name, else the id's first 8 characters.
     pub fn display_title(&self) -> String {
         if let Some(t) = self
             .title
@@ -50,7 +50,7 @@ impl NeedsYouItem {
             .map(str::trim)
             .filter(|t| !t.is_empty())
         {
-            return t.to_string();
+            return plain_title(t);
         }
         if let Some(c) = self.cwd.as_deref() {
             let c = c.trim_end_matches(['/', '\\']);
@@ -60,6 +60,36 @@ impl NeedsYouItem {
         }
         self.id.chars().take(8).collect()
     }
+}
+
+/// A title as words, as web/src/lib/format.ts `plainTitle` makes it for the menu bar and
+/// notifications: one leading heading, quote or list mark goes, and so does every
+/// backtick (a `code` span keeps its text). Text that is nothing but marks stays.
+pub fn plain_title(t: &str) -> String {
+    let t = t.trim();
+    let rest = strip_lead(t).unwrap_or(t);
+    let out: String = rest.chars().filter(|&c| c != '`').collect();
+    match out.trim() {
+        "" => t.to_string(),
+        o => o.to_string(),
+    }
+}
+
+/// `t` after a leading "# " (to "###### "), ">" or "- " / "* " / "+ " before a word.
+fn strip_lead(t: &str) -> Option<&str> {
+    let hashes = t.bytes().take_while(|&b| b == b'#').count();
+    if (1..=6).contains(&hashes) {
+        let after = &t[hashes..];
+        return after
+            .starts_with(char::is_whitespace)
+            .then(|| after.trim_start());
+    }
+    if let Some(q) = t.strip_prefix('>') {
+        return Some(q.strip_prefix(' ').unwrap_or(q));
+    }
+    let after = t.strip_prefix(['-', '*', '+'])?;
+    let words = after.trim_start();
+    (after.starts_with(char::is_whitespace) && !words.is_empty()).then_some(words)
 }
 
 /// The slice of `SessionSummary` read here. Unknown fields are ignored.
@@ -326,6 +356,23 @@ impl NeedsYou {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn titles_are_plain_words() {
+        assert_eq!(
+            plain_title("the old `--sink` flag?"),
+            "the old --sink flag?"
+        );
+        assert_eq!(plain_title("Rename `formatMo…"), "Rename formatMo…");
+        assert_eq!(plain_title("`__init__` cleanup"), "__init__ cleanup");
+        assert_eq!(plain_title("Fix `a` - then `b`"), "Fix a - then b");
+        assert_eq!(plain_title("# Plan the release"), "Plan the release");
+        assert_eq!(plain_title("> quoted ask"), "quoted ask");
+        assert_eq!(plain_title("- refactor the store"), "refactor the store");
+        assert_eq!(plain_title("-v flag"), "-v flag");
+        assert_eq!(plain_title("#123 fails"), "#123 fails");
+        assert_eq!(plain_title("``"), "``");
+    }
 
     fn session(key: &str, state: &str, att: &[&str]) -> String {
         let (h, id) = key.split_once(':').unwrap();

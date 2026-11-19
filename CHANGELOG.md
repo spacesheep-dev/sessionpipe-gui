@@ -363,6 +363,12 @@ pairing link that carries the board's key only for a pairing the sink token star
 
 ### Fixed
 
+- **A session's title is plain words everywhere.** A title written with Markdown showed
+  its marks: "the old \`--sink\` flag?" kept its backticks on the Board, the session's
+  page, the Inbox, the panel beside, ⌘K, Feed, Review, toasts, notifications and the menu
+  bar. It now reads "the old --sink flag?", with no bold, link or heading marks either;
+  code written without backticks (`__init__.py`) stays as it is. A preview line no
+  longer drops a " - " that follows a code span.
 - **A colour label sits after the title, so the titles line up.** Its dot sat
   between the state and the title, which moved a labelled row's title and preview about
   5 px right of its neighbours'. It now follows the title, 6 px after it (after the …

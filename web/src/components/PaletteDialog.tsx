@@ -46,6 +46,7 @@ import {
   isPlanReview,
   isQuestion,
   modelShort,
+  plainTitle,
   repoShort,
   STATE_LABEL,
   sessionTitle,
@@ -1243,7 +1244,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           row({
             id: `sub:f:${fs.key}`,
             mark: live ? <StateDot state={live.state} decorative /> : <Glyph> </Glyph>,
-            label: live ? sessionTitle(live) : fs.title,
+            label: live ? sessionTitle(live) : plainTitle(fs.title),
             detail:
               [live?.machine, fs.count > 1 ? `${fs.count} changes` : undefined].filter(Boolean).join(" · ") ||
               undefined,
@@ -1270,7 +1271,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     function fileRow(f: FileRow, at: number[], score: number): Item {
       const latest = f.sessions[0];
       const live = latest ? sessions.get(latest.key) : undefined;
-      const where = [repoShort(f.repo), live ? sessionTitle(live) : latest?.title].filter(Boolean).join(" · ");
+      const where = [repoShort(f.repo), live ? sessionTitle(live) : latest && plainTitle(latest.title)]
+        .filter(Boolean)
+        .join(" · ");
       return {
         id: `f:${f.repo}:${f.path}`,
         section: "Files",

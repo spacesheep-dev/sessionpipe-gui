@@ -9,9 +9,11 @@ import {
   CC_COMMAND_MAX,
   isPlanReview,
   isQuestion,
+  plainTitle,
   ROW_ASK_MAX,
   rowTime,
   saidCommand,
+  sessionTitle,
   toolLabel,
 } from "./format";
 
@@ -241,5 +243,51 @@ describe("rowTime", () => {
     // Thirty hours back is yesterday: the day goes before the clock.
     const day = new Date(last).toLocaleDateString(undefined, { day: "numeric", month: "short" });
     expect(rowTime(silent, now).tip).toBe(`Last heard ${day} ${hm(last)}`);
+  });
+});
+
+describe("plainTitle", () => {
+  it("keeps a code span's text and drops its ticks", () => {
+    expect(plainTitle("the old `--sink` flag?")).toBe("the old --sink flag?");
+    expect(plainTitle("`__init__` cleanup")).toBe("__init__ cleanup");
+  });
+  it("drops the tick a cut left open", () => {
+    expect(plainTitle("Rename `formatMo…")).toBe("Rename formatMo…");
+  });
+  it("keeps a mark mid-title: only a leading one goes", () => {
+    expect(plainTitle("Fix `a` - then `b`")).toBe("Fix a - then b");
+    expect(plainTitle("- refactor the store")).toBe("refactor the store");
+    expect(plainTitle("> why is it slow")).toBe("why is it slow");
+  });
+  it("reads inline Markdown as its words", () => {
+    expect(plainTitle("# Plan the **release**")).toBe("Plan the release");
+    expect(plainTitle("See [the guide](https://x.test) and ~~old~~ *new* notes")).toBe(
+      "See the guide and old new notes",
+    );
+  });
+  it("leaves code written without ticks as it is", () => {
+    for (const t of ["Fix __init__.py imports", "Why is __main__ slow", "Parse a[0](x) call", "rename snake_case_name"])
+      expect(plainTitle(t)).toBe(t);
+  });
+  it("keeps text that is nothing but marks", () => {
+    expect(plainTitle("``")).toBe("``");
+  });
+});
+
+describe("sessionTitle", () => {
+  const base = { cwd: "/w/app", id: "abcdef123456" };
+  it("is plain words", () => {
+    expect(sessionTitle({ ...base, title: "Which docs pages still mention the old `--sink` flag?" })).toBe(
+      "Which docs pages still mention the old --sink flag?",
+    );
+  });
+  it("matches the uncut ask on the raw strings, then reads it as words", () => {
+    const s = {
+      ...base,
+      title: "Rename `formatMo...",
+      lastUser: "Rename `formatMoney` to `formatAmount` everywhere",
+    };
+    expect(sessionTitle(s)).toBe("Rename formatMoney to formatAmount everywhere");
+    expect(sessionTitle({ ...s, lastUser: "something else" })).toBe("Rename formatMo…");
   });
 });

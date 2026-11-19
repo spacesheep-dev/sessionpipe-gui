@@ -7,7 +7,7 @@
 import type { AgentRun, SessionKey, SessionState, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
 import { phoneLayout } from "./device";
-import { toolLabel } from "./format";
+import { plainTitle, toolLabel } from "./format";
 import { agentPath, navigate, sessionPath } from "./router";
 import { agentTabKey, type OpenSplitOptions, openSplit } from "./split";
 import { dur } from "./time";
@@ -23,7 +23,7 @@ export const agentType = (a: Pick<AgentRun, "type">): string => a.type?.trim() |
 
 /** "Explore · Find ad-hoc money formatting", or the type alone when nothing described it. */
 export function agentLabel(a: Pick<AgentRun, "type" | "description">): string {
-  const d = a.description?.trim();
+  const d = a.description ? plainTitle(a.description.trim()) : "";
   return d ? `${agentType(a)} · ${d}` : agentType(a);
 }
 

@@ -11,7 +11,7 @@ import { type ControlActivity, type MachineControl, type SessionKey, sessionKey,
 import { useCallback, useMemo, useState } from "react";
 import { ActionButton, CommandWell, Since } from "../components/bits";
 import { useMachines } from "../data/hooks";
-import { bytes, harnessMark, rememberStartTitles } from "../lib/format";
+import { bytes, harnessMark, plainTitle, rememberStartTitles } from "../lib/format";
 import { navigate, sessionPath } from "../lib/router";
 import { rpId } from "./api";
 import { uuid } from "./bytes";
@@ -39,9 +39,11 @@ export function useStartOf(key: string): ControlActivity | undefined {
 }
 
 /** The title a start gives its session until the session names itself: the first line of
- *  the message, up to 80 characters, never the folder's name. */
+ *  the message as plain words (lib/format.ts plainTitle), up to 80 characters, never the
+ *  folder's name. */
 export function startTitle(a: ControlActivity | undefined): string | undefined {
-  const first = (a?.text ?? "").split("\n")[0]!.trim();
+  const line = (a?.text ?? "").split("\n")[0]!.trim();
+  const first = line && plainTitle(line);
   if (!first) return undefined;
   return first.length > 80 ? `${first.slice(0, 79).replace(/\s+\S*$/, "")}…` : first;
 }
