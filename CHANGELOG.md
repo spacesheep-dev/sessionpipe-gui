@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-11-18
+
+Pictures from a session's message box reach the agent as files in the session's own
+folder, at every permission level, and the receiver is stricter about which requests it
+answers: a browser on its own pages, a proxy's visitor by the proxy's own word, and a
+pairing link that carries the board's key only for a pairing the sink token started.
+
 ### Changed
 
 - **A picture sent from a session's message box reaches the agent as a file in the
@@ -1432,7 +1439,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.1...v0.8.2
