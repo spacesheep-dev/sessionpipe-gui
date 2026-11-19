@@ -6,7 +6,7 @@
 import { type ReactNode, useRef } from "react";
 import { useFocusTrap } from "../lib/focus";
 import { useSheetDrag } from "../lib/motion";
-import { Link } from "../lib/router";
+import { Link, openSettings, settingsHref, usePath } from "../lib/router";
 import { GearIcon } from "./QuickSettings";
 import { SlidersIcon } from "./Shell";
 
@@ -23,6 +23,7 @@ export interface MoreSheetProps {
 
 export function MoreSheet({ open, closing, onClose, onDisplay, lists: [pages, views] }: MoreSheetProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const path = usePath();
   // Focus goes back the moment it is asked closed, before whatever opens next (Display)
   // takes it.
   useFocusTrap(ref, open, { onClose });
@@ -64,7 +65,16 @@ export function MoreSheet({ open, closing, onClose, onDisplay, lists: [pages, vi
             </button>
           </li>
           <li>
-            <Link to="/settings" className="more-row" data-nav="settings">
+            <Link
+              to={settingsHref(null, path)}
+              plainClick={() => {
+                onClose();
+                openSettings();
+              }}
+              className="more-row"
+              aria-haspopup="dialog"
+              data-nav="settings"
+            >
               <span className="nav-glyph" aria-hidden="true">
                 <SlidersIcon size={20} />
               </span>

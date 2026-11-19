@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ACTIONS, IS_MAC, registerHandler } from "../lib/shortcuts";
 import { installKeyFilter, MENU, menuOwns, runMenu } from "./menu";
 
-const nav = vi.hoisted(() => ({ navigate: vi.fn(), back: vi.fn() }));
+const nav = vi.hoisted(() => ({ navigate: vi.fn(), back: vi.fn(), openSettings: vi.fn() }));
 vi.mock("../lib/router", () => nav);
 
 /** ⌘ on a Mac, ctrl elsewhere (lib/shortcuts.ts reads the platform, node's too). */
@@ -20,6 +20,7 @@ const press = (init: KeyboardEventInit, trusted = true) => {
 afterEach(() => {
   nav.navigate.mockClear();
   nav.back.mockClear();
+  nav.openSettings.mockClear();
   vi.unstubAllGlobals();
 });
 
@@ -43,9 +44,8 @@ describe("menu actions", () => {
       expect(MENU[id], id).toBeDefined();
   });
 
-  it("pages are routes", () => {
+  it("pages are routes, and Settings opens over the page", () => {
     const routes: Record<string, string> = {
-      settings: "/settings",
       "go-board": "/",
       "go-inbox": "/inbox",
       "go-feed": "/feed",
@@ -58,6 +58,10 @@ describe("menu actions", () => {
     }
     runMenu("back");
     expect(nav.back).toHaveBeenCalledTimes(1);
+    const moves = nav.navigate.mock.calls.length;
+    expect(runMenu("settings")).toBe(true);
+    expect(nav.openSettings).toHaveBeenCalledTimes(1);
+    expect(nav.navigate.mock.calls.length).toBe(moves);
   });
 
   it("keyboard actions run through the dispatcher's own handler, once", () => {

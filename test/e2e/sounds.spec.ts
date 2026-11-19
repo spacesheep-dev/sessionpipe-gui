@@ -90,7 +90,7 @@ const openSection = async (page: Page) => {
   await openPage(page, "/inbox");
   await page.locator(".inbox-head").getByRole("button", { name: "Notifications" }).click();
   await page.getByRole("link", { name: "Sounds" }).click();
-  await expect(page).toHaveURL(/\/settings\?section=notifications$/);
+  await expect(page).toHaveURL(/\/inbox\?settings=notifications$/);
   const section = page.locator(".ntf");
   await expect(section).toBeVisible();
   return section;

@@ -459,6 +459,38 @@ test.describe("inside the native shell", () => {
     await expect(page.locator(".rail")).toBeVisible();
   });
 
+  test("⌘, opens Settings over the page you are on; a page from the menu closes it", async ({ page }) => {
+    await openInShell(page, "/machines");
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    const machines = page.locator(".page .bar-title", { hasText: "Machines" });
+    await emit(page, "menu", { action: "settings" });
+    await expect(settings).toBeVisible();
+    await expect(page).toHaveURL(/\/machines\?settings$/);
+    await expect(machines).toBeAttached();
+    await expect(page.locator("nav.rail a[data-nav='machines']")).toHaveAttribute("aria-current", "page");
+    await expect(page.locator(".board-list")).toHaveCount(0);
+    // Again while open: no second window and no second entry, the focus back in it.
+    const entries = await page.evaluate(() => history.length);
+    await page.locator("nav.rail a[data-nav='inbox']").focus();
+    await emit(page, "menu", { action: "settings" });
+    await expect(settings).toBeFocused();
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+    // A deep link to a section (sessionpipe://settings, Check for Updates…) goes to it, in place.
+    await emit(page, "navigate", { to: "/settings?section=data" });
+    await expect(settings.getByRole("tab", { selected: true })).toHaveText("Data");
+    await expect(page).toHaveURL(/\/machines\?settings=data$/);
+    // ⌃⌘1 … 5 go where they say, and Settings closes on the way.
+    await emit(page, "menu", { action: "go-board" });
+    await expect(page).toHaveURL(/\/$/);
+    await expect(settings).toHaveCount(0);
+    await emit(page, "menu", { action: "settings" });
+    await expect(settings).toBeVisible();
+    await emit(page, "menu", { action: "go-machines" });
+    await expect(page).toHaveURL(/\/machines$/);
+    await expect(settings).toHaveCount(0);
+  });
+
   test("menu and navigate events drive the page; menu keys fire once", async ({ page }) => {
     await openInShell(page, "/");
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
@@ -481,7 +513,9 @@ test.describe("inside the native shell", () => {
     await page.waitForTimeout(300);
     await expect(palette).toBeHidden();
     await emit(page, "menu", { action: "settings" });
-    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page).toHaveURL(/\/feed\?settings$/);
+    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(/\/feed$/);
     await emit(page, "menu", { action: "toggle-sidebar" });
     await expect(page.locator("html")).toHaveAttribute("data-rail-hidden", "");
     await expect(page.locator(".rail")).toBeHidden();
@@ -1177,7 +1211,7 @@ test.describe("the app's update", () => {
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
     const settings = settingsButton(page);
     await expect(settings).toHaveAttribute("aria-label", "Settings");
-    await expect(settings).toHaveAttribute("href", "/settings");
+    await expect(settings).toHaveAttribute("href", "/?settings");
     await emit(page, "update", { state: "downloading", version: "0.3.1", progress: 10 });
     await expect(settings.locator(".nav-dot")).toHaveCount(0);
     await emit(page, "update", READY);
@@ -1198,7 +1232,7 @@ test.describe("the app's update", () => {
       expect(d.y).toBeGreaterThanOrEqual(b.y);
     }
     await settings.click();
-    await expect(page).toHaveURL(/\/settings\?section=about$/);
+    await expect(page).toHaveURL(/\/\?settings=about$/);
     await expect(updateRow(page).locator(".settings-label")).toHaveText("0.3.1 is ready");
     // Installed, or checked again: the dot goes with it.
     await emit(page, "update", { state: "checking" });

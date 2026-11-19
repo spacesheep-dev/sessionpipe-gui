@@ -271,11 +271,11 @@ export function useSplit(): SplitState {
   return useMemo(() => parseSplit(s, t), [s, t]);
 }
 
-/** The pages the panel opens beside: the session lists, a session, the installed views
- *  (canvas, office), and Settings (a window over the board, which keeps its layout under
- *  it). Never Setup, Connect, /phone, a pairing page or a path the app has no page for,
- *  where a live session beside it reads as broken. */
-const BESIDE = new Set(["board", "inbox", "search", "feed", "review", "machines", "session", "theme", "settings"]);
+/** The pages the panel opens beside: the session lists, a session and the installed views
+ *  (canvas, office); Settings is over whichever page is open, and keeps its layout. Never
+ *  Setup, Connect, /phone, a pairing page or a path the app has no page for, where a live
+ *  session beside it reads as broken. */
+const BESIDE = new Set(["board", "inbox", "search", "feed", "review", "machines", "session", "theme"]);
 export const panelBeside = (path: string): boolean => BESIDE.has(parseRoute(path).name);
 
 /** Whether the panel shows on the current page (its tabs stay in the URL either way). */

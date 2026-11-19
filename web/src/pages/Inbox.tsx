@@ -67,7 +67,7 @@ import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
-import { Link, navigate, sessionPath } from "../lib/router";
+import { Link, openSettings, sessionPath } from "../lib/router";
 import { type Lens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
@@ -204,7 +204,7 @@ export function Inbox() {
                   : undefined,
             run: () => void setNotifyPref(!notify.on),
           },
-      { label: "Notification sounds…", run: () => navigate("/settings?section=notifications") },
+      { label: "Notification sounds…", run: () => openSettings("notifications") },
       { sep: true },
       ...lensMenu(lens, simple),
     ],

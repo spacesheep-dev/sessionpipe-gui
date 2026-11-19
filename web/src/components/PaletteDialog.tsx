@@ -54,7 +54,7 @@ import {
 import { type FieldsMatch, fuzzyFields } from "../lib/fuzzy";
 import { labelName, labelQuery, setLabel } from "../lib/labels";
 import { accountMode } from "../lib/net";
-import { navigate, parseRoute, sessionPath, useRoute } from "../lib/router";
+import { navigate, openSettings, parseRoute, sessionPath, useRoute } from "../lib/router";
 import { useSimple } from "../lib/settings";
 import { hintFor, IS_MAC, matches, useShortcutMap } from "../lib/shortcuts";
 import { openSplit, useSplitKey } from "../lib/split";
@@ -1036,7 +1036,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         run: () => navigate("/shortcuts"),
       });
       places.push({ label: "Display settings", detail: "appearance, skin, text size", run: openDisplaySettings });
-      places.push({ label: "Settings", detail: "mode · tier lens · data", run: () => navigate("/settings") });
+      places.push({ label: "Settings", detail: "mode · tier lens · data", run: () => openSettings() });
       const rows: Item[] = [];
       for (const p of places) {
         const m = text ? fuzzyFields(text, [p.label, p.words ?? ""]) : null;

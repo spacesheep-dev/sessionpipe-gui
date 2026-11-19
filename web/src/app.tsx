@@ -22,7 +22,7 @@ import { markRestoring } from "./lib/keys";
 import { landingFor, type Opened } from "./lib/landing";
 import { accountMode } from "./lib/net";
 import { titlePrefix, useAttentionEffects } from "./lib/notify";
-import { Link, navigate, parseRoute, usePath, useRoute } from "./lib/router";
+import { Link, navigate, parseRoute, SETTINGS_PARAM, usePath, useRoute, useSearchParam } from "./lib/router";
 import { getSettings } from "./lib/settings";
 import { NEW_WORDS, thisPhone } from "./native/accountWords";
 import { isShell } from "./native/shell";
@@ -63,7 +63,6 @@ const TITLES: Record<string, string> = {
   "add-device": "Add this device",
   phone: "Your phone",
   themes: "Views",
-  settings: "Settings",
   shortcuts: "Keyboard shortcuts",
   missing: "Not found",
 };
@@ -130,14 +129,18 @@ export function App() {
   // Every list names a session started here by its first message (lib/format.ts sessionTitle).
   useStartTitles();
   useEffect(() => landOnDefaultPage(), []);
-  const [deciding, setDeciding] = useState(() => route.name === "board" && !setupSeen());
+  // The board, and no Settings over it: Settings asked for by its address shows at once,
+  // and Setup waits.
+  const settingsAsked = useSearchParam(SETTINGS_PARAM) !== null;
+  const bareBoard = route.name === "board" && !settingsAsked;
+  const [deciding, setDeciding] = useState(() => bareBoard && !setupSeen());
   useEffect(() => {
     if (!deciding) return;
     const t = window.setTimeout(() => setDeciding(false), FIRST_RUN_WAIT_MS);
     return () => window.clearTimeout(t);
   }, [deciding]);
   useLayoutEffect(() => {
-    if (route.name !== "board") {
+    if (!bareBoard) {
       if (deciding) setDeciding(false);
       return;
     }
@@ -151,11 +154,11 @@ export function App() {
       navigate("/setup", { replace: true });
     }
     setDeciding(false);
-  }, [route.name, setup.local, setup.status, setup.error, deciding]);
+  }, [bareBoard, setup.local, setup.status, setup.error, deciding]);
   // The receiver refused this page's key: the link is asked for again. In the native app
-  // Settings (where its receivers are) opens over that page; no other page does.
+  // Settings (where its receivers are) opens over that page; nothing else does.
   if (keyRefused)
-    return route.name === "settings" && isShell() ? (
+    return settingsAsked && isShell() ? (
       <>
         <KeyRefused />
         <Settings />
@@ -193,12 +196,6 @@ export function App() {
       {route.name === "setup" && <Setup />}
       {route.name === "themes" && <Themes />}
       {route.name === "shortcuts" && <Shortcuts />}
-      {route.name === "settings" && (
-        <>
-          <Board />
-          <Settings />
-        </>
-      )}
       {route.name === "theme" && <ThemeRoute key={route.id} id={route.id} />}
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}
       {route.name === "add-device" &&

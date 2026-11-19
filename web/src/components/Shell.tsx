@@ -22,7 +22,17 @@ import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
 import { reducedMotion, usePresence } from "../lib/motion";
 import { accountMode } from "../lib/net";
-import { Link, lastMove, navigate, type Route, usePath } from "../lib/router";
+import {
+  Link,
+  lastMove,
+  navigate,
+  openSettings,
+  type Route,
+  SETTINGS_PARAM,
+  settingsHref,
+  usePath,
+  useSearchParam,
+} from "../lib/router";
 import { useReadyUpdate } from "../lib/selfUpdate";
 import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
 import { hintFor, isTyping, KeysOff, useShortcut, useShortcutMap } from "../lib/shortcuts";
@@ -42,6 +52,7 @@ import { openPalette } from "./Palette";
 import { PULL_PAGES, PullRefresh } from "./PullRefresh";
 import { QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
+import { Settings } from "./Settings";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { TipHost } from "./Tip";
 import { UsageGlance, useGlanceShown } from "./UsageGlance";
@@ -272,7 +283,7 @@ const withUsage = (pages: NavItem[]): NavItem[] => {
   return at < 0 ? [...pages, USAGE_ITEM] : [...pages.slice(0, at), USAGE_ITEM, ...pages.slice(at)];
 };
 
-/** The pages Simple mode keeps off the rail (still there through ⌘K and /settings). */
+/** The pages Simple mode keeps off the rail (still there through ⌘K and Settings). */
 const ADVANCED_ONLY = new Set(["feed", "review"]);
 /** The pages that are a receiver's own doing (its workflows): not offered where the
  *  window shows a spacesheep account, which has no receiver. */
@@ -389,7 +400,7 @@ function railMenu(): MenuList {
       label: "Display…",
       run: () => document.querySelector<HTMLButtonElement>("nav.rail button[aria-label='Quick settings']")?.click(),
     },
-    { label: "Settings…", run: () => navigate("/settings") },
+    { label: "Settings…", run: () => openSettings() },
     { label: "Keyboard shortcuts", action: "nav.shortcuts", run: () => navigate("/shortcuts") },
   ];
 }
@@ -582,7 +593,9 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   // and says the page's name through the live region.
   const mainRef = useRef<HTMLElement>(null);
   const [announce, setAnnounce] = useState("");
-  const path = usePath().split("?")[0] ?? "/";
+  const fullPath = usePath();
+  const path = fullPath.split("?")[0] ?? "/";
+  const settingsShown = useSearchParam(SETTINGS_PARAM) !== null;
   // The path last seen, not a first-run flag: StrictMode runs the effect twice on mount.
   const lastPath = useRef(path);
   useEffect(() => {
@@ -637,7 +650,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     // From the page, or from nowhere in particular: not from the rail or something open.
     if (held || !at || at === document.body || at === main)
       document.querySelector<HTMLElement>("aside.panel")?.focus({ preventScroll: true });
-    // A page that arrives under the panel (a lazy page's code, the board under Settings).
+    // A page that arrives under the panel (a lazy page's code).
     const arrivals = new MutationObserver(cover);
     arrivals.observe(main, { childList: true });
     return () => {
@@ -650,14 +663,13 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   }, [covers]);
   // A move away from a page the panel covered leaves the panel behind: the page asked for
   // is the one to see, not what was over the last. Not a redirect, nor Back and Forward,
-  // which show what was there; and Settings is a window over the page, which moves nothing.
+  // which show what was there; and Settings is a window over the page, which moves no path.
   const under = useRef<{ path: string; covered: boolean } | null>(null);
   useEffect(() => {
-    if (route.name === "settings") return;
     const was = under.current;
     under.current = { path, covered: covers };
     if (was?.covered && was.path !== path && lastMove() === "navigate") leaveSplit();
-  }, [path, route.name, covers]);
+  }, [path, covers]);
   const shellStyle = { "--split-width": `${splitOpen && !phone && !covers ? splitWidth : 0}px` } as CSSProperties;
   const entry = (n: NavItem, tip: boolean) => (
     <NavEntry
@@ -777,12 +789,14 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           <QuickSettings placement="rail" />
           {/* An update that is downloaded and waits: the quiet dot, and the way to its row. */}
           <Link
-            to={update ? "/settings?section=about" : "/settings"}
-            className={`theme-btn ${route.name === "settings" ? "nav-link--on" : ""}`}
+            to={settingsHref(update ? "about" : null, fullPath)}
+            plainClick={() => openSettings(update ? "about" : null)}
+            className={`theme-btn ${settingsShown ? "nav-link--on" : ""}`}
             data-tip={update ? `Settings · ${update}` : "Settings"}
             data-tip-side="top"
             aria-label={update ? `Settings, ${update}` : "Settings"}
-            aria-current={route.name === "settings" ? "page" : undefined}
+            aria-haspopup="dialog"
+            aria-expanded={settingsShown}
             data-nav="settings"
           >
             <SlidersIcon />
@@ -790,6 +804,9 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           </Link>
         </div>
       </nav>
+      {/* Ahead of the page in the DOM: Esc closes the first drawn [data-dismiss]
+          (lib/keys.ts), and Settings is over whatever the page has open (a file, the panel). */}
+      <SettingsHost />
       <main className={`main ${route.name === "theme" ? "main--bleed" : ""}`} id="main" ref={mainRef} tabIndex={-1}>
         <KeysOff.Provider value={covers}>{children}</KeysOff.Provider>
       </main>
@@ -809,6 +826,12 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <TipHost />
     </div>
   );
+}
+
+/** Settings, over the page you are on while the address says `?settings=` (the page stays
+ *  mounted under it, its scroll, its title and its lit row with it). */
+function SettingsHost() {
+  return useSearchParam(SETTINGS_PARAM) === null ? null : <Settings />;
 }
 
 /** How long a drop must last before it is shown: a blip is never drawn, nor said. */

@@ -186,7 +186,7 @@ test.describe("inbox", () => {
     // section (where the header's "Sounds" link goes) shows the same switch.
     expect(await page.evaluate(() => window.__permissionRequests)).toBe(0);
     await (await bell(page)).getByRole("link", { name: "Sounds" }).click();
-    await expect(page).toHaveURL(/\/settings\?section=notifications$/);
+    await expect(page).toHaveURL(/\/inbox\?settings=notifications$/);
     const st = page.locator(".ntf").getByRole("switch", { name: "Notify me" });
     await expect(st).toHaveAttribute("aria-checked", "true");
     await st.click();

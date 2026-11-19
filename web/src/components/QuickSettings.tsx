@@ -12,7 +12,7 @@ import { skinTokensFor } from "@shared/skin-api";
 import { type CSSProperties, type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 import { useFocusTrap } from "../lib/focus";
 import { usePresence, useSheetDrag } from "../lib/motion";
-import { Link, navigate } from "../lib/router";
+import { Link, openSettings, settingsHref, usePath } from "../lib/router";
 import { fetchSkins, type InstalledSkin, isPlain, schemeLabel, useSkins } from "../lib/skins";
 import {
   resolvedScheme,
@@ -131,6 +131,7 @@ export function QuickSettings({
 }) {
   const [openState, setOpenState] = useState(false);
   const open = openProp ?? openState;
+  const path = usePath();
   const setOpen = (next: boolean | ((o: boolean) => boolean)) => {
     const v = typeof next === "function" ? next(open) : next;
     setOpenState(v);
@@ -246,12 +247,13 @@ export function QuickSettings({
           </div>
           <div className="qs-foot">
             <Link
-              to="/settings"
+              to={settingsHref(null, path)}
               className="qs-all"
               data-nav="all-settings"
+              aria-haspopup="dialog"
               plainClick={() => {
                 setOpen(false);
-                navigate("/settings");
+                openSettings();
               }}
             >
               <span>Settings…</span>

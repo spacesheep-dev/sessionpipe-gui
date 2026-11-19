@@ -6,7 +6,7 @@
 // menu's inside the shell: the page lets them pass (no handler runs, nothing is
 // prevented), the menu answers, and nothing fires twice.
 import { type NewSessionTarget, openNewSession } from "../control/newSessionState";
-import { back, navigate } from "../lib/router";
+import { back, navigate, openSettings } from "../lib/router";
 import { activeKeys, type Chord, chordOf, chordString, IS_MAC, parseBinding } from "../lib/shortcuts";
 
 export interface MenuItem {
@@ -50,7 +50,7 @@ const SIDEBAR = IS_MAC ? "ctrl+mod+s" : "mod+b";
 const firing = (keys: string, id: string): MenuItem => ({ keys, fires: id, run: () => fire(id) });
 
 export const MENU: Record<string, MenuItem> = {
-  settings: { keys: "mod+,", run: () => navigate("/settings") },
+  settings: { keys: "mod+,", run: () => openSettings() },
   "new-session": { keys: "mod+n", run: (p) => openNewSession(prefillTarget(p.prefill)) },
   find: firing("mod+f", "search.focus"),
   "go-board": { keys: `${PAGE}+1`, run: () => navigate("/") },

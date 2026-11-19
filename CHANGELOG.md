@@ -350,6 +350,16 @@ pairing link that carries the board's key only for a pairing the sink token star
   page with no loading state of its own (Search, Machines) says "Connecting…" or "Can't
   reach studio-mac" in its bar, and the sidebar's dot says the same. The menu bar item
   reads "Can't reach this Mac", in lower case.
+- **Settings opens over the page you are on.** ⌘, the sidebar's sliders, Display's
+  "Settings…" and every other way in add `?settings=<section>` to the page's address, and
+  the page stays as it was under it: its scroll, its title, its lit row in the sidebar, a
+  file open in a session. It drew the Board under it before, and closing it loaded the
+  page again. Done, ×, Esc and a click beside it go back to the page as it was; a link
+  inside Settings, or another page, closes it on the way. On a computer the window is up
+  to 720 px tall, so Data's Export shows without scrolling, and the dim under every dialog
+  is lighter, so Appearance and Text size are judged on a page that is not greyed. Old
+  `/settings?section=…` links open it over the page Open on names. The phone's Settings
+  is the same full-screen sheet as before.
 
 ### Fixed
 

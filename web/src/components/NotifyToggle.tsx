@@ -13,7 +13,7 @@ import { useEffect, useId, useReducer, useRef, useState } from "react";
 import { nativeNotify, phoneShell, shellPlatform } from "../lib/device";
 import { usePresence } from "../lib/motion";
 import { type NotifyPermission, setNotifyPref, useNotifyPref } from "../lib/notify";
-import { Link } from "../lib/router";
+import { Link, openSettings, settingsHref, usePath } from "../lib/router";
 import { settingsApp } from "../native/logic";
 import { Notice, Toggle } from "./bits";
 
@@ -143,6 +143,7 @@ export function NotifyMenu() {
   const on = app ? app.enabled && app.status === "granted" : browser.on;
   const [open, setOpen] = useState(false);
   const { mounted, closing } = usePresence(open);
+  const path = usePath();
   const wrap = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const id = useId();
@@ -197,7 +198,14 @@ export function NotifyMenu() {
         >
           <NotifyToggle />
           <div className="notify-pop-foot">
-            <Link to="/settings?section=notifications" className="btn btn--sm btn--ghost">
+            <Link
+              to={settingsHref("notifications", path)}
+              plainClick={() => {
+                close();
+                openSettings("notifications");
+              }}
+              className="btn btn--sm btn--ghost"
+            >
               Sounds
             </Link>
             <button type="button" className="sr-only" onClick={close} data-dismiss={open ? "" : undefined}>

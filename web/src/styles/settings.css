@@ -258,12 +258,15 @@ body:has(.page--grouped),
   }
 }
 
-/* ---------- settings window (/settings) ---------- */
+/* ---------- settings window (?settings=) ---------- */
 
-/* A fixed-size window over a real scrim: the section list on the chrome ground at the
-   left, the pane at the right under a 44 px title bar with the section's name and the
-   close button. The pane is the macOS grouped form: inset groups on the grouped ground.
-   On a phone it is a full-screen sheet with the iOS Settings stack. */
+/* A fixed-size window over a light scrim, over the page you are on: the section list on
+   the chrome ground at the left, the pane at the right under a 44 px title bar with the
+   section's name and the close button. One height per window, so a section switched
+   never makes it jump: up to 720 px, clear of the title band, and in a window under
+   600 px tall all of it but a 16 px margin. The pane is the macOS grouped form: inset
+   groups on the grouped ground. On a phone it is a full-screen sheet with the iOS
+   Settings stack (the phone's block below comes later, and wins). */
 .settings-wrap {
   position: fixed;
   inset: 0;
@@ -282,7 +285,7 @@ body:has(.page--grouped),
 .settings {
   position: relative;
   width: min(800px, 100%);
-  height: min(600px, calc(100dvh - 32px));
+  height: min(720px, calc(100dvh - 104px));
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -293,8 +296,13 @@ body:has(.page--grouped),
   overflow: hidden;
   animation: zoom-in var(--dur) var(--ease-out) both;
 }
+@media (max-height: 600px) {
+  .settings {
+    height: calc(100dvh - 32px);
+  }
+}
 /* The exit: the window zooms out, the scrim fades, both quicker than they came, and
-   neither takes a click meanwhile (Settings.tsx plays it before it navigates away). */
+   neither takes a click meanwhile (SettingsWindow.tsx plays it before it closes). */
 .settings-wrap[data-closing] {
   pointer-events: none;
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Settings: /settings, a fixed-size window over the page (the sliders in the sidebar's
-// foot, a row in the phone's More sheet, "Settings…" at the foot of Display). The section
+// Settings: `?settings=<section>`, a fixed-size window over the page you are on, which
+// stays as it was under it (the sliders in the sidebar's foot, ⌘, in the app, a row in the
+// phone's More sheet, "Settings…" at the foot of Display). The section
 // list on the chrome ground at the left; the pane under a 44 px title bar with the
 // section's name and the close button, as macOS System Settings draws it: inset groups,
 // each row a label (one caption under it) and its control on one trailing edge. On a
@@ -33,7 +34,14 @@ import { tablistKey } from "../lib/focus";
 import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
 import { accountMode, apiFetch } from "../lib/net";
-import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
+import {
+  closeSettings,
+  Link,
+  SETTINGS_PARAM,
+  settingsBackToList,
+  showSettingsSection,
+  useSearchParam,
+} from "../lib/router";
 import { selfUpdating } from "../lib/selfUpdate";
 import { isRouteNotFound, olderReceiver } from "../lib/serverAge";
 import {
@@ -145,15 +153,13 @@ const SECTIONS: { id: Section; label: string }[] = [
 ];
 const isSection = (v: string | null): v is Section => SECTIONS.some((s) => s.id === v);
 
-export const settingsPath = (section?: Section) => (section ? `/settings?section=${section}` : "/settings");
-
 const FOCUSABLE =
   "a[href], button:not(:disabled), input:not(:disabled), select, textarea, [tabindex]:not([tabindex='-1'])";
 
-/** The section the URL asks for: `?section=data`, or `#notifications` (a link from
+/** The section the URL asks for: `?settings=data`, or `#notifications` (a link from
  *  elsewhere); null when it names none. */
 function useAskedSection(): Section | null {
-  const param = useSearchParam("section");
+  const param = useSearchParam(SETTINGS_PARAM);
   const hash = location.hash.replace(/^#/, "");
   if (isSection(param)) return param;
   if (isSection(hash)) return hash;
@@ -217,10 +223,10 @@ export function Settings() {
   const [picker, setPicker] = useState<Picker | null>(null);
   // A picker belongs to its section.
   useEffect(() => setPicker(null), [section, view]);
-  // Back to the page under the dialog (opened by its URL, to the board; the split panel
-  // stays), after the window's exit has played.
+  // Back to the page under the dialog, as it was (the split panel stays), after the
+  // window's exit has played.
   const [closing, setClosing] = useState(false);
-  const leave = () => (hasInAppHistory() ? back("/") : navigate("/"));
+  const leave = closeSettings;
   // The exit takes no click, so a click on the page under it lands at once; when that
   // click navigates, the dialog is gone before its exit ends and must not go Back then
   // (that would undo the click and bring the dialog back).
@@ -233,10 +239,16 @@ export function Settings() {
     leaving.current = window.setTimeout(leave, tokenMs("--dur-exit", 140));
   };
 
-  // The window takes focus on open (no ring on a section until the keyboard moves);
-  // Tab and shift+Tab cycle inside it.
+  // The window takes focus on open (no ring on a section until the keyboard moves), and
+  // gives it back on close to what had it, on the page that stayed under it; Tab and
+  // shift+Tab cycle inside it.
   useEffect(() => {
+    const had = document.activeElement as HTMLElement | null;
     ref.current?.focus({ preventScroll: true });
+    return () => {
+      const now = document.activeElement;
+      if (had?.isConnected && (!now || now === document.body || !now.isConnected)) had.focus({ preventScroll: true });
+    };
   }, []);
   const onKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Tab" || !ref.current) return;
@@ -252,7 +264,7 @@ export function Settings() {
       first.focus();
     }
   };
-  const pick = (id: Section) => navigate(settingsPath(id), { replace: !phone });
+  const pick = (id: Section) => showSettingsSection(id, { push: phone });
   const index = SECTIONS.findIndex((s) => s.id === section);
   const label = SECTIONS[index]?.label ?? "Settings";
 
@@ -265,6 +277,7 @@ export function Settings() {
           role="dialog"
           aria-label="Settings"
           aria-modal="true"
+          data-settings-window
           ref={ref}
           tabIndex={-1}
           onKeyDown={onKey}
@@ -336,7 +349,7 @@ export function Settings() {
               <button
                 type="button"
                 className="settings-back"
-                onClick={() => (picker ? setPicker(null) : back(settingsPath()))}
+                onClick={() => (picker ? setPicker(null) : settingsBackToList())}
               >
                 <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
                   <path

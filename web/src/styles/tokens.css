@@ -202,7 +202,9 @@
   --hover: color-mix(in oklch, var(--fg) 5%, transparent);
   --sel: color-mix(in oklch, var(--fg) 9%, transparent);
   --press: color-mix(in oklch, var(--fg) 13%, transparent);
-  --scrim: oklch(0.191 0 0 / 0.24);
+  /* Light: the page under a dialog stays readable (Settings' Appearance is judged on it);
+     the sheet's hairline and shadow set it apart. */
+  --scrim: oklch(0.191 0 0 / 0.14);
   /* A switch's track off and on: ink on a light desktop; on a dark one the marks tier (--fg-4),
      so the always-light knob still stands out; the phone's on is the tint (shared.css). The
      knob of a switch or a slider: always light. */
@@ -232,6 +234,8 @@
     --control: 36px;
     --control-sm: 32px;
     --control-lg: 44px;
+    /* The phone's sheets keep their dim. */
+    --scrim: oklch(0.191 0 0 / 0.24);
   }
 }
 

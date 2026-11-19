@@ -13,6 +13,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { phoneLayout } from "./device";
+import { getSettings } from "./settings";
 import { agentTabKey, dropTab, parseSplit, splitParams } from "./splitState";
 import { type NavDirection, type NavKind, navDirection } from "./transitions";
 
@@ -32,7 +33,6 @@ export type Route =
   | { name: "workflow"; id: string }
   | { name: "workflowRun"; id: string }
   | { name: "search" }
-  | { name: "settings" }
   | { name: "shortcuts" }
   | { name: "theme"; id: string }
   | { name: "pair"; code: string }
@@ -41,6 +41,7 @@ export type Route =
   | { name: "missing"; path: string };
 
 const listeners = new Set<() => void>();
+
 /** The path the app shows: what `current()` reported at the last emit. A popstate's URL
  *  has already moved when it arrives, so this is where a pop comes from. (Guarded: a unit
  *  test imports this module without a window.) */
@@ -101,6 +102,12 @@ if (typeof window !== "undefined")
     window.clearTimeout(ownBack);
     ownBack = 0;
     lastKind = ours ? "back" : "popstate";
+    // Settings closing back onto the entry it was opened on by its address: that entry
+    // drops the parameter as it shows.
+    if (stripSettings) {
+      stripSettings = false;
+      history.replaceState(withoutSettingsMark(), "", withoutSettings());
+    }
     const from = shownPath;
     const to = location.pathname + location.search;
     const dir = navDirection(parseRoute(from).name, parseRoute(to).name, ours ? "back" : "popstate", navEnv());
@@ -134,7 +141,6 @@ export function parseRoute(pathWithSearch: string): Route {
   const wf = /^\/workflows\/([^/]+)\/?$/.exec(path);
   if (wf?.[1]) return { name: "workflow", id: decodeURIComponent(wf[1]) };
   if (path === "/search") return { name: "search" };
-  if (path === "/settings") return { name: "settings" };
   if (path === "/shortcuts") return { name: "shortcuts" };
   if (path === "/add-device") return { name: "add-device" };
   if (path === "/phone") return { name: "phone" };
@@ -162,6 +168,47 @@ export function usePath(): string {
 /** The query parameters of the side panel: its tabs (`<harness>:<id>,…`) and the active one. */
 export const SPLIT_PARAM = "s";
 export const SPLIT_ACTIVE_PARAM = "t";
+
+/** The query parameter that opens Settings over the page (`?settings=<section>`; bare, the
+ *  first section on a desktop and the section list on a phone). No move keeps it: any
+ *  other page, a link inside Settings included, closes it. */
+export const SETTINGS_PARAM = "settings";
+
+/** The address of the page `at` with Settings open on `section` over it (its other
+ *  parameters kept). Pure. */
+export function settingsHref(section?: string | null, at: string = current()): string {
+  const [path = "/", query = ""] = (at.split("#")[0] ?? "").split("?");
+  const q = new URLSearchParams(query);
+  q.set(SETTINGS_PARAM, section ?? "");
+  return `${path}?${q.toString().replace(/(^|&)settings=(?=&|$)/, "$1settings")}`;
+}
+
+/** Settings' old address (`/settings`, `?section=x` or `#x`: old links, a reload, the
+ *  bed, sessionpipe://settings) as the address it is now: the page `openOn` (the device's
+ *  "Open on") with Settings over it, the mock flag and the side panel kept. Null for any
+ *  other address. Pure. */
+export function settingsAlias(at: string, openOn: string): string | null {
+  const [beforeHash = "", hash = ""] = at.split("#");
+  const [path = "", query = ""] = beforeHash.split("?");
+  if (path !== "/settings" && path !== "/settings/") return null;
+  const q = new URLSearchParams(query);
+  const keep = new URLSearchParams();
+  for (const name of ["mock", SPLIT_PARAM, SPLIT_ACTIVE_PARAM]) {
+    const v = q.get(name);
+    if (v !== null) keep.set(name, v);
+  }
+  const kept = keep.toString();
+  return settingsHref(q.get("section") || hash || null, `${openOn}${kept ? `?${kept}` : ""}`);
+}
+
+// An old address of Settings is rewritten before anything reads the location.
+if (typeof location !== "undefined") {
+  const alias = settingsAlias(location.pathname + location.search + location.hash, getSettings().defaultPage);
+  if (alias) {
+    history.replaceState(history.state, "", alias);
+    shownPath = current();
+  }
+}
 
 /** The side panel as it goes along to `to`: its tabs and the active one, as `s` and `t`
  *  are written. A session's own page takes that session's tab out of the strip
@@ -213,6 +260,12 @@ let pushed = 0;
 export const hasInAppHistory = (): boolean => pushed > 0;
 
 export function navigate(to: string, opts: { replace?: boolean; back?: boolean } = {}) {
+  // Settings' old address opens it over this page.
+  const [toPath = "", toHash = ""] = to.split("#");
+  if (/^\/settings\/?(\?|$)/.test(toPath)) {
+    openSettings(new URLSearchParams(toPath.split("?")[1] ?? "").get("section") || toHash || null);
+    return;
+  }
   const env = navEnv();
   // Where there is a beside, the panel goes along onto a session's page too; on the phone
   // layout that page is the whole screen.
@@ -258,6 +311,92 @@ export function useSearchParam(name: string): string | null {
   return i < 0 ? null : new URLSearchParams(p.slice(i)).get(name);
 }
 
+/** What a history entry of Settings knows of the way out: `back` entries back is the one
+ *  it was opened over; `bare` when that one carries Settings too (it was opened by its
+ *  address), so it drops the parameter on arrival; `list` when the phone pushed this
+ *  section over the section list. An entry without it was opened by its address. */
+interface SettingsMark {
+  back: number;
+  bare: boolean;
+  list?: boolean;
+}
+const MARK = "__spguiSettings";
+const settingsMark = (): SettingsMark => {
+  const m = (history.state as Record<string, unknown> | null)?.[MARK] as SettingsMark | undefined;
+  return m && typeof m.back === "number" ? m : { back: 0, bare: true };
+};
+const withMark = (m: SettingsMark) => ({ ...(history.state ?? {}), [MARK]: m });
+function withoutSettingsMark(): Record<string, unknown> | null {
+  const st = history.state as Record<string, unknown> | null;
+  if (!st || !(MARK in st)) return st;
+  const { [MARK]: _, ...rest } = st;
+  return rest;
+}
+/** The current address with Settings closed. */
+function withoutSettings(): string {
+  const q = new URLSearchParams(location.search);
+  q.delete(SETTINGS_PARAM);
+  const qs = q.toString();
+  return `${location.pathname}${qs ? `?${qs}` : ""}`;
+}
+/** Set while Settings' close goes back onto an entry that still carries it. */
+let stripSettings = false;
+
+/** Whether Settings is open over the page. */
+export const settingsOpen = (): boolean => new URLSearchParams(location.search).has(SETTINGS_PARAM);
+
+/** Opens Settings over the page (on `section`, else the first one, or on a phone the
+ *  list): one history entry, so Back and Esc close it. Already open, it goes to the
+ *  section asked for, in place, and takes the focus. */
+export function openSettings(section?: string | null): void {
+  if (settingsOpen()) {
+    const now = new URLSearchParams(location.search).get(SETTINGS_PARAM);
+    if (section && section !== now) {
+      history.replaceState(history.state, "", settingsHref(section));
+      emit();
+    }
+    document.querySelector<HTMLElement>("[data-settings-window]")?.focus({ preventScroll: true });
+    return;
+  }
+  history.pushState(withMark({ back: 1, bare: false }), "", settingsHref(section));
+  pushed++;
+  emit();
+}
+
+/** Settings moved to another section from inside it: in place, or (the phone's stack, a
+ *  section over the list) as one entry more. Null is the list. */
+export function showSettingsSection(section: string | null, opts: { push?: boolean } = {}): void {
+  const target = settingsHref(section);
+  if (target === current()) return;
+  if (opts.push) {
+    const m = settingsMark();
+    history.pushState(withMark({ back: m.back + 1, bare: m.bare, list: true }), "", target);
+    pushed++;
+  } else history.replaceState(history.state, "", target);
+  emit();
+}
+
+/** The phone's Back from a section to the list: the entry behind where the list pushed
+ *  it, else the list in its place. */
+export function settingsBackToList(): void {
+  if (settingsMark().list) history.back();
+  else showSettingsSection(null);
+}
+
+/** Closes Settings: back past every entry of it, to the one it was opened over; opened by
+ *  its address, that entry (or this one) is the page without it. */
+export function closeSettings(): void {
+  if (!settingsOpen()) return;
+  const m = settingsMark();
+  if (m.back <= 0) {
+    history.replaceState(withoutSettingsMark(), "", withoutSettings());
+    emit();
+    return;
+  }
+  stripSettings = m.bare;
+  history.go(-m.back);
+}
+
 /** Our own Back: the entry behind when there is one (its popstate plays as a pop on the
  *  phone), else `fallback` as a pop of its own. */
 export function back(fallback = "/") {
@@ -298,6 +437,7 @@ export function Link({
   "data-nav-item"?: string;
   "aria-label"?: string;
   "aria-expanded"?: boolean;
+  "aria-haspopup"?: "dialog";
   onKeyDown?: (e: KeyboardEvent<HTMLAnchorElement>) => void;
   style?: CSSProperties;
   tabIndex?: number;

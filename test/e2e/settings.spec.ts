@@ -3,8 +3,9 @@
 // Settings: the Display popover in the sidebar (appearance, the two shipped skins, text
 // size) and the settings window at /settings (the mode, the app-wide tier lens), each
 // remembered per device.
-import { expect, type Page, test } from "@playwright/test";
-import { openBoard, openPage } from "./helpers.js";
+import { randomUUID } from "node:crypto";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
+import { EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
 
 test.describe("quick settings", () => {
   test("skin and text size apply, and persist across a reload", async ({ page }) => {
@@ -79,7 +80,7 @@ test.describe("quick settings", () => {
     await page.getByRole("dialog", { name: "Quick settings" }).locator("[data-nav='all-settings']").click();
     await expect(dialog(page)).toBeVisible();
     await expect(page.getByRole("dialog", { name: "Quick settings" })).toHaveCount(0);
-    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page).toHaveURL(/\/\?settings$/);
   });
 });
 
@@ -115,7 +116,7 @@ test.describe("settings dialog", () => {
     await openBoard(page);
     await page.locator("nav.rail a[aria-label='Settings']").click();
     await expect(dialog(page)).toBeVisible();
-    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page).toHaveURL(/\/\?settings$/);
     await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("General");
     for (const s of ["Tier lens", "Notifications", "Keyboard", "Views & skins", "Data", "About"]) {
       await dialog(page).getByRole("tab", { name: s }).click();
@@ -128,7 +129,7 @@ test.describe("settings dialog", () => {
     await expect(dialog(page)).toHaveCount(0);
     await expect(page).toHaveURL(/\/$/);
     // Straight to a section by URL.
-    await openPage(page, "/settings?section=data");
+    await openPage(page, "/?settings=data");
     await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Data");
   });
 
@@ -330,5 +331,198 @@ test.describe("settings dialog", () => {
     await expect(view.getByRole("link", { name: /Add this device|Add it/ })).toHaveCount(0);
     await openPage(page, "/settings");
     await mode(page, "Advanced").click();
+  });
+});
+
+// Settings is a window over the page you are on, not a page of its own: `?settings=` on
+// that page's address, which stays mounted under it, and goes when Settings closes.
+test.describe("settings over the page", () => {
+  const gear = (page: Page) => page.locator("nav.rail a[data-nav='settings']");
+
+  test("opens over Machines and closes onto the same page, at the same place", async ({ page }) => {
+    // Short enough for Machines to scroll.
+    await page.setViewportSize({ width: 1440, height: 420 });
+    await openPage(page, "/machines");
+    const heading = page.locator(".page .bar-title", { hasText: "Machines" });
+    await expect(heading).toBeVisible();
+    await heading.evaluate((el) => {
+      (window as unknown as { __page: Element }).__page = el;
+    });
+    const y = await page.evaluate(() => {
+      window.scrollTo({ top: 120 });
+      return window.scrollY;
+    });
+    await gear(page).click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(page).toHaveURL(/\/machines\?settings$/);
+    // The page is still there under it, its row lit; no board is drawn in its place.
+    await expect(heading).toBeAttached();
+    await expect(page.locator("nav.rail a[data-nav='machines']")).toHaveAttribute("aria-current", "page");
+    await expect(page.locator(".board-list")).toHaveCount(0);
+    expect(await page.title()).toMatch(/^(\(\d+\) )?Machines · /);
+    // The sliders are lit and say they opened a dialog, not a page.
+    await expect(gear(page)).toHaveClass(/nav-link--on/);
+    await expect(gear(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(gear(page)).not.toHaveAttribute("aria-current", /./);
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/machines$/);
+    expect(await heading.evaluate((el) => el === (window as unknown as { __page: Element }).__page)).toBe(true);
+    expect(await page.evaluate(() => window.scrollY)).toBe(y);
+    await expect(gear(page)).toHaveAttribute("aria-expanded", "false");
+  });
+
+  /** A session that read one file, src/outbox.ts, so its page can open it in the drawer. */
+  async function sessionWithFile(request: APIRequestContext): Promise<string> {
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const id = randomUUID();
+    const cwd = "/Users/dev/code/e2e";
+    let seq = 0;
+    let clock = Date.now() - 60_000;
+    const ev = (type: string, data: Record<string, unknown>) => {
+      clock += 1000;
+      return {
+        protocol: 1,
+        id: ulid(clock),
+        type,
+        time: new Date(clock).toISOString(),
+        tier: 3,
+        harness: { name: "claude-code", version: "2.1.296" },
+        session: { id, seq: seq++, machine: "e2e-box", cwd, title: `E2E settings ${id.slice(0, 8)}` },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data,
+      };
+    };
+    const file = `${cwd}/src/outbox.ts`;
+    const input = { file_path: file };
+    const output = { type: "text", file: { filePath: file, content: "export {};\n", numLines: 1, startLine: 1 } };
+    const events = [
+      ev("session.started", { source: "startup" }),
+      ev("turn.started", { turn_id: "t1", prompt_chars: 4 }),
+      ev("tool.started", { tool: "Read", call_id: "c1", turn_id: "t1", input }),
+      ev("tool.ended", { tool: "Read", call_id: "c1", turn_id: "t1", input, output, ok: true, ms: 20 }),
+      ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 2000 }),
+    ];
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events },
+    });
+    expect(res.status()).toBe(202);
+    return sessionUrl("claude-code", id);
+  }
+
+  test("over a session with a file open, the file stays in the address and the drawer", async ({ page, request }) => {
+    const session = await sessionWithFile(request);
+    await openPage(page, `${session}?file=src%2Foutbox.ts`);
+    await expect(page.locator("[data-files-open]")).toBeVisible();
+    await expect(page).toHaveURL((u) => u.searchParams.get("file") === "src/outbox.ts");
+    const seen: string[] = [];
+    page.on("framenavigated", (f) => {
+      if (f === page.mainFrame()) seen.push(f.url());
+    });
+    await page.evaluate(() => {
+      const w = window as unknown as { __urls: string[] };
+      w.__urls = [];
+      for (const k of ["pushState", "replaceState"] as const) {
+        const orig = history[k].bind(history);
+        history[k] = (s: unknown, t: string, u?: string | URL | null) => {
+          w.__urls.push(String(u));
+          orig(s, t, u);
+        };
+      }
+    });
+    await gear(page).click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(page).toHaveURL((u) => u.pathname === session && u.searchParams.get("file") === "src/outbox.ts");
+    await dialog(page).getByRole("tab", { name: "Data" }).click();
+    await expect(page).toHaveURL(/[?&]settings=data$/);
+    // Esc closes Settings, not the file under it.
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page.locator("[data-files-open]")).toBeVisible();
+    await expect(page).toHaveURL((u) => u.pathname === session && u.search === "?file=src%2Foutbox.ts");
+    const urls = await page.evaluate(() => (window as unknown as { __urls: string[] }).__urls);
+    expect(urls.filter((u) => u.startsWith("/settings"))).toEqual([]);
+    expect(seen.filter((u) => new URL(u).pathname === "/settings")).toEqual([]);
+  });
+
+  test("its old address opens it over the page Open on names, on the section asked for", async ({ page }) => {
+    await openPage(page, "/settings?section=data");
+    await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Data");
+    await expect(page).toHaveURL(/\/\?settings=data$/);
+    await openPage(page, "/settings#notifications");
+    await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Notifications");
+    await expect(page).toHaveURL(/\/\?settings=notifications$/);
+    // Opened by its address, it closes onto the same page without it.
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator("section.group").first()).toBeVisible();
+  });
+
+  test("a link inside it goes to its page and leaves Settings behind", async ({ page }) => {
+    await openPage(page, "/machines?settings=keyboard");
+    await dialog(page).getByRole("link", { name: "Customize shortcuts…" }).click();
+    await expect(page).toHaveURL(/\/shortcuts$/);
+    await expect(dialog(page)).toHaveCount(0);
+  });
+
+  test("one height per window: 720 px in a large one, all but a margin in a short one", async ({ page }) => {
+    await openPage(page, "/?settings=general");
+    const sheet = page.locator(".settings");
+    const height = async () => (await sheet.boundingBox())!.height;
+    // Measured once its zoom-in has played.
+    await expect.poll(height).toBe(720);
+    // Switching section never makes it jump.
+    await dialog(page).getByRole("tab", { name: "About" }).click();
+    expect(await height()).toBe(720);
+    // A window under 600 px tall (the app's smallest is 480): 16 px clear above and below.
+    await page.setViewportSize({ width: 720, height: 480 });
+    await expect.poll(height).toBe(448);
+  });
+
+  test("the scrim is the one light token every dialog shares", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await openBoard(page);
+    await page.keyboard.press("ControlOrMeta+k");
+    const scrim = page.locator(".pal-scrim");
+    await expect(scrim).toBeVisible();
+    const [painted, token] = await scrim.evaluate((el) => {
+      const probe = document.createElement("div");
+      probe.style.background = "oklch(0.191 0 0 / 0.14)";
+      document.body.append(probe);
+      const want = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return [getComputedStyle(el).backgroundColor, want];
+    });
+    expect(painted).toBe(token);
+  });
+});
+
+// The phone keeps its full-screen sheet and its stack: the list, a section pushed over it.
+test.describe("settings on a phone", () => {
+  test.use({ viewport: { width: 393, height: 852 } });
+  test("list › section is pushed, Back is the list, Done is the page it was opened on", async ({ page }) => {
+    await openPage(page, "/machines");
+    await page.locator("[data-nav=more]").first().click();
+    await page.locator(".more-sheet [data-nav='settings']").click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(page.locator(".more-sheet")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/machines\?settings$/);
+    await expect(dialog(page)).toHaveAttribute("data-view", "list");
+    await dialog(page).getByRole("tab", { name: "Data" }).click();
+    await expect(dialog(page)).toHaveAttribute("data-view", "pane");
+    await expect(page).toHaveURL(/\/machines\?settings=data$/);
+    await dialog(page).locator(".settings-back").click();
+    await expect(dialog(page)).toHaveAttribute("data-view", "list");
+    await expect(page).toHaveURL(/\/machines\?settings$/);
+    await dialog(page).getByRole("tab", { name: "About" }).click();
+    await dialog(page).locator(".settings-bar .settings-done").click();
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/machines$/);
   });
 });
