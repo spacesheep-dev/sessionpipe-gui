@@ -17,11 +17,23 @@ const here = import.meta.dirname;
  *  older macOS, an Android WebView) still runs it. The native config builds the same. */
 export const TARGET = ["es2020", "edge88", "firefox78", "chrome87", "safari14"];
 
+/** What the first page loads is one chunk, as it was before Vite 8: everything main.tsx
+ *  imports statically. Rolldown's own split made the pieces the entry shares with the lazy
+ *  pages (account/shell.ts, native/bridge.ts and others) separate files, so a browser
+ *  fetched files the native shell's chunks import as well. The native config builds the same. */
+export const ROLLDOWN = { output: { codeSplitting: { groups: [{ name: "index", tags: ["$initial" as const] }] } } };
+
 export default defineConfig({
   root: here,
   plugins: [react()],
   resolve: { alias: { "@shared": path.resolve(here, "../shared") } },
-  build: { outDir: path.resolve(here, "../dist/web"), emptyOutDir: true, sourcemap: true, target: TARGET },
+  build: {
+    outDir: path.resolve(here, "../dist/web"),
+    emptyOutDir: true,
+    sourcemap: true,
+    target: TARGET,
+    rolldownOptions: ROLLDOWN,
+  },
   server: {
     port: 5173,
     host: true,

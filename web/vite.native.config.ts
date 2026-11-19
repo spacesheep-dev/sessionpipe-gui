@@ -8,7 +8,7 @@ import { createReadStream, statSync } from "node:fs";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
-import { TARGET } from "./vite.config.ts";
+import { ROLLDOWN, TARGET } from "./vite.config.ts";
 
 const port = Number(process.env.VITE_PORT);
 if (!port) throw new Error("set VITE_PORT (the app's devUrl port)");
@@ -41,6 +41,12 @@ export default defineConfig({
   root: here,
   plugins: [react(), appViews()],
   resolve: { alias: { "@shared": path.resolve(here, "../shared") } },
-  build: { outDir: path.resolve(here, "../dist/web"), emptyOutDir: true, sourcemap: true, target: TARGET },
+  build: {
+    outDir: path.resolve(here, "../dist/web"),
+    emptyOutDir: true,
+    sourcemap: true,
+    target: TARGET,
+    rolldownOptions: ROLLDOWN,
+  },
   server: { port, strictPort: true, host: "127.0.0.1" },
 });
