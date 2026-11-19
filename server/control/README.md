@@ -180,7 +180,9 @@ keep one named by `email`, else by `name` (an API home, `api.z.ai`), and its `si
 would fail a resume until `claude auth login` is run there, absent is unknown. No home folder: sessionpipe
 0.10's hello has none. `MachineControl.tilde` says a start may name a `~/…` folder, which
 the machine expands: set when this receiver's sessionpipe-core takes one and the hello has
-`start` (CONTROL.md §3.1: "a machine that sends `start` also takes a `~` folder"; `tilde.ts`). Each hello says them again: one without them takes them
+`start` (CONTROL.md §3.1: "a machine that sends `start` also takes a `~` folder"; `tilde.ts`),
+and never for a machine reached through spacesheep, whose jobs door checks a start's folder
+against the computer's full-path folders and refuses a `~/…` one. Each hello says them again: one without them takes them
 away. The well-known's `control.inherit: true` tells a daemon this receiver shows an
 inherit machine as that, so it may pair or switch to inherit with it (CONTROL.md §2).
 Demo mode puts its machines here through `demo` (ids `m_demo-…`, server/demo/machine.ts).

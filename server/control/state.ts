@@ -180,7 +180,9 @@ export class ControlState {
   /** The bytes of the files starts carry (files.ts), under <dir>/files. */
   readonly files: FileStore;
   /** This receiver's core takes a start's `~/…` folder (tilde.ts), so a machine that takes
-   *  one (its hello has `start`) is offered them (`MachineControl.tilde`). */
+   *  one (its hello has `start`) is offered them (`MachineControl.tilde`). A machine reached
+   *  through spacesheep never is: spacesheep checks a start's folder against the computer's
+   *  absolute folders and refuses a `~/…` one (remote.ts MemoryControl says the same). */
   takesTilde = false;
   /** Called with every message whose state changed (queued, acked, expired). */
   onMessage: (m: MessageRow) => void = () => {};
@@ -407,7 +409,7 @@ export class ControlState {
   machineControl(m: MachineRow): MachineControl {
     return machineControl(m, {
       queued: this.queued(m.id).length,
-      tilde: this.takesTilde && machineTakesTilde(m),
+      tilde: this.takesTilde && machineTakesTilde(m) && !m.remote,
     });
   }
 

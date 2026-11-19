@@ -537,6 +537,58 @@ test("long turns read whole from what the phone holds: the newest reply at once,
   await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
 });
 
+test("New session offers only the folders spacesheep takes: a session's `~/…` folder is not among them, and Start sends a full path", async () => {
+  // The computer takes starts (its hello has `start`). spacesheep checks a start's folder
+  // against the computer's folders, which are full paths, and refuses a `~/…` one.
+  Object.assign(ss.machines[0]!, { start: { "claude-code": { permissions: ["read", "safe"], permission: "safe" } } });
+  // The account's newest session, in `~/notes`.
+  const s = new Session("s-notes", "claude-code", Date.now() - 5000);
+  const notes = { ...on, session: { machine: NAME, cwd: "~/notes", title: "Sort the notes" } };
+  ss.push([
+    s.ev("session.started", { source: "startup" }, notes),
+    s.ev("turn.started", { turn_id: "t1" }, notes),
+    s.ev("turn.transcript", { turn: 1, user: "Sort the notes by date.", assistant: "Sorted." }, notes),
+    s.ev("turn.ended", { turn_id: "t1" }, notes),
+  ]);
+  try {
+    await page.goto(server.url);
+    await expect(page.getByText("Sort the notes").first()).toBeVisible();
+    await page.locator(".page.board .compose-btn--phone").click();
+    const sheet = page.locator("[data-new-session]");
+    await expect(sheet.locator("[data-ns-row=permission]")).toBeVisible();
+    // The newest session's folder is `~/notes`: the sheet picks the newest full path instead,
+    // and offers only full paths.
+    const folder = sheet.locator("[data-ns-row=folder] button.sel");
+    await expect(folder).toHaveAttribute("data-value", "/Users/me/billing");
+    await folder.click();
+    const opts = page.locator(".sel-sheet .sel-opt");
+    await expect(opts.first()).toBeVisible();
+    expect(await opts.allTextContents()).toEqual([
+      expect.stringContaining("/Users/me/billing"),
+      expect.stringContaining("/Users/me"),
+    ]);
+    await expect(page.locator(".sel-sheet").getByText("~/notes")).toHaveCount(0);
+    await opts.first().click();
+    await expect(page.locator(".sel-sheet")).toHaveCount(0);
+    const before = ran.length;
+    await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
+    await sheet.locator(".ns-bar [data-ns-start]").click();
+    await expect(page).toHaveURL(/\/s\/claude-code\//);
+    await expect
+      .poll(() => ran.slice(before).find((c) => c.kind === "start"))
+      .toMatchObject({
+        kind: "start",
+        cwd: "/Users/me/billing",
+        text: "Add a test for the rounding.",
+      });
+    expect(ss.jobs.filter((j) => j.action === "start" && j.status === "done")).toHaveLength(1);
+  } finally {
+    delete ss.machines[0]!.start;
+  }
+  await page.goto(server.url);
+  await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+});
+
 test("a 429 from spacesheep is waited out and read on from; a full room at the hub and an answer too large are not errors", async () => {
   ss.limitedUntil = Date.now() + 9000;
   // Something happens on the account: the next read of the relay meets spacesheep's limit

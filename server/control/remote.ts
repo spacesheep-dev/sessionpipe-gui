@@ -662,8 +662,10 @@ export interface MemoryControlOptions {
   /** A new row's id; absent, a ULID at `now` (newUlid). */
   newId?: (now: number) => string;
   /** Whoever verifies a start takes a `~/…` folder (rows.ts machineControl `tilde`), so a
-   *  machine that says `start` is offered one. Absent: yes, as a receiver with a current
-   *  core says of a machine paired on spacesheep. */
+   *  machine that says `start` is offered one. Absent: no. spacesheep's jobs door checks a
+   *  start's folder against the computer's own folders, which are absolute, and refuses a
+   *  `~/…` one, so the sheet offers absolute folders only (state.ts says the same of these
+   *  machines on a receiver). */
   tilde?: boolean;
 }
 
@@ -744,7 +746,7 @@ export class MemoryControl {
     return (this.queues.get(id) ?? []).filter((m) => !isFinal(m.outcome));
   }
   machineControl(m: MachineRow): MachineControl {
-    return machineControl(m, { queued: this.queued(m.id).length, tilde: (this.o.tilde ?? true) && !!m.start });
+    return machineControl(m, { queued: this.queued(m.id).length, tilde: (this.o.tilde ?? false) && !!m.start });
   }
   /** The paired machines, keyed by name (the name events carry in session.machine). */
   machines(): Map<string, MachineControl> {

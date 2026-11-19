@@ -3,9 +3,10 @@
 // It answers what the real one answers, read from its source: the relay
 // (`{ events, next, oldest, protocol }`, every event after `since` it still holds, a wait
 // when there are none), the machine list, the jobs list (100 after `since`, with `now` and
-// `code`), a send (202 with a job id, 401 `unlock` for a key the computer does not list, or
-// whatever the test queued for it), a revoked key (401 `unauthorized`), and its limit on
-// relay reads (240 in a fixed 600 s window, 429 with Retry-After). It also plays the two
+// `code`), a send (202 with a job id, 401 `unlock` for a key the computer does not list, 400
+// `folder` for a start outside the computer's folders, or whatever the test queued for it),
+// a revoked key (401 `unauthorized`), and its limit on relay reads (240 in a fixed 600 s
+// window, 429 with Retry-After). It also plays the two
 // doors an app uses before and beside the relay: the connect (a code and four digits, a
 // poll that hands the key over once approved) and the app's own device key (asked to be
 // trusted, and where it stands; approved or removed on its Devices page; the hour a newly
@@ -435,7 +436,7 @@ export class FakeSpacesheep {
         403,
       );
     }
-    let cmd: { kind?: unknown; session?: unknown; nonce?: unknown } = {};
+    let cmd: { kind?: unknown; session?: unknown; nonce?: unknown; cwd?: unknown } = {};
     try {
       cmd = (JSON.parse(body.cmd) ?? {}) as typeof cmd;
     } catch {
@@ -445,6 +446,14 @@ export class FakeSpacesheep {
     const nonce = typeof cmd.nonce === "string" ? cmd.nonce : "";
     if (nonce && this.replays && this.jobs.some((j) => j.nonce === nonce))
       return json({ error: "That was already sent.", code: "replay" }, 409);
+    // A start runs in one of the computer's folders or inside one, by whole path segments
+    // (index.ts folderAllowed): its folders are full paths, so a `~/…` one is in none.
+    if (cmd.kind === "start") {
+      const m = this.machines.find((x) => x.id === machine)!;
+      const folders = Array.isArray(m.folders) ? (m.folders as string[]) : [];
+      if (!folderAllowed(typeof cmd.cwd === "string" ? cmd.cwd : "", folders))
+        return json({ error: `${m.name} only lets the agent work in: ${folders.join(", ")}.`, code: "folder" }, 400);
+    }
     const named = typeof cmd.session === "string" ? cmd.session : "";
     const at = named.indexOf(":");
     const job: FakeJob & { nonce?: string } = {
@@ -462,6 +471,17 @@ export class FakeSpacesheep {
     this.jobs.push(job);
     return json({ job: job.id, online: !!this.machines.find((m) => m.id === machine)?.online }, 202);
   }
+}
+
+/** spacesheep's folderAllowed (machines.ts): `cwd` is one of `folders` or inside one. */
+function folderAllowed(cwd: string, folders: string[]): boolean {
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+  const c = norm(cwd);
+  if (c.split("/").includes("..")) return false;
+  return folders.some((f) => {
+    const r = norm(f);
+    return c === r || c.startsWith(r === "/" ? "/" : `${r}/`);
+  });
 }
 
 /** The answer as the little of a `Response` the relay's reader and a send read. */

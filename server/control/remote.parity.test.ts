@@ -351,6 +351,11 @@ describe("the receiver's wiring and a page's, through one script", () => {
       [M1, true, undefined, "spacesheep.test"],
       [M2, false, undefined, "spacesheep.test"],
     ]);
+    // Each takes a start, and neither is offered a `~/…` folder: spacesheep refuses one.
+    expect(v.machines.map((m) => [!!m.start, m.tilde])).toEqual([
+      [true, undefined],
+      [true, undefined],
+    ]);
     expect(v.status).toMatchObject({ state: "ok", machines: ["lab-mac", "attic-linux"] });
 
     // A prompt to the computer that is on, a start to the one that is off.
