@@ -4,6 +4,7 @@
 //! reached through Rust (shell's `sp-receivers`: the `rx:` scheme and the stream channel),
 //! never by loading their pages.
 
+mod acct;
 mod confirm;
 pub mod contract;
 #[cfg(not(target_os = "ios"))]
@@ -31,7 +32,51 @@ fn app_open_external<R: Runtime>(app: AppHandle<R>, url: String) -> Result<(), S
     Ok(())
 }
 
-fn open_external<R: Runtime>(app: &AppHandle<R>, url: &str) {
+/// Opens an http(s) link outside the app and says whether the system took it: the
+/// browser was handed the page (true), or nothing opened (false). Called from anywhere;
+/// UIKit is asked on the main thread and answers there a moment later.
+pub(crate) async fn open_external_told<R: Runtime>(app: &AppHandle<R>, url: &str) -> bool {
+    #[cfg(target_os = "ios")]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let url = url.to_owned();
+        let asked = app.run_on_main_thread(move || {
+            uikit::open_external_then(&url, move |opened| {
+                let _ = tx.send(opened);
+            })
+        });
+        if asked.is_err() {
+            return false;
+        }
+        // UIKit always answers; were it ever not to, the link was handed over and what
+        // became of it is not known, which is what this command said before it could tell.
+        match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+            Ok(told) => told.unwrap_or(false),
+            Err(_) => true,
+        }
+    }
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_opener::OpenerExt;
+        // Not logged with its address, nor with the opener's own error (which may
+        // quote it): this is how the connect's link is opened, and the link holds the
+        // connect's code.
+        match app.opener().open_url(url, None::<&str>) {
+            Ok(()) => true,
+            Err(_) => {
+                log::warn!("a link could not be handed to the browser");
+                false
+            }
+        }
+    }
+    #[cfg(not(mobile))]
+    {
+        let _ = (app, url);
+        true
+    }
+}
+
+pub(crate) fn open_external<R: Runtime>(app: &AppHandle<R>, url: &str) {
     #[cfg(target_os = "ios")]
     let _ = (app, uikit::open_external(url));
     #[cfg(target_os = "android")]
@@ -139,6 +184,7 @@ fn open_main<R: Runtime>(app: &AppHandle<R>, path: Option<&str>) -> tauri::Resul
         contract::Os::Ios => contract::init_script(&info),
         contract::Os::Android => contract::live_init_script(),
     };
+    app.state::<contract::Injected>().renew(&script);
     let win = WebviewWindowBuilder::new(app, "main", start_url(path))
         .initialization_script(script)
         .initialization_script(if probe { PROBE_ERRORS } else { "" })
@@ -175,10 +221,6 @@ pub(crate) fn reopen_at<R: Runtime>(app: &AppHandle<R>, path: Option<String>) {
     };
     let hub = app.state::<Hub>();
     hub.close_streams_of("main");
-    let script = contract::init_script(&net::shell_info(
-        &hub,
-        &app.package_info().version.to_string(),
-    ));
     let url = format!(
         "{}{}",
         contract::Os::current().app_origin(),
@@ -186,19 +228,27 @@ pub(crate) fn reopen_at<R: Runtime>(app: &AppHandle<R>, path: Option<String>) {
             .filter(|p| p.starts_with('/') && !p.starts_with("//"))
             .unwrap_or("/")
     );
+    // The contract is read here, on the main thread, where every swap of it is made
+    // (`sync_contract` too): whichever is made last says the Hub as it is then.
     #[cfg(target_os = "ios")]
-    let _ = win.with_webview(move |pv| unsafe {
-        uikit::renew_contract(
-            pv.inner() as *mut objc2::runtime::AnyObject,
-            contract::MARKER,
-            &script,
-            &url,
-        )
-    });
+    {
+        let app = app.clone();
+        let _ = win.with_webview(move |pv| {
+            let script = contract_now(&app);
+            app.state::<contract::Injected>().renew(&script);
+            unsafe {
+                uikit::renew_contract(
+                    pv.inner() as *mut objc2::runtime::AnyObject,
+                    contract::MARKER,
+                    &script,
+                    &url,
+                )
+            }
+        });
+    }
     // Android: the page reads the contract as it starts, so a navigation is enough.
     #[cfg(target_os = "android")]
     {
-        let _ = script;
         match url.parse() {
             Ok(u) => {
                 if let Err(e) = win.navigate(u) {
@@ -209,11 +259,52 @@ pub(crate) fn reopen_at<R: Runtime>(app: &AppHandle<R>, path: Option<String>) {
         }
     }
     #[cfg(not(mobile))]
-    let _ = (win, script, url);
+    let _ = (win, url);
 }
 
 pub(crate) fn reopen<R: Runtime>(app: &AppHandle<R>) {
     reopen_at(app, None)
+}
+
+/// The contract script for the Hub as it is now.
+#[cfg(target_os = "ios")]
+fn contract_now<R: Runtime>(app: &AppHandle<R>) -> String {
+    contract::init_script(&net::shell_info(
+        &app.state::<Hub>(),
+        &app.package_info().version.to_string(),
+    ))
+}
+
+/// Keeps the contract a page would read if it loaded now in step with the Hub, without
+/// touching the page that is showing. The window's contract is fixed for a page's life,
+/// but the Hub's list changes under it: an account is disconnected, its key is refused,
+/// a receiver is removed. The page then reloads itself (`location.replace("/")`), and
+/// must start on what is there now: the next receiver, or none and the welcome, never
+/// the account that was just forgotten. iOS swaps the document-start script when what
+/// it would say changed; Android's page asks for the contract as each page starts
+/// (`contract::live_init_script`), so there is nothing to do there.
+pub(crate) fn sync_contract<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(target_os = "ios")]
+    {
+        let Some(win) = app.get_webview_window("main") else {
+            return;
+        };
+        let app = app.clone();
+        let _ = win.with_webview(move |pv| {
+            let script = contract_now(&app);
+            if app.state::<contract::Injected>().renew(&script) {
+                unsafe {
+                    uikit::swap_contract(
+                        pv.inner() as *mut objc2::runtime::AnyObject,
+                        contract::MARKER,
+                        &script,
+                    )
+                }
+            }
+        });
+    }
+    #[cfg(not(target_os = "ios"))]
+    let _ = app;
 }
 
 /// Collects the page's errors from the first script on (probe runs only).
@@ -297,8 +388,8 @@ mod notifications {
     pub fn start<R: Runtime>(app: &AppHandle<R>, hub: Hub) {
         let n = app.notification();
         // Allow and Deny: plain buttons (red is for errors), and both open the app on the
-        // session, where this build says why it can't send. A device build with a signer
-        // answers them in the background instead (arch-mobile §6.2).
+        // session, where the answer is given and signed. Answering from the notification
+        // itself, with the app behind, is not built (arch-mobile §6.2).
         let actions = ActionType::builder(PERMISSION)
             .actions(vec![
                 Action::builder("allow", "Allow")
@@ -350,8 +441,11 @@ mod notifications {
             let _ = app.run_on_main_thread(move || {
                 crate::uikit::watch_background(move |on| {
                     bg.store(on, Ordering::SeqCst);
-                    // Back in front: the window's own streams resync (§11.1 `wake`).
+                    // Back in front: the window's own streams resync (§11.1 `wake`), and
+                    // a connect the person may just have confirmed in the browser is
+                    // asked about now rather than at its next turn.
                     if !on {
+                        h.state::<Hub>().account_nudge();
                         let _ = h.emit_to("main", "wake", ());
                     }
                 })
@@ -427,6 +521,16 @@ pub fn run() {
             net::rx_remove,
             net::rx_stream,
             net::rx_stream_close,
+            acct::acct_status,
+            acct::acct_connect_start,
+            acct::acct_connect_open,
+            acct::acct_connect_cancel,
+            acct::acct_disconnect,
+            acct::acct_device_ask,
+            acct::acct_needs,
+            acct::acct_doc_get,
+            acct::acct_doc_set,
+            acct::acct_doc_delete,
             settings::app_settings_get,
             settings::app_settings_set,
             settings::app_first_run_done,
@@ -440,9 +544,14 @@ pub fn run() {
             };
             std::fs::create_dir_all(&home)?;
             app.manage(settings::Settings::new(&home));
-            let hub = Hub::new(net::config(home, &version));
+            app.manage(contract::Injected::default());
+            let mut cfg = net::config(home, &version, &app.config().identifier);
+            // What the Hub asks the person about an account, it asks in a native alert.
+            cfg.account.confirm = Some(std::sync::Arc::new(acct::Alerts(app.handle().clone())));
+            let hub = Hub::new(cfg);
             hub.start(tauri::async_runtime::handle().inner().clone());
             app.manage(hub.clone());
+            acct::watch(app.handle(), hub.clone());
             #[cfg(target_os = "ios")]
             identity_glue::init(app, hub.clone())?;
             #[cfg(mobile)]
@@ -454,8 +563,14 @@ pub fn run() {
         })
         .on_page_load(move |webview, payload| {
             if payload.event() == PageLoadEvent::Started {
-                // A reload ends the streams the old page opened.
-                webview.app_handle().state::<Hub>().close_streams_of(webview.label());
+                // A reload ends the streams the old page opened. And the page that comes
+                // starts its board from nothing: the first needs-you list it hands over
+                // for an account is what it found, not news (`account_needs_reseed`).
+                let hub = webview.app_handle().state::<Hub>();
+                hub.close_streams_of(webview.label());
+                if webview.label() == "main" {
+                    hub.account_needs_reseed();
+                }
                 return;
             }
             probe(webview);

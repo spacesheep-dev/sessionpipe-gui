@@ -268,6 +268,15 @@ kbd {
   white-space: nowrap;
 }
 
+/* A name kept on one line where it fits (components/bits.tsx WithName): a machine's
+   "Misha-Petrov-laptop" moves to the next line whole instead of breaking at a hyphen; one
+   wider than the line still wraps inside. */
+.whole-name {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 /* A scheme or skin change lands in one frame (lib/theme.ts sets this for two frames):
    no colour tween across the whole window. */
 :root[data-switching] *,

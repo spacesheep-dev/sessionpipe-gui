@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The shell's platform as page code reads it (the <html> mark, else the flag), and the
-// phone layout from the media query.
+// phone layout and the touch keys from their media queries.
 import "../native/test-env";
 import { afterEach, describe, expect, it } from "vitest";
-import { PHONE_QUERY, phoneLayout, phoneShell, shellPlatform } from "./device";
+import { PHONE_QUERY, phoneLayout, phoneShell, shellPlatform, TOUCH_QUERY, touchKeys } from "./device";
 
 const g = globalThis as Record<string, unknown>;
 const html = document.documentElement as unknown as { dataset: Record<string, string | undefined> };
@@ -49,5 +49,21 @@ describe("phoneLayout", () => {
     };
     expect(phoneLayout()).toBe(true);
     expect(asked).toEqual([PHONE_QUERY]);
+  });
+});
+
+describe("touchKeys", () => {
+  it("is the main pointer, never the width: a narrow desktop window keeps Return to send", () => {
+    expect(touchKeys()).toBe(false);
+    let coarse = false;
+    g.matchMedia = (q: string) => ({
+      matches: q === PHONE_QUERY || (q === TOUCH_QUERY && coarse),
+      addEventListener() {},
+      removeEventListener() {},
+    });
+    expect(phoneLayout()).toBe(true);
+    expect(touchKeys()).toBe(false);
+    coarse = true;
+    expect(touchKeys()).toBe(true);
   });
 });

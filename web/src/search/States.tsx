@@ -3,10 +3,12 @@
 // index status as one quiet line (and its popover), the idle page that teaches the syntax
 // with this device's recent searches, the "nothing to search yet" page, and the no-result
 // state with the one fix that applies.
+
 import type { SearchHint, SearchIndexStatus, SessionSearchPage } from "@shared/api";
 import { useEffect, useRef, useState } from "react";
 import { EmptyState, Toggle } from "../components/bits";
 import { confirmAction } from "../components/ContextMenu";
+import { accountMode } from "../lib/net";
 import { Link, navigate } from "../lib/router";
 import { useNow } from "../lib/time";
 import { forgetAnswers, noteStatus } from "./client";
@@ -237,7 +239,9 @@ export function Idle({
     <div className="sx-idle">
       <h2 className="sx-idle-title">Search every session</h2>
       <p className="sx-idle-text">
-        Prompts, replies and tool calls from every machine, and this {macWord()}'s own agent history.
+        {accountMode()
+          ? "Prompts, replies and tool calls from every machine on this account."
+          : `Prompts, replies and tool calls from every machine, and this ${macWord()}'s own agent history.`}
       </p>
       <ul className="sx-examples">
         {examples.map((e) => (

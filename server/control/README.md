@@ -13,7 +13,10 @@ otherwise `401 {"reason":"unauthorized"}`. All bodies and answers are JSON. Erro
 A terminal ran `sessionpipe control pair <this receiver>`. It printed a link
 (`/pair?code=…`) and six digits; the page shows the same digits, and the person confirms
 with a passkey. Open pairing is on: a daemon with no sink token can pair too (it sent a
-`poll_key`; the paired answer then also carries our sink token).
+`poll_key`; the paired answer then also carries our sink token). The link of a pairing
+the sink token started carries the board's key (`&k=…`), so any browser that opens it is
+let in. An open pairing's link is the code alone: open it in a browser where the board is
+already open, or approve it from the board, which lists every pairing that waits.
 
 | Route | Body → answer |
 |---|---|
@@ -107,7 +110,7 @@ age window, no nonce store) and only then queues it.
 | Route | Body → answer |
 |---|---|
 | `POST /send` | `{ machineId, cmd, csig?, grant?, confirm?, expires_in_s?, from? }` (`SendBody`) → `201 ControlActivity`; `422 { reason, code }` with the verifier's code (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …) or the second look's (below) when it refuses; `404` unknown machine; `400` a `from` that is not a session ref |
-| `POST /files?name=<name>` | One file a `start` will carry: the raw bytes, its media type as `content-type` → `201 StartFile { name, type, size, sha256 }` (sha256 base64url, CONTROL.md §3.1). Held a day under `<stateDir>/control/files/<sha256>`, longer when a queued start needs it; `413` over 25 MiB, `415` no media type, `400` empty or a name a machine would refuse |
+| `POST /files?name=<name>` | One file a `start` or a `prompt` will carry (the composer's pictures go as a prompt's files): the raw bytes, its media type as `content-type` → `201 UploadedFile { name, type, size, sha256 }` (sha256 base64url, CONTROL.md §3.1), with `width` and `height` for a PNG, JPEG, GIF or WebP; only the four fields go into a command. Held a day under `<stateDir>/control/files/<sha256>`, longer when a queued command needs it; `413` over 25 MiB, `415` no media type, or `not_an_image` for bytes that are not the picture the type says, `400` empty or a name a machine would refuse. `&machine=<id>` is taken and not read yet |
 | `GET /activity?limit=` | `{ activity: ControlActivity[] }`, newest first (default 100, at most 1000) |
 | `GET /machines` | `{ machines: (MachineControl & { name, createdAt, pairedAt? })[] }` — paired machines |
 | `POST /machines/:id/forget` | → `204`; the row, its token and its queue are gone here; its next poll is 401 and the daemon says so |
@@ -125,8 +128,11 @@ machine's reason in `detail`; a `copy_of` that is not a session ref is dropped. 
 objects arrive on the SSE stream as `{ kind: "control", message }` whenever one is queued,
 acked or expires.
 
-For a `permission.answer`, `text` is `"<decision>"` or `"<decision>: <note>"`; for a
-`key.add`, `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
+For a `permission.answer`, `text` is `"<decision>"` or `"<decision>: <note>"`, and
+`answer` is `{ for, decision }` as signed: the prompt it answers and how (a row kept from
+before the row stored them reads them from its signed command). The UI reads from it which
+open prompts have an answer out, on every page and after a reload. For a `key.add`, `text`
+is `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
 `permission`, `model`, `files`) and, from its `taken` / `delivered` ack, `applied`: what
 the machine ran it with. `from` is the page's own unsigned note of which session's page
 sent it (`SendBody.from`, a `<harness>:<id>`): kept on the activity for the lineage the
@@ -231,6 +237,27 @@ answers `expired`. `POST hello` 204, `GET ?machine=&wait=` 200/204 (wait ≤ 25 
 machine's own token and nothing else. A `taken` ack pauses redelivery 35 minutes; a final ack ends it;
 duplicates are tolerated. State lives under `<stateDir>/control/` (`machines.json` with
 hashed tokens and `queue/<machine id>.json`).
+
+## Machines paired on a spacesheep account
+
+With an account connected (docs/rfcs/08), the machines paired there are rows too: made
+from the relay's machine list, held in memory, never in `machines.json`, never polled
+here. `POST /send` for one is not verified here (its keys are ids only): the signed body
+goes to spacesheep's jobs route as the account, and the row that comes back is settled by
+spacesheep's jobs list alone (its status, `code` and clock; a day and an hour with no word
+ends it as `expired`, or `unconfirmed` once the computer took it). A send spacesheep took
+without naming its job has nothing to be settled by: its row is `unconfirmed` at once,
+with the code `no_job`. A job is one only as spacesheep writes it, a whole number above
+zero (`remoteJobOf`). A row names the
+account that carried it; with none connected, or its key refused, it waits and says
+`unfollowed`; another account connecting settles it as `untracked`.
+
+All of that is `RemoteSlice` in `remote.ts`, over rows a host hands it, with the row
+shapes and their readers in `rows.ts`. Neither file imports anything of Node's. The
+receiver's host is `ControlState` (its maps, its queue files); a page that carries its own
+board on an account has no receiver and runs `MemoryControl` from the same file.
+`remote.parity.test.ts` drives both wirings through one script and compares them row by
+row; `remote.test.ts` holds each rule on the receiver's.
 
 ## Test door
 

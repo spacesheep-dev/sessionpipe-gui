@@ -312,8 +312,9 @@ function span(ms: number): string {
 
 /** Note a seq: a hole behind the highest seq (or behind a late older one) is a gap
  *  until its seqs arrive. A hole in front of the first seq seen is never one: that
- *  is where the session began for this receiver. */
-function noteSeq(t: Tracking, seq: number, arrivedAt: string): void {
+ *  is where the session began for this receiver. With `holes` false the seq still
+ *  fills a hole and moves the ends, and opens none. */
+function noteSeq(t: Tracking, seq: number, arrivedAt: string, holes: boolean): void {
   // Ingest rejects a seq above 2^53 - 1 (the schema's bound), but an older release
   // stored such lines; past it i++ stops counting, so boot would never finish.
   if (!Number.isSafeInteger(seq)) return;
@@ -337,6 +338,7 @@ function noteSeq(t: Tracking, seq: number, arrivedAt: string): void {
     to = t.seqLo - 1;
     t.seqLo = seq;
   } else return;
+  if (!holes) return;
   if (to < from || to - from + 1 > GAP_MAX_HOLE) return;
   // Count, don't step from `from`: past 2^53 - 1, i++ would stop moving.
   for (let n = 0; n <= to - from; n++) t.missing.add(from + n);
@@ -582,7 +584,10 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
   const at = clampTime(ev.time, arrivedAt);
   const d = ev.data;
   coalesceSession(s, ev);
-  noteSeq(t, ev.session.seq, arrivedAt);
+  // spacesheep asks senders for `tools: "main"` and takes tier 2 and below, so a hole in
+  // what it relays is events never sent, not events on their way (PROTOCOL.md §4: a
+  // receiver MUST NOT read a seq gap as a lost event).
+  noteSeq(t, ev.session.seq, arrivedAt, source !== "spacesheep");
   const m = place(t, ev, arrivedAt);
   const turnId = str(d.turn_id);
   /** Names the turn that is open: it is that turn's, whatever its clock says. */

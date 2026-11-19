@@ -19,10 +19,10 @@ import { LensChip, LensNote } from "../components/LensChip";
 import { PageBar } from "../components/PageBar";
 import { BesideButton, Inline, lensMenu, useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useAppState, useLabels, useStore } from "../data/hooks";
-import { eventSummary, harnessMark, oneLine, sessionTitle, storedKey, toolLabel } from "../lib/format";
+import { eventSummary, harnessMark, isQuestion, oneLine, sessionTitle, storedKey, toolLabel } from "../lib/format";
 import { useListNav } from "../lib/keys";
 import { type LabelFilter, labelPasses, labelQuery } from "../lib/labels";
-import { absoluteUrl, copyItem } from "../lib/menus";
+import { absoluteUrl, copyItem, openOutside } from "../lib/menus";
 import { reducedMotion, tokenMs, useListHold } from "../lib/motion";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { useAppSettings, useLens } from "../lib/settings";
@@ -142,7 +142,12 @@ export function eventWords(e: StoredEvent): string {
     case "files.changed":
       return "Changed files";
     case "attention.needed":
-      return d.kind === "permission" ? "Asks permission" : d.kind === "question" ? "Asks a question" : "Needs you";
+      // Claude Code asks its questions as permissions (lib/format.ts isQuestion).
+      return d.kind === "question" || isQuestion({ kind: str(d.kind), tool: str(d.tool) })
+        ? "Asks a question"
+        : d.kind === "permission"
+          ? "Asks permission"
+          : "Needs you";
     case "attention.cleared":
       return "Answered";
     case "subagent.started":
@@ -737,7 +742,7 @@ const FeedRow = memo(function FeedRow({
           action: "list.background",
           run: () => openSplit(key, { background: true }),
         },
-        wide && { label: "Open in new window", run: () => void window.open(absoluteUrl(path), "_blank", "noopener") },
+        wide && !!absoluteUrl(path) && { label: "Open in new window", run: () => openOutside(path) },
         { sep: true },
         { label: "Show only this session", run: () => c.setSession(key) },
         e.session.machine && { label: `Show only ${e.session.machine}`, run: () => c.setMachine(e.session.machine!) },

@@ -34,6 +34,22 @@ describe("parseShell", () => {
     expect(parseShell({ ...ok, receiver: null })).toMatchObject({ receiver: null, rxBase: null });
     expect(parseShell({ ...ok, receiver: { name: "x" } })).toMatchObject({ receiver: null });
   });
+  it("a spacesheep account is a receiver with a kind, its email and its state; a receiver has none of them", () => {
+    const acct = { id: "a".repeat(52), name: "me@example.com", origin: "https://spacesheep.dev", local: false };
+    const flag = { ...ok, platform: "ios", features: ["signer", "account", "account-needs"] };
+    expect(
+      parseShell({ ...flag, receiver: { ...acct, kind: "spacesheep", email: "me@example.com", state: "ok" } }),
+    ).toMatchObject({
+      features: ["signer", "account", "account-needs"],
+      receiver: { ...acct, kind: "spacesheep", email: "me@example.com", state: "ok" },
+    });
+    // A receiver's row is what it was, field for field: a kind it does not have is not made up,
+    // and one this page does not know is not passed on.
+    expect(parseShell(ok)?.receiver).toEqual(ok.receiver);
+    expect(parseShell({ ...flag, receiver: { ...acct, kind: "other", email: "x@example.com" } })?.receiver).toEqual(
+      acct,
+    );
+  });
   it("knows the Android app", () => {
     expect(parseShell({ v: 1, platform: "android" })?.platform).toBe("android");
   });

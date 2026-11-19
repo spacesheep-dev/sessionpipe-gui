@@ -18,7 +18,7 @@ import type { ControlActivity, SessionKey, SessionSummary, StoredEvent } from "@
 import { splitKey } from "@shared/api";
 import { useEffect, useRef, useState } from "react";
 import { type OpenAttention, openAttentions, useAppState, useStore } from "../data/hooks";
-import { ATTENTION_LABEL, attentionMessage, oneLine, sessionTitle, toolLabel } from "../lib/format";
+import { ATTENTION_LABEL, attentionMessage, isQuestion, oneLine, sessionTitle, toolLabel } from "../lib/format";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { toastAllowed } from "../lib/marks";
 import { reducedMotion, tokenMs } from "../lib/motion";
@@ -37,6 +37,7 @@ import {
   undoLatest,
   useToasts,
 } from "../lib/toasts";
+import { answerable } from "./ControlStrip";
 import { PHONE_QUERY, useMedia } from "./Shell";
 import type { ToastCard as ToastCardType } from "./ToastCard";
 
@@ -61,12 +62,14 @@ const ATTENTION_VERB: Record<string, string> = {
   idle: "Waiting for you",
 };
 
-const soundFor = (r: OpenAttention): SoundKind =>
-  r.attention.kind === "permission" ? "needsYou" : r.attention.kind === "error" ? "error" : "question";
+const soundFor = (kind: string): SoundKind =>
+  kind === "permission" ? "needsYou" : kind === "error" ? "error" : "question";
 
 function attentionToast(r: OpenAttention): Toast {
   const { session: s, attention: a } = r;
   const msg = attentionMessage(a);
+  // Claude Code asks its questions as permissions: a question's banner and sound.
+  const kind = isQuestion(a) ? "question" : a.kind;
   return {
     id: `att|${attKey(r)}`,
     kind: "needs-you",
@@ -76,8 +79,8 @@ function attentionToast(r: OpenAttention): Toast {
     answerable: r.answerable,
     title: sessionTitle(s),
     machine: s.machine,
-    verb: ATTENTION_VERB[a.kind] ?? "Needs you",
-    label: ATTENTION_LABEL[a.kind] ?? a.kind,
+    verb: ATTENTION_VERB[kind] ?? "Needs you",
+    label: ATTENTION_LABEL[kind] ?? kind,
     tool: a.tool ? toolLabel(a.tool) : undefined,
     body: msg
       ? oneLine(msg, 160)
@@ -86,7 +89,7 @@ function attentionToast(r: OpenAttention): Toast {
         : r.answerable
           ? "A permission request"
           : "Waiting in the terminal",
-    sound: soundFor(r),
+    sound: soundFor(kind),
     at: Date.now(),
   };
 }
@@ -164,11 +167,11 @@ function useToastEffects(): void {
         // Nobody attends an unattended run (`attended: false`): the Inbox has it, no banner.
         if (onScreen(r.session.key) || r.session.attended === false) continue;
         // An older server may pass on a harness's notification about a prompt already
-        // open as an answerable one (readings.ts folds these): one card, not two.
+        // open as an answerable one (readings.ts folds these): one card, not two. By the
+        // protocol's word, so a question, answered on its computer, folds its twin too.
+        const hook = (x: OpenAttention) => x.attention.kind === "permission" && answerable(x.attention);
         const twin =
-          !r.answerable &&
-          r.attention.kind === "permission" &&
-          rows.some((x) => x.session.key === r.session.key && x.answerable);
+          r.attention.kind === "permission" && !hook(r) && rows.some((x) => x.session.key === r.session.key && hook(x));
         if (!twin) push(attentionToast(r));
       }
       pruneAttentionToasts(ids);

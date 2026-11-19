@@ -13,6 +13,7 @@ import {
   agentLabel,
   agentNow,
   agentsChoice,
+  agentsOpen,
   agentTip,
   agentType,
   openAgent,
@@ -64,14 +65,14 @@ export function AgentText({ a }: { a: Pick<AgentRun, "type" | "description"> }) 
 }
 
 /** Whether a parent's agents show under it: the person's choice on this device, else open
- *  while any agent is open. */
+ *  while one runs (lib/agents.ts agentsOpen). */
 export function useAgentsOpen(s: SessionSummary): boolean {
   const choice = useSyncExternalStore(
     subscribeAgentsChoice,
     () => agentsChoice(s.key),
     () => undefined,
   );
-  return choice ?? (s.counts.agentsRunning ?? 0) > 0;
+  return agentsOpen(s, choice);
 }
 
 /** One agent under its parent on the board: a 32 px row (44 on a phone) on the tree guide,

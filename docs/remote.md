@@ -33,8 +33,13 @@ Tailscale running. The url's host becomes the passkeys' rp id, so use that one a
 the Wi-Fi too; passkeys made for another name are made again on first use.
 
 Behind the proxy the server trusts `X-Forwarded-For`, `-Proto` and `-Host` only on
-connections from loopback. A phone coming through it still needs the UI key, and Setup's
-actions still answer only on this machine.
+connections from this machine. The visitor's address is the last one in
+`X-Forwarded-For`, the one the proxy itself wrote. Whoever comes through the proxy needs
+the UI key, a browser on this machine too, and Setup's actions answer only at
+`http://localhost:7373/setup`. The proxy's name is one the server answers to because
+`--public-url` says so, and through the proxy only: a request under that name that the
+proxy did not mark as forwarded is refused (403 `unknown_host`), and so is a proxy on
+this machine that forwards under a name `--public-url` does not say.
 
 ## Sending, way 2: the same Wi-Fi, with the GUI's own certificate
 
@@ -85,11 +90,21 @@ sessionpipe control pair http://<this-machine>:7373
 
 It prints a link and six digits; the page shows the same six; you approve with your
 passkey. Over Tailscale, `sessionpipe connect https://<machine>.<tailnet>.ts.net` does the
-hooks, the sink and the pairing in one approval.
+hooks, the sink and the pairing in one approval. A machine that has a sink for this board
+gets a link any browser can open; one that has none yet (`connect`) gets a link for a
+browser where the board is already open, and the Machines page lists its request too.
 
 ## Other proxies and tunnels
 
 Any https reverse proxy on this machine that sets `X-Forwarded-For`, `-Proto` and `-Host`
-works the way Tailscale does. A public tunnel (Cloudflare, ngrok) works too, but then the UI
-key and the sink token are all that stand between the internet and your sessions: put an
-access layer in front. Publishing the port itself to the internet is not supported.
+works the way Tailscale does, once `--public-url` names its address. It must write the
+address it took the connection from as the last entry of `X-Forwarded-For`; appending to
+the header and replacing it both do. A proxy that adds no such header (nginx does not by
+itself: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`) is refused under
+the public url's name; one that also puts the port's own address in `Host` hands every
+visitor on as a program on this machine. A proxy over plain http, on any machine, must
+pass on the `Host` it was asked for (nginx: `proxy_set_header Host $host;`): the board's
+own writes name that host in `Origin`. A public tunnel (Cloudflare, ngrok) works too, but
+then the UI key and the sink token are all that stand between the internet and your
+sessions: put an access layer in front. Publishing the port itself to the internet is not
+supported.
