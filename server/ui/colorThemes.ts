@@ -6,6 +6,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { type ColorThemesResponse, parseColorTheme } from "../../shared/color-theme.js";
+import { withoutBom } from "../config.js";
 
 export function readColorThemes(dir: string): ColorThemesResponse {
   const out: ColorThemesResponse = { themes: [], errors: [] };
@@ -21,7 +22,7 @@ export function readColorThemes(dir: string): ColorThemesResponse {
   for (const file of files) {
     let doc: unknown;
     try {
-      doc = JSON.parse(readFileSync(path.join(dir, file), "utf8"));
+      doc = JSON.parse(withoutBom(readFileSync(path.join(dir, file), "utf8")));
     } catch (err) {
       out.errors.push({ file, error: `not JSON: ${err instanceof Error ? err.message : String(err)}` });
       continue;

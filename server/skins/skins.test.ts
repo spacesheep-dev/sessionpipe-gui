@@ -128,6 +128,18 @@ describe("skin manifest validation", () => {
     }
   });
 
+  it("readSkinManifest reads past a byte-order mark, as Notepad and PowerShell 5 write one", () => {
+    const tmp = tempDir();
+    try {
+      const dir = makeSkin(path.join(tmp.dir, "marked"));
+      const file = path.join(dir, "skin.json");
+      writeFileSync(file, `\uFEFF${readFileSync(file, "utf8")}`);
+      expect(readSkinManifest(dir)).toMatchObject({ id: "marked", scheme: "dark" });
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
   it("skinFromManifest normalises the tokens per scheme and names the files' URL", () => {
     const one = skinFromManifest(validateSkinManifest({ ...BASE, scheme: "light", tokens: LIGHT, source: "s" }), "/d");
     expect(one).toEqual({
