@@ -4,7 +4,7 @@
 // computer (the board's is in its Filter menu there), the board's on a phone. The trigger
 // is a combobox and opens a listbox; arrows and Enter pick "Codex" and the page filters to
 // it; typing jumps to a row; Esc closes and gives focus back; axe finds nothing new with
-// the list open. On the phone project the same list is a bottom sheet.
+// Search's Date list open. On the phone project the same list is a bottom sheet.
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { openBoard, openPage } from "./helpers.js";
@@ -24,10 +24,18 @@ const onlyCards = async (page: Page, name: string) => {
   await expect.poll(() => cardHarnesses(page).then((hs) => hs.filter((h) => h !== name))).toEqual([]);
 };
 
+/** Search with its index read: the chips come with the facets, which are asked for again
+ *  each time the count of sessions changes, so they can be a while on a busy machine. */
+async function searchSettled(page: Page): Promise<void> {
+  await openPage(page, "/search");
+  await expect(page.getByRole("status").filter({ hasText: "up to date" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("combobox", { name: "Date" })).toBeVisible({ timeout: 30_000 });
+}
+
 test.describe("select", () => {
   test.beforeEach(async ({ page, isMobile }) => {
     if (isMobile) await openBoard(page);
-    else await openPage(page, "/search");
+    else await searchSettled(page);
     await expect(trigger(page)).toBeVisible();
   });
 
@@ -131,12 +139,15 @@ test.describe("select", () => {
         .analyze();
       return r.violations.flatMap((v) => v.nodes.map((n) => `${v.impact}:${v.id} ${n.target.join(" ")}`));
     };
-    // The board's own findings (a card footer's contrast, say) are not the select's.
+    // The page's own findings (a card footer's contrast, say) are not the select's.
     const before = new Set(await scan());
-    await trigger(page).click();
-    await expect(list(page)).toBeVisible();
+    // Date's rows are fixed. The Agent list's come from the index, and gain a row when a
+    // session of a new agent is read, which can land while axe is reading the list.
+    const date = page.getByRole("combobox", { name: "Date" });
+    const dates = page.getByRole("listbox", { name: "Date" });
+    await date.click();
     // Placed: the list is drawn where it opens (it waits one frame, hidden, to measure).
-    await expect(list(page).getByRole("option").first()).toBeVisible();
+    await expect(dates.getByRole("option", { name: "Past 7 days" })).toBeVisible();
     const after = await scan();
     const fresh = after.filter((v) => !before.has(v) && !/\.card/.test(v));
     expect(fresh, "axe findings that appear only with the select open").toEqual([]);

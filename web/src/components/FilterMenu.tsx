@@ -56,6 +56,13 @@ export function labelFilterSub(labels: Labels, value: LabelFilter, set: (v: Labe
   };
 }
 
+/** A menu with the label filter alone (the Inbox's): its section, and no Clear, as its
+ *  "All labels" already is the way out. */
+export const labelFilterMenu = (labels: Labels, value: LabelFilter, set: (v: LabelFilter) => void): MenuList => [
+  { heading: "Label" },
+  ...labelFilterItems(labels, value, set),
+];
+
 export interface BoardFilter {
   machines: string[];
   machine: string;

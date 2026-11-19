@@ -29,7 +29,7 @@ import {
 import { useBehind, useCatchingUp } from "../account/current";
 import { ActionButton, Ago, EmptyState, HarnessGlyph, Notice, Redacted, StateDot, WithName } from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
-import { FilterMenu, labelFilterItems, labelFilterName } from "../components/FilterMenu";
+import { FilterMenu, labelFilterMenu, labelFilterName } from "../components/FilterMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { NoConnection } from "../components/NoConnection";
@@ -274,12 +274,7 @@ export function Inbox() {
                 on={!!label}
                 summary={labelFilterName(labels, label)}
                 hint="Filter by label"
-                build={() => [
-                  { heading: "Label" },
-                  ...labelFilterItems(labels, label, setLabelFilter),
-                  !!label && { sep: true },
-                  !!label && { label: "Clear filters", run: () => setLabelFilter("") },
-                ]}
+                build={() => labelFilterMenu(labels, label, setLabelFilter)}
               />
             )
           )

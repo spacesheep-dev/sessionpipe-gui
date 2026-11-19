@@ -2,12 +2,13 @@
 // The Board's one Filter menu: a section only where there is a choice (two machines, two
 // agents, a label in use), none at all with one machine, one agent and no labels (then
 // there is no button), "Clear filters" only while a filter is on, and a summary that names
-// what the board narrows to in the order machine · agent · label.
+// what the board narrows to in the order machine · agent · label. The Inbox's menu, with
+// the label filter alone, has no Clear: its "All labels" is the way out.
 import "../native/test-env";
 import type { Labels } from "@shared/api";
 import { describe, expect, it, vi } from "vitest";
 import { tidy } from "./ContextMenu";
-import { type BoardFilter, boardFilterItems, boardFilterSummary } from "./FilterMenu";
+import { type BoardFilter, boardFilterItems, boardFilterSummary, labelFilterMenu } from "./FilterMenu";
 
 const noLabels: Labels = { rev: 1, names: {}, sessions: {} };
 const someLabels: Labels = { rev: 1, names: { red: "Urgent" }, sessions: { "codex:a": "red" } };
@@ -74,5 +75,22 @@ describe("boardFilterSummary", () => {
     );
     expect(boardFilterSummary(filter({ label: "none" }))).toBe("No label");
     expect(boardFilterSummary(filter())).toBe("");
+  });
+});
+
+describe("labelFilterMenu", () => {
+  it("is the Label section alone, with no Clear while a label is set: All labels clears it", () => {
+    const set = vi.fn();
+    const items = tidy(labelFilterMenu(someLabels, "red", set));
+    const at = items.map((i) => ("heading" in i ? `# ${i.heading}` : "sep" in i ? "-" : i.label));
+    expect(at[0]).toBe("# Label");
+    expect(at[1]).toBe("All labels");
+    expect(at).toContain("Urgent");
+    expect(at.at(-1)).toBe("No label");
+    expect(at.filter((l) => l.startsWith("Clear"))).toEqual([]);
+    const all = items.find((i) => "label" in i && i.label === "All labels");
+    if (!all || !("run" in all)) throw new Error("no All labels");
+    void all.run();
+    expect(set).toHaveBeenCalledWith("");
   });
 });
