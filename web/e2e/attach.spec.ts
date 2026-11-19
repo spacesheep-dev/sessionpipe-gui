@@ -477,7 +477,8 @@ test("a 9 MB picture is made smaller first, and one that can't be is refused bef
   // A GIF is never redrawn (it may be animated): over 8 MB, it can't go where the prompt names its path.
   await paste(page, [{ name: "huge.gif", type: "image/gif", base64: GIF, padTo: 9 * 1024 * 1024 }]);
   await expect(item).toHaveAttribute("data-state", "error");
-  await expect(page.locator(".att-note")).toHaveText("That picture is over 8 MB.");
+  // Said on the one line under the tray.
+  await expect(page.locator(".att-tray + .att-note")).toHaveText("That picture is over 8 MB.");
   // Nothing was uploaded for it, and Send will not take it.
   const before = (await (await fetch(`${base}/api/ui/info`)).json()) as { storage: { attachments: number } };
   await composer(page).fill("try anyway");

@@ -12,6 +12,7 @@ import { useCallback, useMemo, useState } from "react";
 import { ActionButton, CommandWell, Since } from "../components/bits";
 import { useMachines } from "../data/hooks";
 import { harnessMark, rememberStartTitles } from "../lib/format";
+import { accountMode } from "../lib/net";
 import { navigate, sessionPath } from "../lib/router";
 import { rpId } from "./api";
 import { uuid } from "./bytes";
@@ -72,9 +73,11 @@ export function appliedFact(a: ControlActivity | undefined): string | null {
 }
 
 /** A start that asked for options and was delivered without `applied` reached a machine
- *  that ignored them (a daemon before 0.10); the sender rule makes this rare. */
+ *  that ignored them (a daemon before 0.10); the sender rule makes this rare. On a
+ *  spacesheep account no row says what the machine applied (spacesheep's jobs keep no
+ *  `applied`), so there it is not known, and not said. */
 export const optionsIgnored = (a: ControlActivity | undefined): boolean =>
-  !!a && a.outcome === "delivered" && !!(a.permission || a.model) && !a.applied;
+  !!a && a.outcome === "delivered" && !!(a.permission || a.model) && !a.applied && !accountMode();
 
 /** Reopens the sheet with what the start carried, so it can be fixed and sent again. */
 export function editAgain(a: ControlActivity, machine: string | undefined): void {

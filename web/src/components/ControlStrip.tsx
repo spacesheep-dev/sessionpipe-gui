@@ -50,6 +50,7 @@ import type { AnswerOut } from "../control/answers";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
 import { deviceWords, setupLabel, signerKind, signerLabel } from "../control/signer";
+import { PHONE_HTTP_WORDS, plainHttpHere } from "../control/webauthn";
 import { receiptWords } from "../control/words";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
@@ -483,6 +484,9 @@ export function ControlStrip({
   // works, as a link to this very page there; never an offer to add a device.
   const wrong = blocked ? wrongOriginHere() : null;
   const httpsHref = blocked ? (wrong ? wrongOriginHref() : httpsHere()) : null;
+  // A phone's browser on the board's plain-http LAN or tailnet address, with no https
+  // address to send it to: the line says the two ways that work, beside the greyed paperclip.
+  const phoneHttp = !!blocked && !wrong && !httpsHref && touch && plainHttpHere();
   const enabled = paired && !!onSend && !blocked && !stream && approval === "ok";
   // Not approved: the way to approve it stands where Allow and Deny would.
   const approve = paired && !blocked && approval === "unapproved";
@@ -608,6 +612,22 @@ export function ControlStrip({
         ),
       };
     if (blocked && hourOnCard) return null;
+    if (phoneHttp) {
+      // "/connect" is the page it names.
+      const [before, after] = PHONE_HTTP_WORDS.split("/connect");
+      return {
+        kind: "phone-http",
+        text: (
+          <>
+            {before}
+            <Link to="/connect" className="ctl-origin-link">
+              /connect
+            </Link>
+            {after}
+          </>
+        ),
+      };
+    }
     if (blocked)
       return {
         kind: "blocked",
@@ -1019,7 +1039,13 @@ export function ControlStrip({
         <div className="ctl-field">
           <AttachmentTray att={att} />
           <div className="ctl-ask">
-            {att.offered && <AttachButton att={att} disabled={!enabled || !!busy || !!review} />}
+            {att.offered && (
+              <AttachButton
+                att={att}
+                disabled={!enabled || !!busy || !!review}
+                why={phoneHttp ? PHONE_HTTP_WORDS : undefined}
+              />
+            )}
             <textarea
               ref={field}
               value={text}

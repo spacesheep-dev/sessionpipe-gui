@@ -20,6 +20,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
 import { type BrowserContext, expect, type Locator, type Page, type Route, test, webkit } from "@playwright/test";
+import { humanSize } from "../../shared/attachments.js";
 import {
   CONTROL_BASE,
   type FakeDaemon,
@@ -31,7 +32,7 @@ import {
   seenSetupHere,
   sinkToken,
 } from "./control-helpers.js";
-import { composer, sessionUrl } from "./helpers.js";
+import { composer, sessionUrl, ulid } from "./helpers.js";
 
 const SHOTS = process.env.ATT_SHOTS ?? "";
 const CWD = "/Users/e2e/code";
@@ -242,14 +243,15 @@ async function open(
 
 const tray = (page: Page) => page.locator(".att-item");
 
-/** A tray item whose picture can't be drawn still shows its frame: 56 px, visible, on its
- *  own background, with the picture glyph in it. */
+/** A tray item whose picture can't be drawn still shows its frame: a 44 px square (the
+ *  size of a frame not drawn yet), visible, on its own background, with the picture glyph
+ *  in it. */
 async function framed(item: Locator): Promise<void> {
   const frame = item.locator(".att-thumb--none");
   await expect(frame).toBeVisible();
   const box = await frame.boundingBox();
-  expect(box && Math.round(box.width)).toBe(56);
-  expect(box && Math.round(box.height)).toBe(56);
+  expect(box && Math.round(box.width)).toBe(44);
+  expect(box && Math.round(box.height)).toBe(44);
   const look = await frame.evaluate((el) => {
     const cs = getComputedStyle(el);
     return { visibility: cs.visibility, opacity: Number(cs.opacity), background: cs.backgroundColor };
@@ -259,6 +261,8 @@ async function framed(item: Locator): Promise<void> {
   expect(look.background).not.toBe("rgba(0, 0, 0, 0)");
   await expect(frame.locator("svg")).toBeVisible();
 }
+/** The one line under the whole tray. */
+const trayLine = (page: Page) => page.locator(".ctl-field > .att > .att-tray + .att-note");
 const picker = (page: Page) => page.locator("input[data-attach-input]");
 const send = (page: Page) => page.locator(".ctl-send");
 const prompts = (d: FakeDaemon) => d.seen.filter((c) => c.kind === "prompt");
@@ -452,7 +456,9 @@ test("an upload that did not arrive whole, and a file that is not the picture it
   });
   await picker(page).setInputFiles({ name: "kiwi.png", mimeType: "image/png", buffer: KIWI });
   await expect(tray(page)).toHaveAttribute("data-state", "error");
-  await expect(page.locator(".att-note")).toHaveText("The picture didn't arrive whole. Try again.");
+  // Said once, on a line under the whole tray; nothing is written inside the tray.
+  await expect(trayLine(page)).toHaveText("The picture didn't arrive whole. Try again.");
+  expect(await tray(page).innerText()).toBe("");
   // Nothing is signed with it: Send is off and says to take it out or try it again.
   await composer(page).fill("try anyway");
   await expect(send(page)).toBeDisabled();
@@ -471,7 +477,7 @@ test("an upload that did not arrive whole, and a file that is not the picture it
     buffer: Buffer.from("these are words, not pixels"),
   });
   await expect(tray(page)).toHaveAttribute("data-state", "error");
-  await expect(page.locator(".att-note")).toHaveText("That file isn't a picture.");
+  await expect(trayLine(page)).toHaveText("That file isn't a picture.");
   // It can't be drawn, so its frame is.
   await framed(tray(page));
   // Trying the same bytes again would only be refused again: no Retry.
@@ -480,7 +486,7 @@ test("an upload that did not arrive whole, and a file that is not the picture it
   // A kind of picture the composer does not take is refused before any upload.
   await tray(page).getByRole("button", { name: "Remove picture" }).click();
   await paste(page, [given("scan.tiff", KIWI, "image/tiff")]);
-  await expect(page.locator(".att-note")).toHaveText("Only PNG, JPEG, GIF, WebP or HEIC pictures can be sent.");
+  await expect(trayLine(page)).toHaveText("Only PNG, JPEG, GIF, WebP or HEIC pictures can be sent.");
   await page.waitForTimeout(400);
   expect(prompts(d)).toHaveLength(0);
 });
@@ -605,13 +611,13 @@ test("a HEIC this browser can't draw is refused in words, before any upload", as
   const { asked } = await open(context, page, { takes: true, title: "A HEIC photo" });
   await paste(page, [given("IMG_0412.heic", HEIC, "image/heic")]);
   await expect(tray(page)).toHaveAttribute("data-state", "error");
-  await expect(page.locator(".att-note")).toHaveText(HEIC_WORDS);
+  await expect(trayLine(page)).toHaveText(HEIC_WORDS);
   await shots(page, "7-a-heic-refused");
   await tray(page).getByRole("button", { name: "Remove picture" }).click();
   // From Files or Finder a HEIC may come with no type at all: its name says what it is.
   const dropped = await drop(page, [given("IMG_0413.HEIC", HEIC, "")]);
   expect(dropped.dropped).toBe(true);
-  await expect(page.locator(".att-note")).toHaveText(HEIC_WORDS);
+  await expect(trayLine(page)).toHaveText(HEIC_WORDS);
   expect(asked.filter((a) => a.startsWith("POST /api/ui/control/files"))).toEqual([]);
 });
 
@@ -1113,4 +1119,175 @@ test("on a slow link (2 Mbit/s) the tray says how far the upload is", async ({ c
     uploadThroughput: -1,
   });
   expect(prompts(d)).toHaveLength(0);
+});
+
+/** Each picture's frame as drawn: its size, rounded, and how the picture fits it. */
+function frames(scope: ReturnType<Page["locator"]>): Promise<{ w: number; h: number; fit: string }[]> {
+  return scope.evaluateAll((imgs) =>
+    imgs.map((i) => {
+      const r = i.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height), fit: getComputedStyle(i).objectFit };
+    }),
+  );
+}
+
+test("a picture is whole in the tray and the message, and a sent one opens whole in the page: the arrows move, Esc, a tap outside and × close it", async ({
+  context,
+  page,
+}) => {
+  const { d } = await open(context, page, { takes: true, title: "Whole pictures" });
+  // A 4:3 photo and a 16:9 screenshot: each frame the picture's shape, within 120×88.
+  const FOUR_THREE = png(640, 480, [0xd9, 0x3a, 0x2b]);
+  const WIDE = png(960, 540, [0x2a, 0x4d, 0x8f]);
+  const whole = [
+    { w: 117, h: 88, fit: "contain" },
+    { w: 120, h: 68, fit: "contain" },
+  ];
+  await picker(page).setInputFiles([
+    { name: "four-three.png", mimeType: "image/png", buffer: FOUR_THREE },
+    { name: "wide.png", mimeType: "image/png", buffer: WIDE },
+  ]);
+  await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(2);
+  await expect.poll(() => frames(page.locator(".att-thumb"))).toEqual(whole);
+  await shots(page, "11-whole-pictures-in-the-tray");
+  await composer(page).fill("Which of the two is wider?");
+  await send(page).click();
+  await expect.poll(() => prompts(d).length, { timeout: 20_000 }).toBe(1);
+  const bubble = page.locator(".page.session blockquote", { hasText: "Which of the two is wider?" }).last();
+  const thumbs = bubble.locator("[data-sent-picture]");
+  await expect(thumbs).toHaveCount(2);
+  await expect.poll(() => drawn(bubble)).toEqual([640, 960]);
+  await expect.poll(() => frames(bubble.locator("[data-sent-picture] img"))).toEqual(whole);
+  // The picture's name is the link's; no words are drawn inside its frame.
+  await expect(thumbs.first()).toHaveAttribute("aria-label", `four-three.png · PNG · ${humanSize(FOUR_THREE.length)}`);
+  await expect(thumbs.first().locator("img")).toHaveAttribute("alt", "");
+
+  const tabs: Page[] = [];
+  context.on("page", (p) => tabs.push(p));
+  const url = page.url();
+  const box = page.locator("[data-lightbox]");
+  const src = (i: number) => thumbs.nth(i).locator("img").getAttribute("src");
+  await thumbs.first().click();
+  await expect(box).toBeVisible();
+  await expect(box).toHaveAttribute("role", "dialog");
+  await expect(box).toHaveAttribute("aria-label", "four-three.png");
+  await expect(box.locator(".lb-img")).toHaveAttribute("src", (await src(0))!);
+  await expect(box.locator(".lb-count")).toHaveText("1 of 2");
+  await shots(page, "12-lightbox");
+  // The arrows move through the message's pictures, and round.
+  await page.keyboard.press("ArrowRight");
+  await expect(box).toHaveAttribute("aria-label", "wide.png");
+  await expect(box.locator(".lb-img")).toHaveAttribute("src", (await src(1))!);
+  await expect(box.locator(".lb-count")).toHaveText("2 of 2");
+  await page.keyboard.press("ArrowRight");
+  await expect(box.locator(".lb-count")).toHaveText("1 of 2");
+  await page.keyboard.press("ArrowLeft");
+  await expect(box.locator(".lb-count")).toHaveText("2 of 2");
+  // Esc closes it, and only it: the page stays where it was.
+  await page.keyboard.press("Escape");
+  await expect(box).toHaveCount(0);
+  expect(page.url()).toBe(url);
+  // A tap outside the picture.
+  await thumbs.nth(1).click();
+  await expect(box).toHaveAttribute("aria-label", "wide.png");
+  await box.click({ position: { x: 4, y: 200 } });
+  await expect(box).toHaveCount(0);
+  // ×, and the chevrons.
+  await thumbs.first().click();
+  await box.getByRole("button", { name: "Next picture" }).click();
+  await expect(box.locator(".lb-count")).toHaveText("2 of 2");
+  await box.getByRole("button", { name: "Close" }).click();
+  await expect(box).toHaveCount(0);
+  // No tab was opened, and nothing left the page.
+  expect(tabs).toHaveLength(0);
+  expect(page.url()).toBe(url);
+});
+
+test("a phone's browser on the board's plain-http LAN or tailnet address is told the app, /connect or HTTPS, also beside the greyed paperclip", async ({
+  context,
+  page,
+  isMobile,
+}) => {
+  const { s } = await open(context, page, { takes: true, title: "From the Wi-Fi" });
+  const info = (await (await fetch(`${CONTROL_BASE}/api/ui/info`)).json()) as {
+    uiKey: string;
+    urls: { lan: string[] };
+  };
+  const lan = info.urls.lan.find((u) => u.startsWith("http:"));
+  test.skip(!lan, "this machine reports no LAN IPv4 address (GET /api/ui/info urls.lan is empty)");
+  // A board with no TLS mode and no other address to send from, as a receiver started
+  // without --tls is.
+  await page.route("**/api/ui/info", async (route: Route) => {
+    const response = await route.fetch();
+    const json = (await response.json()) as { control?: Record<string, unknown> };
+    await route.fulfill({
+      response,
+      json: { ...json, tls: null, remote: null, control: { ...json.control, origins: [] } },
+    });
+  });
+  const lanOrigin = new URL(lan!).origin;
+  await page.goto(`${lanOrigin}${sessionUrl(s.harness, s.id)}?k=${info.uiKey}`);
+  expect(await page.evaluate(() => window.isSecureContext)).toBe(false);
+  await expect(composer(page)).toBeDisabled();
+  const foot = page.locator(".ctl-foot");
+  const clip = page.locator(".att-btn");
+  await expect(clip).toHaveAttribute("aria-disabled", "true");
+  if (isMobile) {
+    const words =
+      "To send from this phone, use the sessionpipe app (scan the code on /connect) or open this board over HTTPS (start it with --tls).";
+    await expect(foot).toHaveAttribute("data-reason", "phone-http");
+    await expect(foot.locator(".ctl-hint")).toHaveText(words);
+    await expect(foot.getByRole("link", { name: "/connect" })).toHaveAttribute("href", "/connect");
+    await expect(clip).toHaveAttribute("title", words);
+    await shots(page, "13-phone-on-plain-http");
+  } else {
+    // A computer's browser keeps the passkey's words.
+    await expect(foot).toHaveAttribute("data-reason", "blocked");
+    await expect(foot.locator(".ctl-hint")).toContainText(/passkeys need https or localhost/);
+    await expect(clip).toHaveAttribute("title", "Attach pictures");
+  }
+});
+
+test("an agent's reply of three lines is drawn as three lines", async ({ context, page }) => {
+  await seenSetupHere(context);
+  const sink = await sinkToken();
+  const id = randomUUID();
+  let seq = 0;
+  let clock = Date.now() - 60_000;
+  const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+    clock += 500;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 2,
+      harness: { name: "claude-code", version: "2.1.296", event: hook },
+      session: { id, seq: seq++, machine: `lines-${tag()}`, cwd: CWD, title: "Three lines", title_source: "custom" },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const reply = "Purple, Iris\nGreen, Thyme\nBrown, Copper";
+  await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${sink}`, "sessionpipe-protocol": "1" },
+    body: JSON.stringify({
+      events: [
+        ev("session.started", { source: "startup" }, "SessionStart"),
+        ev("turn.started", { turn_id: "t1", prompt_chars: 30 }, "UserPromptSubmit"),
+        ev(
+          "turn.transcript",
+          { turn: 1, turn_id: "t1", user: "Name each colour and a word.", assistant: reply },
+          "Stop",
+        ),
+        ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 900 }, "Stop"),
+      ],
+    }),
+  });
+  await page.goto(`${CONTROL_BASE}${sessionUrl("claude-code", id)}`);
+  const said = page.locator(".page.session .md p", { hasText: "Purple, Iris" }).first();
+  await expect(said).toBeVisible();
+  await expect(said.locator("br")).toHaveCount(2);
+  expect(await said.innerText()).toBe("Purple, Iris\nGreen, Thyme\nBrown, Copper");
 });

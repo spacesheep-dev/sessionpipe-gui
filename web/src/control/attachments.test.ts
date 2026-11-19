@@ -527,6 +527,20 @@ describe("a sent message's files, found and drawn", () => {
     expect(before).toContain(`src="/api/ui/control/files/${SHA.birch}"`);
     expect(before).toContain('data-sent-file="notes.pdf"');
   });
+
+  it("draws no words inside a thumbnail's frame: its name is the link's, and an older block's pictures share the strip", () => {
+    const id = "01M7PFKZR0FD41DEAX3W6QAG65";
+    const text = `Look\n\nAttached images (open them with your file-reading tool):\n- /Users/you/.local/state/sessionpipe-gui/attachments/${id}.jpg (4032×3024)`;
+    const html = renderToStaticMarkup(createElement(PromptBody, { text, files: rows[1]!.files }));
+    // Every picture's alt is empty: a picture that does not load leaves no words in its frame.
+    expect(html.match(/<img [^>]*>/g)!.map((i) => /alt="([^"]*)"/.exec(i)?.[1])).toEqual(["", ""]);
+    expect(html).not.toContain("attachment 4032×3024");
+    expect(html).toContain('aria-label="Picture · JPEG · 4032×3024"');
+    expect(html).toContain('aria-label="birch.png · PNG · 2 KB"');
+    // One strip: the lightbox moves through all of a message's pictures.
+    expect(html.match(/class="att-thumbs /g)).toHaveLength(1);
+    expect(html).toContain('data-attachment-thumbs="1"');
+  });
 });
 
 // ---------- pictures kept elsewhere ----------

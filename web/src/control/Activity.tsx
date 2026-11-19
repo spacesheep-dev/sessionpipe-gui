@@ -13,15 +13,7 @@ import { Markdown } from "../components/Markdown";
 import { useSession } from "../data/hooks";
 import { harnessMark, oneLine, sessionTitle } from "../lib/format";
 import { Link, sessionPath } from "../lib/router";
-import {
-  AttachmentThumbs,
-  attachmentRefs,
-  LinkPictures,
-  linkPictures,
-  promptParts,
-  SentPictures,
-  shownFiles,
-} from "./Attachments";
+import { attachmentRefs, LinkPictures, linkPictures, promptParts, SentPictures, shownFiles } from "./Attachments";
 import { isFinal, KIND_LABEL, outcomeWords, shownState } from "./words";
 import "./control.css";
 import "../styles/lineage.css";
@@ -80,9 +72,8 @@ export function ActivityRow({
         {text}
         {when}
       </div>
-      <AttachmentThumbs items={legacy} small />
       <LinkPictures items={links} small />
-      <SentPictures files={shownFiles([], a.files, [])} small />
+      <SentPictures legacy={legacy} files={shownFiles([], a.files, [])} small />
       {(a.from || a.replyTo) && <ViaLine from={a.from} replyTo={a.replyTo} />}
       <p className={`ctl-act-state ${live ? "is-live" : ""}`} aria-live="polite">
         {live && <span className="spinner" aria-hidden="true" />}

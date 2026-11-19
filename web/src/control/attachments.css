@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Images beside a prompt (control/Attachments.tsx): the paperclip inside the field, the
-   tray of 56 px thumbnails at the field's top (each one's size is its tooltip; one line
-   under the tray says a refusal or how far the uploads are), the drop highlight, and the
-   thumbnails a sent prompt shows in the activity list and the Session view, with a chip
-   for a file that is no picture or is kept no more. Fills and hairlines, no badges; the
-   shared spinner while one uploads. */
+   tray of thumbnails at the field's top (each one's size is its tooltip; one line under
+   the tray says a refusal or how far the uploads are), the drop highlight, the thumbnails
+   a sent prompt shows in the activity list and the Session view, with a chip for a file
+   that is no picture or is kept no more, and the lightbox a sent one opens
+   (control/Lightbox.tsx). A thumbnail is the whole picture: its frame takes the picture's
+   shape within 120×88 (44×32 in a list row), on a neutral fill where a very long or tall
+   one leaves room. Fills and hairlines, no badges; the shared spinner while one uploads. */
 
 /* The paperclip: an icon button in the field (a label around the hidden picker). */
 .att-btn {
@@ -72,18 +74,23 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  width: 56px;
 }
 .att-frame {
   position: relative;
   display: block;
   line-height: 0;
 }
-.att-thumb {
+/* The picture's own shape within 120×88; one not drawn yet holds a 44 px square. */
+.att-thumb,
+.att-thumbs img {
   display: block;
-  width: 56px;
-  height: 56px;
-  object-fit: cover;
+  width: auto;
+  height: auto;
+  max-width: 120px;
+  max-height: 88px;
+  min-width: 44px;
+  min-height: 44px;
+  object-fit: contain;
   border-radius: var(--radius-inner);
   outline: var(--hairline) solid var(--line);
   outline-offset: -1px;
@@ -163,18 +170,11 @@
   outline: var(--focus-width) solid var(--focus);
   outline-offset: 2px;
 }
-.att-thumbs img {
-  width: 64px;
-  height: 64px;
-  object-fit: cover;
-  border-radius: var(--radius-inner);
-  outline: var(--hairline) solid var(--line);
-  outline-offset: -1px;
-  background: var(--bg-3);
-}
 .att-thumbs--sm img {
-  width: 32px;
-  height: 32px;
+  max-width: 44px;
+  max-height: 32px;
+  min-width: 24px;
+  min-height: 24px;
 }
 .att-thumbs--sm {
   margin-top: 4px;
@@ -233,4 +233,107 @@
 .att-chip--elsewhere .att-chip-meta {
   flex: 0 1 auto;
   min-width: 0;
+}
+
+/* The lightbox: the picture whole over a dark ground in every scheme, its name under it,
+   × at the top right and, with several, a chevron each side. */
+.lb {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-menu);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  padding: max(56px, env(safe-area-inset-top)) 56px max(16px, env(safe-area-inset-bottom));
+  background: oklch(0.14 0 0 / 0.94);
+  color: oklch(0.96 0 0);
+  overscroll-behavior: contain;
+  animation: fade-in var(--dur) var(--ease-out) both;
+}
+.lb:focus {
+  outline: none;
+}
+/* The picture at its own size, or smaller to fit, in the middle of what is left. */
+.lb-stage {
+  position: relative;
+  min-height: 0;
+}
+.lb-img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-inner);
+  background: var(--bg-3);
+}
+.lb-cap {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 12px 0 0;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+}
+.lb-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-count {
+  flex: none;
+  color: oklch(0.96 0 0 / 0.6);
+}
+.lb-btn.icon-btn {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  background: oklch(1 0 0 / 0.1);
+  color: inherit;
+}
+@media (hover: hover) {
+  .lb-btn.icon-btn:hover {
+    background: oklch(1 0 0 / 0.2);
+  }
+}
+.lb-btn.icon-btn:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: 2px;
+}
+.lb-x.icon-btn {
+  top: max(8px, env(safe-area-inset-top));
+  right: 8px;
+}
+.lb-prev.icon-btn,
+.lb-next.icon-btn {
+  top: 50%;
+  margin-top: -20px;
+}
+.lb-prev.icon-btn {
+  left: 8px;
+}
+.lb-next.icon-btn {
+  right: 8px;
+}
+/* A phone: the picture takes the width, the chevrons sit beside its name at the foot. */
+@media (max-width: 599px) {
+  .lb {
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-bottom: max(64px, calc(env(safe-area-inset-bottom) + 56px));
+  }
+  .lb-btn.icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .lb-prev.icon-btn,
+  .lb-next.icon-btn {
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    margin-top: 0;
+  }
 }

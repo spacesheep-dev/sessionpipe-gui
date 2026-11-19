@@ -682,6 +682,37 @@ test("a gap in the relay is said, and the board shows what the relay still holds
   await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
 });
 
+test("a start at a level the phone chose says nothing of the computer's own mode: spacesheep's jobs don't say what it applied", async () => {
+  // studio-mac's sessionpipe starts sessions at Safe or Auto, for this test.
+  Object.assign(ss.machines[0]!, {
+    start: { "claude-code": { permissions: ["safe", "auto"], permission: "safe" } },
+  });
+  try {
+    await page.goto(`${server.url}/?new=1&machine=${NAME}`);
+    const sheet = page.locator("[data-new-session]");
+    await sheet.locator("[data-ns-text]").fill("Read the refund page and say what it does.");
+    await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
+    const jobs = ss.jobs.length;
+    await sheet.locator("[data-ns-start]").click();
+    await expect(page).toHaveURL(/\/s\/claude-code\/[0-9a-f-]{36}$/, { timeout: 20_000 });
+    // The computer takes it (the stand-in settles every job done) and the session begins.
+    await expect.poll(() => ss.jobs.slice(jobs).map((j) => j.status)).toEqual(["done"]);
+    const cmd = ran[ran.length - 1]!;
+    expect(cmd).toMatchObject({ kind: "start", permission: "safe" });
+    const sid = String(cmd.session).split(":")[1]!;
+    ss.push(started(sid, "Refund page", String(cmd.text), "It refunds an order in two steps."));
+    await expect(page.getByText("It refunds an order in two steps.").first()).toBeVisible();
+    // Delivered, and no row says what it ran at: not known, so not said either way.
+    await expect
+      .poll(() => page.evaluate(() => document.body.innerText.includes("It refunds an order in two steps.")))
+      .toBe(true);
+    await page.waitForTimeout(1500);
+    await expect(page.getByText(/at its own mode|ignores per-session options/)).toHaveCount(0);
+  } finally {
+    delete ss.machines[0]!.start;
+  }
+});
+
 test("what only a receiver has is not offered, and no page asks for it", async () => {
   // Every page a person can reach: what it asks of its backend is answered, never refused.
   for (const route of [

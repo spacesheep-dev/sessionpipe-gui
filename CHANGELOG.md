@@ -225,6 +225,25 @@ could not read.
   New session say what went wrong in one sentence, offer ↻ where trying again can help,
   and show how far an upload is. A picture dropped anywhere on a session's page goes to its
   message box, and an unsent message's pictures come back with its words after a reload.
+- **A picture is shown whole, and opens over the page.** A thumbnail in the message box
+  and in a sent message is the whole picture, in a frame of its own shape up to 120×88,
+  so two screenshots that start alike can be told apart. A sent one opens large over the
+  page in the browser and in the desktop and phone apps alike: Esc, a tap outside it or ×
+  closes it, and the arrow keys (or the two arrows beside it) go through the message's
+  pictures. A picture that doesn't load is a chip with its name, never words in an empty
+  frame, and why one in the message box can't go is said once, on a line under them all.
+- **An agent's reply keeps its lines.** A single line break in a reply is a line break
+  on the page, the way the agent wrote it, everywhere a reply is shown.
+- **A phone's browser on the board's Wi-Fi or tailnet address says what works there.**
+  Over plain http no passkey can sign, so the line under the message box says: "To send
+  from this phone, use the sessionpipe app (scan the code on /connect) or open this board
+  over HTTPS (start it with --tls).", with /connect a link, and the greyed paperclip says
+  the same.
+- **On a spacesheep account a new session's level is not second-guessed.** spacesheep
+  doesn't say what level the computer ran a start at, so the session no longer says the
+  computer ran it at its own mode.
+- **The iPhone app asks for the camera for photos too.** Its question now says it reads
+  your computer's code and takes photos you send to a session.
 
 ## [0.8.5] - 2026-11-18
 

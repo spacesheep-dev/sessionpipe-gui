@@ -68,6 +68,7 @@ import { copyItem } from "../lib/menus";
 import { accountMode, apiFetch, apiUpload, apiUrl, uploadProgress } from "../lib/net";
 import { controlApi, uploadRefusal } from "./api";
 import { b64url, sha256 } from "./bytes";
+import { Lightbox } from "./Lightbox";
 import { PICKER_DESK, PICKER_TOUCH, pictureType, refuseInput, shrinkImage, stillOverWords } from "./shrink";
 import { boardName, uploadWords } from "./uploadWords";
 import "./attachments.css";
@@ -1039,15 +1040,18 @@ export function usePageDrop(att: AttachmentsHandle, form: RefObject<HTMLElement 
 // ---------- the pieces a composer places ----------
 
 /** The paperclip: a file picker (several at once; on a phone the native sheet, which
- *  offers the camera). Hidden input, visible button. */
+ *  offers the camera). Hidden input, visible button. `why`: where it is greyed for a reason
+ *  of its own, that sentence is its tooltip. */
 export function AttachButton({
   att,
   disabled,
   title = "Attach pictures",
+  why,
 }: {
   att: AttachmentsHandle;
   disabled?: boolean;
   title?: string;
+  why?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const onChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -1060,7 +1064,12 @@ export function AttachButton({
   // Until it is known how this machine takes pictures, none is picked.
   const off = disabled || full || (att.mode !== "files" && att.mode !== "path");
   return (
-    <label className="att-btn" title={title} data-tip={title} aria-disabled={off ? "true" : undefined}>
+    <label
+      className="att-btn"
+      title={off && why ? why : title}
+      data-tip={off && why ? why : title}
+      aria-disabled={off ? "true" : undefined}
+    >
       <input
         ref={input}
         type="file"
@@ -1146,7 +1155,7 @@ function TrayItem({ it, onRemove, onRetry }: { it: PendingItem; onRemove: () => 
       data-state={state}
       data-name={name}
       data-restored={it.restored ? "" : undefined}
-      title={it.error ? `${name} · ${it.error}` : tip}
+      title={it.error ? [name, it.error].filter(Boolean).join(" · ") : tip}
       {...menu}
     >
       <span className="att-frame">
@@ -1266,36 +1275,124 @@ const fileFacts = (f: Pick<ShownFile, "type" | "size">): string =>
 /** A chip's words: "kiwi.png · PNG · 32 KB" for a picture, "notes.pdf · 1.2 MB" for any other file. */
 export const fileWords = (f: Pick<ShownFile, "name" | "type" | "size">): string => `${f.name} · ${fileFacts(f)}`;
 
+/** One thing a sent message shows it carried: a picture this page can draw (`src`), else a
+ *  chip of `file`'s words. `name`: what it is known by; `caption`: what the lightbox says. */
+interface SentThing {
+  key: string;
+  name: string;
+  caption: string;
+  file: ShownFile;
+  src?: string;
+}
+
+/** What a picture the prompt's text names (the composer's older block) says of itself, as
+ *  a chip says a file: "Picture · PNG · 4032×3024". */
+const legacyFile = (it: AttachmentRef): ShownFile => ({
+  name: "Picture",
+  type: it.ext === "jpg" ? "image/jpeg" : `image/${it.ext}`,
+  size: it.width && it.height ? `${it.width}×${it.height}` : "",
+});
+
 /** The files a sent message carried, under its words: a thumbnail for each picture this
- *  receiver keeps, which opens it whole in a new tab; a chip for the rest, and for one
- *  that does not load (kept no more). On a spacesheep account the receiver holds none of
- *  them: chips only. Nothing when there is none. */
-export function SentPictures({ files, small }: { files: readonly ShownFile[]; small?: boolean }) {
-  if (files.length === 0) return null;
+ *  receiver keeps, whole in a frame of its own shape, which opens it in the lightbox
+ *  (every shell; a click with a modifier still opens a new tab in a browser), the arrows
+ *  moving through this message's pictures; a chip for the rest, and for one that does not
+ *  load (kept no more). `legacy`: the pictures the prompt's text names in the composer's
+ *  older block, drawn first. On a spacesheep account the receiver holds none of them: the
+ *  files are chips, the older block's pictures a chip each that says where they are kept.
+ *  Nothing when there is none. */
+export function SentPictures({
+  files,
+  legacy = [],
+  small,
+}: {
+  files: readonly ShownFile[];
+  legacy?: readonly AttachmentRef[];
+  small?: boolean;
+}) {
   const draw = !accountMode();
+  const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
+  const [open, setOpen] = useState<number | null>(null);
+  const things = useMemo((): SentThing[] => {
+    const out: SentThing[] = [];
+    if (draw)
+      for (const it of legacy) {
+        const file = legacyFile(it);
+        out.push({
+          key: `a:${it.id}`,
+          name: `${it.id}.${it.ext}`,
+          caption: fileWords(file),
+          file,
+          src: apiUrl(it.src),
+        });
+      }
+    files.forEach((f, i) => {
+      const src =
+        draw && f.type in ATTACHMENT_TYPES && f.sha256 ? apiUrl(`${ROUTES.ui.control}/files/${f.sha256}`) : undefined;
+      out.push({ key: `f:${i}:${f.name}`, name: f.name, caption: f.name, file: f, ...(src ? { src } : {}) });
+    });
+    return out;
+  }, [files, legacy, draw]);
+  const pictures = useMemo(() => things.filter((t) => t.src && !broken.has(t.src)), [things, broken]);
+  // On a spacesheep account, whose relay holds none of a receiver's pictures, nothing is
+  // asked for that would come back broken.
+  const elsewhere = draw ? [] : legacy;
+  if (things.length === 0 && elsewhere.length === 0) return null;
   return (
-    <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`} data-sent-files={files.length}>
-      {files.map((f, i) => (
-        <SentFile key={`${i}:${f.name}`} f={f} draw={draw} />
+    <span
+      className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`}
+      data-sent-files={files.length}
+      data-attachment-thumbs={draw && legacy.length ? legacy.length : undefined}
+    >
+      {elsewhere.map((it) => (
+        <ElsewhereChip
+          key={`a:${it.id}`}
+          name="picture"
+          facts={[it.width && it.height ? `${it.width}×${it.height}` : "", KEPT_ON_BOARD].filter(Boolean).join(" · ")}
+        />
       ))}
+      {things.map((t) => {
+        const at = pictures.indexOf(t);
+        if (at < 0) return <FileChip key={t.key} f={t.file} />;
+        const words = fileWords(t.file);
+        return (
+          <a
+            key={t.key}
+            href={t.src}
+            target="_blank"
+            rel="noreferrer noopener"
+            title={words}
+            aria-label={words}
+            data-sent-picture={t.name}
+            onClick={(e) => {
+              // A new tab where the person asked for one; the lightbox everywhere else.
+              if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              setOpen(at);
+            }}
+          >
+            <img src={t.src} alt="" loading="lazy" onError={() => setBroken((b) => new Set(b).add(t.src!))} />
+          </a>
+        );
+      })}
+      {open !== null && pictures[open] && (
+        <Lightbox
+          pictures={pictures.map((p) => ({ src: p.src!, name: p.caption }))}
+          at={open}
+          onMove={setOpen}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </span>
   );
 }
 
-function SentFile({ f, draw }: { f: ShownFile; draw: boolean }) {
-  const [broken, setBroken] = useState(false);
-  const words = fileWords(f);
+/** A file drawn as words: a file's glyph when it is no picture, its name (cut to fit), then
+ *  its type and size in the meta tier. */
+function FileChip({ f }: { f: ShownFile }) {
   const picture = f.type in ATTACHMENT_TYPES;
-  if (picture && f.sha256 && draw && !broken) {
-    const src = apiUrl(`${ROUTES.ui.control}/files/${f.sha256}`);
-    return (
-      <a href={src} target="_blank" rel="noreferrer noopener" title={words} data-sent-picture={f.name}>
-        <img src={src} alt={f.name} loading="lazy" onError={() => setBroken(true)} />
-      </a>
-    );
-  }
   return (
-    <span className="att-chip" title={words} data-sent-file={f.name}>
+    <span className="att-chip" title={fileWords(f)} data-sent-file={f.name}>
       {!picture && (
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor">
           <path d="M4 1.5h5.5L12.5 4.5v10h-8.5zM9.5 1.5v3h3" strokeWidth="1.25" strokeLinejoin="round" />
@@ -1318,44 +1415,6 @@ function ElsewhereChip({ name, facts }: { name: string; facts: string }) {
     <span className="att-chip att-chip--elsewhere" title={`${name} · ${facts}`} data-picture-elsewhere={name}>
       <span className="att-chip-name">{name}</span>
       <span className="att-chip-meta num">{facts}</span>
-    </span>
-  );
-}
-
-/** Thumbnails for the images a prompt text names; each opens the full image in a new tab.
- *  On a spacesheep account, whose relay holds none of a receiver's images, a chip each:
- *  nothing is asked for that would come back broken. */
-export function AttachmentThumbs({ items, small }: { items: readonly AttachmentRef[]; small?: boolean }) {
-  if (items.length === 0) return null;
-  if (accountMode())
-    return (
-      <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`}>
-        {items.map((it) => (
-          <ElsewhereChip
-            key={it.id}
-            name="picture"
-            facts={[it.width && it.height ? `${it.width}×${it.height}` : "", KEPT_ON_BOARD].filter(Boolean).join(" · ")}
-          />
-        ))}
-      </span>
-    );
-  return (
-    <span className={`att-thumbs ${small ? "att-thumbs--sm" : ""}`} data-attachment-thumbs={items.length}>
-      {items.map((it) => (
-        <a
-          key={it.id}
-          href={apiUrl(it.src)}
-          target="_blank"
-          rel="noreferrer noopener"
-          title={it.width && it.height ? `${it.width}×${it.height} · open` : "open"}
-        >
-          <img
-            src={apiUrl(it.src)}
-            alt={`attachment${it.width && it.height ? ` ${it.width}×${it.height}` : ""}`}
-            loading="lazy"
-          />
-        </a>
-      ))}
     </span>
   );
 }
@@ -1397,9 +1456,8 @@ export function PromptBody({
   return (
     <>
       {body ? render(body) : null}
-      <AttachmentThumbs items={legacy} small={small} />
       <LinkPictures items={links} small={small} />
-      <SentPictures files={shown} small={small} />
+      <SentPictures legacy={legacy} files={shown} small={small} />
     </>
   );
 }
