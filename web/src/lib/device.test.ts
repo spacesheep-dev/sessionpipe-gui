@@ -263,16 +263,34 @@ const windowOf = (width: number, pointer: Pointer) => {
     removeEventListener() {},
   });
 };
+/** Every width from 300 to 1300 in steps of 10, and the pixel either side of each place a
+ *  layout changes. */
+const WIDTHS = [
+  ...Array.from({ length: 101 }, (_, i) => 300 + i * 10),
+  ...[719, 720, 721, 839, 840, 841, 599, 600],
+].sort((a, b) => a - b);
+/** Where a window with a mouse takes the desktop layout, and one with no pointer. */
+const MOUSE_FROM = 720;
+const NO_POINTER_FROM = 840;
+/** The combined layout rule, said plainly: the touch app for a touch-first screen at any
+ *  width, for a window with a mouse under 720 px and for no pointer under 840. */
+const touchApp = (width: number, pointer: Pointer): boolean =>
+  pointer === "coarse" || (pointer === "fine" ? width < MOUSE_FROM : width < NO_POINTER_FROM);
+
 describe("the two layouts", () => {
-  it("are exact opposites: every window has one of them, whatever its pointer", () => {
-    for (const width of [320, 700, 719, 720, 760, 839, 840, 1440])
-      for (const pointer of POINTERS)
-        expect(`${width} ${pointer}: ${matches(PHONE_QUERY, width, pointer)}`).toBe(
-          `${width} ${pointer}: ${!matches(DESKTOP_QUERY, width, pointer)}`,
-        );
+  it("are exact opposites, and each window has the one the rule names: a touch screen the touch app at any width", () => {
+    const wrong: string[] = [];
+    for (const width of WIDTHS)
+      for (const pointer of POINTERS) {
+        const phone = matches(PHONE_QUERY, width, pointer);
+        const desktop = matches(DESKTOP_QUERY, width, pointer);
+        if (phone === desktop || phone !== touchApp(width, pointer))
+          wrong.push(`${width} ${pointer}: phone ${phone}, desktop ${desktop}`);
+      }
+    expect(wrong).toEqual([]);
   });
 
-  it("keep a window with a mouse a desktop down to 720 px, where it was 840", () => {
+  it("keep a window with a mouse a desktop down to 720 px, and one with no pointer to 840", () => {
     const phone = (width: number, pointer: Pointer) => matches(PHONE_QUERY, width, pointer);
     expect([700, 719, 720, 760, 839, 840].map((w) => phone(w, "fine"))).toEqual([
       true,
@@ -282,27 +300,22 @@ describe("the two layouts", () => {
       false,
       false,
     ]);
-    // A touch screen, and one with no pointer at all, change where they always did: a
-    // phone and a tablet held upright keep the phone's layout.
-    for (const pointer of ["coarse", "none"] as const)
-      expect([700, 719, 720, 760, 839, 840].map((w) => phone(w, pointer))).toEqual([
-        true,
-        true,
-        true,
-        true,
-        true,
-        false,
-      ]);
+    expect([700, 719, 720, 760, 839, 840].map((w) => phone(w, "none"))).toEqual([true, true, true, true, true, false]);
+    // A phone, a tablet on its side, an opened phone turned: the touch app all the way.
+    expect([320, 393, 669, 820, 951, 1180, 1366, 2560].map((w) => phone(w, "coarse"))).toEqual(Array(8).fill(true));
   });
 
-  it("are what the page's code is told: wideLayout is phoneLayout's opposite", async () => {
-    const { phoneLayout, wideLayout } = await fresh();
-    windowOf(760, "fine");
-    expect([phoneLayout(), wideLayout()]).toEqual([false, true]);
-    windowOf(760, "coarse");
-    expect([phoneLayout(), wideLayout()]).toEqual([true, false]);
-    windowOf(700, "fine");
-    expect([phoneLayout(), wideLayout()]).toEqual([true, false]);
+  it("are what the page's code is told: wideLayout is phoneLayout's opposite, at every width and pointer", async () => {
+    const wrong: string[] = [];
+    for (const width of WIDTHS)
+      for (const pointer of POINTERS) {
+        const { phoneLayout, wideLayout } = await fresh();
+        windowOf(width, pointer);
+        const told = [phoneLayout(), wideLayout()];
+        if (told[0] === told[1] || told[0] !== touchApp(width, pointer)) wrong.push(`${width} ${pointer}: ${told}`);
+        vi.resetModules();
+      }
+    expect(wrong).toEqual([]);
   });
 });
 

@@ -202,7 +202,7 @@
 }
 
 /* ----- the phone: a bottom sheet above the tab bar ----- */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .qs-scrim {
     display: block;
     position: fixed;

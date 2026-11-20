@@ -36,12 +36,9 @@ const INSETS = ((said) => {
   return said.split(",").map(Number) as Insets;
 })(process.env.ACCOUNT_SCREENS_INSETS);
 /** The hour on a prompt's card, with the way to answer it on spacesheep: the hour's own
- *  sentence, then on a phone the link on a line of its own, and wider after a "·". */
-const hourOnCard = (width: number) =>
-  width < 840
-    ? /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.\sOpen on spacesheep\.dev$/
-    : /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\s·\sOpen on spacesheep\.dev$/;
-const HOUR_ON_CARD = hourOnCard(W);
+ *  sentence, then the link on a line of its own. A touch screen's card at every width: a
+ *  tablet held wide has the phone's, never a mouse window's "·" between the two. */
+const HOUR_ON_CARD = /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.\sOpen on spacesheep\.dev$/;
 const MACHINE = "m_studio0123456789abcd";
 const NAME = "studio-mac";
 /** The account's origin as a person reads it. Nothing is asked of it: spacesheep is stood in. */
@@ -1057,9 +1054,9 @@ test("the Approve page's blocks are panels that start at one edge, at any width"
         expect(z.h, JSON.stringify(z)).toBeLessThan(50);
       }
     }
-    // One left edge and one right edge for all of them; and on a wide screen, where the
-    // page draws no panels of its own, each is one, and what is inside starts equally far in.
-    for (const k of W >= 840 ? (["left", "right", "inner"] as const) : (["left", "right"] as const))
+    // One left edge and one right edge for all of them, at any width: the grouped page
+    // draws the panels on a touch screen however wide it is.
+    for (const k of ["left", "right"] as const)
       expect(new Set(boxes.map((x) => Math.round(x[k]))).size, `${k}: ${JSON.stringify(boxes)}`).toBe(1);
   } finally {
     await b.close();
@@ -2057,15 +2054,13 @@ test.describe("what else an account shows", () => {
       // and no button that would be refused.
       await expect(card.locator(".ctl-answer-note")).toHaveText(HOUR_ON_CARD, { timeout: 15_000 });
       await expect(card.locator("[data-elsewhere]")).toBeVisible();
-      if (W < 840) {
-        // The link starts its own line, where the sentence starts: no "·" left at a line's end.
-        const [note, link] = await Promise.all([
-          card.locator(".ctl-answer-note").boundingBox(),
-          card.locator("[data-elsewhere]").boundingBox(),
-        ]);
-        expect(Math.round(link!.x)).toBe(Math.round(note!.x));
-        await expect(card.locator(".ctl-answer-note")).not.toContainText("·");
-      }
+      // The link starts its own line, where the sentence starts: no "·" left at a line's end.
+      const [note, link] = await Promise.all([
+        card.locator(".ctl-answer-note").boundingBox(),
+        card.locator("[data-elsewhere]").boundingBox(),
+      ]);
+      expect(Math.round(link!.x)).toBe(Math.round(note!.x));
+      await expect(card.locator(".ctl-answer-note")).not.toContainText("·");
       await expect(page.getByText("this page cannot sign an answer")).toHaveCount(0);
       const allow = card.getByRole("button", { name: "Allow" });
       const deny = card.getByRole("button", { name: "Deny" });
@@ -2079,12 +2074,12 @@ test.describe("what else an account shows", () => {
       // Off, Allow wears Deny's face: neither reads as the one pressed.
       const face = (l: typeof allow) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
       expect(await face(allow)).toBe(await face(deny));
-      // On the phone the card stands alone: the field, off for the hour too, takes no room.
-      if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
+      // On a touch screen the card stands alone: the field, off for the hour too, takes no room.
+      await expect(page.locator(".ctl-field")).toHaveCount(0);
       await shot(page, "also-prompt-cooling");
-      // On the phone and on an iPad's card, upright or held wide (a grid whose rows are 2 px
-      // apart, the pair beside), Open on spacesheep.dev is 45 tall to a finger and takes no
-      // tap from the question above it or from the pair under it.
+      // On the phone and on an iPad, upright or held wide (the same card at each: the touch
+      // app's), Open on spacesheep.dev is 45 tall to a finger and takes no tap from the
+      // question above it or from the pair under it.
       const elsewhere = card.locator("[data-elsewhere]");
       for (const size of [
         { width: 390, height: 844 },
@@ -2093,7 +2088,7 @@ test.describe("what else an account shows", () => {
       ]) {
         await page.setViewportSize(size);
         // The card takes the width's form, and draws the link anew as it does: measured after.
-        await expect(card.locator(".ctl-answer-note")).toHaveText(hourOnCard(size.width));
+        await expect(card.locator(".ctl-answer-note")).toHaveText(HOUR_ON_CARD);
         await expect(elsewhere).toBeVisible();
         const hits = await elsewhere.evaluate((el) => {
           const r = el.getBoundingClientRect();
@@ -2471,7 +2466,7 @@ test.describe("what else an account shows", () => {
       await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
       await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
       await expect(page.getByText(line)).toHaveCount(1);
-      if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
+      await expect(page.locator(".ctl-field")).toHaveCount(0);
       // With no prompt open, the line under the field, which is off.
       await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
       await expect(page.locator(".ctl-foot[data-reason='blocked']")).toContainText(line, { timeout: 15_000 });

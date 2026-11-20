@@ -6,6 +6,18 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A touch screen has the touch app at any width.** A tablet turned on its side, a phone
+  on its side or opened flat, and a tablet's browser got the Mac's layout from 840 px wide:
+  the icon rail, "Start ⌘↵" and "… is listening." in New session, "Open in new window" in a
+  row's menu, two "Approve this iPhone" under one prompt, and the page running under the
+  status bar at the side. They now keep the phone's tab bar, sheets and words, inside the
+  screen's safe areas, with the message field riding on the keyboard. Turning the screen no
+  longer swaps the app under the hand: New session keeps its open list, the caret and the
+  words being typed. The sidebar, the panel beside a list and "Open beside" are a window
+  with a mouse's, which still changes at 720 px.
+
 ### Fixed
 
 - **A window dragged across 720 px wide changes its layout all at once, and keeps nothing

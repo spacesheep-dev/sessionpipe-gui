@@ -3,7 +3,9 @@
 // The iPhone app at the iPhone Duo's shapes (the `duo` project: a touch screen, 3x): the
 // outer display 466×678, the inner one upright 669×951 and turned 951×669, a Split View
 // half 470×669, each with the bands the system keeps (duo.ts). What holds at a shape is
-// said here. What a page keeps as it moves from one to another is in
+// said here: the first run, the keyboard, a reply's lines, and that the inner display
+// turned (wider than the width at which a window with a mouse takes the Mac's layout) is
+// still the touch app. What a page keeps as it moves from one to another is in
 // duo-continuity.spec.ts, which runs in WebKit too.
 import { expect, type Page, test } from "@playwright/test";
 import {
@@ -22,6 +24,9 @@ import {
 } from "./duo.js";
 
 const composer = (page: Page) => page.locator("textarea").first();
+/** The inner display turned on its side, as the simulator gives it and as first estimated:
+ *  both wider than the width a mouse window's layout changes at (lib/device.ts). */
+const TURNED = ["951x669", "890x626"] as const;
 
 test.beforeAll(async ({ browser }) => {
   // A finger, at every width: what makes the inner display the touch app's and not a Mac's.
@@ -154,6 +159,152 @@ test("a reply on the outer display and in Split View reads in lines of at most 7
       // It wraps (the reply is some 190 characters), into lines the eye can follow back.
       expect(chars, `${width}x${height}`).toBeGreaterThan(20);
       expect(chars, `${width}x${height}`).toBeLessThanOrEqual(75);
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+test("the inner display turned is the touch app still: its tab bar, one sentence on a prompt it cannot answer yet, and none of a Mac's words in New session or a row's menu", async ({
+  browser,
+}) => {
+  for (const size of TURNED) {
+    const b = await duoBed(browser, size);
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+      // The phone's tab bar under the page, and no rail beside it.
+      await expect(page.locator("nav.tabbar"), size).toBeVisible();
+      await expect(page.locator("nav.rail"), size).toBeHidden();
+      // Not approved yet. The prompt's card says so in one sentence with the one way on: no
+      // message field that would only refuse, and no second "Approve this iPhone" under it.
+      await page.goto(`${b.server.url}${DUO_SESSIONS.prompt}`);
+      await expect(page.locator(".ctl-answer").getByText("This iPhone can't answer yet."), size).toBeVisible();
+      await expect(page.getByRole("link", { name: "Approve this iPhone" }), size).toHaveCount(1);
+      await expect(page.getByText("Approve this iPhone"), size).toHaveCount(1);
+      await expect(page.locator("textarea"), size).toHaveCount(0);
+      // Approved: New session is the phone's form. Nothing is said while all is well, and
+      // Start is a word, with no key beside it.
+      await b.approve();
+      await page.goto(b.server.url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+      await page.getByRole("button", { name: "New session" }).click();
+      const sheet = page.getByRole("dialog", { name: "New session" });
+      await sheet.locator("[data-ns-text]").fill("Look around.");
+      await expect(sheet.locator("[data-ns-start]"), size).toBeEnabled();
+      await expect(sheet.locator("[data-ns-start]"), size).toHaveText("Start");
+      await expect(sheet.locator(".ns-status"), size).toHaveText("");
+      await expect(sheet, size).not.toContainText("⌘");
+      await expect(sheet, size).not.toContainText("is listening.");
+      await sheet.getByRole("button", { name: "Discard draft" }).click();
+      await sheet.getByRole("button", { name: "Cancel" }).click();
+      await expect(sheet).toHaveCount(0);
+      // A row held down: a preview, and nothing that needs a second window or a panel beside.
+      await page
+        .locator("article.card .card-title")
+        .first()
+        .evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          el.dispatchEvent(
+            new PointerEvent("pointerdown", {
+              bubbles: true,
+              pointerType: "touch",
+              clientX: r.left + 4,
+              clientY: r.top + 4,
+            }),
+          );
+        });
+      await expect(page.getByRole("menuitem", { name: "Preview", exact: true }), size).toBeVisible();
+      const items = await page.getByRole("menuitem").allInnerTexts();
+      for (const mac of ["Open in new window", "Open in background tab", "Open beside"])
+        expect(items, `${size}: ${mac}`).not.toContain(mac);
+    } finally {
+      await b.close();
+    }
+  }
+});
+
+test("the inner display turned: the message field rides on the keyboard, as on the outer display", async ({
+  browser,
+}) => {
+  for (const size of TURNED) {
+    const b = await duoBed(browser, size);
+    const { page } = b;
+    const [, height] = size.split("x").map(Number) as [number, number];
+    const kb = DUO[size]!.kb;
+    /** The docked strip's bottom edge, and the field's, in the window. */
+    const edges = () =>
+      page.evaluate(() =>
+        [".sess-ctl", ".sess-ctl textarea"].map((sel) =>
+          Math.round(document.querySelector(sel)!.getBoundingClientRect().bottom),
+        ),
+      );
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+      await b.approve();
+      await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+      await expect(composer(page)).toBeEnabled();
+      const [down] = await edges();
+      await composer(page).focus();
+      await fakeKeyboard(page, kb);
+      // The strip stands on the keys, and the field in it is above them.
+      await expect.poll(async () => (await edges())[0], size).toBe(height - kb);
+      expect((await edges())[1], size).toBeLessThanOrEqual(height - kb);
+      await fakeKeyboard(page, 0);
+      await expect.poll(async () => (await edges())[0], size).toBe(down);
+    } finally {
+      await b.close();
+    }
+  }
+});
+
+test("the inner display turned holds no control under its band that the outer display does not", async ({
+  browser,
+}) => {
+  const b = await duoBed(browser, "466x678");
+  const { page } = b;
+  /** Each control by its first words: a row's name ends with its age, which moves. */
+  const named = (names: string[]) => names.map((name) => name.split(" ").slice(0, 3).join(" ")).sort();
+  /** The pages, each with what shows once it is whole (`answers`: Allow, ready to be tapped). */
+  const PAGES: [name: string, path: string, shown: string, answers: boolean][] = [
+    ["Board", "/", "Release notes for 0.8.3", false],
+    ["a session with a prompt", DUO_SESSIONS.prompt, "Allow Bash to run:", true],
+    ["Inbox", "/inbox", "Fix the invoice webhook retries", true],
+    ["Machines", "/machines", "studio-mac", false],
+  ];
+  /** What a finger would land on under a band, page by page, in the pose the phone is in. */
+  const under = async () => {
+    const found: Record<string, string[]> = {};
+    for (const [name, path, shown, answers] of PAGES) {
+      await page.goto(`${b.server.url}${path}`);
+      await expect(page.getByText(shown).first(), name).toBeVisible();
+      if (answers) await expect(page.getByRole("button", { name: "Allow", exact: true }), name).toBeEnabled();
+      found[name] = await bandOffenders(page);
+    }
+    return found;
+  };
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await b.approve();
+    // The phone's own layout, on the outer display: what it holds there is the measure.
+    // Today that is its gutter's doing: a bar's last button is 44 wide round a glyph that
+    // ends at the band (10 pt under it), and a board row's ground runs 8 pt past its words.
+    // Turned, the same and nothing of a Mac's layout; none at either is the gutter's to fix.
+    const outer = await under();
+    for (const size of TURNED) {
+      const [width, height] = size.split("x").map(Number) as [number, number];
+      await pose(page, width, height);
+      const turned = await under();
+      expect(await shapeOf(page), size).toEqual({ size, insets: DUO[size]!.insets });
+      for (const [name] of PAGES) {
+        // What answers a prompt, sends, or turns something on is never one of them.
+        for (const held of turned[name]!)
+          expect(held, `${name} at ${size}`).not.toMatch(/^(Allow|Deny|Send|Stop|Ask another agent…|Turn on)\b/);
+        expect(named(turned[name]!), `${name} at ${size}`).toEqual(named(outer[name]!));
+      }
     }
   } finally {
     await b.close();

@@ -272,6 +272,33 @@ test.describe("phone", () => {
     await expect(page).toHaveURL(/\/machines$/);
   });
 
+  test("held wide, a tablet or a phone on its side has the same app: the tab bar, a session as its own page, no panel beside the list", async ({
+    page,
+  }) => {
+    // An iPad and an Android tablet on their sides, and an Android phone on its: each wider
+    // than the width at which a window with a mouse takes the sidebar's layout.
+    for (const size of [
+      { width: 1180, height: 820 },
+      { width: 1280, height: 800 },
+      { width: 915, height: 412 },
+    ]) {
+      const at = `${size.width}x${size.height}`;
+      await page.setViewportSize(size);
+      await openBoard(page);
+      await tabBarIsOn(page);
+      await noSidewaysScroll(page);
+      await expect(page.locator(".page.board .compose-btn--phone"), at).toBeVisible();
+      // A row pushes its session's page, with Board behind Back: never a panel beside the list.
+      await page.locator("article.card a.card-link").first().click();
+      await expect(page, at).toHaveURL(/\/s\//);
+      await expect(page.locator(".bar-back-label"), at).toHaveText("Board");
+      await expect(page.locator(".panel--open"), at).toHaveCount(0);
+      expect(page.url(), at).not.toContain("?s=");
+      await tabBarIsOn(page);
+      await noSidewaysScroll(page);
+    }
+  });
+
   test("a pull down the board past the arm distance reopens the stream; a short one does nothing", async ({ page }) => {
     await openBoard(page);
     const html = page.locator("html");

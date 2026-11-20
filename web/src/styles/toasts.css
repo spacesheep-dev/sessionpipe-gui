@@ -247,7 +247,7 @@
     transform: translateY(8px);
   }
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .toasts--phone {
     inset: 0;
     width: auto;

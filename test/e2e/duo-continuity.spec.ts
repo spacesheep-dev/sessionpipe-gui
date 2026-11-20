@@ -94,6 +94,174 @@ test("a message being written is kept as the phone is unfolded, turned, put in S
   }
 });
 
+/** The inner display opened, turned on its side, upright again, then half of it in Split
+ *  View: every pose from the outer display on. Turned, it is wider than the width at which
+ *  a window with a mouse changes its layout; a touch screen keeps the one it has. */
+const WALK = [
+  [669, 951],
+  [951, 669],
+  [669, 951],
+  [470, 669],
+] as const;
+
+interface Held {
+  __held?: Record<string, Element | null>;
+}
+/** The page keeps hold of the nodes that match now, each by a name. */
+const hold = (page: Page, nodes: Record<string, string>) =>
+  page.evaluate((sel) => {
+    const held: Record<string, Element | null> = {};
+    for (const [name, selector] of Object.entries(sel)) held[name] = document.querySelector(selector);
+    (window as unknown as Held).__held = held;
+  }, nodes);
+/** Which of them are still the nodes on the page: the same element, not one drawn anew in
+ *  its place (that one would have lost the focus, the caret and an open list). */
+const same = (page: Page, nodes: Record<string, string>) =>
+  page.evaluate((sel) => {
+    const held = (window as unknown as Held).__held ?? {};
+    const kept: Record<string, boolean> = {};
+    for (const [name, selector] of Object.entries(sel)) {
+      const now = document.querySelector(selector);
+      kept[name] = !!now && now === held[name] && now.isConnected;
+    }
+    return kept;
+  }, nodes);
+/** The field with the focus, as a person left it: its words and where the caret is. */
+const typing = (page: Page, selector: string) =>
+  page.evaluate((sel) => {
+    const field = document.querySelector<HTMLTextAreaElement | HTMLInputElement>(sel);
+    return {
+      focused: !!field && document.activeElement === field,
+      caret: field ? [field.selectionStart, field.selectionEnd] : null,
+      text: field?.value ?? null,
+    };
+  }, selector);
+
+test.describe("no pose swaps the app: through an unfold, a turn and Split View", () => {
+  /** The app on the outer display, approved, at the board. */
+  const approved = async (b: Awaited<ReturnType<typeof duoBed>>) => {
+    await b.page.goto(b.server.url);
+    await expect(b.page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await b.approve();
+    await b.page.goto(b.server.url);
+    await expect(b.page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+  };
+
+  test("New session being written is the same sheet: its field keeps the focus, the caret and the words", async ({
+    browser,
+  }) => {
+    const b = await duoBed(browser, "466x678");
+    const { page } = b;
+    const NODES = { sheet: "[data-new-session]", field: "[data-ns-text]" };
+    const draft = "Started on the outer screen.";
+    try {
+      await approved(b);
+      await page.getByRole("button", { name: "New session" }).click();
+      const field = page.locator(NODES.field);
+      await field.click();
+      await field.fill(draft);
+      await field.evaluate((t: HTMLTextAreaElement) => t.setSelectionRange(6, 6));
+      expect(await typing(page, NODES.field)).toEqual({ focused: true, caret: [6, 6], text: draft });
+      await hold(page, NODES);
+      for (const [width, height] of WALK) {
+        const at = `${width}x${height}`;
+        await pose(page, width, height);
+        expect(await same(page, NODES), at).toEqual({ sheet: true, field: true });
+        expect(await typing(page, NODES.field), at).toEqual({ focused: true, caret: [6, 6], text: draft });
+        // The phone's sheet at every one of them: Start in its bar, a word with no key beside it.
+        await expect(page.locator("[data-ns-start]"), at).toHaveText("Start");
+      }
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("New session with the machine picker open keeps the sheet and the open list", async ({ browser }) => {
+    const b = await duoBed(browser, "466x678");
+    const { page } = b;
+    const NODES = { sheet: "[data-new-session]", picker: "[data-ns-row=machine] button" };
+    try {
+      await approved(b);
+      await page.getByRole("button", { name: "New session" }).click();
+      await page.locator(NODES.picker).click();
+      const list = page.getByRole("listbox");
+      await expect(list).toBeVisible();
+      await expect(list.getByRole("option", { name: "studio-mac" })).toBeVisible();
+      await hold(page, NODES);
+      for (const [width, height] of WALK) {
+        const at = `${width}x${height}`;
+        await pose(page, width, height);
+        expect(await same(page, NODES), at).toEqual({ sheet: true, picker: true });
+        await expect(list, at).toHaveCount(1);
+        await expect(list.getByRole("option", { name: "studio-mac" }), at).toBeVisible();
+        await expect(page.locator(NODES.picker), at).toHaveAttribute("aria-expanded", "true");
+      }
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("Ask another agent, Search's field and a choice pushed in Settings are each as they were left", async ({
+    browser,
+  }) => {
+    const b = await duoBed(browser, "466x678");
+    const { page } = b;
+    const walk = async (what: string, check: (at: string) => Promise<void>) => {
+      for (const [width, height] of [...WALK, [466, 678] as const]) {
+        const at = `${what} at ${width}x${height}`;
+        await pose(page, width, height);
+        await check(at);
+      }
+    };
+    try {
+      // The computer's agents can be asked by one another, so the session offers it.
+      Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+      await approved(b);
+      // Ask another agent, with what to ask half written.
+      const HANDOFF = { sheet: "[data-handoff]", field: "[data-hs-text]" };
+      const ask = "Check the notes against the merged PRs.";
+      await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+      await page.getByRole("button", { name: "Ask another agent…" }).click();
+      const field = page.locator(HANDOFF.field);
+      await field.click();
+      await field.fill(ask);
+      await field.evaluate((t: HTMLTextAreaElement) => t.setSelectionRange(5, 5));
+      await hold(page, HANDOFF);
+      await walk("Ask another agent", async (at) => {
+        expect(await same(page, HANDOFF), at).toEqual({ sheet: true, field: true });
+        expect(await typing(page, HANDOFF.field), at).toEqual({ focused: true, caret: [5, 5], text: ask });
+      });
+      // Search, with a word in its field.
+      const SEARCH = { field: ".sx-search input" };
+      await page.goto(`${b.server.url}/search`);
+      const search = page.locator(SEARCH.field);
+      await search.click();
+      await search.fill("webhook");
+      await search.evaluate((t: HTMLInputElement) => t.setSelectionRange(3, 3));
+      await hold(page, SEARCH);
+      await walk("Search", async (at) => {
+        expect(await same(page, SEARCH), at).toEqual({ field: true });
+        expect(await typing(page, SEARCH.field), at).toEqual({ focused: true, caret: [3, 3], text: "webhook" });
+      });
+      // Settings › General › Mode: a choice pushed, as a phone pushes it.
+      const SETTINGS = { settings: ".settings", picks: ".settings-picks" };
+      await page.goto(`${b.server.url}/settings`);
+      const settings = page.getByRole("dialog", { name: "Settings" });
+      await settings.getByRole("tab", { name: "General" }).click();
+      await settings.getByRole("button", { name: /^Mode:/ }).click();
+      await expect(settings.locator(".settings-bar-title")).toHaveText("Mode");
+      await hold(page, SETTINGS);
+      await walk("Settings", async (at) => {
+        expect(await same(page, SETTINGS), at).toEqual({ settings: true, picks: true });
+        await expect(settings.locator(".settings-bar-title"), at).toHaveText("Mode");
+        await expect(settings.getByRole("radio", { name: "Simple" }), at).toBeChecked();
+      });
+    } finally {
+      await b.close();
+    }
+  });
+});
+
 test.describe("what duo.ts promises a test, in both engines", () => {
   /** A page of the made-up document at the outer display, with its bands. */
   const madeUp = async (browser: Parameters<typeof duoBed>[0]) => {
@@ -159,6 +327,55 @@ test.describe("what duo.ts promises a test, in both engines", () => {
         // page ends at 382.
         if (size === "669x951") expect(first.bar[3]).toBe(77);
         if (size === "466x678") expect(first.page[1]).toBe(382);
+        letGo();
+        await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+        await expect(page.locator(".boot")).toHaveCount(0);
+        expect(await chrome(), size).toEqual(first);
+      } finally {
+        letGo();
+        await b.close();
+      }
+    }
+  });
+
+  test("a wide touch screen's first frame is the touch app's: the tab bar, and no sidebar the app would then take away", async ({
+    browser,
+  }) => {
+    // The inner display turned, and a tablet on its side at the width a mouse window's
+    // sidebar gets its labels (index.html draws that frame before the app's script runs).
+    for (const size of ["951x669", "1280x800"]) {
+      const b = await duoBed(browser, size);
+      const { page } = b;
+      let letGo = () => {};
+      const held = new Promise<void>((go) => {
+        letGo = go;
+      });
+      await page.route(/\/assets\/index-[^/]+\.js$/, async (route) => {
+        await held;
+        await route.continue().catch(() => {});
+      });
+      /** The shell as drawn: which of the tab bar and the rail shows, whether it is marked
+       *  as the labelled sidebar's, and where the page's bar and the tab bar stand. */
+      const chrome = () =>
+        page.evaluate(() => {
+          const shell = document.querySelector(".shell")!;
+          const shows = (sel: string) => (shell.querySelector(sel)?.getClientRects().length ?? 0) > 0;
+          const box = (sel: string) => {
+            const r = shell.querySelector(sel)!.getBoundingClientRect();
+            return [r.left, r.top, r.right, r.bottom].map(Math.round);
+          };
+          return {
+            tabbar: shows(".tabbar"),
+            rail: shows(".rail"),
+            side: shell.classList.contains("shell--side"),
+            at: { bar: box(".bar"), tabbar: box(".tabbar") },
+          };
+        });
+      try {
+        await page.goto(b.server.url, { waitUntil: "commit" });
+        await expect(page.locator(".boot")).toBeVisible();
+        const first = await chrome();
+        expect(first, size).toMatchObject({ tabbar: true, rail: false, side: false });
         letGo();
         await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
         await expect(page.locator(".boot")).toHaveCount(0);

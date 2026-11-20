@@ -219,7 +219,7 @@
 
 /* The page and its bars keep clear of a notch or the rounded corners in landscape; the
    tab bar's tabs too, its ground still running edge to edge. */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .main {
     padding-left: max(var(--gutter), var(--safe-left, env(safe-area-inset-left)));
     padding-right: max(var(--gutter), var(--safe-right, env(safe-area-inset-right)));
@@ -350,7 +350,7 @@
 .boot[data-mode="advanced"] [data-boot-simple] {
   display: none;
 }
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .boot .bar-below {
     display: none;
   }
@@ -358,7 +358,7 @@
 
 /* ----- the sidebar (desktop) ----- */
 
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .shell {
     grid-template-rows: none;
     grid-template-columns: var(--rail) minmax(0, 1fr);
@@ -722,7 +722,7 @@
    in a window with a mouse; lib/device.ts): icons only, each named by its tooltip; the
    labels stay for assistive tech. The stream's words too: the dot says it, the tooltip
    names it. */
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .shell:not(.shell--side) .rail .nav-label {
     position: absolute;
     width: 1px;
@@ -913,7 +913,7 @@
 /* The phone: a 44 px navigation bar whose title fades in once the large title under it
    has scrolled away (PageBar watches it); the tools sit under the large title and
    scroll with the page. */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .bar {
     padding-top: var(--safe-top, env(safe-area-inset-top));
     justify-content: space-between;

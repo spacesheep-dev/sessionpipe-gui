@@ -150,10 +150,11 @@
   }
 }
 
-/* A phone's gutter has no room left of the chevron (2 px to the screen's edge), so its
-   44 x 44 reaches right instead: from the edge to where the title starts, over the row's
-   glyph. A tap on the glyph of a row with subagents folds them; the title opens the row. */
-@media (pointer: coarse) and (max-width: 839px) {
+/* A touch screen's gutter has no room left of the chevron (2 px to the screen's edge), so
+   its 44 x 44 reaches right instead: from the edge to where the title starts, over the row's
+   glyph. A tap on the glyph of a row with subagents folds them; the title opens the row.
+   A touch screen has the phone layout at any width (lib/device.ts PHONE_QUERY). */
+@media (pointer: coarse) {
   .card-disclose::before {
     inset: 0 -28px 0 -2px;
   }
@@ -163,17 +164,10 @@
     padding-top: 13px;
   }
 }
-/* Wider, the card is a grid whose rows are 2 px apart: the note takes 11 over its way on,
-   so the box stops at the question or Show n more lines (an iPad held wide, in the hour). */
-@media (pointer: coarse) and (min-width: 840px) {
-  .ctl-answer > .ctl-answer-note:has(> :is(.ctl-link, .ctl-open-https)) {
-    padding-top: 11px;
-  }
-}
 
 /* ---------- the phone's back button and empty states ---------- */
 
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* The chevron with the previous page's name beside it, both in the tint's ink (the name
      is text, so the readable --tint-fg, and the chevron matches it), as iOS's back button
      (PageBar.tsx BackButton): the name gives way to an ellipsis before it reaches the
@@ -234,16 +228,18 @@
    flat shadows, each the row's own height, carry the ground over the 4 px margin and the
    gutter on either side. Not while a swipe has the row, whose pane has its own ground,
    nor while the finger is on its chevron, which folds the tree rather than opening it. */
-@media (hover: none) and (max-width: 839px) {
-  .card-row:active:not([data-swipe], :has(> .card-disclose:active)),
-  .kid:active,
-  .kid-more-btn:active,
-  .inbox-row:not([data-swipe]):has(.inbox-main:active),
-  .ev:active,
-  .hit:active {
-    border-radius: 0;
-    box-shadow:
-      calc(-1 * (var(--gutter) + 4px)) 0 0 var(--press),
-      calc(var(--gutter) + 4px) 0 0 var(--press);
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
+  @media (hover: none) {
+    .card-row:active:not([data-swipe], :has(> .card-disclose:active)),
+    .kid:active,
+    .kid-more-btn:active,
+    .inbox-row:not([data-swipe]):has(.inbox-main:active),
+    .ev:active,
+    .hit:active {
+      border-radius: 0;
+      box-shadow:
+        calc(-1 * (var(--gutter) + 4px)) 0 0 var(--press),
+        calc(var(--gutter) + 4px) 0 0 var(--press);
+    }
   }
 }

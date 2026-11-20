@@ -7,7 +7,7 @@
    clipped to it, emerging as the gap opens, as a native list's spinner does. Transform
    only: nothing is laid out twice while the finger moves. */
 
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   @media (prefers-reduced-motion: no-preference) {
     html[data-pull] .main {
       transform: translateY(var(--pull-y, 0px));
@@ -61,7 +61,7 @@ html[data-pull="refreshing"] .pull {
 html[data-pull="settling"] .pull {
   transition: opacity var(--dur-slow) var(--ease-in);
 }
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .pull {
     display: none;
   }

@@ -140,17 +140,18 @@ const subscribeTo = (query: string) => (l: () => void) => {
  *  width; never a desktop window, however narrow. */
 export const TOUCH_QUERY = "(pointer: coarse)";
 
-/** The phone layout: a tab bar, sheets, large titles (tokens.css switches on the same
- *  query). A screen under 840 px whose main pointer is a finger, or that has none: a phone,
- *  a tablet held upright. A window with a mouse keeps the desktop's layout down to 720 px,
- *  the narrowest the desktop app's window goes (apps/desktop window.rs) and half the screen
- *  of a 13-inch laptop, so a window tiled to one side never turns into a phone. */
-export const PHONE_QUERY =
-  "(max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none)";
+/** The phone layout, the touch app: a tab bar, sheets, large titles (tokens.css switches
+ *  on the same query). A touch-first screen at any width, so a tablet on its side or a
+ *  phone opened flat keeps the app it had; a screen with no pointer under 840 px. A
+ *  window with a mouse keeps the desktop's layout down to 720 px, the narrowest the
+ *  desktop app's window goes (apps/desktop window.rs) and half the screen of a 13-inch
+ *  laptop, so a window tiled to one side never turns into a phone. */
+export const PHONE_QUERY = "(max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none)";
 
 /** The other layout, the exact opposite: a sidebar, a panel beside the page, dialogs. A
- *  stylesheet writes one of the two whole, as its media query. */
-export const DESKTOP_QUERY = "(min-width: 840px), (min-width: 720px) and (pointer: fine)";
+ *  window with a mouse from 720 px, and one with no pointer from 840. A stylesheet writes
+ *  one of the two whole, as its media query. */
+export const DESKTOP_QUERY = "(min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none)";
 
 /** The desktop layout with no room for a session beside its page: the panel's 420 px
  *  would leave a list about 260. There the panel covers the page (styles/split.css). */
@@ -166,7 +167,8 @@ export const wideLayout = (): boolean => !phoneLayout();
  *  outside React; returns the way to stop. */
 export const onPhoneLayout = subscribeTo(PHONE_QUERY);
 
-/** `phoneLayout`, live: re-renders when the window crosses the width. */
+/** `phoneLayout`, live: re-renders when a mouse window crosses the width, or the main
+ *  pointer changes (a laptop folded into a tablet). */
 export const usePhoneLayout = (): boolean => useSyncExternalStore(onPhoneLayout, phoneLayout, () => false);
 
 /** Whether an open panel covers the page right now, having no room beside it. */

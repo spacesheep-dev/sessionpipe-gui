@@ -120,8 +120,9 @@
     flex: none;
   }
 }
-/* A phone (or a tablet held upright, as New session's phone row): each frame within 88×64. */
-@media (max-width: 839px) and (pointer: coarse) {
+/* A touch screen, which has the phone layout at any width (as New session's phone row):
+   each frame within 88×64. A narrow window with a mouse keeps the larger frame. */
+@media (pointer: coarse) {
   .att-thumb {
     max-width: 88px;
     max-height: 64px;
