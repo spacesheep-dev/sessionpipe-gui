@@ -73,11 +73,15 @@ describe("fuzzyFields", () => {
     expect(m.positions[3]).toEqual([5, 6, 7, 8, 9, 10, 11]);
   });
 
-  it("scores the row by the field the word went to: where it starts there still counts between rows", () => {
+  it("scores the row by the word's best field, wherever its underlines go: rows rank as before", () => {
     const fields = (title: string) => [title, "lab-mac", "acme/billing", "demo/webhook-backoff", ""];
     const early = fuzzyFields("webhook", fields("Webhook retry on bad signature"))!;
     const late = fuzzyFields("webhook", fields("Second opinion on the webhook retry"))!;
     expect(early.score).toBeGreaterThan(late.score);
-    expect(late.score).toBeCloseTo(fuzzy("webhook", "Second opinion on the webhook retry")!.score);
+    // Late in the title, early in the branch: drawn on the title, scored as the branch.
+    expect(late.positions[0]).toEqual([22, 23, 24, 25, 26, 27, 28]);
+    const branch = fuzzy("webhook", "demo/webhook-backoff")!.score;
+    expect(branch).toBeGreaterThan(fuzzy("webhook", "Second opinion on the webhook retry")!.score);
+    expect(late.score).toBeCloseTo(branch);
   });
 });

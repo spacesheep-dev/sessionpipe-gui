@@ -113,10 +113,11 @@ export interface FieldsMatch {
 }
 
 /** A query of several words against several fields: every word must fit some field; the
- *  score is the sum. A word goes to the field it fits best; where it starts in a field does
- *  not count across fields, and a tie goes to the earlier field (callers list shown fields
- *  first). Positions are collected per field, so a title and a repo can each carry their
- *  own underlines. */
+ *  score is the sum of each word's best score in any field, so rows rank as they always
+ *  have. A word's underlines go to the field it fits best; where it starts in a field does
+ *  not count there, and a tie goes to the earlier field (callers list shown fields first).
+ *  Positions are collected per field, so a title and a repo can each carry their own
+ *  underlines. */
 export function fuzzyFields(query: string, fields: readonly string[]): FieldsMatch | null {
   const words = query.trim().split(/\s+/).filter(Boolean);
   const positions: number[][] = fields.map(() => []);
@@ -124,14 +125,16 @@ export function fuzzyFields(query: string, fields: readonly string[]): FieldsMat
   let score = 0;
   for (const w of words) {
     let best: { f: number; m: FuzzyMatch; fit: number } | null = null;
+    let top = Number.NEGATIVE_INFINITY;
     for (let f = 0; f < fields.length; f++) {
       const m = fuzzy(w, fields[f] as string);
       if (!m) continue;
+      top = Math.max(top, m.score);
       const fit = m.score + (m.positions[0] ?? 0) * LEAD;
       if (!best || fit > best.fit + 1e-6) best = { f, m, fit };
     }
     if (!best) return null;
-    score += best.m.score;
+    score += top;
     const list = positions[best.f] as number[];
     for (const p of best.m.positions) if (!list.includes(p)) list.push(p);
   }
