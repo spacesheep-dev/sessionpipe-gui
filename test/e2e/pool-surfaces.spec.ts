@@ -31,6 +31,20 @@ async function poolSession(page: Page): Promise<{ harness: string; id: string }>
   return { harness: s.harness, id: s.id };
 }
 
+/** The session from its first turn, where the switch fell. The pooled session takes a turn
+ *  every few minutes and never ends, so late in the run its newest page no longer reaches
+ *  back to that turn: until "Older turns" brings it, no turn on the page holds the switch. */
+async function fromFirstTurn(page: Page): Promise<void> {
+  await expect(page.locator("li.turn").first()).toBeVisible();
+  const older = page.locator("li.older button");
+  if (await older.count()) await expect(page.locator("[data-swap]")).toHaveCount(0);
+  while (await older.count()) {
+    await older.click();
+    // A page of 200 events is drawn into the chat; on a busy runner that takes a while.
+    await expect(page.locator("li.older button:disabled")).toHaveCount(0, { timeout: 30_000 });
+  }
+}
+
 /** Simple mode (the chat) for this page alone; the suite's storage state says advanced. */
 const chatMode = (page: Page) =>
   page.addInitScript(([k]) => localStorage.setItem(k, JSON.stringify({ mode: "simple" })), [SETTINGS_KEY] as const);
@@ -43,6 +57,7 @@ test.describe("session page", () => {
     await expect(note).toHaveText(/^Served by Misha since \d{2}:\d{2}$/);
     await expect(note.locator("a")).toHaveAttribute("href", /#pool%3Alab-mac$/);
     await expect(note.locator("time")).toHaveAttribute("title", /\d/);
+    await fromFirstTurn(page);
     const rows = page.locator(".timeline [data-swap]");
     await expect(rows).toHaveCount(1);
     await expect(rows).toHaveText("Switched to Misha: Spacesheep's 5 hours are used up");
@@ -60,13 +75,16 @@ test.describe("session page", () => {
     await openPage(page, sessionUrl(s.harness, s.id));
     await expect(page.locator(".session[data-ui=simple]")).toBeVisible();
     await expect(page.locator(".page-note[data-served]")).toHaveText(/^Served by Misha since \d{2}:\d{2}$/);
+    await fromFirstTurn(page);
     const rows = page.locator(".chat-note[data-swap]");
     await expect(rows).toHaveCount(1);
     await expect(rows).toHaveText("Switched to Misha: Spacesheep's 5 hours are used up");
-    // Inside the first turn, after that turn's reply.
+    // Inside the first turn, after that turn's reply (every third turn asks about --sink).
     const turn = page.locator("li.turn--chat").filter({ has: rows });
     await expect(turn).toHaveCount(1);
     await expect(turn.locator(".chat-you")).toContainText("--sink");
+    const asked = page.locator("li.turn--chat").filter({ has: page.locator(".chat-you") });
+    await expect(asked.first().locator("[data-swap]")).toHaveCount(1);
     const reply = await turn.locator(".chat-ai .md, .chat-ai .reply").first().boundingBox();
     const row = await rows.boundingBox();
     expect(row!.y).toBeGreaterThan(reply!.y);
@@ -191,6 +209,7 @@ test.describe("phone", () => {
     const s = await poolSession(page);
     await openPage(page, sessionUrl(s.harness, s.id));
     await expect(page.locator(".page-note[data-served]")).toHaveText(/^Served by Misha since \d{2}:\d{2}$/);
+    await fromFirstTurn(page);
     const row = page.locator(".chat-note[data-swap]");
     await expect(row).toHaveText("Switched to Misha: Spacesheep's 5 hours are used up");
     await row.scrollIntoViewIfNeeded();

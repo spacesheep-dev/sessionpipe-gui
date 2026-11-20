@@ -43,6 +43,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   at least 16 characters at once and leaves any other until then. `sessionpipe-gui key renew` gives a
   new key while the receiver runs.
 
+### Fixed
+
+- **"Switched to …" stays under the turn it fell in.** On a long session whose switch to
+  another account is older than its newest page, the chat and the timeline drew the note
+  under the first turn the page had loaded; it now appears, under its own turn, once Older
+  turns brings that turn in.
+
 ## [0.8.6] - 2026-11-19
 
 The web app is built on React 19 and Vite 8, and the receiver runs sessionpipe-core 0.17.0;

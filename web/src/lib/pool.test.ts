@@ -200,21 +200,41 @@ describe("a session's events", () => {
       ev(6, { windows: w, account_id: "own" }),
       ev(7, { windows: w, account_id: 7 }),
     ];
-    expect(swaps(events, { accountId: "own" })).toEqual([
+    const all = { fromStart: true };
+    expect(swaps(events, { accountId: "own" }, all)).toEqual([
       { seq: 3, at: new Date(NOW + 3 * MIN).toISOString(), from: "own", to: "fiction" },
       { seq: 6, at: new Date(NOW + 6 * MIN).toISOString(), from: "fiction", to: "own" },
     ]);
-    expect(swaps(events, {})).toMatchObject([
+    expect(swaps(events, {}, all)).toMatchObject([
       { seq: 2, to: "own" },
       { seq: 3, from: "own", to: "fiction" },
       { seq: 6, to: "own" },
     ]);
-    expect(servedBy(events, { accountId: "own" })).toBeNull();
-    expect(servedBy(events.slice(0, 4), { accountId: "own" })).toEqual({
+    expect(servedBy(events, { accountId: "own" }, all)).toBeNull();
+    expect(servedBy(events.slice(0, 4), { accountId: "own" }, all)).toEqual({
       accountId: "fiction",
       since: new Date(NOW + 3 * MIN).toISOString(),
     });
-    expect(servedBy([], { accountId: "own" })).toBeNull();
+    expect(servedBy([], { accountId: "own" }, all)).toBeNull();
+  });
+
+  it("puts no switch at the first report of a window that begins after the session's start", () => {
+    // The newest page of a long session: the switch to Fiction was turns ago, in an older
+    // page; its first report here only says who serves it, not that it moved then.
+    const page = [
+      ev(40, { windows: w, account_id: "fiction" }),
+      ev(44, { windows: w, account_id: "fiction" }),
+      ev(48, { windows: w, account_id: "own" }),
+    ];
+    expect(swaps(page, { accountId: "own" })).toEqual([
+      { seq: 48, at: new Date(NOW + 48 * MIN).toISOString(), from: "fiction", to: "own" },
+    ]);
+    expect(swaps(page.slice(0, 2), { accountId: "own" })).toEqual([]);
+    expect(servedBy(page.slice(0, 2), { accountId: "own" })).toBeNull();
+    // From the start, the same page's first report is the switch.
+    expect(swaps(page.slice(0, 2), { accountId: "own" }, { fromStart: true })).toMatchObject([
+      { seq: 40, from: "own", to: "fiction" },
+    ]);
   });
 });
 

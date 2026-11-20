@@ -231,16 +231,29 @@ export interface Swap {
 }
 
 /** The switches in a session, from its `limits.observed` events' `account_id` in seq
- *  order: one swap each time the serving account changes, starting from the session's own
- *  (`accountId`). A report with no `account_id` says nothing. The events are the ones the
- *  session page already loads; nothing extra is fetched. */
-export function swaps(events: readonly ProtocolEvent[], s: Pick<SessionSummary, "accountId">): Swap[] {
+ *  order: one swap each time the serving account changes. A report with no `account_id`
+ *  says nothing. The events are the ones the session page already loads; nothing extra is
+ *  fetched. When they begin at the session's beginning (`fromStart`), the account before
+ *  the first report is the session's own (`accountId`); a window that begins later picks
+ *  the serving account up from its first report, which is no switch: one that happened
+ *  before it is in an older page, and drawn when that page is loaded. */
+export function swaps(
+  events: readonly ProtocolEvent[],
+  s: Pick<SessionSummary, "accountId">,
+  o: { fromStart?: boolean } = {},
+): Swap[] {
   const out: Swap[] = [];
   let serving = s.accountId;
+  let known = !!o.fromStart;
   const sorted = [...events].filter((e) => e.type === "limits.observed").sort((a, b) => a.session.seq - b.session.seq);
   for (const e of sorted) {
     const id = e.data?.account_id;
-    if (typeof id !== "string" || !id || id === serving) continue;
+    if (typeof id !== "string" || !id) continue;
+    if (!known || id === serving) {
+      serving = id;
+      known = true;
+      continue;
+    }
     out.push({ seq: e.session.seq, at: e.time, ...(serving ? { from: serving } : {}), to: id });
     serving = id;
   }
@@ -253,8 +266,9 @@ export function swaps(events: readonly ProtocolEvent[], s: Pick<SessionSummary, 
 export function servedBy(
   events: readonly ProtocolEvent[],
   s: Pick<SessionSummary, "accountId">,
+  o: { fromStart?: boolean } = {},
 ): { accountId: string; since: string } | null {
-  const last = swaps(events, s).at(-1);
+  const last = swaps(events, s, o).at(-1);
   return last && last.to !== s.accountId ? { accountId: last.to, since: last.at } : null;
 }
 
