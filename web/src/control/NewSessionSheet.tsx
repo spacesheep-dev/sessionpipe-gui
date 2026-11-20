@@ -17,6 +17,7 @@
 // idle (NewSession.tsx mounts it).
 import type { ControlActivity, MachineSummary, RunLevel, StartFile } from "@shared/api";
 import {
+  ATTACHMENT_TYPES,
   PICTURE_INPUT_MAX_BYTES,
   START_FILE_MAX_BYTES,
   START_FILES_MAX,
@@ -43,6 +44,7 @@ import { Select, type SelectOption } from "../components/Select";
 import { useAppState, useLimits, useListedSessions, useMachines } from "../data/hooks";
 import { useFocusTrap } from "../lib/focus";
 import "../lib/acp";
+import { UPLOAD_REFUSED, UPLOAD_WORDS } from "@shared/attachments";
 import { bytes, harnessMark } from "../lib/format";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { accountMode, uploadProgress } from "../lib/net";
@@ -50,8 +52,8 @@ import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { useNow } from "../lib/time";
 import { START, ThisPhone } from "../native/accountWords";
-import { boardNow, pictureName, progressWords } from "./Attachments";
-import { controlApi, wrongOriginHere } from "./api";
+import { boardNow, markSpacesheepRefused, pictureName, progressWords, useSpacesheepRefused } from "./Attachments";
+import { ControlError, controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
 import { folderChoices, machineHome, tildify, typedFolder, unnamedHere } from "./folders";
@@ -77,11 +79,13 @@ import {
   readRemembered,
   rememberStart,
   saveDraft,
+  uploadsAgain,
 } from "./newSessionState";
+import { keepSentPicture } from "./sentPictures";
 import { HEIC_FILE_NOTE, pictureType, ShrinkRefused, type Shrunk, shrinkImage } from "./shrink";
 import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "./signer";
 import { machineBlocked, startGate } from "./startGate";
-import { nounFor, uploadWords } from "./uploadWords";
+import { nounFor, spacesheepName, uploadWords } from "./uploadWords";
 import { notSentWords, PERMISSION_LABEL } from "./words";
 import "./newSessionSheet.css";
 
@@ -142,6 +146,8 @@ interface FileItem {
   error?: string;
   /** Why its upload failed, as a sentence (the status line says it), and whether Retry can mend it. */
   failed?: { words: string; retry: boolean };
+  /** The machine its upload went for, and whether that one is reached through spacesheep. */
+  to?: { machine?: string; remote: boolean };
 }
 
 export function Sheet({ target, closing }: { target: NewSessionTarget; closing: boolean }) {
@@ -346,8 +352,11 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const showPermission = levels.length >= 2;
   const showModel = !!opts && (!!opts.anyModel || !!opts.models?.length);
   const takesFiles = c?.files === true;
-  // Reached through spacesheep: no file can be carried there yet (server/control/state.ts).
+  // Reached through spacesheep: its files are uploaded there (server/control/remote.ts),
+  // unless spacesheep refused this app's uploads, which holds for the page's life.
   const relayed = !!c?.remote;
+  const ssRefused = useSpacesheepRefused();
+  const filesRefused = relayed && ssRefused;
   const listsFolders = !!c?.folders?.length;
   const folderCheck = machine
     ? typedFolder(folder, { folders: c?.folders, home: machineHome(c), machine })
@@ -412,8 +421,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // ----- files: 📎, paste, drop; uploaded here, named by hash in the signed command -----
   const addFiles = (list: File[]) => {
     if (!list.length) return;
-    if (relayed) {
-      setNote(`Files can't be sent to ${machine ?? "this machine"} through spacesheep yet.`);
+    if (filesRefused) {
+      setNote(UPLOAD_WORDS.refused);
       return;
     }
     if (!takesFiles) {
@@ -468,20 +477,40 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     filesNow.current = filesNow.current.map((x) => (x.key === key ? { ...x, ...p } : x));
     setFiles((prev) => prev.map((x) => (x.key === key ? { ...x, ...p } : x)));
   };
-  /** One file's upload: its progress where it is counted, stopped when it is removed. */
+  /** Where an upload goes now: the selected machine, and whether it is reached through
+   *  spacesheep (the bytes go on to spacesheep for it). Read when the upload begins, which
+   *  can be after a picture is made smaller. */
+  const goesTo = useRef({ machine: c?.machineId, remote: relayed });
+  goesTo.current = { machine: c?.machineId, remote: relayed };
+  /** One file's upload, for the machine selected now: its progress where it is counted,
+   *  stopped when it is removed. */
   const upload = (key: string, f: File) => {
     const stop = new AbortController();
     stops.current.set(key, stop);
+    const to = goesTo.current;
+    patchFile(key, { to });
     controlApi
-      .uploadFile(f, undefined, {
+      .uploadFile(f, to.machine, {
         signal: stop.signal,
         ...(uploadProgress() ? { onProgress: (sent: number) => patchFile(key, { sent }) } : {}),
       })
       .then(
-        (entry) => patchFile(key, { entry, at: Date.now() }),
+        (entry) => {
+          if (stop.signal.aborted) return;
+          patchFile(key, { entry, at: Date.now() });
+          // No receiver keeps a picture sent through spacesheep to show: this page does.
+          if ((to.remote || accountMode()) && f.type in ATTACHMENT_TYPES)
+            void f
+              .arrayBuffer()
+              .then((b) => keepSentPicture(entry.sha256, b, f.type))
+              .catch(() => {});
+        },
         async (e) => {
-          // The board is named as its Info says, which a page opened on ?new=1 may not have read yet.
-          const board = await boardNow();
+          // spacesheep takes none from this app: no files for its computers from now on.
+          if (e instanceof ControlError && e.reason === UPLOAD_REFUSED) markSpacesheepRefused();
+          // The board is named as its Info says, which a page opened on ?new=1 may not have
+          // read yet; spacesheep, where the upload went on to it.
+          const board = to.remote ? spacesheepName() : await boardNow();
           if (stop.signal.aborted) return;
           patchFile(key, { error: "didn't upload", failed: uploadWords(e, board, nounFor(f.type)) });
         },
@@ -533,6 +562,15 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     filesNow.current = filesNow.current.filter((x) => x.key !== key);
     setFiles((prev) => prev.filter((x) => x.key !== key));
   };
+  // Another machine chosen, reached another way: its files go again, for it (`uploadsAgain`).
+  useEffect(() => {
+    for (const x of filesNow.current) {
+      if (!x.file || !uploadsAgain(x, relayed)) continue;
+      stops.current.get(x.key)?.abort();
+      patchFile(x.key, { entry: undefined, error: undefined, failed: undefined, sent: undefined });
+      upload(x.key, x.file);
+    }
+  }, [relayed]);
   const onDrop = (e: DragEvent) => {
     if (!e.dataTransfer?.files?.length) return;
     e.preventDefault();
@@ -681,8 +719,6 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     if (note) return { text: note };
     const failedFile = files.find((f) => f.failed);
     if (failedFile?.failed) return { text: failedFile.failed.words, tone: "err" };
-    if (files.length && relayed)
-      return { text: `Files can't be sent to ${m.name} through spacesheep yet. Remove them to start.` };
     if (files.length && !takesFiles)
       return { text: `${m.name} can't take files on a new session. Update sessionpipe there.` };
     if (model && !modelOk)
@@ -938,7 +974,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     </>
   );
 
-  const fileButton = takesFiles && (
+  const fileButton = takesFiles && !filesRefused && (
     <>
       <input
         ref={fileInput}

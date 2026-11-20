@@ -268,6 +268,39 @@ describe("what an account that is no longer on this phone left behind", () => {
     expect(local.m.has("sp.search.recent")).toBe(true);
   });
 
+  it("the pictures sent from an account that is gone go with it, also when nothing else of it is kept", async () => {
+    const db = idb([
+      "sessionpipe.account.acct-one",
+      "sessionpipe.sent-pictures.acct-one",
+      "sessionpipe.sent-pictures.acct-old",
+      "sessionpipe.account.acct-two",
+      "sessionpipe.sent-pictures.acct-two",
+      "sent-pictures",
+    ]);
+    const wiped: string[] = [];
+    const h = hub(answer(["acct-two"]));
+    const swept = await sweepGone(h.status, {
+      idb: db.factory,
+      sleep: h.sleep,
+      kept: () => [],
+      sessions: async () => [],
+      seen: () => [],
+      wipe: (id) => {
+        wiped.push(id);
+        return [];
+      },
+    });
+    expect(wiped.sort()).toEqual(["acct-old", "acct-one"]);
+    expect(swept.caches).toEqual([
+      "sessionpipe.account.acct-one",
+      "sessionpipe.sent-pictures.acct-one",
+      "sessionpipe.sent-pictures.acct-old",
+    ]);
+    // The account that is here keeps its own, and a board's pictures are no account's.
+    expect(db.deleted).not.toContain("sessionpipe.sent-pictures.acct-two");
+    expect(db.deleted).not.toContain("sent-pictures");
+  });
+
   it("one answer that lists no accounts removes nothing: the second lists them, or does not come, or is no list", async () => {
     for (const second of [answer(["acct-one"]), new Error("not ready"), { enabled: true }, null, { accounts: [{}] }]) {
       const db = idb(["sessionpipe.account.acct-one"]);

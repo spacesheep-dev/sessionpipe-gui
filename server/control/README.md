@@ -110,7 +110,7 @@ age window, no nonce store) and only then queues it.
 | Route | Body → answer |
 |---|---|
 | `POST /send` | `{ machineId, cmd, csig?, grant?, confirm?, expires_in_s?, from? }` (`SendBody`) → `201 ControlActivity`; `422 { reason, code }` with the verifier's code (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …) or the second look's (below) when it refuses; `404` unknown machine; `400` a `from` that is not a session ref |
-| `POST /files?name=<name>` | One file a `start` or a `prompt` will carry (the composer's pictures go as a prompt's files): the raw bytes, its media type as `content-type` → `201 UploadedFile { name, type, size, sha256 }` (sha256 base64url, CONTROL.md §3.1), with `width` and `height` for a PNG, JPEG, GIF or WebP; only the four fields go into a command. Held a day under `<stateDir>/control/files/<sha256>`, longer when a queued command needs it; `413` over 25 MiB, `415` no media type, or `not_an_image` for bytes that are not the picture the type says, `400` empty or a name a machine would refuse. `&machine=<id>` is taken and not read yet |
+| `POST /files?name=<name>` | One file a `start` or a `prompt` will carry (the composer's pictures go as a prompt's files): the raw bytes, its media type as `content-type` → `201 UploadedFile { name, type, size, sha256 }` (sha256 base64url, CONTROL.md §3.1), with `width` and `height` for a PNG, JPEG, GIF or WebP; only the four fields go into a command. Held a day under `<stateDir>/control/files/<sha256>`, longer when a queued command needs it; `413` over 25 MiB, `415` no media type, or `not_an_image` for bytes that are not the picture the type says, `400` empty or a name a machine would refuse. `&machine=<id>` names the machine it is for: for one paired on spacesheep the bytes go to spacesheep's files door as the account and nothing is held here (`forwardRemoteUpload`) |
 | `GET /files/:sha256` | A picture a message sent from here carried, for the page to draw: the bytes with their `content-type` (PNG, JPEG, GIF or WebP only), `cache-control: private, max-age=31536000, immutable`, `nosniff`, a `sandbox` CSP and `cross-origin-resource-policy: same-origin`. Served while a machine may fetch it or for 30 days after its message was queued; when the store is full an upload makes room among the pictures only the page still keeps, oldest first. `404 { reason: "gone" }` once it is not kept, `404 { reason: "not_a_picture" }` for any other type |
 | `GET /activity?limit=` | `{ activity: ControlActivity[] }`, newest first (default 100, at most 1000) |
 | `GET /machines` | `{ machines: (MachineControl & { name, createdAt, pairedAt? })[] }` — paired machines |
@@ -256,6 +256,15 @@ with the code `no_job`. A job is one only as spacesheep writes it, a whole numbe
 zero (`remoteJobOf`). A row names the
 account that carried it; with none connected, or its key refused, it waits and says
 `unfollowed`; another account connecting settles it as `untracked`.
+
+A send names files only where the relay's list says the computer takes them (`files` for a
+start, `prompt_files` for a message); otherwise it is refused here as `relay_files`, with
+the version to update to. Each file is uploaded to spacesheep (`POST /files?machine=` for
+that machine), where the computer fetches it with its own token; spacesheep's hash and size
+are held against this side's own. A refusal carries a reason the page says in its words
+(web/src/control/uploadWords.ts): `spacesheep_refused` (its 401 or 403), `not_whole`,
+`spacesheep_unreachable`, `spacesheep_failed` (its 5xx), and `rate_limited` with
+spacesheep's `retry_after` passed on.
 
 All of that is `RemoteSlice` in `remote.ts`, over rows a host hands it, with the row
 shapes and their readers in `rows.ts`. Neither file imports anything of Node's. The

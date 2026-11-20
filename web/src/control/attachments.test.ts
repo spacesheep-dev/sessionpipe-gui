@@ -17,6 +17,7 @@ import {
   composeFiles,
   fileWords,
   fillerText,
+  markSpacesheepRefused,
   NOT_WHOLE_WORDS,
   type PictureEntry,
   PromptBody,
@@ -28,6 +29,7 @@ import {
   SentFilesRows,
   savedFileSha,
   shownFiles,
+  spacesheepRefusesPictures,
   TOGETHER_WORDS,
   type UploadFailed,
   uploadPicture,
@@ -142,9 +144,9 @@ describe("how a picture goes to a session's machine", () => {
       [true, false, false, "files"],
       [false, false, true, "path"],
       [false, false, false, "off"],
-      // Through spacesheep there is no way to carry a file yet, whatever the computer takes.
-      [true, true, true, "off"],
-      [true, true, false, "off"],
+      // Through spacesheep a picture goes as a file uploaded there, where the computer takes one.
+      [true, true, true, "files"],
+      [true, true, false, "files"],
       [false, true, true, "off"],
       [false, true, false, "off"],
     ];
@@ -154,20 +156,25 @@ describe("how a picture goes to a session's machine", () => {
         JSON.stringify({ promptFiles, relayed, thisMachine }),
       ).toBe(mode);
   });
+  it("is off through spacesheep once spacesheep refused this app's uploads, and only there", () => {
+    expect(pictureMode({ promptFiles: true, remote }, false, true)).toBe("off");
+    expect(pictureMode({ promptFiles: true }, false, true)).toBe("files");
+    expect(pictureMode({}, true, true)).toBe("path");
+  });
   it("is not known before the machine's row is, or (where it decides) which machine this is", () => {
     expect(pictureMode(undefined, true)).toBeUndefined();
     expect(pictureMode({}, null)).toBeUndefined();
     // Where the daemon takes files, or the computer is reached through spacesheep, it is not asked.
     expect(pictureMode({ promptFiles: true }, null)).toBe("files");
     expect(pictureMode({ remote }, null)).toBe("off");
+    expect(pictureMode({ remote, promptFiles: true }, null)).toBe("files");
   });
-  it("says why none can be sent, and what to do about it where there is something", () => {
-    expect(picturesOffWords("studio-mac", false)).toBe(
+  it("says why none can be sent, and what to do about it", () => {
+    // The same sentence wherever the computer is reached from.
+    expect(picturesOffWords("studio-mac")).toBe(
       "Pictures can't be sent to studio-mac: its sessionpipe is older than 0.10. Run `sessionpipe update` there.",
     );
-    expect(picturesOffWords("studio-mac", true)).toBe(
-      "Pictures can't be sent to studio-mac through spacesheep from here yet.",
-    );
+    expect(picturesOffWords("studio-mac", "spacesheep")).toBe("spacesheep.dev can't take pictures from here yet.");
   });
   it("one picture is at most a command's file (25 MiB) as a file, and 8 MiB where the prompt names its path", () => {
     const sized = (size: number, type = "image/png") => ({ size, type }) as Blob;
@@ -198,6 +205,12 @@ describe("uploading a picture as a prompt's file", () => {
     });
     return seen;
   };
+  /** What an upload threw, as the tray says it. */
+  const failure = (p: Promise<unknown>) =>
+    p.then(
+      () => null,
+      (e: UploadFailed) => ({ words: e.message, retry: e.retry }),
+    );
 
   it("sends the bytes as an ArrayBuffer under the picture's name, for its machine, and signs its own hash", async () => {
     const own = b64url(await sha256(bytes));
@@ -245,11 +258,6 @@ describe("uploading a picture as a prompt's file", () => {
   });
 
   it("says why in words (uploadWords), with Retry only where trying again can help", async () => {
-    const failure = (p: Promise<unknown>) =>
-      p.then(
-        () => null,
-        (e: UploadFailed) => ({ words: e.message, retry: e.retry }),
-      );
     receiver(() => ({
       status: 415,
       body: { reason: "not_an_image", error: "This file isn't the picture its type says." },
@@ -306,6 +314,45 @@ describe("uploading a picture as a prompt's file", () => {
     const stop = new AbortController();
     await expect(uploadPicture(file(), "kiwi.png", M, { signal: stop.signal })).rejects.toMatchObject({
       name: "AbortError",
+    });
+  });
+
+  it("spacesheep refusing this app's upload is said, and holds for the rest of the page's life", async () => {
+    expect(spacesheepRefusesPictures()).toBe(false);
+    const remote = { remote: true };
+    // For a computer reached through spacesheep, the words name spacesheep, not the board.
+    receiver(() => ({ status: 502, body: { reason: "hub_unreachable", error: "spacesheep could not be reached." } }));
+    expect(await failure(uploadPicture(file(), "kiwi.png", M, remote))).toEqual({
+      words: "The picture didn't reach spacesheep.dev. Try again.",
+      retry: true,
+    });
+    receiver(() => ({ status: 502, body: { reason: "spacesheep_unreachable" } }));
+    expect(await failure(uploadPicture(file(), "kiwi.png", M, remote))).toEqual({
+      words: "The picture didn't upload: spacesheep.dev can't be reached. Try again.",
+      retry: true,
+    });
+    receiver(() => ({ status: 502, body: { reason: "spacesheep_failed" } }));
+    expect(await failure(uploadPicture(file(), "kiwi.png", M, remote))).toEqual({
+      words: "spacesheep.dev couldn't save the picture. Try again.",
+      retry: true,
+    });
+    expect(spacesheepRefusesPictures()).toBe(false);
+    // Refused: no Retry, and no paperclip from now on.
+    receiver(() => ({
+      status: 502,
+      body: { reason: "spacesheep_refused", error: "spacesheep.dev can't take pictures from here yet." },
+    }));
+    expect(await failure(uploadPicture(file(), "kiwi.png", M, remote))).toEqual({
+      words: "spacesheep.dev can't take pictures from here yet.",
+      retry: false,
+    });
+    expect(spacesheepRefusesPictures()).toBe(true);
+    markSpacesheepRefused(false);
+    // spacesheep's limit keeps its minutes on the way through the board.
+    receiver(() => ({ status: 429, body: { reason: "rate_limited", retry_after: 290 } }));
+    expect(await failure(uploadPicture(file(), "kiwi.png", M, remote))).toEqual({
+      words: "That's a lot of pictures in a short time. Try again in 5 minutes.",
+      retry: true,
     });
   });
 });

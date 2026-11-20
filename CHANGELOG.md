@@ -133,6 +133,16 @@ All notable changes to `sessionpipe-gui`. The format follows
   computer ran it at its own mode.
 - **The iPhone app asks for the camera for photos too.** Its question now says it reads
   your computer's code and takes photos you send to a session.
+- **Pictures reach a computer through spacesheep.** The iPhone app on a spacesheep
+  account, and a board connected to spacesheep, now have the paperclip, paste, drop and
+  the camera for a session on a computer whose sessionpipe is 0.10 or later, and New
+  session takes pictures and files for one: they upload to spacesheep, where the computer
+  fetches them. A sent message shows them as thumbnails on the device that sent them
+  (kept 30 days, up to 50 MB, and removed with the account on Disconnect) and as chips
+  elsewhere. A computer with an older sessionpipe gets the line to update it, and a
+  spacesheep that takes no pictures from here says so once (`spacesheep.dev can't take
+  pictures from here yet.`) and the paperclip is gone until the app or the page is opened
+  again.
 
 ## [0.8.6] - 2026-11-19
 

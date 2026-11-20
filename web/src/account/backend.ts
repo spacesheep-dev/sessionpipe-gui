@@ -49,6 +49,7 @@ import { LimitsCore } from "../../../server/ui/limitsCore";
 import { MarksCore } from "../../../server/ui/marksCore";
 import { cutPreview } from "../../../server/ui/preview";
 import { snapshotWithControl } from "../../../server/ui/snapshot";
+import { forgetSentPictures } from "../control/sentPictures";
 import { HttpError, type StreamHandlers, type Transport } from "../data/transport";
 import { isQuestion } from "../lib/format";
 import type { ApiBackend } from "../lib/net";
@@ -762,10 +763,10 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
 
   // ---------- the hub's word on the account ----------
   /** Everything this page holds of the account goes: the reader stops, the machines and
-   *  the board leave the screen, the cached sessions are deleted, and what the page's own
-   *  storage keeps of the account's sessions and under its id is removed (with what
-   *  belongs to no session, when the person disconnected it here). Then whoever draws the
-   *  window is told. */
+   *  the board leave the screen, the cached sessions and the sent pictures are deleted,
+   *  and what the page's own storage keeps of the account's sessions and under its id is
+   *  removed (with what belongs to no session, when the person disconnected it here). Then
+   *  whoever draws the window is told. */
   const drop = async (disconnected: Disconnected | null = null, asked = disconnected !== null): Promise<void> => {
     if (gone) return;
     const sessions = [...new Set([...store.snapshot().sessions.map((s) => s.key), ...seen])];
@@ -782,6 +783,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     // write themselves empty at the hub, where they are the hub's to keep or to delete.
     // `asked`: the person disconnected it here, however the hub's answer came.
     local.wipe(shell.id, sessions, { conveniences: asked });
+    // The pictures sent from it, which the page kept to draw (control/sentPictures.ts).
+    forgetSentPictures(shell.id, o.idb === null ? undefined : (o.idb ?? globalThis.indexedDB));
     await cache.destroy();
     emit({ kind: "snapshot", snapshot: snapshot() });
     changed();

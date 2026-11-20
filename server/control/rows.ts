@@ -250,6 +250,9 @@ export interface MessageRow {
   permission?: StartPermission;
   model?: string;
   files?: StartFile[];
+  /** The signed nonce, on a row with files: the folder a machine saves a prompt's files in.
+   *  Kept apart from `cmd` for a page's row, which keeps no command. */
+  nonce?: string;
   /** What the machine ran the start with (`taken`, `delivered`). */
   applied?: Applied;
   /** A pool command's action and account, as signed (pool.ts read them). */
@@ -315,7 +318,7 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.model) a.model = m.model;
   if (m.files) {
     a.files = m.files;
-    const nonce = nonceOf(m.cmd);
+    const nonce = m.nonce ?? nonceOf(m.cmd);
     if (nonce) a.nonce = nonce;
   }
   if (m.applied) a.applied = m.applied;
@@ -510,8 +513,11 @@ export function messageRow(
   // say what a message carried.
   if (cmd.kind === "start" || cmd.kind === "prompt") {
     const files = (cmd as ControlCommand & { files?: StartFile[] }).files;
-    if (Array.isArray(files) && files.length)
+    if (Array.isArray(files) && files.length) {
       row.files = files.map((f) => ({ name: f.name, type: f.type, size: f.size, sha256: f.sha256 }));
+      const nonce = (cmd as { nonce?: unknown }).nonce;
+      if (typeof nonce === "string" && nonce) row.nonce = nonce;
+    }
   }
   return row;
 }

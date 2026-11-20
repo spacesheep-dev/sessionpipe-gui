@@ -8,6 +8,14 @@
 // Node's (store/browser.test.ts holds it to what a page has).
 import type { ControlCommand, SignedCommand } from "sessionpipe-core/control";
 import type { ControlActivity, MachineControl } from "../../shared/api.js";
+import {
+  UPLOAD_FAILED,
+  UPLOAD_NOT_WHOLE,
+  UPLOAD_REFUSED,
+  UPLOAD_UNREACHABLE,
+  UPLOAD_WORDS,
+  uploadLimitWords,
+} from "../../shared/attachments.js";
 import { cleanReason } from "../../shared/reason.js";
 import {
   activity,
@@ -131,11 +139,10 @@ export class RemoteSlice {
         folders: r.folders ?? undefined,
         mode: r.mode === "auto" || r.mode === "inherit" || r.mode === "safe" ? r.mode : undefined,
         accounts: [],
-        // A file a send names lives on this disk (control/files), and spacesheep checks its
-        // own store for it: through spacesheep there is no way to carry one yet, whatever
-        // the computer takes, so none is offered (the page reads these).
-        files: false,
-        promptFiles: false,
+        // What the computer's hello said it takes, as spacesheep lists it: a file a send
+        // names is uploaded to spacesheep for it (`forwardRemoteUpload`), where it fetches it.
+        files: !!r.files,
+        promptFiles: !!r.prompt_files,
         keyTypes: r.key_types?.includes("device") ? ["passkey", "device"] : ["passkey"],
         ask: r.ask,
         handoff: !!r.handoff,
@@ -495,7 +502,7 @@ export class RemoteSlice {
 
 /** The code of a send spacesheep refused because it no longer takes this app's key. */
 export const SPACESHEEP_UNAUTHORIZED = "spacesheep_unauthorized";
-/** The code of a send for a spacesheep computer that names files: none can be carried there. */
+/** The code of a send for a spacesheep computer that names files it does not take. */
 export const RELAY_FILES = "relay_files";
 
 /** A send for a machine paired on spacesheep: the signed body goes to spacesheep's jobs
@@ -540,15 +547,21 @@ export async function forwardRemoteSend(
   // JSON that is no object (`null`, a number, a list) is no command: said so, not thrown on.
   if (!cmd || typeof cmd !== "object" || Array.isArray(cmd))
     throw new SendRefused(400, { reason: "bad_request", error: "cmd is not a command." });
-  // A file a send names is held on this disk, and spacesheep looks for it in its own store:
-  // none can be carried there yet (the pages offer none), so a page that sends one is told
-  // here, before spacesheep answers that it "didn't finish uploading".
+  // Files go only where the computer's hello said it takes them: on a start (`files`), on
+  // a message (`prompt_files`, sessionpipe 0.10). An older daemon would refuse the command
+  // or drop the files, so the page is told here, before spacesheep is asked.
   const files = (cmd as ControlCommand & { files?: unknown }).files;
-  if (Array.isArray(files) && files.length)
-    throw new SendRefused(422, {
-      reason: `Files can't be sent to ${m.name} through spacesheep yet.`,
-      code: RELAY_FILES,
-    });
+  if (Array.isArray(files) && files.length) {
+    const takes = cmd.kind === "start" ? !!m.files : cmd.kind === "prompt" ? !!m.promptFiles : false;
+    if (!takes)
+      throw new SendRefused(422, {
+        reason:
+          cmd.kind === "prompt"
+            ? `Update sessionpipe on ${m.name} to 0.10 or later to send pictures.`
+            : `Update sessionpipe on ${m.name} to send files.`,
+        code: RELAY_FILES,
+      });
+  }
   const signed: SignedCommand = { cmd: body.cmd };
   if (typeof body.csig === "string") signed.csig = body.csig;
   if (body.grant && typeof body.grant === "object") signed.grant = body.grant as SignedCommand["grant"];
@@ -599,6 +612,83 @@ export async function forwardRemoteSend(
   // when, so the page says the time in its own words.
   if (r.status === 403 && code === "cooling") throw new SendRefused(403, { reason: error, code, ...untilOf(r.json) });
   throw new SendRefused(r.status >= 500 ? 502 : r.status, { reason: error, code: code || "refused" });
+}
+
+/** What spacesheep's files door (`POST /api/machines/files`) answered: its status, its body,
+ *  and its Retry-After in seconds where it gave one. `said`: the answer is already the
+ *  page's (the carrier's own refusal, in its words), passed on as it is. */
+export interface RemoteUploadAnswer {
+  status: number;
+  json: Record<string, unknown>;
+  retryAfter?: number | null;
+  said?: boolean;
+}
+
+/** One file for a computer paired on spacesheep: its bytes to spacesheep's files door as
+ *  this account, where the computer fetches it with its own token. The receiver asks with
+ *  the account's key; a page asks through the native hub, which holds it. */
+export type RemoteUpload = (file: { bytes: Uint8Array; type: string; name: string }) => Promise<RemoteUploadAnswer>;
+
+/** How long an upload of `bytes` may take to be sent and answered, as the app's hub times
+ *  its files door (apps/crates/sp-receivers/src/proxy.rs `send_timeout`): fifteen seconds,
+ *  and a second more for each 32 KiB, at most ten minutes. */
+export const uploadTimeoutMs = (bytes: number): number =>
+  Math.min(15 + Math.ceil(Math.max(0, bytes) / (32 * 1024)), 600) * 1000;
+
+/** A file's SHA-256 as a command names it: base64url, no padding (CONTROL.md §3.1). */
+export async function fileSha256(bytes: Uint8Array): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes)));
+  let bin = "";
+  for (const b of d) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** An upload for a computer paired on spacesheep: the bytes go to spacesheep, nothing is
+ *  kept here, and the answer is the entry a signed command names (201, the page's
+ *  UploadedFile) or why not (`{ reason, error }`, in words). spacesheep's hash and size are
+ *  held against this side's own, so what is signed is what spacesheep keeps. */
+export async function forwardRemoteUpload(
+  file: { bytes: Uint8Array; type: string; name: string },
+  upload: RemoteUpload | undefined,
+): Promise<{ status: number; json: Record<string, unknown> }> {
+  if (!upload) return { status: 503, json: { reason: "no_relay", error: "Not connected to spacesheep any more." } };
+  const own = await fileSha256(file.bytes);
+  let a: RemoteUploadAnswer;
+  try {
+    a = await upload(file);
+  } catch {
+    return { status: 502, json: { reason: UPLOAD_UNREACHABLE, error: UPLOAD_WORDS.unreachable } };
+  }
+  if (a.said) return { status: a.status, json: a.json };
+  if (a.status >= 200 && a.status < 300) {
+    if (a.json.sha256 !== own || a.json.size !== file.bytes.length)
+      return { status: 502, json: { reason: UPLOAD_NOT_WHOLE, error: UPLOAD_WORDS.notWhole } };
+    return { status: 201, json: { name: file.name, type: file.type, size: file.bytes.length, sha256: own } };
+  }
+  // A spacesheep that takes no key on this door yet, or no Talk for the account.
+  if (a.status === 401 || a.status === 403)
+    return { status: 502, json: { reason: UPLOAD_REFUSED, error: UPLOAD_WORDS.refused } };
+  if (a.status === 415) return { status: 415, json: { reason: "not_an_image", error: UPLOAD_WORDS.notPicture } };
+  if (a.status === 429) {
+    // spacesheep's time to wait goes on, so the page can say it in minutes.
+    const after = [a.retryAfter, a.json.retry_after].find((v) => typeof v === "number" && Number.isFinite(v) && v >= 0);
+    return {
+      status: 429,
+      json: {
+        reason: "rate_limited",
+        error: uploadLimitWords(after),
+        ...(typeof after === "number" ? { retry_after: after } : {}),
+      },
+    };
+  }
+  const words = [a.json.message, a.json.error]
+    .map((v) => cleanReason(v))
+    .find((t) => t && !/^[a-z][a-z0-9_]*$/.test(t));
+  if (a.status === 413)
+    return { status: 413, json: { reason: "too_large", error: words || "That file is too large." } };
+  if (a.status >= 400 && a.status < 500)
+    return { status: 400, json: { reason: codeOf(a.json.code) || "refused", error: words || UPLOAD_WORDS.notTaken } };
+  return { status: 502, json: { reason: UPLOAD_FAILED, error: UPLOAD_WORDS.failed } };
 }
 
 /** A `cooling` refusal's `until` on this clock. spacesheep writes it on its own: where it

@@ -15,6 +15,7 @@ import {
   pruneRemembered,
   readDraft,
   saveDraft,
+  uploadsAgain,
 } from "./newSessionState";
 
 const sessions = [
@@ -334,5 +335,23 @@ describe("agentLeft", () => {
       out: true,
       aside: "None left",
     });
+  });
+});
+
+describe("uploadsAgain", () => {
+  const file = new Blob(["x"]);
+  it("a file goes again only when the machine chosen is reached another way", () => {
+    // Held here, now for a computer reached through spacesheep, and the other way round.
+    expect(uploadsAgain({ file, to: { remote: false } }, true)).toBe(true);
+    expect(uploadsAgain({ file, to: { remote: true } }, false)).toBe(true);
+    // The same way: this board, or the same spacesheep account, already holds it.
+    expect(uploadsAgain({ file, to: { remote: true } }, true)).toBe(false);
+    expect(uploadsAgain({ file, to: { remote: false } }, false)).toBe(false);
+    // Failed where trying again can mend it, yes; where it can't, it stays as it is.
+    expect(uploadsAgain({ file, to: { remote: false }, failed: { retry: true } }, true)).toBe(true);
+    expect(uploadsAgain({ file, to: { remote: false }, failed: { retry: false } }, true)).toBe(false);
+    // Brought back from the draft (no bytes here), or never sent: nothing to send again.
+    expect(uploadsAgain({ to: { remote: false } }, true)).toBe(false);
+    expect(uploadsAgain({ file }, true)).toBe(false);
   });
 });

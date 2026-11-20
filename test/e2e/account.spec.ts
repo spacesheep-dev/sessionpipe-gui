@@ -16,6 +16,7 @@ import { type AccountServer, startAccountServer } from "../account/serve.js";
 import { fakeShell } from "../account/shell-init.js";
 import { Session } from "../events.js";
 import { composer as composerOf } from "./helpers.js";
+import { drop, given, paste, png, sha } from "./pictures.js";
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/web");
 const MACHINE = "m_studio0123456789abcd";
@@ -247,7 +248,7 @@ test("this phone's key is asked to be trusted through the hub; once the computer
   await expect(box).toHaveValue("");
 });
 
-test("a picture can't go to a computer reached through spacesheep yet: no paperclip, and a pasted one is answered under the field", async () => {
+test("a picture can't go to a computer whose sessionpipe is older than 0.10: no paperclip, and a pasted one is answered under the field", async () => {
   const box = composer();
   await expect(box).toBeEnabled();
   await expect(page.locator("input[data-attach-input]")).toHaveCount(0);
@@ -262,7 +263,9 @@ test("a picture can't go to a computer reached through spacesheep yet: no paperc
   });
   // Nothing is taken, so nothing is prevented, and the line says why the picture did not go.
   expect(prevented).toBe(false);
-  await expect(line).toHaveText(`Pictures can't be sent to ${NAME} through spacesheep from here yet.`);
+  await expect(line).toHaveText(
+    `Pictures can't be sent to ${NAME}: its sessionpipe is older than 0.10. Run sessionpipe update there.`,
+  );
   await expect(page.locator(".att-item")).toHaveCount(0);
   // It answers the paste; once the person writes on, it goes. (Nothing was asked of the hub
   // for it: the last test of this story reads every door that was.)
@@ -1288,5 +1291,327 @@ test.describe("pictures another surface sent, on an account", () => {
     await expect(page4.getByText("“Which one is brighter?”").first()).toBeVisible();
     expect(await page4.content()).not.toContain("talk-files");
     expect(server4.strays).toEqual([]);
+  });
+});
+
+test.describe("pictures to a computer reached through spacesheep", () => {
+  let ss4: FakeSpacesheep;
+  let hub4: HubStandIn;
+  let server4: AccountServer;
+  let context4: BrowserContext;
+  let page4: Page;
+  let stop4: () => void;
+  const KIWI = png(64, 48, [0xd9, 0x3a, 0x2b]);
+  const BIRCH = png(80, 60, [0xe8, 0xe2, 0xd0]);
+  const ONYX = png(96, 54, [0x1c, 0x1c, 0x1e]);
+  const kiwi = new Session("s-kiwi");
+  const where = { tier: 2 as const, session: { machine: NAME, cwd: "/Users/me/kiwi" } };
+  /** What the computer was told, in order. */
+  const told: Record<string, unknown>[] = [];
+  const size = (n: number) => (n < 1024 ? `${n} B` : `${Math.round(n / 1024)} KB`);
+
+  test.beforeAll(async ({ browser }) => {
+    ss4 = new FakeSpacesheep();
+    ss4.machines = [
+      {
+        id: MACHINE,
+        name: NAME,
+        online: true,
+        last_seen: Date.now(),
+        folders: ["/Users/me"],
+        mode: "safe",
+        agents: ["claude-code"],
+        cli_version: "sessionpipe 0.17.0",
+        modes: ["waiter"],
+        passkey_ids: ["a-passkey-made-on-spacesheep"],
+        key_types: ["passkey", "device"],
+        files: true,
+        prompt_files: true,
+      },
+    ];
+    const named = { ...where, session: { ...where.session, title: "Match the kiwi red" } };
+    ss4.push([
+      kiwi.ev("session.started", { source: "startup" }, named),
+      kiwi.ev("turn.started", { turn_id: "t1" }, named),
+      kiwi.ev("turn.transcript", { turn: 1, user: "Find the brand red.", assistant: "Found it." }, named),
+      kiwi.ev("turn.ended", { turn_id: "t1" }, named),
+    ]);
+    hub4 = new HubStandIn({ upstream: { origin: "https://spacesheep.test", ask: (req) => ss4.handle(req) } });
+    hub4.add("me@example.com", ss4.key);
+    server4 = await startAccountServer({ web: WEB, hub: hub4 });
+    context4 = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      storageState: { cookies: [], origins: [] },
+    });
+    await context4.addInitScript(fakeShell, {});
+    page4 = await context4.newPage();
+    // The computer, as sessionpipe 0.10 and later: it fetches a message's files, saves them
+    // under .sessionpipe/files/<session>/<nonce>/ and lists them after the words.
+    let turn = 10;
+    const t = setInterval(() => {
+      for (const job of ss4.jobs) {
+        if (job.status !== "queued") continue;
+        const cmd = JSON.parse(String(job.sent.cmd)) as Record<string, unknown>;
+        told.push(cmd);
+        ss4.settle(job.id, "running");
+        const sid = String(cmd.session).split(":")[1]!;
+        const s = sid === kiwi.id ? kiwi : new Session(sid);
+        const files = (cmd.files ?? []) as { name: string; type: string; size: number }[];
+        const folder = cmd.kind === "start" ? sid : `${sid}/${String(cmd.nonce)}`;
+        const list = files.length
+          ? `\n\nAttached files (saved in this folder):\n${files
+              .map((f) => `- .sessionpipe/files/${folder}/${f.name} (${f.type}, ${size(f.size)})`)
+              .join("\n")}`
+          : "";
+        const id = `t${turn++}`;
+        const on = { ...where, session: { ...where.session, cwd: String(cmd.cwd ?? where.session.cwd) } };
+        ss4.push([
+          ...(cmd.kind === "start" ? [s.ev("session.started", { source: "startup" }, on)] : []),
+          s.ev("turn.started", { turn_id: id }, on),
+          s.ev("turn.transcript", { turn, user: `${cmd.text}${list}`, assistant: `Saw ${files.length}.` }, on),
+          s.ev("turn.ended", { turn_id: id }, on),
+        ]);
+        ss4.settle(job.id, "done");
+      }
+    }, 100);
+    stop4 = () => clearInterval(t);
+    // This phone's key, trusted by the computer.
+    await page4.goto(`${server4.url}/s/claude-code/s-kiwi`);
+    const asked = (await page4.evaluate(
+      (id) =>
+        (
+          window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+        ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id }),
+      [...hub4.accounts.keys()][0]!,
+    )) as { keyId: string };
+    (ss4.machines[0]!.passkey_ids as string[]).push(asked.keyId);
+    ss4.trusting.set(asked.keyId, [MACHINE]);
+    await page4.reload();
+  });
+  test.afterAll(async () => {
+    stop4?.();
+    await context4?.close();
+    await server4?.close();
+  });
+
+  const tray = () => page4.locator(".att-item");
+
+  test("the paperclip is there; one picked, one pasted and one dropped go up through the files door, and the message carries them", async () => {
+    const box = composerOf(page4);
+    await expect(box).toBeEnabled();
+    await page4
+      .locator("input[data-attach-input]")
+      .setInputFiles({ name: "kiwi.png", mimeType: "image/png", buffer: KIWI });
+    expect(await paste(page4, [given("birch.png", BIRCH)])).toBe(true);
+    expect(await drop(page4, [given("onyx.png", ONYX)])).toBe(true);
+    await expect(tray()).toHaveCount(3);
+    await expect(page4.locator(".att-item[data-state=ready]")).toHaveCount(3);
+    await box.fill("Which of these is the brand red?");
+    const n = told.length;
+    await box.press("Enter");
+    await expect.poll(() => told.length, { timeout: 20_000 }).toBeGreaterThan(n);
+    await expect(page4.getByText("Saw 3.").first()).toBeVisible();
+    // Each upload went through the hub's files door before the message did.
+    const posts = hub4.log.filter((l) => l.startsWith("POST"));
+    expect(posts).toEqual([
+      "POST /api/machines/files 200",
+      "POST /api/machines/files 200",
+      "POST /api/machines/files 200",
+      `POST /api/machines/${MACHINE}/jobs 202`,
+    ]);
+    // The signed message names what spacesheep keeps, by the same hashes; nothing in its words.
+    const cmd = told[n]!;
+    expect(cmd).toMatchObject({
+      kind: "prompt",
+      session: "claude-code:s-kiwi",
+      text: "Which of these is the brand red?",
+    });
+    const files = cmd.files as { name: string; sha256: string; size: number; type: string }[];
+    expect(files.map((f) => f.name)).toEqual(["kiwi.png", "birch.png", "onyx.png"]);
+    expect(files.map((f) => f.sha256)).toEqual([sha(KIWI), sha(BIRCH), sha(ONYX)]);
+    // Two go up at a time, so spacesheep may have them in another order.
+    const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+    expect([...ss4.files].sort(byName).map((f) => [f.name, f.sha256])).toEqual(
+      [...files].sort(byName).map((f) => [f.name, f.sha256]),
+    );
+    // The sent message draws them from what this phone kept, before and after its turn came back.
+    const drawn = page4.locator("[data-sent-picture] img");
+    await expect(drawn).toHaveCount(3);
+    for (const src of await drawn.evaluateAll((els) => els.map((e) => (e as HTMLImageElement).src)))
+      expect(src).toMatch(/^blob:/);
+    // A tap opens the kept picture over the page, as a receiver's does.
+    await page4.locator("[data-sent-picture='kiwi.png']").last().click();
+    const lightbox = page4.locator("[data-lightbox]");
+    await expect(lightbox).toBeVisible();
+    expect(await lightbox.locator("img").first().getAttribute("src")).toMatch(/^blob:/);
+    await page4.keyboard.press("Escape");
+    await expect(lightbox).toHaveCount(0);
+    await expect(page4.locator("text=.sessionpipe/files")).toHaveCount(0);
+    await expect(tray()).toHaveCount(0);
+    // After a reload, from IndexedDB.
+    await page4.reload();
+    await expect(page4.getByText("Saw 3.").first()).toBeVisible();
+    await expect(drawn).toHaveCount(3);
+  });
+
+  test("a picture with no words goes with the line that says to look at it, and the bubble shows the line", async () => {
+    const box = composerOf(page4);
+    await paste(page4, [given("kiwi.png", KIWI)]);
+    await expect(page4.locator(".att-item[data-state=ready]")).toHaveCount(1);
+    await expect(page4.locator(".ctl-send")).toBeEnabled();
+    const n = told.length;
+    await box.press("Enter");
+    await expect.poll(() => told.length, { timeout: 20_000 }).toBeGreaterThan(n);
+    expect(told[n]).toMatchObject({ kind: "prompt", text: "Look at the attached picture." });
+    expect(told[n]!.files).toHaveLength(1);
+    await expect(page4.getByText("Look at the attached picture.").first()).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("a message spacesheep holds names its pictures, and goes with them when confirmed", async () => {
+    ss4.sendAnswers.push(() => ({
+      status: 409,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code: "confirm",
+        error: "Confirm with your passkey to send this.",
+        why: "it has pictures",
+      }),
+    }));
+    const box = composerOf(page4);
+    await paste(page4, [given("birch.png", BIRCH)]);
+    await expect(page4.locator(".att-item[data-state=ready]")).toHaveCount(1);
+    await box.fill("Is this one lighter?");
+    const n = told.length;
+    await box.press("Enter");
+    const notice = page4.locator("[data-held]");
+    await expect(notice).toBeVisible();
+    await expect(notice.locator("[data-held-names]")).toContainText("1 picture: birch.png");
+    // Held: the computer was told nothing yet.
+    expect(told.length).toBe(n);
+    await notice.locator("[data-held-confirm]").click();
+    await expect(notice).toHaveCount(0);
+    await expect.poll(() => told.length, { timeout: 20_000 }).toBeGreaterThan(n);
+    const cmd = told[n]!;
+    expect(cmd).toMatchObject({ text: "Is this one lighter?" });
+    expect((cmd.files as { sha256: string }[]).map((f) => f.sha256)).toEqual([sha(BIRCH)]);
+  });
+
+  test("another phone, which kept none of them, shows each as a chip with its name", async ({ browser }) => {
+    const other = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      storageState: { cookies: [], origins: [] },
+    });
+    try {
+      await other.addInitScript(fakeShell, {});
+      const p = await other.newPage();
+      await p.goto(`${server4.url}/s/claude-code/s-kiwi`);
+      await expect(p.getByText("Saw 3.").first()).toBeVisible();
+      await expect(p.locator("[data-sent-picture]")).toHaveCount(0);
+      await expect(p.locator("[data-sent-file='kiwi.png']").first()).toBeVisible();
+      await expect(p.locator("[data-sent-file='onyx.png']").first()).toBeVisible();
+      await expect(p.locator("text=.sessionpipe/files")).toHaveCount(0);
+    } finally {
+      await other.close();
+    }
+  });
+
+  test("New session takes a picture: it goes up through the files door and the start names it", async () => {
+    await page4.goto(`${server4.url}/?new=1&machine=${NAME}&cwd=/Users/me/kiwi`);
+    const sheet = page4.locator("[data-new-session]");
+    await expect(sheet.locator("input[data-ns-files]")).toBeAttached();
+    // spacesheep's limit on one: its sentence is on the status line until that file is removed.
+    ss4.fileAnswer = {
+      status: 429,
+      headers: { "content-type": "application/json", "retry-after": "120" },
+      body: JSON.stringify({ error: "rate_limited", retry_after: 120 }),
+    };
+    await sheet
+      .locator("input[data-ns-files]")
+      .setInputFiles({ name: "birch.png", mimeType: "image/png", buffer: BIRCH });
+    const limit = "That's a lot of pictures in a short time. Try again in 2 minutes.";
+    await expect(sheet.locator("#ns-status")).toHaveText(limit);
+    // Trying again can help there: it is offered.
+    await expect(sheet.getByRole("button", { name: "Try birch.png again" })).toBeVisible();
+    await sheet.getByRole("button", { name: "Remove birch.png" }).click();
+    await expect(sheet.locator("[data-file-state]")).toHaveCount(0);
+    await expect(sheet.locator("#ns-status")).not.toContainText(limit);
+    await sheet
+      .locator("input[data-ns-files]")
+      .setInputFiles({ name: "onyx.png", mimeType: "image/png", buffer: ONYX });
+    await expect(sheet.locator("[data-file-state=held]")).toHaveCount(1);
+    await sheet.locator("[data-ns-text]").fill("Match this black on the header.");
+    await sheet.locator("[data-ns-start]").click();
+    await expect.poll(() => told.filter((c) => c.kind === "start").length, { timeout: 15_000 }).toBe(1);
+    const start = told.find((c) => c.kind === "start")!;
+    expect(start).toMatchObject({ cwd: "/Users/me/kiwi", text: "Match this black on the header." });
+    expect(start.files).toEqual([{ name: "onyx.png", type: "image/png", size: ONYX.length, sha256: sha(ONYX) }]);
+    expect(ss4.files.at(-1)).toMatchObject({ sha256: sha(ONYX), name: "onyx.png" });
+  });
+
+  test("an app from before the files door says to update it, and offers no Try again", async () => {
+    await page4.goto(`${server4.url}/s/claude-code/s-kiwi`);
+    await expect(page4.getByText("Saw 3.").first()).toBeVisible();
+    await expect(composerOf(page4)).toBeEnabled();
+    hub4.filesDoor = false;
+    try {
+      await paste(page4, [given("onyx.png", ONYX)]);
+      await expect(page4.locator(".att-item[data-state=error]")).toHaveCount(1);
+      await expect(page4.locator(".att-note")).toHaveText("This app can't send pictures yet. Update the app.");
+      await expect(page4.locator(".att-retry")).toHaveCount(0);
+      // An older app is no refusal of spacesheep's: the paperclip stays.
+      await expect(page4.locator("input[data-attach-input]")).toHaveCount(1);
+    } finally {
+      hub4.filesDoor = true;
+    }
+    await page4.locator(".att-x").click();
+    await expect(page4.locator(".att-item")).toHaveCount(0);
+  });
+
+  test("a spacesheep that takes no pictures from here says so once, and the paperclip goes for the rest of the page's life", async () => {
+    await page4.goto(`${server4.url}/s/claude-code/s-kiwi`);
+    const clip = page4.locator("input[data-attach-input]");
+    // The board as it stands after the read, not as the cache had it at the launch.
+    await expect(page4.getByText("Saw 3.").first()).toBeVisible();
+    await page4.evaluate(() =>
+      (window as unknown as { __sessionpipeAccount: { flushed(): Promise<void> } }).__sessionpipeAccount.flushed(),
+    );
+    await expect(composerOf(page4)).toBeEnabled();
+    await expect(clip).toHaveCount(1);
+    ss4.fileAnswer = {
+      status: 401,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ error: "Unknown or revoked API key.", code: "unauthorized" }),
+    };
+    await paste(page4, [given("kiwi.png", KIWI)]);
+    const words = "spacesheep.dev can't take pictures from here yet.";
+    await expect(page4.locator(".att-item[data-state=error]")).toHaveCount(1);
+    await expect(page4.locator(".att-note")).toHaveText(words);
+    // Trying again can't help: not offered.
+    await expect(page4.locator(".att-retry")).toHaveCount(0);
+    await expect(clip).toHaveCount(0);
+    // The account's key still reads: a 401 on the files door marks nothing.
+    expect(
+      (
+        await page4.evaluate(() =>
+          (window as unknown as { __sessionpipeAccount: { view(): { state: string } } }).__sessionpipeAccount.view(),
+        )
+      ).state,
+    ).toBe("ok");
+    await page4.locator(".att-x").click();
+    await paste(page4, [given("birch.png", BIRCH)]);
+    await expect(page4.locator(".ctl-foot[data-reason=pictures-off] .ctl-hint")).toHaveText(words);
+  });
+
+  test("Disconnect takes the pictures this phone kept of what it sent with the account", async () => {
+    const id = [...hub4.accounts.keys()][0]!;
+    const kept = `sessionpipe.sent-pictures.${id}`;
+    const names = () => page4.evaluate(async () => (await indexedDB.databases()).map((d) => d.name));
+    expect(await names()).toContain(kept);
+    await page4.goto(`${server4.url}/settings?section=app`);
+    hub4.alert = () => true;
+    await page4.locator("[data-account-settings] [data-disconnect]").click();
+    await expect(page4.locator(".onb[data-step='account-disconnected']")).toBeVisible();
+    await expect.poll(names).not.toContain(kept);
+    expect((await names()).filter((n) => n?.includes("sent-pictures"))).toEqual([]);
   });
 });

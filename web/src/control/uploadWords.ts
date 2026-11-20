@@ -4,6 +4,15 @@
 // can help (the tray's Retry is offered only then). `board` is what took the upload: the
 // receiver's name, or spacesheep.dev on an account (`boardName`). Never a raw code.
 import { ATTACHMENT_TYPES } from "@shared/api";
+import {
+  UPLOAD_FAILED,
+  UPLOAD_NO_DOOR,
+  UPLOAD_NOT_WHOLE,
+  UPLOAD_REFUSED,
+  UPLOAD_UNREACHABLE,
+  UPLOAD_WORDS,
+  uploadLimitWords,
+} from "@shared/attachments";
 import { KEY_LOST_SENTENCE } from "../lib/keyWords";
 import { accountMode, receiverName, receiverOrigin } from "../lib/net";
 
@@ -30,17 +39,12 @@ export function boardName(hostname?: string): string {
   return typeof location !== "undefined" && location.hostname ? location.hostname : "the board";
 }
 
+/** The name of spacesheep, where an upload for a computer reached through it goes on to:
+ *  the account's server on an account, else spacesheep.dev (the board's link). */
+export const spacesheepName = (): string => (accountMode() ? boardName() : "spacesheep.dev");
+
 /** "picture" for one of the four picture types, else "file" (New session takes any file). */
 export const nounFor = (type: string): "picture" | "file" => (type in ATTACHMENT_TYPES ? "picture" : "file");
-
-/** When a Retry-After of `s` seconds says to try again, as words: "in a minute", "in 5
- *  minutes", and past an hour just "later". */
-const minutes = (s: number | undefined): string => {
-  if (s === undefined || !Number.isFinite(s)) return "in a few minutes";
-  const n = Math.max(1, Math.ceil(s / 60));
-  if (n > 60) return "later";
-  return n === 1 ? "in a minute" : `in ${n} minutes`;
-};
 
 /** The app's hub gave up on the receiver's answer: its plain-text sentence (sp-receivers
  *  proxy.rs), which a 504 says too. */
@@ -58,23 +62,27 @@ export function uploadWords(e: unknown, board: string, noun: "picture" | "file" 
   const status = typeof r.status === "number" ? r.status : 0;
   const reason = typeof r.reason === "string" ? r.reason : "";
   const detail = typeof r.detail === "string" ? r.detail : "";
+  // What the upload through spacesheep said, before what its status would.
+  if (reason === UPLOAD_REFUSED) return { words: UPLOAD_WORDS.refused, retry: false };
+  // As UPLOAD_WORDS has them for a picture (uploadWords.test holds them to it).
+  if (reason === UPLOAD_NO_DOOR) return { words: `This app can't send ${noun}s yet. Update the app.`, retry: false };
+  if (reason === UPLOAD_NOT_WHOLE) return { words: `${The} didn't arrive whole. Try again.`, retry: true };
+  if (reason === UPLOAD_UNREACHABLE)
+    return { words: `${The} didn't upload: ${board} can't be reached. Try again.`, retry: true };
+  if (reason === UPLOAD_FAILED) return { words: `${board} couldn't save the ${noun}. Try again.`, retry: true };
   if (status === 504 || (status === 502 && SLOW_RE.test(detail)))
     return { words: `${The} didn't finish uploading: the connection is slow. Try again, or use Wi-Fi.`, retry: true };
   if (status === 502) return { words: `${The} didn't reach ${board}. Try again.`, retry: true };
   if (status === 413 || reason === "too_large") return { words: `${That} is too big for ${board}.`, retry: false };
   if (status === 415 || reason === "not_an_image" || reason === "unsupported_type")
     return {
-      words: noun === "picture" ? "That file isn't a picture." : `${board} can't take that kind of file.`,
+      words: noun === "picture" ? UPLOAD_WORDS.notPicture : `${board} can't take that kind of file.`,
       retry: false,
     };
   if (status === 507) return { words: `${board} has no room for more files today.`, retry: false };
   // The page's key is refused: the one sentence every place says for it (lib/keyWords).
   if (status === 401) return { words: KEY_LOST_SENTENCE, retry: false };
-  if (status === 429)
-    return {
-      words: `That's a lot of ${noun}s in a short time. Try again ${minutes(typeof r.retryAfterS === "number" ? r.retryAfterS : undefined)}.`,
-      retry: true,
-    };
+  if (status === 429) return { words: uploadLimitWords(r.retryAfterS, noun), retry: true };
   if (status >= 500 || !status) return { words: `${board} couldn't save the ${noun}. Try again.`, retry: true };
   // Another refusal (a name the machine can't save, an empty file): the receiver's own sentence.
   return { words: detail || `${board} couldn't take the ${noun}.`, retry: false };

@@ -608,6 +608,20 @@ export interface StartFile {
 export const START_FILES_MAX = 10;
 export const START_FILE_MAX_BYTES = 26_214_400;
 export const START_FILES_TOTAL_BYTES = 52_428_800;
+/** CONTROL.md §3.1's rule for a file's name (NFC), or why it is broken: what the receiver's
+ *  precheck holds a command's `files` to, and both files routes hold an upload's name to. */
+export function fileNameProblem(name: string): string | null {
+  if (
+    name.length < 1 ||
+    name.length > 200 ||
+    name === "." ||
+    name === ".." ||
+    name.startsWith(".") ||
+    [...name].some((c) => c === "/" || c === "\\" || c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)
+  )
+    return "a file's name is 1 to 200 characters, no slash, no control character, no leading dot";
+  return null;
+}
 /** What POST ROUTES.ui.control + "/files" answers: the entry a signed command names, and
  *  for a picture (PNG, JPEG, GIF, WebP) its size in pixels, read from its own bytes. Only
  *  the four fields of `StartFile` go into a command; an older receiver sends no pixels. */
@@ -1831,7 +1845,8 @@ export const ROUTES = {
     qr: "/api/ui/qr.svg",
     /** Everything under it is the control channel's UI side (server/control/README.md),
      *  POST /files?name=&machine= among it: one file a start or a prompt will carry, as the
-     *  raw body → UploadedFile. `machine` (the machine it is for) is taken and not read yet.
+     *  raw body → UploadedFile. `machine`: the machine it is for; one paired on spacesheep
+     *  gets it from spacesheep, so the bytes go there and nothing is held here.
      *  415 `not_an_image` for bytes that are not the picture their content-type says.
      *  GET /files/:sha256 → a picture sent from here (PNG, JPEG, GIF or WebP), kept 30 days
      *  for the page to draw; 404 `gone` once it is not kept, 404 `not_a_picture` for other types. */

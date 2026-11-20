@@ -32,7 +32,15 @@ import { MEDIA_TYPE_RE } from "./files.js";
 import { CODE_RE, MACHINE_RE, SESSION_REF } from "./parse.js";
 import { looksLikePool, verifyPoolCommand } from "./pool.js";
 import { filesProblem, precheck, type Refusal } from "./precheck.js";
-import { forwardRemoteSend, RELAY_FILES, type RemoteSend, SendRefused, SPACESHEEP_UNAUTHORIZED } from "./remote.js";
+import {
+  forwardRemoteSend,
+  forwardRemoteUpload,
+  RELAY_FILES,
+  type RemoteSend,
+  type RemoteUpload,
+  SendRefused,
+  SPACESHEEP_UNAUTHORIZED,
+} from "./remote.js";
 import { requestOrigin } from "./routes.js";
 import {
   type ControlState,
@@ -57,6 +65,9 @@ export interface UiRouteDeps {
   /** A send for a machine paired on spacesheep (docs/rfcs/08): the signed body goes to
    *  spacesheep's jobs route as this account; the answer is its job id, or why not. */
   remoteSend?: RemoteSend;
+  /** An upload for a machine paired on spacesheep: the bytes to spacesheep's files door as
+   *  this account, where the machine fetches them; nothing is kept here. */
+  remoteUpload?: RemoteUpload;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -483,8 +494,9 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
   // SHA-256 (files.ts); the answer is the entry the signed command names. Nothing about it
   // is in the text. A file sent as one of the four picture types is held to its own bytes
   // (the composer's pictures come this way): what the agent is told is a PNG is one, and
-  // the answer says how many pixels it has. `?machine=` (the machine it is for) is taken
-  // and not read: every file is held here, whichever machine fetches it.
+  // the answer says how many pixels it has. `?machine=` is the machine it is for: one paired
+  // on spacesheep fetches it from there, so the bytes go to spacesheep as this account and
+  // nothing is held here; every other machine fetches it from here.
   router.post(
     `${base}/files`,
     guarded(async (ctx): Promise<Reply> => {
@@ -502,6 +514,13 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       const picture = type in ATTACHMENT_TYPES ? sniffImage(bytes) : null;
       if (type in ATTACHMENT_TYPES && picture?.type !== type)
         throw new HttpError(415, { reason: "not_an_image", error: "This file isn't the picture its type says." });
+      const target = state.machine(ctx.url.searchParams.get("machine") ?? "");
+      if (target?.remote) {
+        const r = await forwardRemoteUpload({ bytes, type, name }, d.remoteUpload);
+        if (r.status !== 201) throw new HttpError(r.status, r.json);
+        if (picture) Object.assign(r.json, { width: picture.width, height: picture.height });
+        return { status: 201, json: r.json };
+      }
       let held: { sha256: string; size: number };
       try {
         held = state.files.put(bytes, type);

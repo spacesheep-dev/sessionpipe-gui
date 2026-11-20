@@ -10,11 +10,15 @@
 //    with its own token and saves them in the session's folder. Nothing is added to the text.
 //  - "path": the text block of absolute paths (shared/attachments.ts), for an older daemon
 //    on the machine the GUI runs on.
-//  - "off": no way to send one (an older daemon on another machine, a computer reached
-//    through spacesheep): no paperclip, and a picture pasted or dropped is answered in words.
+//  - "off": no way to send one (an older daemon on another machine, or one reached through
+//    a spacesheep that refused this app's uploads): no paperclip, and a picture pasted or
+//    dropped is answered in words.
+// A computer reached through spacesheep takes its pictures as files too: the upload goes to
+// spacesheep (the receiver's or the hub's files door), where the computer fetches it.
 // No address of this board and no key to it is ever in what is signed.
 // A sent message shows what it carried under its words: a thumbnail of each picture the
-// receiver still keeps (GET …/control/files/:sha), else a chip with its name, type and size.
+// receiver still keeps (GET …/control/files/:sha) or, where no receiver keeps it, this page
+// does (sentPictures.ts); else a chip with its name, type and size.
 // Before the session's record of the turn arrives that is the sent row's `files`; after, the
 // list of saved files the machine added to the message, each found again by its nonce.
 // A picture held somewhere this page can't show it from is a chip that says where it is
@@ -46,6 +50,8 @@ import {
   type PromptItem,
   type SavedFileRef,
   splitAttachments,
+  UPLOAD_REFUSED,
+  UPLOAD_WORDS,
 } from "@shared/attachments";
 import {
   type ChangeEvent,
@@ -60,17 +66,19 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { Redacted } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { useTouchKeys } from "../lib/device";
 import { copyItem } from "../lib/menus";
 import { accountMode, apiFetch, apiUpload, apiUrl, uploadProgress } from "../lib/net";
-import { controlApi, uploadRefusal } from "./api";
+import { ControlError, controlApi, uploadRefusal } from "./api";
 import { b64url, sha256 } from "./bytes";
 import { Lightbox } from "./Lightbox";
+import { heldSentPicture, keepSentPicture, useSentPictureUrls } from "./sentPictures";
 import { PICKER_DESK, PICKER_TOUCH, pictureType, refuseInput, shrinkImage, stillOverWords } from "./shrink";
-import { boardName, uploadWords } from "./uploadWords";
+import { boardName, spacesheepName, uploadWords } from "./uploadWords";
 import "./attachments.css";
 
 // ---------- how a picture goes ----------
@@ -83,27 +91,56 @@ export type PictureMode = "files" | "path" | "off";
 export function pictureMode(
   control: Pick<MachineControl, "promptFiles" | "remote"> | undefined,
   thisMachine: boolean | null,
+  spacesheepRefused = false,
 ): PictureMode | undefined {
   if (!control) return undefined;
-  // A file a send names would have to be held by spacesheep: there is no way to carry one yet.
-  if (control.remote) return "off";
+  // Through spacesheep, a picture goes as a file uploaded there, or not at all: no path of
+  // this disk means anything on that computer. `spacesheepRefused`: spacesheep would not take
+  // this app's uploads (`useSpacesheepRefused`).
+  if (control.remote) return control.promptFiles && !spacesheepRefused ? "files" : "off";
   if (control.promptFiles) return "files";
   if (thisMachine === null) return undefined;
   return thisMachine ? "path" : "off";
 }
 
 /** Why no picture can go to `machine`, as the line under the field says it when one is
- *  pasted or dropped. What is between backticks is a command to type. */
-export function picturesOffWords(machine: string, relayed: boolean): string {
-  return relayed
-    ? `Pictures can't be sent to ${machine} through spacesheep from here yet.`
+ *  pasted or dropped: its sessionpipe is too old for them (`old`, wherever it is reached
+ *  from), or spacesheep would not take this app's uploads (`spacesheep`). What is between
+ *  backticks is a command to type. */
+export function picturesOffWords(machine: string, why: "old" | "spacesheep" = "old"): string {
+  return why === "spacesheep"
+    ? UPLOAD_WORDS.refused
     : `Pictures can't be sent to ${machine}: its sessionpipe is older than 0.10. Run \`sessionpipe update\` there.`;
+}
+
+// spacesheep answered an upload of this app's that it takes none from it (an older
+// spacesheep, or no Talk on the account): no paperclip for a computer reached through it,
+// for the rest of the page's life.
+let spacesheepRefused = false;
+const refusedWatchers = new Set<() => void>();
+/** spacesheep refused an upload of this page's (UPLOAD_REFUSED). */
+export function markSpacesheepRefused(on = true): void {
+  if (spacesheepRefused === on) return;
+  spacesheepRefused = on;
+  for (const w of [...refusedWatchers]) w();
+}
+/** Whether spacesheep refused this page's uploads. */
+export const spacesheepRefusesPictures = (): boolean => spacesheepRefused;
+/** The same, kept current. */
+export function useSpacesheepRefused(): boolean {
+  return useSyncExternalStore(
+    (w) => {
+      refusedWatchers.add(w);
+      return () => void refusedWatchers.delete(w);
+    },
+    () => spacesheepRefused,
+  );
 }
 
 /** The pictures of one message are over the protocol's total (CONTROL.md §3.1). */
 export const TOGETHER_WORDS = "These pictures are over 50 MB together. Remove one.";
 /** The receiver's hash or size of an upload is not the page's own. */
-export const NOT_WHOLE_WORDS = "The picture didn't arrive whole. Try again.";
+export const NOT_WHOLE_WORDS = UPLOAD_WORDS.notWhole;
 /** Send is off while a picture in the tray failed: what to do about it. */
 export const FAILED_WORDS = "Remove or retry the picture that didn't upload.";
 /** The same, where trying again can't help (Retry isn't offered). */
@@ -209,10 +246,13 @@ export class UploadFailed extends Error {
 }
 
 /** What an upload threw, as the tray says it; a stop (the picture was removed) as it is.
- *  The board is named as its Info says, once that is in. */
-async function failed(e: unknown): Promise<Error> {
+ *  The board is named as its Info says, once that is in; `remote`: the upload went on to
+ *  spacesheep (a computer reached through it), which is named instead. */
+async function failed(e: unknown, remote?: boolean): Promise<Error> {
   if (e instanceof UploadFailed || (e instanceof DOMException && e.name === "AbortError")) return e;
-  const f = uploadWords(e, await boardNow());
+  // spacesheep takes none from this app: no paperclip for its computers from now on.
+  if (e instanceof ControlError && e.reason === UPLOAD_REFUSED) markSpacesheepRefused();
+  const f = uploadWords(e, remote ? spacesheepName() : await boardNow());
   return new UploadFailed(f.words, f.retry);
 }
 
@@ -233,14 +273,17 @@ export type PictureEntry = UploadedFile;
 
 /** Upload one picture as a file a prompt will carry, under `name`, and check it arrived
  *  whole: the page hashes the very bytes it sent, and an answer with another hash or size
- *  is refused, so what is signed is the page's own word on the bytes. Throws the words. */
+ *  is refused, so what is signed is the page's own word on the bytes. Throws the words.
+ *  `remote`: the machine is reached through spacesheep, so no receiver keeps the picture to
+ *  show: the page keeps it (sentPictures.ts), as it does for every one on an account. */
 export async function uploadPicture(
   file: Blob,
   name: string,
   machineId?: string,
-  opts: UploadOpts = {},
+  opts: UploadOpts & { remote?: boolean } = {},
 ): Promise<PictureEntry> {
-  const why = refuseFile(file, "files");
+  const { remote, ...up } = opts;
+  const why = refuseFile(file, "files", remote ? spacesheepName() : undefined);
   if (why) throw new UploadFailed(why, false);
   const buf = await file.arrayBuffer();
   let held: UploadedFile;
@@ -248,12 +291,13 @@ export async function uploadPicture(
   try {
     [hash, held] = await Promise.all([
       sha256(new Uint8Array(buf)).then(b64url),
-      controlApi.uploadFile(new File([buf], name, { type: file.type }), machineId, opts),
+      controlApi.uploadFile(new File([buf], name, { type: file.type }), machineId, up),
     ]);
   } catch (e) {
-    throw await failed(e);
+    throw await failed(e, remote);
   }
   if (held.sha256 !== hash || held.size !== buf.byteLength) throw new UploadFailed(NOT_WHOLE_WORDS, true);
+  if (remote || accountMode()) void keepSentPicture(hash, buf, file.type).catch(() => {});
   const entry: PictureEntry = { name, type: file.type, size: buf.byteLength, sha256: hash };
   if (typeof held.width === "number" && typeof held.height === "number") {
     entry.width = held.width;
@@ -392,6 +436,8 @@ export interface PendingItem {
   via: "files" | "path";
   /** The machine it was added for, which fetches it. */
   machine?: string;
+  /** That machine is reached through spacesheep: the upload goes on to spacesheep. */
+  remote?: boolean;
   /** The name it goes under: a file's signed name (`pictureName`), else the file's own. */
   name: string;
   /** Its upload has not begun: two run at a time. */
@@ -510,12 +556,14 @@ export interface AttachmentsHandle {
 }
 
 /** `mode`: how this session's machine takes pictures (`pictureMode`); `machineId`: the
- *  machine an upload is for. `onRefused`: a picture was pasted or dropped where none can be
- *  sent ("off"), so the composer says why (`picturesOffWords`); nothing is swallowed.
- *  `initial`: the pictures the tray opens with (a session's draft); `land`: where a picture
- *  still uploading as a file when the composer closes goes once it is in (that draft). */
+ *  machine an upload is for; `remote`: it is reached through spacesheep. `onRefused`: a
+ *  picture was pasted or dropped where none can be sent ("off"), so the composer says why
+ *  (`picturesOffWords`); nothing is swallowed. `initial`: the pictures the tray opens with
+ *  (a session's draft); `land`: where a picture still uploading as a file when the
+ *  composer closes goes once it is in (that draft). */
 export function useAttachments(o: {
   machineId?: string;
+  remote?: boolean;
   enabled?: boolean;
   mode?: PictureMode;
   onRefused?: () => void;
@@ -553,6 +601,7 @@ export function useAttachments(o: {
   /** How each running upload is stopped, by item key. */
   const stops = useRef(new Map<string, AbortController>());
   const { mode, machineId } = o;
+  const remote = !!o.remote;
   const takes = mode === "files" || mode === "path" ? mode : null;
   /** The composer is on; `enabled`: and its machine takes pictures. */
   const active = o.enabled !== false;
@@ -586,7 +635,10 @@ export function useAttachments(o: {
       };
       const going: Promise<Partial<PendingItem>> =
         it.via === "files"
-          ? uploadPicture(it.file, it.name, it.machine, opts).then((entry) => ({ entry, at: Date.now() }))
+          ? uploadPicture(it.file, it.name, it.machine, { ...opts, remote: it.remote }).then((entry) => ({
+              entry,
+              at: Date.now(),
+            }))
           : uploadAttachment(it.file, opts).then((attachment) => ({ attachment }));
       going.then(
         (done) => {
@@ -717,6 +769,7 @@ export function useAttachments(o: {
           bytes: file.size,
           name: own,
           ...(machineId ? { machine: machineId } : {}),
+          ...(remote ? { remote } : {}),
         };
         return why ? { ...item, via: takes, error: why } : { ...item, via: takes, shrinking: true };
       });
@@ -738,7 +791,7 @@ export function useAttachments(o: {
         );
       }
     },
-    [enabled, takes, machineId, shrunk, patchNow],
+    [enabled, takes, machineId, remote, shrunk, patchNow],
   );
 
   /** Lets an item go: its upload stops, its thumbnail's URL is revoked, a path upload is taken back. */
@@ -1283,7 +1336,12 @@ interface SentThing {
   caption: string;
   file: ShownFile;
   src?: string;
+  /** A picture this page kept, being read: its frame holds the place. */
+  wait?: boolean;
 }
+
+/** Where the receiver shows a file it holds, by its hash. */
+const receiverCopy = (sha: string): string => apiUrl(`${ROUTES.ui.control}/files/${sha}`);
 
 /** What a picture the prompt's text names (the composer's older block) says of itself, as
  *  a chip says a file: "Picture · PNG · 4032×3024". */
@@ -1296,11 +1354,12 @@ const legacyFile = (it: AttachmentRef): ShownFile => ({
 /** The files a sent message carried, under its words: a thumbnail for each picture this
  *  receiver keeps, whole in a frame of its own shape, which opens it in the lightbox
  *  (every shell; a click with a modifier still opens a new tab in a browser), the arrows
- *  moving through this message's pictures; a chip for the rest, and for one that does not
+ *  moving through this message's pictures; else one this page kept of what it sent
+ *  (sentPictures.ts: on a spacesheep account, where the receiver holds none, and for a
+ *  computer reached through spacesheep); a chip for the rest, and for one that does not
  *  load (kept no more). `legacy`: the pictures the prompt's text names in the composer's
- *  older block, drawn first. On a spacesheep account the receiver holds none of them: the
- *  files are chips, the older block's pictures a chip each that says where they are kept.
- *  Nothing when there is none. */
+ *  older block, drawn first. On a spacesheep account the older block's pictures are a chip
+ *  each that says where they are kept. Nothing when there is none. */
 export function SentPictures({
   files,
   legacy = [],
@@ -1313,6 +1372,16 @@ export function SentPictures({
   const draw = !accountMode();
   const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
   const [open, setOpen] = useState<number | null>(null);
+  // The copies this page kept that are read: every picture on an account, where no receiver
+  // holds one; on a board, one whose receiver's copy does not load.
+  const ask = useMemo(
+    () =>
+      files.flatMap((f) =>
+        f.type in ATTACHMENT_TYPES && f.sha256 && (!draw || broken.has(receiverCopy(f.sha256))) ? [f.sha256] : [],
+      ),
+    [files, draw, broken],
+  );
+  const kept = useSentPictureUrls(ask);
   const things = useMemo((): SentThing[] => {
     const out: SentThing[] = [];
     if (draw)
@@ -1327,12 +1396,21 @@ export function SentPictures({
         });
       }
     files.forEach((f, i) => {
-      const src =
-        draw && f.type in ATTACHMENT_TYPES && f.sha256 ? apiUrl(`${ROUTES.ui.control}/files/${f.sha256}`) : undefined;
-      out.push({ key: `f:${i}:${f.name}`, name: f.name, caption: f.name, file: f, ...(src ? { src } : {}) });
+      const thing: SentThing = { key: `f:${i}:${f.name}`, name: f.name, caption: f.name, file: f };
+      out.push(thing);
+      if (!(f.type in ATTACHMENT_TYPES) || !f.sha256) return;
+      // One this page sent to a computer reached through spacesheep: drawn from here, as no
+      // receiver holds it; else the receiver's; else (and on an account) the copy kept here.
+      const held = draw ? heldSentPicture(f.sha256) : undefined;
+      const theirs = draw ? receiverCopy(f.sha256) : undefined;
+      const own = kept.get(f.sha256);
+      if (held && !broken.has(held)) thing.src = held;
+      else if (theirs && !broken.has(theirs)) thing.src = theirs;
+      else if (own) thing.src = own;
+      else if (own === undefined) thing.wait = true;
     });
     return out;
-  }, [files, legacy, draw]);
+  }, [files, legacy, draw, broken, kept]);
   const pictures = useMemo(() => things.filter((t) => t.src && !broken.has(t.src)), [things, broken]);
   // On a spacesheep account, whose relay holds none of a receiver's pictures, nothing is
   // asked for that would come back broken.
@@ -1353,6 +1431,7 @@ export function SentPictures({
       ))}
       {things.map((t) => {
         const at = pictures.indexOf(t);
+        if (t.wait) return <span key={t.key} className="att-thumb-wait" title={fileWords(t.file)} aria-hidden="true" />;
         if (at < 0) return <FileChip key={t.key} f={t.file} />;
         const words = fileWords(t.file);
         return (

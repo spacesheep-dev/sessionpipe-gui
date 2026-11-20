@@ -328,3 +328,17 @@ export function agentLeft(
     return poolPickerWords(pool, (id) => limits.find((e) => e.harness === harness && e.accountId === id), now);
   return agentWords(accountFor(harness, machine, c?.accounts, limits), now);
 }
+
+/** A file New session uploads again when another machine is chosen: one whose bytes it
+ *  still has, uploaded (or on its way, or failed in a way trying again can mend) for a
+ *  machine reached through spacesheep where the one chosen now is not, or the other way
+ *  round. A file held here is not where spacesheep looks, nor one spacesheep holds where
+ *  this board does; every computer reached through spacesheep fetches from the same
+ *  account, and this board holds a file for any of its own. */
+export function uploadsAgain(
+  f: { file?: unknown; to?: { remote: boolean }; failed?: { retry: boolean } },
+  remote: boolean,
+): boolean {
+  if (!f.file || !f.to || f.to.remote === remote) return false;
+  return !f.failed || f.failed.retry;
+}

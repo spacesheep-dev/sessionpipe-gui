@@ -44,6 +44,7 @@ import {
   picturesOffWords,
   useAttachments,
   usePageDrop,
+  useSpacesheepRefused,
   useThisMachine,
 } from "../control/Attachments";
 import type { AnswerOut } from "../control/answers";
@@ -494,12 +495,14 @@ export function ControlStrip({
   // picker. How they go is the machine's: as the command's files where its sessionpipe takes
   // them, as paths for an older one on this machine, and not at all anywhere else. There a
   // picture pasted or dropped is answered by the line under the field, until the words change.
-  const mode = pictureMode(control, useThisMachine(session.machine));
+  const ssRefused = useSpacesheepRefused();
+  const mode = pictureMode(control, useThisMachine(session.machine), ssRefused);
   const refusedKey = `${session.key}\n${text}`;
   const [refusedAt, setRefusedAt] = useState<string | null>(null);
   const picturesOff = mode === "off" && refusedAt === refusedKey;
   const att = useAttachments({
     machineId: control?.machineId,
+    remote: !!control?.remote,
     enabled,
     mode,
     onRefused: () => setRefusedAt(refusedKey),
@@ -586,7 +589,10 @@ export function ControlStrip({
       return { kind: noteKind === "err" ? "error" : "note", text: note, tone: noteKind === "err" ? "err" : undefined };
     if (picturesOff) {
       // The sentence, with the command it names set as one.
-      const [words, command, rest] = picturesOffWords(name, !!control?.remote).split("`");
+      const [words, command, rest] = picturesOffWords(
+        name,
+        control?.remote && control.promptFiles && ssRefused ? "spacesheep" : "old",
+      ).split("`");
       return {
         kind: "pictures-off",
         text: (

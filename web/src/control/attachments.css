@@ -176,6 +176,17 @@
   min-width: 24px;
   min-height: 24px;
 }
+/* A picture this page kept, being read: its thumbnail's place. */
+.att-thumb-wait {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-inner);
+  background: var(--bg-3);
+}
+.att-thumbs--sm .att-thumb-wait {
+  width: 24px;
+  height: 24px;
+}
 .att-thumbs--sm {
   margin-top: 4px;
 }

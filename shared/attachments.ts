@@ -209,3 +209,37 @@ export function attachmentIdsIn(text: string): string[] {
   for (const m of text.matchAll(ATTACHMENT_REF_RE)) out.push(m[1]!);
   return out;
 }
+
+// ---------- a picture uploaded through spacesheep (server/control/remote.ts) ----------
+// The page says an upload's words from these (web/src/control/uploadWords.ts); the receiver
+// and the app's account routes answer with the same, for any other reader.
+
+/** The code of an upload spacesheep would not take from this app's key (its 401 or 403). */
+export const UPLOAD_REFUSED = "spacesheep_refused";
+/** The code of an upload the iPhone app's hub has no files door for (an older app). */
+export const UPLOAD_NO_DOOR = "no_door";
+/** The code of an upload whose hash or size spacesheep gave is not the bytes sent. */
+export const UPLOAD_NOT_WHOLE = "not_whole";
+/** The code of an upload that could not reach spacesheep. */
+export const UPLOAD_UNREACHABLE = "spacesheep_unreachable";
+/** The code of an upload spacesheep failed to save (its 5xx). */
+export const UPLOAD_FAILED = "spacesheep_failed";
+/** The sentences of the states above, as they read for a picture sent through spacesheep. */
+export const UPLOAD_WORDS = {
+  refused: "spacesheep.dev can't take pictures from here yet.",
+  notPicture: "That file isn't a picture.",
+  notWhole: "The picture didn't arrive whole. Try again.",
+  unreachable: "The picture didn't upload: spacesheep.dev can't be reached. Try again.",
+  failed: "spacesheep.dev couldn't save the picture. Try again.",
+  notTaken: "spacesheep.dev couldn't take the picture.",
+  noDoor: "This app can't send pictures yet. Update the app.",
+} as const;
+
+/** Too many uploads in a short time, in words: when to try again, from a Retry-After of
+ *  `retryAfterS` seconds ("in a minute", "in 5 minutes", past an hour "later"). */
+export function uploadLimitWords(retryAfterS?: unknown, noun: "picture" | "file" = "picture"): string {
+  const s = typeof retryAfterS === "number" && Number.isFinite(retryAfterS) ? retryAfterS : undefined;
+  const n = s === undefined ? 0 : Math.max(1, Math.ceil(s / 60));
+  const when = s === undefined ? "in a few minutes" : n > 60 ? "later" : n === 1 ? "in a minute" : `in ${n} minutes`;
+  return `That's a lot of ${noun}s in a short time. Try again ${when}.`;
+}

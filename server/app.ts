@@ -33,6 +33,7 @@ import {
   writeChanged,
 } from "./config.js";
 import { type Control, createControl } from "./control/index.js";
+import { uploadTimeoutMs } from "./control/remote.js";
 import { type Runner, startDemo, startReplay } from "./demo/index.js";
 import { registerExtras } from "./extensions/extras.js";
 import { bundledDirs } from "./extensions/kind.js";
@@ -410,6 +411,32 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       // The key revoked there: the source says so now, not at its next poll (ui.ts forwardSend).
       if (res.status === 401 && json.code !== "unlock") spacesheep?.unauthorized();
       return { status: res.status, json };
+    },
+    // A file for a machine paired on spacesheep: its bytes to the files door, as this
+    // account, where the machine fetches it. Nothing of it is kept here.
+    remoteUpload: async (file) => {
+      const link = config.spacesheep;
+      if (!link)
+        return {
+          status: 503,
+          json: { reason: "no_relay", error: "Not connected to spacesheep any more." },
+          said: true,
+        };
+      const res = await fetch(`${link.origin}/api/machines/files`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${link.key}`,
+          "content-type": file.type,
+          "x-file-name": encodeURIComponent(file.name),
+          accept: "application/json",
+        },
+        body: file.bytes as Uint8Array<ArrayBuffer>,
+        // A spacesheep that stops answering is given up on, as the app's hub gives up.
+        signal: AbortSignal.timeout(uploadTimeoutMs(file.bytes.length)),
+      });
+      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const after = Number(res.headers.get("retry-after"));
+      return { status: res.status, json, retryAfter: Number.isFinite(after) && after > 0 ? after : null };
     },
   });
 

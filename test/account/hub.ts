@@ -216,6 +216,8 @@ export class HubStandIn {
   /** The phone's uplink for a file, in bytes a second (0: at once). The files door's time
    *  limit is `sendTimeoutS` of its bytes. */
   uplinkBytesPerS = 0;
+  /** Off: the hub of an app from before the files door, which answers it `not_a_door`. */
+  filesDoor = true;
   /** The most a relay answer may hold, unpacked (8 MiB in the hub; a test lowers it). */
   relayMax = 8 * MIB;
   /** The native alerts: what the person answers ("use this account?", "disconnect?"). `null`:
@@ -745,7 +747,7 @@ export class HubStandIn {
     else if (req.method === "GET" && path === `${RELAY}/machines`) door = "machines";
     else if (req.method === "GET" && path === `${RELAY}/jobs`) door = "jobs";
     else if (req.method === "POST" && jobs && !BOX.test(jobs[1]!)) door = "send";
-    else if (req.method === "POST" && path === MACHINE_FILES) door = "files";
+    else if (req.method === "POST" && path === MACHINE_FILES && this.filesDoor) door = "files";
     else if (req.method === "GET" && path === "/api/gui/device") door = "device";
     else return this.refuse("not_a_door");
 

@@ -140,6 +140,14 @@ export interface AccountDoors {
   look(m: { id: string }, body: Record<string, unknown>, askedAt: number, floor: number): Promise<Looked>;
   /** `GET /api/gui/device`: where this phone's own device key stands. */
   device(): Promise<DoorAnswer>;
+  /** `POST /api/machines/files`: one file's bytes for a machine to fetch, with its type and
+   *  its name (percent-encoded, as the hub forwards it). The answer as it came, and its
+   *  Retry-After in seconds where it has one; a full room at the hub is asked again. */
+  uploadFile(file: {
+    bytes: Uint8Array;
+    type: string;
+    name: string;
+  }): Promise<DoorAnswer & { retryAfter: number | null }>;
 }
 
 export interface DoorsOptions {
@@ -379,5 +387,23 @@ export function openDoors(o: DoorsOptions): AccountDoors {
       return { status: 504, json: { code: SEND_UNKNOWN_CODE, error: said.why } };
     },
     device: async () => read1(await get("/api/gui/device")),
+    async uploadFile(file) {
+      for (let i = 0; ; i++) {
+        const res = await f(`${o.rxBase}/api/machines/files`, {
+          method: "POST",
+          headers: {
+            "content-type": file.type,
+            "x-file-name": encodeURIComponent(file.name),
+            accept: "application/json",
+          },
+          body: file.bytes as Uint8Array<ArrayBuffer>,
+        });
+        const a = await read1(res);
+        const after = Number(res.headers.get("retry-after"));
+        const retryAfter = Number.isFinite(after) && after > 0 ? after : null;
+        if (a.hub !== "busy" || i >= SEND_BUSY_TRIES - 1) return { ...a, retryAfter };
+        await sleep(retryAfter ? retryAfter * 1000 : SEND_BUSY_WAIT_MS);
+      }
+    },
   };
 }
