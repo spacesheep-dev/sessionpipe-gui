@@ -8,7 +8,7 @@
 import { LABEL_COLORS, LABEL_DEFAULT_NAMES, LABEL_NAME_MAX, type LabelColor } from "@shared/api";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useLabels, useStore } from "../data/hooks";
-import { phoneLayout } from "../lib/device";
+import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import { onLabelRename, renameLabel } from "../lib/labels";
 
@@ -27,72 +27,53 @@ export function LabelsDialog() {
   return <Dialog focus={open.color} onClose={() => setOpen(null)} />;
 }
 
+/** One tree for both forms: a window resized across the phone's width changes what is
+ *  around the rows and never the rows, so the field in hand keeps its focus and its text. */
 function Dialog({ focus, onClose }: { focus?: LabelColor; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Read once, at open: a sheet on a phone, a dialog elsewhere.
-  const [phone] = useState(phoneLayout);
+  // A sheet on a phone, a dialog elsewhere.
+  const phone = usePhoneLayout();
   useFocusTrap(ref, true, { onClose, initial: focus ? `[data-label="${focus}"] input` : "input" });
-  const rows = (
-    <ul className="labels-rows">
-      {LABEL_COLORS.map((c) => (
-        <LabelField key={c} color={c} />
-      ))}
-    </ul>
+  const title = (
+    <h2 className={phone ? "menu-sheet-title" : "confirm-title"} id="labels-title">
+      Labels
+    </h2>
   );
-  const done = (
-    <button
-      type="button"
-      className={phone ? "menu-sheet-item menu-sheet-cancel" : "btn btn--primary"}
-      onClick={onClose}
-    >
-      Done
-    </button>
-  );
-  if (phone)
-    return (
-      <>
-        <button type="button" className="menu-scrim" aria-label="Close" onClick={onClose} data-dismiss />
-        <div
-          className="menu-sheet labels-sheet"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="labels-title"
-          ref={ref}
-          tabIndex={-1}
-        >
-          <span className="menu-grab" aria-hidden="true" />
-          <div className="menu-sheet-head">
-            <h2 className="menu-sheet-title" id="labels-title">
-              Labels
-            </h2>
-          </div>
-          <div className="menu-sheet-group">{rows}</div>
-          <div className="menu-sheet-group">{done}</div>
-        </div>
-      </>
-    );
   return (
     <>
       <button
         type="button"
-        className="menu-scrim menu-scrim--dialog"
+        className={phone ? "menu-scrim" : "menu-scrim menu-scrim--dialog"}
         aria-label="Close"
         onClick={onClose}
         data-dismiss
       />
       <div
-        className="confirm labels-dialog"
+        className={phone ? "menu-sheet labels-sheet" : "confirm labels-dialog"}
         role="dialog"
         aria-modal="true"
         aria-labelledby="labels-title"
         ref={ref}
         tabIndex={-1}
       >
-        <h2 className="confirm-title" id="labels-title">
-          Labels
-        </h2>
-        {rows}
-        <div className="confirm-actions">{done}</div>
+        {phone && <span className="menu-grab" aria-hidden="true" />}
+        {phone ? <div className="menu-sheet-head">{title}</div> : title}
+        <div className={phone ? "menu-sheet-group" : "labels-group"}>
+          <ul className="labels-rows">
+            {LABEL_COLORS.map((c) => (
+              <LabelField key={c} color={c} />
+            ))}
+          </ul>
+        </div>
+        <div className={phone ? "menu-sheet-group" : "confirm-actions"}>
+          <button
+            type="button"
+            className={phone ? "menu-sheet-item menu-sheet-cancel" : "btn btn--primary"}
+            onClick={onClose}
+          >
+            Done
+          </button>
+        </div>
       </div>
     </>
   );

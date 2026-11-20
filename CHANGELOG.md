@@ -6,6 +6,18 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A window dragged across 720 px wide changes its layout all at once, and keeps nothing
+  of the layout it left.** Each part of the page watched the width by itself, so for a
+  moment a phone's bar stood over a desktop's page; on Search that put the focus back in
+  the field and threw the results to the top. Search's field now takes the focus when the
+  page opens and is not given it again; a field being typed in keeps it, with its caret,
+  and the results are no longer thrown to the top. In Settings, a choice opened in the
+  narrow window (Mode) stayed as a page with no way back once the window was wide; the
+  section shows instead. The Labels sheet becomes the dialog, and the dialog the sheet, as
+  the window is resized, with the name being typed still in its field.
+
 ## [0.8.7] - 2026-11-20
 
 A round on the desktop app: on a computer a session opens beside the page, Settings opens

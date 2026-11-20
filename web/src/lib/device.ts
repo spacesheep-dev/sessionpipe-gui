@@ -4,8 +4,10 @@
 // writes to `<html data-shell>` before the app renders (the flag it parsed stands in until
 // then, and in a unit test), the phone layout (where tokens.css switches) and whether a
 // finger is the main pointer, each as a yes or no, now or live, and the place the
-// page's sessions come from, by the name the page says it with. The layout's widths are
-// written here and nowhere else in the page's code (breakpoints.test.ts).
+// page's sessions come from, by the name the page says it with. The layout is decided
+// here and nowhere else (breakpoints.test.ts holds its widths to this file): every part
+// of the page asks this file, and all of them hear of a change in the same turn, so no
+// render has a phone's bar over a desktop's page.
 import { useSyncExternalStore } from "react";
 
 export type ShellPlatform = "macos" | "windows" | "linux" | "ios" | "android";
@@ -62,6 +64,82 @@ export function reachName(): string {
   return typeof r.name === "string" && r.name ? r.name : "sessionpipe";
 }
 
+/** A query the page watches. One MediaQueryList for each, made when it is first asked,
+ *  with one "change" listener that tells every subscriber before it returns, so React
+ *  renders them all in one pass. (With a listener each, the browser let React render
+ *  between two of them: for that render the bar was a phone's and the page a desktop's.)
+ *  `on` is what the browser last told, not what the list says this instant: Chromium has
+ *  a kept list say the new width already in a resize handler, WebKit not before the
+ *  "change", and a render between the two must read the layout every other part has.
+ *  So inside a "resize" handler the answer is still the layout the window is leaving
+ *  (the "change" comes later in that frame): code that measures on a resize must also
+ *  follow `usePhoneLayout` or `onPhoneLayout`, and measure again when the layout turns. */
+interface Watch {
+  list: MediaQueryList;
+  on: boolean;
+  subs: Set<() => void>;
+  /** The one listener, on the list that is kept. */
+  heard: () => void;
+}
+const watches = new Map<string, Watch>();
+
+function watch(query: string): Watch {
+  let w = watches.get(query);
+  if (!w) {
+    const list = matchMedia(query);
+    const made: Watch = {
+      list,
+      on: list.matches,
+      subs: new Set(),
+      heard: () => {
+        made.on = made.list.matches;
+        for (const tell of [...made.subs]) tell();
+      },
+    };
+    list.addEventListener("change", made.heard);
+    watches.set(query, made);
+    w = made;
+  }
+  return w;
+}
+
+/** What a query says. While no part listens (the first render, and anything that asks
+ *  before it) the browser is asked afresh each time, as every part asked it before this
+ *  file kept a list: a window can still be taking its size as the app starts (a phone's
+ *  document begins 980 px wide, and a shell may size its window after the page has begun),
+ *  and a width kept from then would draw the first render in the other layout. A fresh
+ *  list that says otherwise than the kept one is kept in its place: the browser tells of
+ *  a change from what a list itself last said, so the old list would have nothing to tell
+ *  if the width went back before it had heard, and the answer would stay wrong. Once a
+ *  part listens, the answer is the one all of them were last told. (The phone layout has
+ *  a listener from the Shell's first render, and in a window that stays wide from the
+ *  first idle moment at the latest: the More sheet's warm-up, components/Shell.tsx.) */
+const stateOf = (query: string) => (): boolean => {
+  if (typeof matchMedia !== "function") return false;
+  const kept = watches.get(query);
+  if (!kept) return watch(query).on;
+  if (kept.subs.size === 0) {
+    const fresh = matchMedia(query);
+    if (fresh.matches !== kept.on) {
+      kept.list.removeEventListener("change", kept.heard);
+      fresh.addEventListener("change", kept.heard);
+      kept.list = fresh;
+      kept.on = fresh.matches;
+    }
+  }
+  return kept.on;
+};
+const subscribeTo = (query: string) => (l: () => void) => {
+  if (typeof matchMedia !== "function") return () => {};
+  const w = watch(query);
+  w.subs.add(l);
+  return () => void w.subs.delete(l);
+};
+
+/** A finger is the main pointer: a phone or a tablet, in the app or a browser, at any
+ *  width; never a desktop window, however narrow. */
+export const TOUCH_QUERY = "(pointer: coarse)";
+
 /** The phone layout: a tab bar, sheets, large titles (tokens.css switches on the same
  *  query). A screen under 840 px whose main pointer is a finger, or that has none: a phone,
  *  a tablet held upright. A window with a mouse keeps the desktop's layout down to 720 px,
@@ -79,37 +157,37 @@ export const DESKTOP_QUERY = "(min-width: 840px), (min-width: 720px) and (pointe
 export const PANEL_COVERS_QUERY = "(min-width: 720px) and (max-width: 839px) and (pointer: fine)";
 
 /** Whether the page is laid out as a phone right now. */
-export const phoneLayout = (): boolean => typeof matchMedia === "function" && matchMedia(PHONE_QUERY).matches;
+export const phoneLayout = stateOf(PHONE_QUERY);
 
 /** The other layout: a sidebar, a panel beside the page, dialogs. */
 export const wideLayout = (): boolean => !phoneLayout();
 
-/** Whether an open panel covers the page right now, having no room beside it. */
-export const panelCovers = (): boolean => typeof matchMedia === "function" && matchMedia(PANEL_COVERS_QUERY).matches;
-
-/** A finger is the main pointer: a phone or a tablet, in the app or a browser, at any
- *  width; never a desktop window, however narrow. */
-export const TOUCH_QUERY = "(pointer: coarse)";
-
-/** Whether the keys are a touch screen's right now: its Return is a new line, as in
- *  Messages, and the send button sends (or ⌘/Ctrl+Return from a keyboard). */
-export const touchKeys = (): boolean => typeof matchMedia === "function" && matchMedia(TOUCH_QUERY).matches;
-
-const subscribeTo = (query: string) => (l: () => void) => {
-  if (typeof matchMedia !== "function") return () => {};
-  const mq = matchMedia(query);
-  mq.addEventListener("change", l);
-  return () => mq.removeEventListener("change", l);
-};
-const onPhone = subscribeTo(PHONE_QUERY);
-const onCovers = subscribeTo(PANEL_COVERS_QUERY);
-const onTouch = subscribeTo(TOUCH_QUERY);
+/** Calls the listener each time the page changes between the two layouts, for code
+ *  outside React; returns the way to stop. */
+export const onPhoneLayout = subscribeTo(PHONE_QUERY);
 
 /** `phoneLayout`, live: re-renders when the window crosses the width. */
-export const usePhoneLayout = (): boolean => useSyncExternalStore(onPhone, phoneLayout, () => false);
+export const usePhoneLayout = (): boolean => useSyncExternalStore(onPhoneLayout, phoneLayout, () => false);
+
+/** Whether an open panel covers the page right now, having no room beside it. */
+export const panelCovers = stateOf(PANEL_COVERS_QUERY);
+const onCovers = subscribeTo(PANEL_COVERS_QUERY);
 
 /** `panelCovers`, live: re-renders when the window crosses either end of that width. */
 export const usePanelCovers = (): boolean => useSyncExternalStore(onCovers, panelCovers, () => false);
+
+/** Where a Select's list is a bottom sheet (components/Select.tsx), not a pop-up under its button. */
+export const SELECT_SHEET_QUERY = "(max-width: 599px)";
+const selectSheet = stateOf(SELECT_SHEET_QUERY);
+const onSelectSheet = subscribeTo(SELECT_SHEET_QUERY);
+
+/** Whether a Select opens as a sheet, live. */
+export const useSelectSheet = (): boolean => useSyncExternalStore(onSelectSheet, selectSheet, () => false);
+
+/** Whether the keys are a touch screen's right now: its Return is a new line, as in
+ *  Messages, and the send button sends (or ⌘/Ctrl+Return from a keyboard). */
+export const touchKeys = stateOf(TOUCH_QUERY);
+const onTouch = subscribeTo(TOUCH_QUERY);
 
 /** `touchKeys`, live: re-renders when the main pointer changes. */
 export const useTouchKeys = (): boolean => useSyncExternalStore(onTouch, touchKeys, () => false);

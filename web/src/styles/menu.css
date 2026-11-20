@@ -321,6 +321,11 @@
   width: min(400px, calc(100vw - 32px));
   gap: 12px;
 }
+/* Around the rows: the sheet's group on a phone, no box of its own in the dialog. One
+   element in both, so the fields stay mounted when a window changes form. */
+.labels-group {
+  display: contents;
+}
 .labels-rows {
   display: flex;
   flex-direction: column;

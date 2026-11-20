@@ -42,7 +42,7 @@ import {
 } from "../data/hooks";
 import { openDrawer, toggleDrawer } from "../files/state";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
-import { phoneLayout } from "../lib/device";
+import { phoneLayout, usePhoneLayout } from "../lib/device";
 import {
   attentionMessage,
   isPlanReview,
@@ -1397,13 +1397,16 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     }
   }, [at]);
   // The list ends on a whole row at its fold, never half a row: measured when its rows
-  // change (not on every live update) and on a resize.
+  // change (not on every live update), on a resize, and when the window changes layout
+  // (a resize that crosses the width is measured before the page hears of the change, so
+  // as the layout it left).
   const shape = items.map((it) => it.id).join("|");
+  const phone = usePhoneLayout();
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
     snapToRows(list);
-  }, [shape, mode.kind]);
+  }, [shape, mode.kind, phone]);
   useEffect(() => {
     const on = () => listRef.current && snapToRows(listRef.current);
     window.addEventListener("resize", on);

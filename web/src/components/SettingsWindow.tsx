@@ -24,6 +24,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -230,8 +231,10 @@ export function Settings() {
   // About's background service row, once shown in this window: kept here, so it stays
   // through a visit to another section, and is gone the next time Settings opens.
   const [service, setService] = useState<ServiceSeen>({ shown: false, running: "" });
-  // A picker belongs to its section.
-  useEffect(() => setPicker(null), [section, view]);
+  // A picker belongs to its section, and to the phone's stack: a window widened past it
+  // shows the section, never the pushed page with no way back. Before anything is drawn:
+  // not for one frame.
+  useLayoutEffect(() => setPicker(null), [section, view, phone]);
   // Back to the page under the dialog, as it was (the split panel stays), after the
   // window's exit has played.
   const [closing, setClosing] = useState(false);

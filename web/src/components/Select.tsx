@@ -22,6 +22,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useSelectSheet } from "../lib/device";
 import "../styles/select.css";
 
 export interface SelectOption<T> {
@@ -77,22 +78,10 @@ export interface MultiSelectProps<T> extends CommonProps<T> {
   onChange: (v: T[]) => void;
 }
 
-const PHONE = "(max-width: 599px)";
 const MAX_LIST_WIDTH = 320;
 const MAX_LIST_HEIGHT = 320;
 const GAP = 6;
 const EDGE = 8;
-
-function usePhone(): boolean {
-  const [phone, setPhone] = useState(() => (typeof matchMedia === "function" ? matchMedia(PHONE).matches : false));
-  useEffect(() => {
-    const mq = matchMedia(PHONE);
-    const on = () => setPhone(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return phone;
-}
 
 const defaultKey = (v: unknown) => String(v);
 
@@ -148,7 +137,7 @@ function Picker<T>({
   className = "",
   keyOf = defaultKey,
 }: CommonProps<T> & { chosen: T[]; onPick: (v: T) => void; multiple: boolean }) {
-  const phone = usePhone();
+  const phone = useSelectSheet();
   const canSearch = !!custom || (searchable ?? options.length > 8);
   const rawId = useId().replace(/:/g, "");
   const listId = `sel-${rawId}-list`;

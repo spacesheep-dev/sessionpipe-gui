@@ -16,7 +16,7 @@ import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
 import { useAppState, useNeedsYouCount, useStore, useStreamMark } from "../data/hooks";
-import { phoneLayout, reachName, usePanelCovers, usePhoneLayout } from "../lib/device";
+import { onPhoneLayout, phoneLayout, reachName, usePanelCovers, usePhoneLayout } from "../lib/device";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
@@ -75,9 +75,6 @@ const writeSetupHint = (on: boolean): void => {
     // a private window: the entry just arrives a moment late
   }
 };
-
-/** The phone layout: a tab bar, sheets, large titles (lib/device.ts decides it). */
-export { PHONE_QUERY } from "../lib/device";
 
 /** What is drawn over the page and is not the page (the palette, the toasts): its keys stay
  *  live while the panel covers the page (a narrow window) and the page's own are off. */
@@ -530,10 +527,19 @@ function MoreTab({ items, active, views }: { items: NavItem[]; active: string; v
   );
 }
 
-/** The More sheet is a phone's alone: its code is fetched when a phone is idle after load
- *  (so the first tap opens it at once), never on a desktop. */
+/** The More sheet is a phone's alone: its code is fetched once the page has the phone
+ *  layout, when it is idle after load or when a window is narrowed into it later (so the
+ *  first tap opens it at once), never in a window that stays wide. The layout is listened
+ *  to until the code is in: a fetch that failed is tried at the next narrowing. */
 const moreSheet = lazyModule(() => import("./MoreSheet"));
-if (typeof window !== "undefined" && phoneLayout()) whenIdle(() => void moreSheet.preload().catch(() => {}));
+if (typeof window !== "undefined")
+  whenIdle(() => {
+    const warm = () => {
+      if (phoneLayout()) void moreSheet.preload().then(off, () => {});
+    };
+    const off = onPhoneLayout(warm);
+    warm();
+  });
 function MoreSheetHost(p: MoreSheetProps) {
   const m = moreSheet.use();
   return m ? <m.MoreSheet {...p} /> : null;
