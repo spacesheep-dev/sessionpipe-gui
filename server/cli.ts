@@ -838,6 +838,15 @@ async function main(): Promise<void> {
   process.on("exit", () => removeRunFile(app.stateDir));
 
   let closing = false;
+  // The output may be gone by the time a signal comes (a closed terminal, or a `| tee`
+  // stopped by the same Ctrl-C): a failed write (EIO, EPIPE) in shutdown or in app.close()'s
+  // logging must not end the process before app.close() has run. Taken here, not in the
+  // handler: Node opens a terminal's stream on first use, and on macOS opening a terminal
+  // that has been closed never returns.
+  for (const stream of [process.stdout, process.stderr])
+    stream.on("error", (e) => {
+      if (!closing) throw e;
+    });
   const shutdown = (signal: string): void => {
     if (closing) return;
     closing = true;
@@ -849,6 +858,9 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+  // Closing the terminal the receiver runs in sends SIGHUP, which would otherwise end it
+  // at once, leaving run.json behind and skipping app.close().
+  process.on("SIGHUP", () => shutdown("SIGHUP"));
 }
 
 main().catch((e: unknown) => {
