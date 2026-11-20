@@ -111,6 +111,12 @@ async function postSession(request: APIRequestContext, { reread = false, crowd =
 }
 
 const drawer = (page: Page) => page.locator(".files");
+/** The session's page, its keys listening: the page's code in and the session read (a key
+ *  pressed before then has no session to act on, as a click on a page still loading). */
+async function openSession(page: Page, s: { harness: string; sessionId: string }): Promise<void> {
+  await openPage(page, sessionUrl(s.harness, s.sessionId));
+  await expect(page.locator(".page.session:not(.starting)")).toBeVisible();
+}
 
 test.describe("files drawer", () => {
   test("lists the files a session touched and shows one as its changes, then its text", async ({ page, request }) => {
@@ -282,7 +288,7 @@ test.describe("files drawer", () => {
 
   test("the Problems tab lists the failed tool and jumps to its row; Esc steps back", async ({ page, request }) => {
     const s = await postSession(request);
-    await openPage(page, sessionUrl(s.harness, s.sessionId));
+    await openSession(page, s);
     await page.keyboard.press("Shift+F");
     await expect(drawer(page)).toBeVisible();
     await drawer(page).locator("label.seg-opt", { hasText: "Problems · 1" }).click();
@@ -311,7 +317,7 @@ test.describe("files drawer", () => {
     request,
   }) => {
     const s = await postSession(request);
-    await openPage(page, sessionUrl(s.harness, s.sessionId));
+    await openSession(page, s);
     await page.keyboard.press("Shift+F");
     // ⇧F puts focus in the filter; ↓ moves to the rows, Enter opens.
     await expect(drawer(page).getByRole("searchbox", { name: "Filter files" })).toBeFocused();
