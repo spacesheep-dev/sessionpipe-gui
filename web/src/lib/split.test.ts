@@ -21,6 +21,7 @@ import {
   previewTab,
   restoreSplit,
   tabPath,
+  takeJump,
 } from "./split";
 
 const g = globalThis as Record<string, unknown>;
@@ -279,7 +280,11 @@ describe("openSession: every opener asks the one rule", () => {
     openSession("claude-code:b", "other", { hash: "#seq-9" });
     expect(tabs()).toEqual(["claude-code:b"]);
     expect(previewTab()).toBeNull();
-    expect((g.location as URL).hash).toBe("#seq-9");
+    // The tab beside is handed its row; the address's hash stays the page's.
+    expect((g.location as URL).hash).toBe("");
+    expect(takeJump("claude-code:a")).toBeNull();
+    expect(takeJump("claude-code:b")).toBe(9);
+    expect(takeJump("claude-code:b")).toBeNull();
   });
 
   it("a menu's plain open keeps its tab", () => {

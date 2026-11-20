@@ -55,6 +55,11 @@ const KEY_WIDTH = "sessionpipe-gui.splitWidth";
 const KEY_TABS = "sessionpipe-gui.splitTabs";
 
 let pendingFrom: Rect | null = null;
+/** The row an open beside asks its tab to land on (`#seq-N`), held for that tab alone: the
+ *  address's hash is the page's, and every mounted tab hears a hashchange. */
+let pendingJump: { key: SessionKey; seq: number } | null = null;
+/** Said when a jump is handed over, for a tab that is already open (takeJump). */
+export const JUMP_EVENT = "sessionpipe:jump";
 let width: number | null = (() => {
   try {
     const v = Number(localStorage.getItem(KEY_WIDTH));
@@ -322,6 +327,23 @@ export function leaveSplit(): void {
   commit({ tabs: [], active: 0 }, { replace: true });
 }
 
+/** Hands `#seq-N` to the tab `key` opened beside: its view takes it on its first paint, or
+ *  now when it is already open (takeJump). Any other hash is not a row's. */
+export function handJump(key: SessionKey, hash: string): void {
+  const m = /^#seq-(\d+)$/.exec(hash);
+  if (!m) return;
+  pendingJump = { key, seq: Number(m[1]) };
+  window.dispatchEvent(new Event(JUMP_EVENT));
+}
+
+/** The seq handed to the tab `key`, once; null when none was, or it was another tab's. */
+export function takeJump(key: SessionKey): number | null {
+  if (pendingJump?.key !== key) return null;
+  const { seq } = pendingJump;
+  pendingJump = null;
+  return seq;
+}
+
 /** The rectangle the last `openSplit` asked to animate from, once. */
 export function takeFrom(): Rect | null {
   const r = pendingFrom;
@@ -377,8 +399,8 @@ function ownPageKey(): SessionKey | null {
 /** Opens a session by the one rule (openWay): as its page, beside the page (a plain open
  *  is the preview tab; one that went the other way, or a menu's (`keep`), is kept) or as a
  *  background tab. The session whose page is open stays its page: no copy of it opens
- *  beside. `hash` (`#seq-N`) lands it on a row: the page carries it, the panel reads it
- *  once (components/SessionView.tsx). Not the theme API's openSession, which is always the
+ *  beside. `hash` (`#seq-N`) lands it on a row: the page carries it, a tab beside is
+ *  handed it (handJump). Not the theme API's openSession, which is always the
  *  page. */
 export function openSession(
   key: SessionKey,
@@ -396,9 +418,7 @@ export function openSession(
     return;
   }
   openSplit(key, { from: opts.from, background: way === "background", preview: how === "primary" && !opts.keep });
-  if (!opts.hash) return;
-  history.replaceState(history.state, "", `${location.pathname}${location.search}${opts.hash}`);
-  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  if (opts.hash) handJump(key, opts.hash);
 }
 
 /** A page the app asks for while its window is up (a notification's click, the menu bar's

@@ -106,7 +106,8 @@ import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, setSearchParam
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit } from "../lib/split";
+import { JUMP_EVENT, openSplit, takeJump } from "../lib/split";
+import { agentTabKey } from "../lib/splitState";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { ago, ClockHold, clock, dur, ms, useNow } from "../lib/time";
 import {
@@ -581,13 +582,14 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     }
   }, [store, harness, id, olderBusy, scrollHeight, scrollY, sc]);
 
-  /** Scroll to the row of a seq when it is loaded (centred, marked for a moment) and drop
-   *  the hash either way; true when the row was there. */
+  /** Scroll to the row of a seq when it is loaded (centred, marked for a moment), and then
+   *  drop the hash that asked for it (the entry's state stays: a Settings mark, the split's);
+   *  true when the row was there. */
   const jumpTo = useCallback((seq: number | null): boolean => {
     if (seq === null) return false;
-    history.replaceState(null, "", location.pathname + location.search);
     const row = rootRef.current?.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
     if (!row) return false;
+    if (location.hash === `#seq-${seq}`) history.replaceState(history.state, "", location.pathname + location.search);
     followRef.current = false;
     pinned.current = false;
     setFollow(false);
@@ -617,11 +619,23 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     },
     [jumpToAgent],
   );
+  // The address's #seq is the page's own; a tab beside is handed its row (lib/split.ts
+  // handJump), on its first paint below or here when it is already open.
+  const tabKey = mode === "panel" && agent ? agentTabKey(key, agent) : key;
   useEffect(() => {
-    const onHash = () => jumpTo(hashSeq());
+    const onHash = () => mode === "page" && jumpTo(hashSeq());
+    const onJump = () => {
+      if (firstPaint.current) return;
+      const seq = takeJump(tabKey);
+      if (seq !== null) jumpTo(seq);
+    };
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, [jumpTo]);
+    window.addEventListener(JUMP_EVENT, onJump);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener(JUMP_EVENT, onJump);
+    };
+  }, [jumpTo, mode, tabKey]);
 
   /** Open on a row when what comes from it on is taller than two thirds of the view: the
    *  row a third of the way down, so it reads from its start. */
@@ -672,7 +686,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     if (events.length === 0) return;
     if (firstPaint.current) {
       firstPaint.current = false;
-      if (!jumpTo(hashSeq()) && !jumpToAgent(focusAgent) && !toNewLine() && !toPlan()) toBottom();
+      const seq = takeJump(tabKey) ?? (mode === "page" ? hashSeq() : null);
+      if (!jumpTo(seq) && !jumpToAgent(focusAgent) && !toNewLine() && !toPlan()) toBottom();
       return;
     }
     const a = anchor.current;
@@ -687,7 +702,21 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         if (Math.abs(scrollY() - want) > 1) scrollTo(want);
       }
     }
-  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo, jumpToAgent, focusAgent, toNewLine, toPlan, toBottom]);
+  }, [
+    events,
+    scrollTo,
+    scrollBy,
+    scrollHeight,
+    scrollY,
+    jumpTo,
+    jumpToAgent,
+    focusAgent,
+    toNewLine,
+    toPlan,
+    toBottom,
+    tabKey,
+    mode,
+  ]);
   // Asked for another agent while open (a second "Open beside" on the same tab, the URL).
   const lastFocus = useRef(focusAgent);
   useEffect(() => {

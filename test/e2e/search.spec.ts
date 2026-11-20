@@ -161,6 +161,33 @@ test.describe("search", () => {
     await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
   });
 
+  test("two plain clicks one after the other: each opens beside on its own hit, the second in the first's place", async ({
+    page,
+  }) => {
+    await openSessionsUnchosen(page);
+    await openPage(page, "/search?q=backoff");
+    await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
+    // Two live sessions whose best hit is in a reply, a row of the timeline of its own (a
+    // history-only row names no turn).
+    const hits: { i: number; seq: string }[] = [];
+    for (let i = 0; i < (await rows(page).count()) && hits.length < 2; i++) {
+      const row = rows(page).nth(i);
+      const seq = /#seq-(\d+)$/.exec((await row.getAttribute("href")) ?? "")?.[1];
+      if (seq && (await row.locator('.sx-hit[data-field="reply"]').count()) > 0) hits.push({ i, seq });
+    }
+    expect(hits).toHaveLength(2);
+    const body = page.locator("aside.panel .panel-body:not(.panel-body--off)");
+    for (const { i, seq } of hits) {
+      await rows(page).nth(i).click();
+      await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
+      await expect(body.locator(`[data-seq="${seq}"]`)).toHaveClass(/is-target/);
+      // The hash was the tab's, not the page's: the address keeps none.
+      expect(new URL(page.url()).hash).toBe("");
+    }
+    // The preview tab was replaced, not added to.
+    await expect(page.locator("aside.panel .panel-body")).toHaveCount(1);
+  });
+
   test("j/k walk the rows, ⌘C copies the resume line, Space peeks beside with focus kept, `.` opens the row menu", async ({
     page,
   }) => {

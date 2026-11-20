@@ -9,7 +9,7 @@
 import type { SessionMatch, SessionSearchHit } from "@shared/api";
 import { noteHistoryTitle } from "../lib/historyTitle";
 import { hrefFor, navigate, sessionPath } from "../lib/router";
-import { type OpenHow, openSplit, openWay } from "../lib/split";
+import { handJump, type OpenHow, openSplit, openWay } from "../lib/split";
 
 export type OpenMode = "page" | "beside" | "background";
 
@@ -62,10 +62,15 @@ export function openResult(
     return;
   }
   openSplit(m.key, { from, background: mode === "background", preview });
-  // The panel reads the hash once (components/SessionBody.tsx, search/History.tsx), the
-  // search page's own `?q=` is the history view's query.
+  // A live session's row is handed to its tab alone (lib/split.ts handJump); a history
+  // transcript reads `#h-` once (search/History.tsx), the search page's own `?q=` is its
+  // query.
   const hash = hitHash(m, hit);
   if (!hash) return;
+  if (m.summary) {
+    handJump(m.key, hash);
+    return;
+  }
   history.replaceState(history.state, "", `${location.pathname}${location.search}${hash}`);
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 }
