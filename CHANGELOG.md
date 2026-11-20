@@ -148,6 +148,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   spacesheep that takes no pictures from here says so once (`spacesheep.dev can't take
   pictures from here yet.`) and the paperclip is gone until the app or the page is opened
   again.
+- **The receiver rejects an event time on a day the month does not have, or at hour 24.**
+  An event dated `2026-02-30`, `2026-11-31` or `T24:00:00Z` was accepted and filed under
+  March 2, December 1 or the next day, though `schemas/v1/event.json` refuses it. It is now
+  rejected as `bad_time`, as `T25:00:00Z` already was, and the outbox and spacesheep sources
+  skip it as they skip any other invalid event; `2028-02-29` is still accepted.
 
 ## [0.8.6] - 2026-11-19
 
