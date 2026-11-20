@@ -139,8 +139,8 @@ test.describe("command palette", () => {
     await openBoard(page);
     const { title, href, fragment } = await firstCard(page);
     await open(page);
-    // The board's own search is a plain toolbar field; the palette is ⌘K (and in the rail's menu).
-    await expect(page.locator("[data-search]")).toHaveAttribute("placeholder", "Search");
+    // The board's own field filters its rows; the palette is ⌘K (and in the rail's menu).
+    await expect(page.locator("[data-search]")).toHaveAttribute("placeholder", "Filter");
     await expect(dialog(page).locator(".pal-section").first()).toHaveText("Sessions");
     await page.keyboard.type(fragment);
     const first = rows(page).first();

@@ -513,7 +513,8 @@ test.describe("settings over the page", () => {
     await expect(scrim).toBeVisible();
     const [painted, token] = await scrim.evaluate((el) => {
       const probe = document.createElement("div");
-      probe.style.background = "oklch(0.191 0 0 / 0.14)";
+      // The token itself, as the build writes it (Vite 8's minifier turns oklch() into lab()).
+      probe.style.background = "var(--scrim)";
       document.body.append(probe);
       const want = getComputedStyle(probe).backgroundColor;
       probe.remove();

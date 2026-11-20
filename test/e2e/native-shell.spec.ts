@@ -981,7 +981,7 @@ test.describe("inside the native shell", () => {
     await expect(screen).toContainText("Receivers… opens the app's list of boards, where its link is added again.");
     await expect(screen.getByRole("button", { name: "Scan the code" })).toHaveCount(0);
     await screen.getByRole("button", { name: "Receivers…" }).click();
-    await expect(page).toHaveURL(/\/settings\?section=app$/);
+    await expect(page).toHaveURL(/\?settings=app$/);
     const pane = page.getByRole("tabpanel", { name: "App" });
     await expect(pane).toBeVisible({ timeout: 15_000 });
     await expect(pane.getByText("This Mac", { exact: true })).toBeVisible();
@@ -1870,8 +1870,9 @@ test("in a browser nothing native loads", async ({ page }) => {
   await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "App" })).toHaveCount(0);
   expect(await page.locator("html").getAttribute("data-shell")).toBeNull();
+  // native/menu.ts loads only with the shell; a chunk named menu- is Search's row menu.
   const native = scripts.filter((p) =>
-    /\/(shell|stream|bridge|menu|appState|Welcome|FirstRun|AppSettings|native)[-.]/.test(p),
+    /\/(shell|stream|bridge|appState|Welcome|FirstRun|AppSettings|native)[-.]/.test(p),
   );
   expect(native).toEqual([]);
 });

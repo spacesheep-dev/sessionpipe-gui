@@ -229,7 +229,7 @@ test.describe("setup at the secure address, reached through this machine's netwo
       expect(status.status()).toBe(200);
       // The key went with the page: the answer holds no key of its own.
       expect(((await status.json()) as { uiKey: string }).uiKey).toBe("");
-      await expect(page.getByRole("heading", { name: "Set up sessionpipe gui" })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible({ timeout: 15_000 });
       const steps = page.locator("li.step");
       await expect(steps).toHaveCount(6);
       await expect(page.getByText("Setup acts on the computer this board runs on")).toHaveCount(0);
