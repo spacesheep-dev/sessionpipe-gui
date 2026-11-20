@@ -269,8 +269,10 @@ function useMenuPolicy() {
     const onCtx = (ev: MouseEvent) => {
       const e = ev as MenuEvent;
       const t = e.target as HTMLElement | null;
-      // A keyboard-made menu we already opened, or Android's own long-press after ours.
-      if (!e.__kbd && !e.__touch && Date.now() - lastOpenAt < 400) {
+      // A keyboard-made menu we already opened, or Android's own long-press after ours: the
+      // browser's own event for the same gesture, while that menu is still up. Once it has
+      // closed, a right-click is a new one, however soon it comes.
+      if (!e.__kbd && !e.__touch && menu && Date.now() - lastOpenAt < 400) {
         e.preventDefault();
         return;
       }

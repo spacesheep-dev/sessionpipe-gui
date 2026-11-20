@@ -268,6 +268,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A right-click just after a menu closed opens its row's menu.** For 0.4 s after any menu
+  opened, a right-click did nothing: right-clicking a Board row moments after Allow, Hide or
+  Esc on another row's menu, or after `.`, showed no menu and had to be done again. Only
+  the browser's own second event for a menu still open is ignored now.
 - **`--port` and `--keep-days` take digits only, and a flag is never another flag's
   value.** `--port ""` (a script's unset `$PORT`) started on a random port and
   `--keep-days ""` kept every event whole, both without a word; `--port 0x1F90` listened on

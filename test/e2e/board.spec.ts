@@ -639,6 +639,57 @@ test.describe("board", () => {
     await expect(page.getByRole("menu")).toHaveCount(0);
     await expect(page).toHaveURL(/\/s\//);
   });
+
+  test("a right-click the moment a menu has closed opens its row's menu; the browser's own event for a keys' menu still up opens nothing", async ({
+    page,
+  }) => {
+    await openBoard(page);
+    await holdBoard(page);
+    const menu = page.locator(".menu[data-depth='0']");
+    const cards = page.locator("article.card");
+    /** Whether the menu up is this row's: its element is marked while its menu is open. */
+    const owns = (i: number) =>
+      cards.nth(i).evaluate((el) => el.matches("[data-menu-open]") || !!el.querySelector("[data-menu-open]"));
+    // The page's clock stands still: each step below comes in the same millisecond as the
+    // menu's opening, however fast or slow the machine running the test.
+    await page.evaluate(() => {
+      const now = Date.now();
+      Date.now = () => now;
+    });
+    // `.` on the j cursor: the first row's menu, the keys', on its first item.
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("j");
+    await page.keyboard.press(".");
+    await expect(menu).toBeVisible();
+    await expect(menu.locator(".menu-item--active")).toHaveCount(1);
+    const where = await menu.boundingBox();
+    // The browser's own event for the same gesture on the row, sent after ours (as Android's
+    // long-press is): the same menu, where it was, still the keys'.
+    await cards
+      .first()
+      .locator("a.card-link")
+      .evaluate((el) =>
+        el.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 600, clientY: 600 }),
+        ),
+      );
+    await expect(menu).toHaveCount(1);
+    expect(await menu.boundingBox()).toEqual(where);
+    await expect(menu.locator(".menu-item--active")).toHaveCount(1);
+    // Closed, then a right-click on the second row at once: that row's menu.
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await cards.nth(1).locator("a.card-link").click({ button: "right" });
+    await expect(menu).toBeVisible();
+    expect(await owns(1)).toBe(true);
+    // And one opened by a right-click, closed, then another at once.
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await cards.first().locator("a.card-link").click({ button: "right" });
+    await expect(menu).toBeVisible();
+    expect(await owns(0)).toBe(true);
+    await page.keyboard.press("Escape");
+  });
 });
 
 test.describe("board: one needs-you number", () => {
