@@ -144,8 +144,10 @@ export async function runKeyCommand(verb: string | undefined, io: KeyCommandIo):
   try {
     renewUiKey(dir, readGuiConfig(dir));
   } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (typeof code !== "string") throw e;
+    // A write the system refused carries the call it failed in; anything else (a
+    // programming error, Node's own ERR_ codes included) is thrown on, with its stack.
+    const { code, syscall } = e as NodeJS.ErrnoException;
+    if (typeof code !== "string" || typeof syscall !== "string") throw e;
     err(`${dir} could not be written (${code})${keyNow() === before ? "; the key was not changed" : ""}.`);
     return 1;
   }
