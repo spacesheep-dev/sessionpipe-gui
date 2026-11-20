@@ -58,15 +58,27 @@ All notable changes to `sessionpipe-gui`. The format follows
   receiver runs in (SIGHUP) ended it at once and left its `run.json` behind; it now stops
   as Ctrl-C does. A receiver whose output was already gone when it was stopped (a `| tee`
   ended by the same Ctrl-C) no longer exits with an error before it has closed.
+- **Search's status line says which computer to restart.** With history search off and its
+  index still on disk, a viewer on another device read "Restarting the app tries again",
+  which could mean the app on the phone; it now reads "Restarting the app on that computer
+  tries again".
+- **`--rp-id` takes a host name alone.** `--rp-id https://foo.example`,
+  `--rp-id foo.example:7373`, a path or an empty value started a receiver whose passkey
+  origin (`https://https://foo.example:<port>`, `https://:<port>`) no browser makes a
+  passkey for, without a word. Each now stops with an `--rp-id` message; an IP address is
+  taken as before.
+- **`tls status` names a broken certificate file.** A certificate folder with a file
+  missing, cut short or not a certificate was reported as "none yet", and an unreadable
+  `server.key` ended in Node's stack trace. It now names the file and the cause, and says
+  what the next `--tls` start does about it: a new server certificate from the same CA, a
+  new CA that phones must trust again, or nothing, when the file has to be fixed by hand
+  (or the folder deleted with `sessionpipe-gui tls reset`). A `tls` folder this account
+  cannot read is named too, instead of "none yet".
 - **Search's `since:` and `until:` refuse a day the month does not have.** `until:2026-02-30`
   searched up to March 2, `since:2026-11-31` from December 1 and `2026-02-29` read as March
   1, without a word, and the Date chip said "Until Mar 2". Such a date is now left out, as
   `2026-13-01` already was, and the receiver's Search page and `sessionpipe-gui search`
   name it ("“until:2026-02-30” isn't a date, so it was left out"). `2028-02-29` still reads.
-- **Search's status line says which computer to restart.** With history search off and its
-  index still on disk, a viewer on another device read "Restarting the app tries again",
-  which could mean the app on the phone; it now reads "Restarting the app on that computer
-  tries again".
 
 ## [0.8.6] - 2026-11-19
 

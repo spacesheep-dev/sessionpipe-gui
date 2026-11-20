@@ -3,6 +3,7 @@
 // open it (with a QR code for a phone) and the one line that connects another
 // machine. Ctrl-C stops it cleanly.
 import { execFileSync, spawn } from "node:child_process";
+import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,7 +33,7 @@ import { processEnv, runService, type Verb } from "./service/index.js";
 import { sameMachine } from "./setup/index.js";
 import { addSkin, formatSkinList, linkSkin, listSkins, removeSkin } from "./skins/index.js";
 import { addTheme, formatList, linkTheme, listThemes, removeTheme } from "./themes/index.js";
-import { ensureCerts, localHostname, readCerts, resetCerts, TlsError } from "./tls/certs.js";
+import { certsProblem, ensureCerts, localHostname, readCerts, resetCerts, TlsError } from "./tls/certs.js";
 
 // Before anything else: an old Node fails somewhere deep with a stack trace; say it plainly.
 // (Imports are hoisted above this line, but the two external ones load on any Node.)
@@ -239,6 +240,20 @@ interface Args {
  *  check after it refuses. */
 const digits = (v: string): number => (/^\d+$/.test(v) ? Number(v) : Number.NaN);
 
+/** `--rp-id`: a host name alone. Passkeys are made for it and the origin is
+ *  https://<rp id>:<port>, so "https://host", "host:7373", "host/x" or "user@host" would
+ *  start a receiver no browser makes a passkey for. An IP address is taken as given (the
+ *  caller checks isIP first). The URL parse refuses what is not a host at all. */
+function bareHost(v: string): boolean {
+  if (/[\s/\\?#@]|:\d*$/.test(v)) return false;
+  try {
+    new URL(`https://${v}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseArgs(argv: string[]): Args | "help" | "version" {
   const a: Args = {
     outbox: true,
@@ -304,6 +319,8 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         break;
       case "--rp-id":
         a.rpId = next();
+        if (!a.rpId.trim()) fail("--rp-id needs a host name");
+        if (!isIP(a.rpId) && !bareHost(a.rpId)) fail(`--rp-id is a host name, no scheme, port or path: ${a.rpId}`);
         break;
       case "--allow-host":
         a.allowHosts = [...(a.allowHosts ?? []), next()];
@@ -627,10 +644,23 @@ function tlsCommand(parsed: Args): void {
   const hostname = localHostname();
   switch (verb) {
     case "status": {
-      const m = readCerts(dir);
       const cfg = readGuiConfig(stateDir);
       out(`tls mode   ${cfg.tls ? "on (remembered; --no-tls turns it off)" : "off (start with --tls)"}`);
       out(`hostname   ${hostname}`);
+      // A set that is there but broken is named, not reported as "none yet" (and an
+      // unreadable file is not read again below, where it would throw).
+      const broken = certsProblem(dir);
+      if (broken) {
+        const reset = `\`sessionpipe-gui tls reset\`${parsed.state ? " (with the same --state)" : ""}`;
+        const next = {
+          ca: "The next --tls start makes a new CA and server certificate; phones must trust the new CA again.",
+          server: "The next --tls start makes a new server certificate from the same CA; phones need nothing new.",
+          folder: "The next --tls start makes the folder readable again (mode 700) and checks the files in it.",
+          "by-hand": `Fix it by hand, or run ${reset} and the next --tls start makes a new CA, which phones must trust again.`,
+        }[broken.repair];
+        fail(`the certificates under ${dir} cannot be used: ${broken.problem}. ${next}`);
+      }
+      const m = readCerts(dir);
       if (!m) {
         out(`certs      none yet under ${dir} (made on the first --tls start)`);
         return;
