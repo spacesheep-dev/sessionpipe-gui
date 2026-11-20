@@ -419,6 +419,35 @@ test("the inner display turned: the message field rides on the keyboard, as on t
   }
 });
 
+test("Ask another agent covers the whole window on the inner display turned and on a tablet on its side: no session shows beside it", async ({
+  browser,
+}) => {
+  // Wider than the docked strip's measure (760 px): the sheet is the phone's all the same,
+  // from one edge of the window to the other, and not held to the strip it is opened from.
+  for (const size of ["951x669", "1180x820"]) {
+    const b = await duoBed(browser, size);
+    const { page } = b;
+    const [width] = size.split("x").map(Number) as [number, number];
+    try {
+      Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+      await page.goto(b.server.url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+      await b.approve();
+      await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+      await page.getByRole("button", { name: "Ask another agent…" }).click();
+      const sheet = page.locator("[data-handoff]");
+      await expect(sheet.locator("[data-hs-text]")).toBeVisible();
+      const box = await sheet.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return [r.left, r.right];
+      });
+      expect(box, size).toEqual([0, width]);
+    } finally {
+      await b.close();
+    }
+  }
+});
+
 /** The windows with a band at one side: the outer display, a Split View half and the
  *  inner display turned; and with the phone held the other way up, the band on the left.
  *  The band is the 84 pt the system's own bars stand in beside the page (duo.ts). */
