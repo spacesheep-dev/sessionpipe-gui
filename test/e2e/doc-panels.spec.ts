@@ -93,6 +93,17 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
 
     test("Setup's steps are one panel, and step 1's harnesses have no fill of their own", async ({ page }) => {
+      // Step 1 lists the agents installed on the receiver's computer: two, whatever the
+      // computer running the suite has.
+      await page.route("**/api/ui/setup/status", async (r) => {
+        const res = await r.fetch();
+        const real = (await res.json()) as { harnesses: { name: string; installed: boolean; hooks: string }[] };
+        const on: Record<string, string> = { "claude-code": "on", codex: "off" };
+        const harnesses = real.harnesses.map((h) =>
+          h.name in on ? { ...h, installed: true, hooks: on[h.name] } : { ...h, installed: false },
+        );
+        await r.fulfill({ response: res, json: { ...real, harnesses } });
+      });
       await openPage(page, "/setup");
       const bg2 = await tokenColor(page, "--bg-2");
       const steps = page.locator(".setup .steps");
@@ -107,6 +118,8 @@ for (const colorScheme of ["light", "dark"] as const) {
       // The way on under the panel draws no rule of its own: the panel's edge is the divider.
       const end = page.locator(".setup-end, .setup-done").first();
       if (await end.count()) expect((await look(end)).border).toBe("0px");
+      // The page asks for its status every two seconds: one in flight at the end is no failure.
+      await page.unrouteAll({ behavior: "ignoreErrors" });
     });
   });
 }
