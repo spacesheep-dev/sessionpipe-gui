@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Why an upload didn't make it, in words, the same for the composer's pictures
 // (Attachments.tsx) and New session's files (NewSessionSheet.tsx), and whether trying again
-// can help (the tray's Retry is offered only then). `board` is what took the upload: the
+// can help (the tray's Retry is offered only then; after a refusal for too many at once,
+// only once its wait is over). `board` is what took the upload: the
 // receiver's name, or spacesheep.dev on an account (`boardName`). Never a raw code.
 import { ATTACHMENT_TYPES } from "@shared/api";
 import {
@@ -21,7 +22,13 @@ export interface UploadFailure {
   words: string;
   /** Trying the same bytes again can work: offer Retry. */
   retry: boolean;
+  /** Too many at once: Retry can work after this many seconds, and is offered then. */
+  waitS?: number;
 }
+
+/** How long a refusal for too many at once is waited out when it names no time: the
+ *  "few minutes" its words say. */
+export const LIMIT_WAIT_S = 180;
 
 /** The name of what an upload goes to: spacesheep.dev (the account's server) on an account,
  *  the receiver's name in the app, else the receiver's machine as its Info names it
@@ -82,7 +89,11 @@ export function uploadWords(e: unknown, board: string, noun: "picture" | "file" 
   if (status === 507) return { words: `${board} has no room for more files today.`, retry: false };
   // The page's key is refused: the one sentence every place says for it (lib/keyWords).
   if (status === 401) return { words: KEY_LOST_SENTENCE, retry: false };
-  if (status === 429) return { words: uploadLimitWords(r.retryAfterS, noun), retry: true };
+  if (status === 429) {
+    const s = r.retryAfterS;
+    const waitS = typeof s === "number" && Number.isFinite(s) && s >= 0 ? s : LIMIT_WAIT_S;
+    return { words: uploadLimitWords(s, noun), retry: false, waitS };
+  }
   if (status >= 500 || !status) return { words: `${board} couldn't save the ${noun}. Try again.`, retry: true };
   // Another refusal (a name the machine can't save, an empty file): the receiver's own sentence.
   return { words: detail || `${board} couldn't take the ${noun}.`, retry: false };

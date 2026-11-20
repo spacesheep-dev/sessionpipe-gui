@@ -289,14 +289,15 @@ describe("uploading a picture as a prompt's file", () => {
       words: "The picture didn't finish uploading: the connection is slow. Try again, or use Wi-Fi.",
       retry: true,
     });
-    // A busy receiver's Retry-After is the minutes said.
+    // A busy receiver's Retry-After is the minutes said, and Retry waits them out.
     vi.stubGlobal("fetch", async () =>
       Response.json({ reason: "rate_limited" }, { status: 429, headers: { "retry-after": "120" } }),
     );
     expect(await failure(uploadPicture(file(), "kiwi.png", M))).toEqual({
       words: "That's a lot of pictures in a short time. Try again in 2 minutes.",
-      retry: true,
+      retry: false,
     });
+    expect(await uploadPicture(file(), "kiwi.png", M).catch((e: UploadFailed) => e.waitS)).toBe(120);
     vi.stubGlobal("fetch", async () => {
       throw new TypeError("Failed to fetch");
     });
@@ -352,7 +353,7 @@ describe("uploading a picture as a prompt's file", () => {
     receiver(() => ({ status: 429, body: { reason: "rate_limited", retry_after: 290 } }));
     expect(await failure(uploadPicture(file(), "kiwi.png", M, remote))).toEqual({
       words: "That's a lot of pictures in a short time. Try again in 5 minutes.",
-      retry: true,
+      retry: false,
     });
   });
 });

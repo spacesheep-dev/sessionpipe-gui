@@ -437,3 +437,29 @@ test("seven files go two at a time; the rest wait their turn, and one removed le
   expect(most).toBeLessThanOrEqual(2);
   await expect(sheet(page).locator("[data-ns-start]")).toBeEnabled();
 });
+
+test("a file refused for too many at once offers Try again only once the wait is over", async ({ page }) => {
+  const m = await fakeDaemon(key, advertising(`ns-wait-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  await page.clock.install();
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}`);
+  await expect(rowValue(page, "machine")).toHaveAttribute("data-value", m.name);
+  await sheet(page).locator("[data-ns-text]").fill("Read the notes.");
+  await page.route("**/api/ui/control/files?*", (route) =>
+    route.fulfill({ status: 429, json: { reason: "rate_limited" }, headers: { "retry-after": "120" } }),
+  );
+  await sheet(page)
+    .locator("input[data-ns-files]")
+    .setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("off by one\n") });
+  const chip = sheet(page).locator(".ns-file");
+  await expect(chip).toHaveAttribute("data-file-state", "error");
+  await expect(status(page)).toHaveText("That's a lot of files in a short time. Try again in 2 minutes.");
+  const again = chip.getByRole("button", { name: "Try notes.txt again" });
+  await expect(again).toHaveCount(0);
+  await expect(chip.getByRole("button", { name: "Remove notes.txt" })).toBeVisible();
+  await page.clock.fastForward("02:01");
+  await expect(again).toHaveCount(1);
+  await page.unroute("**/api/ui/control/files?*");
+  await again.click();
+  await expect(chip).toHaveAttribute("data-file-state", "held");
+});

@@ -278,9 +278,19 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   );
   /** How each running upload is stopped, by file key. */
   const stops = useRef(new Map<string, AbortController>());
+  /** A file refused for too many at once: the timer that offers its Try again once the wait is over. */
+  const waits = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const unwait = (key?: string) => {
+    for (const [k, t] of waits.current)
+      if (key === undefined || k === key) {
+        clearTimeout(t);
+        waits.current.delete(k);
+      }
+  };
   useEffect(
     () => () => {
       for (const stop of stops.current.values()) stop.abort();
+      for (const t of waits.current.values()) clearTimeout(t);
     },
     [],
   );
@@ -520,7 +530,23 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           // read yet; spacesheep, where the upload went on to it.
           const board = to.remote ? spacesheepName() : await boardNow();
           if (stop.signal.aborted) return;
-          patchFile(key, { error: "didn't upload", failed: uploadWords(e, board, nounFor(f.type)) });
+          const failed = uploadWords(e, board, nounFor(f.type));
+          patchFile(key, { error: "didn't upload", failed });
+          // Too many at once: Try again is offered once the wait its words say is over.
+          if (failed.waitS !== undefined) {
+            unwait(key);
+            waits.current.set(
+              key,
+              setTimeout(
+                () => {
+                  waits.current.delete(key);
+                  const x = filesNow.current.find((y) => y.key === key);
+                  if (x?.failed) patchFile(key, { failed: { ...x.failed, retry: true } });
+                },
+                Math.min(failed.waitS * 1000, 2 ** 31 - 1),
+              ),
+            );
+          }
         },
       )
       .finally(() => {
@@ -565,6 +591,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const removeFile = (key: string) => {
     stops.current.get(key)?.abort();
     stops.current.delete(key);
+    unwait(key);
     filesNow.current = filesNow.current.filter((x) => x.key !== key);
     setFiles((prev) => prev.filter((x) => x.key !== key));
   };
@@ -574,6 +601,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       if (!x.file || !uploadsAgain(x, relayed)) continue;
       stops.current.get(x.key)?.abort();
       stops.current.delete(x.key);
+      unwait(x.key);
       patchFile(x.key, { entry: undefined, error: undefined, failed: undefined, sent: undefined, waiting: true });
     }
   }, [relayed]);
@@ -717,6 +745,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     setText("");
     for (const stop of stops.current.values()) stop.abort();
     stops.current.clear();
+    unwait();
     setFiles([]);
     setNote(null);
     setError(null);

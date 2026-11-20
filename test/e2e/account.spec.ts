@@ -1530,8 +1530,9 @@ test.describe("pictures to a computer reached through spacesheep", () => {
       .setInputFiles({ name: "birch.png", mimeType: "image/png", buffer: BIRCH });
     const limit = "That's a lot of pictures in a short time. Try again in 2 minutes.";
     await expect(sheet.locator("#ns-status")).toHaveText(limit);
-    // Trying again can help there: it is offered.
-    await expect(sheet.getByRole("button", { name: "Try birch.png again" })).toBeVisible();
+    // Trying again can help there, once the two minutes are over: not offered before.
+    await expect(sheet.getByRole("button", { name: "Remove birch.png" })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: "Try birch.png again" })).toHaveCount(0);
     await sheet.getByRole("button", { name: "Remove birch.png" }).click();
     await expect(sheet.locator("[data-file-state]")).toHaveCount(0);
     await expect(sheet.locator("#ns-status")).not.toContainText(limit);

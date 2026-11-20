@@ -234,11 +234,13 @@ export function refuseFile(file: Blob, mode: "files" | "path" = "path", board = 
   return null;
 }
 
-/** An upload that didn't make it: its words, and whether Retry can help. */
+/** An upload that didn't make it: its words, whether Retry can help, and (too many at
+ *  once) after how many seconds it can. */
 export class UploadFailed extends Error {
   constructor(
     message: string,
     readonly retry: boolean,
+    readonly waitS?: number,
   ) {
     super(message);
     this.name = "UploadFailed";
@@ -253,7 +255,7 @@ async function failed(e: unknown, remote?: boolean): Promise<Error> {
   // spacesheep takes none from this app: no paperclip for its computers from now on.
   if (e instanceof ControlError && e.reason === UPLOAD_REFUSED) markSpacesheepRefused();
   const f = uploadWords(e, remote ? spacesheepName() : await boardNow());
-  return new UploadFailed(f.words, f.retry);
+  return new UploadFailed(f.words, f.retry, f.waitS);
 }
 
 /** The board an upload's words name, once its Info is in (or as well as it is known). */
@@ -600,6 +602,8 @@ export function useAttachments(o: {
   const started = useRef(new Set<string>());
   /** How each running upload is stopped, by item key. */
   const stops = useRef(new Map<string, AbortController>());
+  /** An item refused for too many at once: the timer that offers its Retry once the wait is over. */
+  const waits = useRef(new Map<string, number>());
   const { mode, machineId } = o;
   const remote = !!o.remote;
   const takes = mode === "files" || mode === "path" ? mode : null;
@@ -615,6 +619,27 @@ export function useAttachments(o: {
 
   const set = useCallback((key: string, patch: Partial<PendingItem>) => {
     setItems((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
+  }, []);
+
+  /** Retry is offered on `key` once `s` seconds are over, as its words say: never a button
+   *  that would only be refused again. */
+  const offerLater = useCallback((key: string, s: number) => {
+    window.clearTimeout(waits.current.get(key));
+    const t = window.setTimeout(
+      () => {
+        waits.current.delete(key);
+        setItems((prev) => prev.map((p) => (p.key === key && p.error ? { ...p, retry: true } : p)));
+      },
+      Math.min(s * 1000, 2 ** 31 - 1),
+    );
+    waits.current.set(key, t);
+  }, []);
+  const unwait = useCallback((key?: string) => {
+    for (const [k, t] of waits.current)
+      if (key === undefined || k === key) {
+        window.clearTimeout(t);
+        waits.current.delete(k);
+      }
   }, []);
 
   /** Pictures let go of while they uploaded (another draft restored, or the composer
@@ -651,13 +676,14 @@ export function useAttachments(o: {
           // Removed while it went, or gone with another draft: nothing is left to say it to.
           if (away.current.delete(it.key) || stop.signal.aborted) return;
           set(it.key, { error: e.message, retry: e instanceof UploadFailed && e.retry });
+          if (e instanceof UploadFailed && e.waitS !== undefined) offerLater(it.key, e.waitS);
         },
       );
       void going.finally(() => {
         if (stops.current.get(it.key) === stop) stops.current.delete(it.key);
       });
     },
-    [set],
+    [set, offerLater],
   );
 
   /** Lets the tray's items go, but a picture still on its way as a file finishes, into
@@ -682,12 +708,14 @@ export function useAttachments(o: {
   // Object URLs of what was never sent are let go with the composer, and its uploads stop
   // (but a picture's, which lands in its draft).
   useEffect(
-    () => () =>
+    () => () => {
+      unwait();
       leave(landing.current, (it) => {
         stops.current.get(it.key)?.abort();
         if (!it.restored) URL.revokeObjectURL(it.preview);
-      }),
-    [leave],
+      });
+    },
+    [leave, unwait],
   );
 
   // Two uploads at a time, in the tray's order; the rest wait.
@@ -795,13 +823,17 @@ export function useAttachments(o: {
   );
 
   /** Lets an item go: its upload stops, its thumbnail's URL is revoked, a path upload is taken back. */
-  const letGo = useCallback((it: PendingItem) => {
-    stops.current.get(it.key)?.abort();
-    stops.current.delete(it.key);
-    started.current.delete(it.key);
-    if (!it.restored) URL.revokeObjectURL(it.preview);
-    if (it.attachment) void deleteAttachment(it.attachment);
-  }, []);
+  const letGo = useCallback(
+    (it: PendingItem) => {
+      stops.current.get(it.key)?.abort();
+      stops.current.delete(it.key);
+      started.current.delete(it.key);
+      unwait(it.key);
+      if (!it.restored) URL.revokeObjectURL(it.preview);
+      if (it.attachment) void deleteAttachment(it.attachment);
+    },
+    [unwait],
+  );
 
   const remove = useCallback(
     (key: string) => {
@@ -832,10 +864,11 @@ export function useAttachments(o: {
     }
     stops.current.clear();
     started.current.clear();
+    unwait();
     itemsRef.current = [];
     setItems([]);
     setError(null);
-  }, []);
+  }, [unwait]);
 
   const restore = useCallback(
     (kept: readonly KeptPicture[], land?: (p: KeptPicture) => void) => {

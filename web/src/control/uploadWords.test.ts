@@ -14,7 +14,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { KEY_LOST_SENTENCE } from "../lib/keyWords";
 import { ControlError } from "./api";
-import { boardName, nounFor, spacesheepName, uploadWords } from "./uploadWords";
+import { boardName, LIMIT_WAIT_S, nounFor, spacesheepName, uploadWords } from "./uploadWords";
 
 const B = "studio-mac";
 const refused = (status: number, o: { reason?: string; detail?: string; retryAfterS?: number } = {}) =>
@@ -22,7 +22,7 @@ const refused = (status: number, o: { reason?: string; detail?: string; retryAft
 
 describe("uploadWords", () => {
   it("the table", () => {
-    const rows: [unknown, string, boolean][] = [
+    const rows: [unknown, string, boolean, number?][] = [
       [new TypeError("Failed to fetch"), "The picture didn't upload: studio-mac can't be reached. Try again.", true],
       [refused(504), "The picture didn't finish uploading: the connection is slow. Try again, or use Wi-Fi.", true],
       [
@@ -42,11 +42,33 @@ describe("uploadWords", () => {
       [refused(400, { reason: "not_an_image" }), "That file isn't a picture.", false],
       [refused(507, { reason: "full" }), "studio-mac has no room for more files today.", false],
       [refused(401), KEY_LOST_SENTENCE, false],
-      [refused(429, { retryAfterS: 300 }), "That's a lot of pictures in a short time. Try again in 5 minutes.", true],
-      [refused(429, { retryAfterS: 20 }), "That's a lot of pictures in a short time. Try again in a minute.", true],
-      [refused(429), "That's a lot of pictures in a short time. Try again in a few minutes.", true],
-      [refused(429, { retryAfterS: 3600 }), "That's a lot of pictures in a short time. Try again in 60 minutes.", true],
-      [refused(429, { retryAfterS: 86_400 }), "That's a lot of pictures in a short time. Try again later.", true],
+      // Too many at once: Retry only once the wait is over (its seconds; a few minutes where
+      // none is named).
+      [
+        refused(429, { retryAfterS: 300 }),
+        "That's a lot of pictures in a short time. Try again in 5 minutes.",
+        false,
+        300,
+      ],
+      [
+        refused(429, { retryAfterS: 20 }),
+        "That's a lot of pictures in a short time. Try again in a minute.",
+        false,
+        20,
+      ],
+      [refused(429), "That's a lot of pictures in a short time. Try again in a few minutes.", false, LIMIT_WAIT_S],
+      [
+        refused(429, { retryAfterS: 3600 }),
+        "That's a lot of pictures in a short time. Try again in 60 minutes.",
+        false,
+        3600,
+      ],
+      [
+        refused(429, { retryAfterS: 86_400 }),
+        "That's a lot of pictures in a short time. Try again later.",
+        false,
+        86_400,
+      ],
       [refused(500), "studio-mac couldn't save the picture. Try again.", true],
       [refused(503), "studio-mac couldn't save the picture. Try again.", true],
       [new Error("anything else"), "studio-mac couldn't save the picture. Try again.", true],
@@ -56,7 +78,9 @@ describe("uploadWords", () => {
         false,
       ],
     ];
-    for (const [e, words, retry] of rows) expect(uploadWords(e, B), words).toEqual({ words, retry });
+    for (const [e, words, retry, waitS] of rows)
+      expect(uploadWords(e, B), words).toEqual({ words, retry, ...(waitS === undefined ? {} : { waitS }) });
+    expect(LIMIT_WAIT_S).toBe(180);
   });
 
   it("never says a raw code", () => {
@@ -92,9 +116,10 @@ describe("uploadWords", () => {
       [refused(502, { reason: "hub_bad_encoding" }), "The picture didn't reach spacesheep.dev. Try again.", true],
       [refused(413, { reason: "too_large" }), "That picture is too big for spacesheep.dev.", false],
       // spacesheep's Retry-After, passed on as `retry_after`, keeps its minutes.
-      [refused(429, { reason: "rate_limited", retryAfterS: 125 }), uploadLimitWords(125), true],
+      [refused(429, { reason: "rate_limited", retryAfterS: 125 }), uploadLimitWords(125), false],
     ];
-    for (const [e, words, retry] of rows) expect(uploadWords(e, S), words).toEqual({ words, retry });
+    for (const [e, words, retry] of rows) expect(uploadWords(e, S), words).toMatchObject({ words, retry });
+    expect(uploadWords(refused(429, { reason: "rate_limited", retryAfterS: 125 }), S).waitS).toBe(125);
     expect(uploadLimitWords(125)).toBe("That's a lot of pictures in a short time. Try again in 3 minutes.");
     // For a file on New session, the same states in its noun.
     expect(uploadWords(refused(501, { reason: UPLOAD_NO_DOOR }), S, "file")).toEqual({

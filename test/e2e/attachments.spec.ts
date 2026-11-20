@@ -865,7 +865,8 @@ test("an upload that fails says why in words; Retry sends the same bytes again; 
       json: { reason: "rate_limited" },
       headers: { "retry-after": "300" },
       words: "That's a lot of pictures in a short time. Try again in 5 minutes.",
-      retry: true,
+      // Not until the five minutes are over (the next test).
+      retry: false,
     },
   ];
   for (const a of answers) {
@@ -886,6 +887,37 @@ test("an upload that fails says why in words; Retry sends the same bytes again; 
     await page.unroute(FILES_ROUTE);
   }
   expect(prompts(d)).toHaveLength(1);
+});
+
+test("too many pictures at once: Retry comes back only once the wait the words say is over", async ({
+  context,
+  page,
+}) => {
+  // The page's clock, moved on by hand (nothing is signed on it here).
+  await page.clock.install();
+  await open(context, page, { takes: true, title: "Too many at once" });
+  await page.route(FILES_ROUTE, (route) =>
+    route.fulfill({ status: 429, json: { reason: "rate_limited" }, headers: { "retry-after": "300" } }),
+  );
+  await paste(page, [given("image.png", KIWI)]);
+  await expect(tray(page)).toHaveAttribute("data-state", "error");
+  await expect(line(page)).toHaveText("That's a lot of pictures in a short time. Try again in 5 minutes.");
+  // Only × until then: a Retry now would only be refused again.
+  await expect(retryOf(page)).toHaveCount(0);
+  await expect(tray(page).getByRole("button", { name: "Remove picture" })).toBeVisible();
+  await composer(page).fill("And this one?");
+  await expect(send(page)).toHaveAttribute("data-tip", "Remove the picture that didn't upload.");
+  await page.clock.fastForward("04:50");
+  await expect(retryOf(page)).toHaveCount(0);
+  await page.clock.fastForward("00:15");
+  await expect(retryOf(page)).toHaveCount(1);
+  await expect(send(page)).toHaveAttribute("data-tip", "Remove or retry the picture that didn't upload.");
+  // The words stay as they were; Retry now goes.
+  await expect(line(page)).toHaveText("That's a lot of pictures in a short time. Try again in 5 minutes.");
+  await page.unroute(FILES_ROUTE);
+  await retryOf(page).click();
+  await expect(tray(page)).toHaveAttribute("data-state", "ready");
+  await expect(send(page)).toBeEnabled();
 });
 
 test("Send while a picture uploads says it waits for it, and the line goes once the upload is in", async ({
