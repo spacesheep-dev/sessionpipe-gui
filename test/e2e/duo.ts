@@ -59,8 +59,10 @@ interface DuoWindow {
 
 /** In the page, before any of its scripts: the --safe-* properties on <html>, which every
  *  stylesheet reads before env(safe-area-inset-*), as Android's shell sets them
- *  (native/shell.ts). They are set again as the window changes size, before the page hears
- *  of it: a fold changes both at once. */
+ *  (native/shell.ts). An init script runs before the document has its <html>, so they are
+ *  put on it the moment the parser makes it: the page's first script reads them and its
+ *  first frame is laid out with them. They are set again as the window changes size,
+ *  before the page hears of it: a fold changes both at once. */
 function insetsScript(d: { insets: number[]; at: [number, number] | null }) {
   const KEPT = "duo.insets";
   let { insets, at } = d;
@@ -74,8 +76,10 @@ function insetsScript(d: { insets: number[]; at: [number, number] | null }) {
   } catch {
     // A document with no storage (about:blank) has no pose to remember.
   }
-  // `at`: these are that size's insets, and another size has none. Until the document is
-  // read the window may not have its size yet, so the first answer is that it does.
+  // `at`: these are that size's insets, and another size has none. As its <html> is made a
+  // window does not have its size yet (it is 980 wide until the page's viewport is read), so
+  // the first answer is that it does; it is settled once the window has its size: at its
+  // first resize, or once the document is read.
   let sized = false;
   const apply = () => {
     const root = document.documentElement;
@@ -99,13 +103,20 @@ function insetsScript(d: { insets: number[]; at: [number, number] | null }) {
     apply();
   };
   apply();
+  // The <html> is not there yet: they are put on it as the parser makes it, which in a page
+  // being loaded is before the script that follows it runs.
+  new MutationObserver(apply).observe(document, { childList: true });
   document.addEventListener("DOMContentLoaded", settle);
   window.addEventListener("resize", settle, true);
 }
 
-/** Every page of `context` has these insets, from before its first script. `at`: only while
- *  the window is that size, so a test that walks other widths leaves them behind and has
- *  them back when it returns. Once per context; pose() changes them from there. */
+/** Every page of `context` has these insets, from before its first script and its first
+ *  frame. `at`: only while the window is that size, so a test that walks other widths
+ *  leaves them behind and has them back when it returns. A page opened at another size
+ *  still has them in its first frame, in both engines: they go at its first resize, or
+ *  once the document is read. A document written into an open page (page.setContent) gets
+ *  them as well, but in Chromium only after its first script: open pages by address.
+ *  Once per context; pose() changes them from there. */
 export async function insetsInit(
   context: BrowserContext,
   insets: Insets,
@@ -116,7 +127,8 @@ export async function insetsInit(
 
 /** Moves a live page to another window, as a fold, an unfold, a turn or Split View does:
  *  the size and that shape's insets together (`insets`: others, as with the band on the
- *  left), then a moment for the layout to settle. A page loaded afterwards keeps them. */
+ *  left), then waits until the page has the size and has drawn two frames at it, so what
+ *  the resize set off is laid out. A page loaded afterwards keeps them. */
 export async function pose(
   page: Page,
   width: number,
@@ -132,7 +144,11 @@ export async function pose(
   await page.setViewportSize({ width, height });
   // The same size with other insets is no resize: they are put in place here.
   await page.evaluate(() => (window as unknown as DuoWindow).__duoInsets?.apply());
-  await page.waitForTimeout(400);
+  // A state, not a time: the window is the size, then two frames have been drawn at it.
+  await page.waitForFunction(([w, h]) => innerWidth === w && innerHeight === h, [width, height] as const);
+  await page.evaluate(
+    () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+  );
 }
 
 /** The window a page is in ("WxH") and the insets it has, as the page itself has them. */
@@ -184,7 +200,8 @@ const keyboards = new WeakSet<Page>();
 /** The software keyboard `kb` pt tall over the bottom of the page (0: put away), as the
  *  page learns of it in WKWebView: the visual viewport gets shorter and says so, and
  *  lib/keyboardInset.ts sets --kb from that. The page reads its viewport as it starts, so
- *  the first call comes before the page is opened (duoBed makes it). */
+ *  the first call comes before the page is opened, with 0 (duoBed makes it): there is no
+ *  page yet to raise a keyboard over. */
 export async function fakeKeyboard(page: Page, kb: number): Promise<void> {
   if (!keyboards.has(page)) {
     keyboards.add(page);
@@ -195,17 +212,21 @@ export async function fakeKeyboard(page: Page, kb: number): Promise<void> {
     raise?.(px);
     return !!raise;
   }, kb);
-  if (!set && page.url() !== "about:blank")
+  if (!set && (kb > 0 || page.url() !== "about:blank"))
     throw new Error(
-      "fakeKeyboard: the first call comes before the page is opened (the page keeps the viewport it starts with)",
+      "fakeKeyboard: this page has no keyboard to move. The first call comes before the page is opened, with 0 (the page keeps the viewport it starts with); the keyboard is raised once the page is open",
     );
 }
 
 /** The controls a finger would land on inside an inset band: every button, link, field and
  *  [role=button|menuitem|switch|tab|option] (and <summary>, <select>) whose box reaches
  *  into a band of this page's --safe-* insets, is on top there, and cannot be scrolled out
- *  from under it (a row passing under the home indicator is not held there; a bar is).
- *  Their names as a screen reader would say them, as near as the page can tell. */
+ *  from under it (a row passing under the home indicator is not held there, nor a sticky
+ *  head on its way up the page; a bar is, and a head once it is stuck). It goes by the box
+ *  the eye aims at: a hit area that ::before or ::after widens past it is not counted.
+ *  Their names as a screen reader would say them, as near as the page can tell.
+ *  Once, in WebKit, a measure made straight after a scroll from the test missed a control
+ *  (one trial in 13, not seen again): after such a scroll, ask through expect.poll. */
 export function bandOffenders(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const root = document.documentElement;
@@ -225,12 +246,25 @@ export function bandOffenders(page: Page): Promise<string[]> {
       [0, H - bottom, W, H, false, true],
       [0, 0, left, H, true, false],
     ];
+    /** Whether a sticky box is held along that axis now: off the place its flow gives it,
+     *  which is where it stands for a moment with its position taken away. The attribute
+     *  is written whole and put back whole: set through el.style and then removed, it came
+     *  back empty (style="") in both engines on a box that had none. */
+    const stuck = (el: HTMLElement, across: boolean): boolean => {
+      const had = el.getAttribute("style");
+      const now = el.getBoundingClientRect();
+      el.setAttribute("style", `${had ?? ""};position:static!important`);
+      const flow = el.getBoundingClientRect();
+      if (had === null) el.removeAttribute("style");
+      else el.setAttribute("style", had);
+      return Math.abs(across ? flow.left - now.left : flow.top - now.top) > 0.5;
+    };
     /** Whether something `el` scrolls with has `need` px left to scroll that way. What is
-     *  fixed or sticky stays where it is. */
-    const scrollsClear = (el: Element, across: boolean, on: boolean, need: number): boolean => {
+     *  fixed stays where it is, and so does what is sticky while it is stuck. */
+    const scrollsClear = (el: HTMLElement, across: boolean, on: boolean, need: number): boolean => {
       for (let n = el; ; ) {
         const position = getComputedStyle(n).position;
-        if (position === "fixed" || position === "sticky") return false;
+        if (position === "fixed" || (position === "sticky" && stuck(n, across))) return false;
         const up = n.parentElement;
         if (!up) return false;
         // The page itself scrolls at the document, whatever <html> and <body> say of overflow.
@@ -254,6 +288,7 @@ export function bandOffenders(page: Page): Promise<string[]> {
         by.trim() ||
         el.getAttribute("aria-label") ||
         (el as HTMLInputElement).labels?.[0]?.textContent ||
+        // biome-ignore lint/performance/useDomNodeTextContent: the words as drawn, without what is hidden
         el.innerText ||
         el.getAttribute("placeholder") ||
         el.getAttribute("title") ||

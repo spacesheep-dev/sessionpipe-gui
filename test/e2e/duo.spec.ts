@@ -131,6 +131,8 @@ test("the keyboard up on the outer display: the page hears of it as WKWebView te
     await fakeKeyboard(page, 0);
     await expect.poll(said).toBe("");
     await expect.poll(dock).toBe(down);
+    // A page not opened yet has nothing to raise it over: that is said, not let pass.
+    await expect(fakeKeyboard(await b.context.newPage(), kb)).rejects.toThrow("no keyboard to move");
   } finally {
     await b.close();
   }

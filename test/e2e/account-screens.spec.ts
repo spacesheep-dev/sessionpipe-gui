@@ -28,9 +28,13 @@ const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../di
 const SHOTS = process.env.ACCOUNT_SCREENS ?? "";
 const [W, H] = (process.env.ACCOUNT_SCREENS_SIZE ?? "390x844").split("x").map(Number) as [number, number];
 const SCHEME = process.env.ACCOUNT_SCREENS_SCHEME === "dark" ? "dark" : "light";
-const INSETS = process.env.ACCOUNT_SCREENS_INSETS
-  ? (process.env.ACCOUNT_SCREENS_INSETS.split(",").map(Number) as Insets)
-  : null;
+const INSETS = ((said) => {
+  if (!said) return null;
+  // Four numbers or none: a slip here would take the band away and every test would still pass.
+  if (!/^\d+(\.\d+)?(,\d+(\.\d+)?){3}$/.test(said))
+    throw new Error(`ACCOUNT_SCREENS_INSETS is top,right,bottom,left in pt, as 0,84,20,0: got "${said}"`);
+  return said.split(",").map(Number) as Insets;
+})(process.env.ACCOUNT_SCREENS_INSETS);
 /** The hour on a prompt's card, with the way to answer it on spacesheep: the hour's own
  *  sentence, then on a phone the link on a line of its own, and wider after a "·". */
 const hourOnCard = (width: number) =>

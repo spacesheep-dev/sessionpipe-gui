@@ -31,8 +31,9 @@ export const seenSetup = (origin: string) => ({
   ],
 });
 
-/** The iPhone Duo's outer display, for the `duo` projects: a finger, 3 px to the pt. */
-const DUO = {
+/** The iPhone Duo's outer display, for the `duo` projects: a finger, 3 px to the pt. (Its
+ *  shapes are test/e2e/duo.ts's DUO.) */
+const DUO_DEVICE = {
   ...devices["iPhone 13"],
   viewport: { width: 466, height: 678 },
   isMobile: true,
@@ -93,14 +94,14 @@ export default defineConfig({
       // outer display. A spec moves it through the others.
       name: "duo",
       testMatch: /duo(-[a-z]+)?\.spec\.ts/,
-      use: { ...DUO, browserName: "chromium", defaultBrowserType: "chromium" },
+      use: { ...DUO_DEVICE, browserName: "chromium", defaultBrowserType: "chromium" },
     },
     {
       // The same in WebKit, WKWebView's engine, for what the engine has a say in: what a
       // page keeps when its window changes size. `npx playwright install webkit` once.
       name: "duo-webkit",
       testMatch: /duo-continuity\.spec\.ts/,
-      use: { ...DUO, browserName: "webkit", defaultBrowserType: "webkit" },
+      use: { ...DUO_DEVICE, browserName: "webkit", defaultBrowserType: "webkit" },
     },
   ],
   webServer: [
