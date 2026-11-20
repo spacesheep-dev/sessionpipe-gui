@@ -58,6 +58,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   receiver runs in (SIGHUP) ended it at once and left its `run.json` behind; it now stops
   as Ctrl-C does. A receiver whose output was already gone when it was stopped (a `| tee`
   ended by the same Ctrl-C) no longer exits with an error before it has closed.
+- **Search's `since:` and `until:` refuse a day the month does not have.** `until:2026-02-30`
+  searched up to March 2, `since:2026-11-31` from December 1 and `2026-02-29` read as March
+  1, without a word, and the Date chip said "Until Mar 2". Such a date is now left out, as
+  `2026-13-01` already was, and the receiver's Search page and `sessionpipe-gui search`
+  name it ("“until:2026-02-30” isn't a date, so it was left out"). `2028-02-29` still reads.
 - **Search's status line says which computer to restart.** With history search off and its
   index still on disk, a viewer on another device read "Restarting the app tries again",
   which could mean the app on the phone; it now reads "Restarting the app on that computer

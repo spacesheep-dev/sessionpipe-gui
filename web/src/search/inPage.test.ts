@@ -82,6 +82,17 @@ describe("the search reader in the page", () => {
     expect((await c.sessions({ q: "machine:this" })).sessions).toEqual([]);
   });
 
+  it("leaves out a date that does not read, also when it is excluded", async () => {
+    const c = client();
+    const ids = async (q: string) => (await c.sessions({ q: `${q} the` })).sessions.map((s) => s.id).sort();
+    // 2026-11-31 is not a day: it was read as Dec 1, and `-until:` of it hid every session.
+    expect(await ids("since:2026-11-31")).toEqual(["aaaa1111", "bbbb2222"]);
+    expect(await ids("-until:2026-11-31")).toEqual(["aaaa1111", "bbbb2222"]);
+    expect(await ids("-since:2026-13-01")).toEqual(["aaaa1111", "bbbb2222"]);
+    expect(await ids("-until:2026-11-30")).toEqual([]);
+    expect(await ids("since:2026-11-11")).toEqual([]);
+  });
+
   it("with nothing found says the first thing that would help", async () => {
     const c = client();
     expect((await c.sessions({ q: "agent:codex webhook" })).hint).toMatchObject({ kind: "filters", query: "webhook" });
