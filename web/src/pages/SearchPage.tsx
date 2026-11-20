@@ -168,7 +168,7 @@ export function Search() {
       if (!keyList.length) return false;
       // From anywhere else on the page (Sort), the first j lands on the cursor's row, not
       // the one after it.
-      if (!inField() && !inList()) return focusRow(cursor < 0 ? 0 : cursor);
+      if (!inField() && !inList()) return focusRow(Math.max(0, cursor));
       const next = cursor < 0 ? 0 : Math.max(0, Math.min(keyList.length - 1, cursor + d));
       setCursor(next);
       if (inField()) listRef.current?.querySelector(`[data-cursor="${next}"]`)?.scrollIntoView({ block: "nearest" });

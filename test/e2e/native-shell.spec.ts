@@ -1420,7 +1420,7 @@ test.describe("notifications in the Mac app", () => {
     await expect(pane.getByRole("switch", { name: "Sounds" })).toBeVisible();
     // Nothing of the page's own switch: no tab, no browser, no site.
     await expect(pane.locator(".ntf-row[data-row='notify']")).toHaveCount(0);
-    expect(await pane.innerText()).not.toMatch(/\btab\b|browser|this site/i);
+    await expect(pane).not.toHaveText(/\btab\b|browser|this site/i);
 
     await page.getByRole("tab", { name: "App" }).click();
     const app = page.getByRole("tabpanel", { name: "App" });

@@ -495,7 +495,7 @@ test.describe("search: the history transcript (mock)", () => {
   test("⏎ opens the transcript at the moment the row shows", async ({ page }) => {
     await page.goto("/search?mock=1&q=webhook%20409");
     await expect(rows(page).first()).toBeVisible({ timeout: 15_000 });
-    const shown = (await rows(page).first().locator(".sx-snip").innerText()).replace(/^…|…$/g, "").trim();
+    const shown = ((await rows(page).first().locator(".sx-snip").textContent()) ?? "").replace(/^…|…$/g, "").trim();
     expect(shown).not.toBe("");
     await field(page).focus();
     await page.keyboard.press("Enter");
