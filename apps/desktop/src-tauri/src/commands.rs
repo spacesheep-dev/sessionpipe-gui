@@ -290,8 +290,15 @@ pub fn apply_settings<R: Runtime>(
             tauri::ActivationPolicy::Regular
         });
     }
-    *shell.settings.lock().unwrap() = next.clone();
-    crate::settings::save(&shell.home, &next).map_err(|e| e.to_string())?;
+    {
+        // The shell's own fields are read again under the lock that writes: the launch's
+        // service check may have noted a version since `prev` was read.
+        let mut cur = shell.settings.lock().unwrap();
+        next.hotkey = cur.hotkey.clone();
+        next.last_version = cur.last_version.clone();
+        *cur = next.clone();
+        crate::settings::save(&shell.home, &cur).map_err(|e| e.to_string())?;
+    }
     crate::tray::refresh(app);
     crate::tray::update_badge(app, false);
     // Turned on: check now rather than at the schedule's next six-hour mark.
