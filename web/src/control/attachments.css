@@ -318,7 +318,8 @@
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   padding: max(56px, env(safe-area-inset-top)) 56px max(16px, env(safe-area-inset-bottom));
-  background: oklch(0.14 0 0 / 0.94);
+  /* All but opaque: nothing of the page (its tabs, the message box) shows through. */
+  background: oklch(0.14 0 0 / 0.98);
   color: oklch(0.96 0 0);
   overscroll-behavior: contain;
   animation: fade-in var(--dur) var(--ease-out) both;
