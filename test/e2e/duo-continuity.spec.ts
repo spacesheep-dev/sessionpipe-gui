@@ -4,13 +4,178 @@
 // folded again: each is a live resize of the one page, between the shapes of duo.ts. Run
 // in Chromium (the `duo` project) and in WebKit (`duo-webkit`), WKWebView's engine, since
 // what a page holds on to through a resize is the engine's doing as much as the app's.
+// A message being written; the reply being read and the board's row, where they were under
+// the bar (lib/resizeAnchor.ts); the end of a session that is followed; an open list.
 // So is what duo.ts itself promises a test, which is held here too: the system's bands in
 // a page from its first script, and a measure that tells a control held under a band from
 // one passing.
-import { expect, type Page, test } from "@playwright/test";
-import { bandOffenders, coarsePointer, DUO, DUO_SESSIONS, duoBed, insetsInit, pose, shapeOf } from "./duo.js";
+import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
+import { Session } from "../events.js";
+import {
+  bandOffenders,
+  coarsePointer,
+  DUO,
+  DUO_SESSIONS,
+  type DuoBed,
+  duoBed,
+  insetsInit,
+  pose,
+  shapeOf,
+} from "./duo.js";
 
 const composer = (page: Page) => page.locator("textarea").first();
+
+/** The Duo's poses as a hand goes through them and back: unfolded, turned, upright again,
+ *  folded. */
+const ROUND = [
+  [669, 951],
+  [951, 669],
+  [669, 951],
+  [466, 678],
+] as const;
+
+const on = (title: string) => ({
+  session: { machine: "studio-mac", cwd: "/Users/me/code/billing", title, title_source: "custom" as const },
+});
+const LONG = on("Resume the invoice export");
+const PARAGRAPHS = [
+  "Batch 7 resets because the connection pooler drops connections that sit idle for more than 30 seconds, and batch 7 is the first one large enough to spend that long building its CSV before it writes.",
+  "I changed the export to take a fresh connection for each batch and to write the batch in pages of 100 invoices, so no connection is idle long enough to be dropped.",
+  "The export now records the last batch that finished in export_state. A run that starts again reads it and goes on from the next batch, so a failure at batch 7 no longer repeats batches 1 to 6.",
+  "The new test starts an export, closes the connection halfway through batch 7 and runs the export again. It checks that batches 1 to 6 are written once and that batch 7 is written whole.",
+];
+/** A session longer than any of the Duo's screens (/s/claude-code/s-long): five turns, each
+ *  a question of one line and a reply of ten paragraphs, "Turn 3, paragraph 4." and so on. */
+function longSession(): { s: Session; events: unknown[] } {
+  const s = new Session("s-long", "claude-code", Date.now() - 50 * 60_000);
+  const events: unknown[] = [s.ev("session.started", { source: "startup" }, LONG)];
+  for (let t = 1; t <= 5; t++) {
+    const assistant = Array.from(
+      { length: 10 },
+      (_, i) => `Turn ${t}, paragraph ${i + 1}. ${PARAGRAPHS[i % PARAGRAPHS.length]}`,
+    ).join("\n\n");
+    events.push(
+      s.ev("turn.started", { turn_id: `t${t}` }, LONG),
+      s.ev("turn.transcript", { turn: t, user: `Turn ${t}: what changed?`, assistant }, LONG),
+      s.ev("turn.ended", { turn_id: `t${t}` }, LONG),
+    );
+  }
+  return { s, events };
+}
+const LAST = "Turn 5, paragraph 10.";
+
+/** A board longer than any screen: `n` sessions that ended hours ago, "Row 01: …" on. */
+function manyRows(n: number): unknown[] {
+  const events: unknown[] = [];
+  for (let i = 0; i < n; i++) {
+    const s = new Session(`s-row-${i}`, "claude-code", Date.now() - (5 + i) * 60 * 60_000);
+    const row = on(`Row ${String(i + 1).padStart(2, "0")}: tidy the billing module`);
+    events.push(
+      s.ev("session.started", { source: "startup" }, row),
+      s.ev("turn.started", { turn_id: "t1" }, row),
+      s.ev(
+        "turn.transcript",
+        { turn: 1, user: "Tidy the billing module.", assistant: "Tidied: two dead exports gone." },
+        row,
+      ),
+      s.ev("turn.ended", { turn_id: "t1" }, row),
+    );
+  }
+  return events;
+}
+
+/** `n` sessions that each wait for an answer, "Ask 01: …" on: an Inbox longer than a screen. */
+function manyPrompts(n: number): unknown[] {
+  const events: unknown[] = [];
+  for (let i = 0; i < n; i++) {
+    const asked = Date.now() - (2 + i) * 60_000;
+    const s = new Session(`s-ask-${i}`, "claude-code", asked - 60_000);
+    const row = (at?: number) => ({
+      ...on(`Ask ${String(i + 1).padStart(2, "0")}: ship the billing module`),
+      ...(at ? { time: new Date(at).toISOString() } : {}),
+    });
+    const command = `npm run deploy -- --target staging-${i + 1}`;
+    events.push(
+      s.ev("session.started", { source: "startup" }, row()),
+      s.ev("turn.started", { turn_id: "t1" }, row()),
+      s.ev("turn.progress", { turn_id: "t1", user: "Ship it to staging.", assistant: "Built. Deploying next." }, row()),
+      s.ev("tool.started", { tool: "Bash", call_id: "c1", turn_id: "t1", input: { command } }, row(asked - 1_000)),
+      s.ev(
+        "attention.needed",
+        { attention_id: `att_${i}`, kind: "permission", tool: "Bash", message: command },
+        row(asked),
+      ),
+    );
+  }
+  return events;
+}
+
+/** The iPhone app at `size`, approved, with `events` more on its account, on its board. */
+async function bedWith(browser: Browser, size: string, events: unknown[]): Promise<DuoBed> {
+  const b = await duoBed(browser, size);
+  b.ss.push(events);
+  await b.page.goto(b.server.url);
+  await expect(b.page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+  await b.approve();
+  return b;
+}
+
+/** `n` frames drawn: what a scroll set off (the page hears it, then writes its place
+ *  down in the next frame) is done. A state to wait for, not a time. */
+const frames = (page: Page, n = 2) =>
+  page.evaluate(
+    (left) =>
+      new Promise<void>((done) => {
+        const tick = (k: number) => (k ? requestAnimationFrame(() => tick(k - 1)) : done());
+        tick(left);
+      }),
+    n,
+  );
+/** How far the top of `el` is under the bar at the top of the page, in pt. */
+const underBar = (el: Locator) =>
+  el.evaluate((node) => {
+    const bar = Array.from(document.querySelectorAll(".bar")).find((b) => b.getClientRects().length);
+    return Math.round(node.getBoundingClientRect().top - (bar?.getBoundingClientRect().bottom ?? 0));
+  });
+/** Scrolls the page until `el` is `pt` under the bar, as a finger leaves it there: the page
+ *  hears each scroll, and a list still taking its rows is waited for. */
+async function putUnderBar(page: Page, el: Locator, pt: number): Promise<void> {
+  await expect(async () => {
+    await el.evaluate((node, want) => {
+      const bar = Array.from(document.querySelectorAll(".bar")).find((b) => b.getClientRects().length);
+      window.scrollBy(0, node.getBoundingClientRect().top - (bar?.getBoundingClientRect().bottom ?? 0) - want);
+    }, pt);
+    await frames(page);
+    expect(Math.abs((await underBar(el)) - pt)).toBeLessThanOrEqual(1);
+  }, "the page is long enough to put it there, and has stopped moving").toPass({ timeout: 10_000 });
+}
+/** `el` is within `slack` pt of `pt` under the bar (asked until a moving list has stopped). */
+const staysUnderBar = (el: Locator, pt: number, slack: number, at: string) =>
+  expect
+    .poll(async () => Math.abs((await underBar(el)) - pt), { message: `${at}: pt from its place` })
+    .toBeLessThanOrEqual(slack);
+/** What is left of the page under the screen, in pt: 0 at its end. */
+const gapToEnd = (page: Page) =>
+  page.evaluate(() => Math.round(document.documentElement.scrollHeight - (scrollY + innerHeight)));
+
+/** The long session open at `size` and followed at its end. A session opens on its end,
+ *  and now and then stops a line short of it (0.8.4 does, more often in WebKit: a scroll
+ *  of the browser's own is heard before the page has followed a reply read whole). That is
+ *  not what is tried here: a flick to the end, as a person's, and it is followed. */
+async function longOpen(browser: Browser, size: string): Promise<DuoBed & { s: Session }> {
+  const { s, events } = longSession();
+  const b = await bedWith(browser, size, events);
+  await b.page.goto(`${b.server.url}/s/claude-code/s-long`);
+  await expect(b.page.getByText(LAST).first()).toBeVisible();
+  await expect(async () => {
+    await b.page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await frames(b.page);
+    expect(await gapToEnd(b.page)).toBeLessThanOrEqual(1);
+  }).toPass({ timeout: 10_000 });
+  return { ...b, s };
+}
+const paragraph = (page: Page, turn: number, n: number) =>
+  page.locator(".md p").filter({ hasText: `Turn ${turn}, paragraph ${n}.` });
 
 /** A page of this file's own, to try duo.ts on with no app in the way. Its first script
  *  writes down the bands it can read. Its buttons are named for where they stand, on a
@@ -260,6 +425,214 @@ test.describe("no pose swaps the app: through an unfold, a turn and Split View",
       await b.close();
     }
   });
+});
+
+test("a reply being read stays where it was under the bar as the phone is unfolded, turned and folded", async ({
+  browser,
+}) => {
+  const b = await longOpen(browser, "466x678");
+  const { page } = b;
+  try {
+    // The start of a reply, 260 pt under the bar: its message is the row at the reading
+    // line, a third of the way down the view (lib/resizeAnchor.ts). Up from the end first,
+    // so that the page knows the reader left it.
+    const start = paragraph(page, 4, 1);
+    await page.evaluate(() => window.scrollBy(0, -600));
+    await putUnderBar(page, start, 260);
+    for (const [width, height] of ROUND) {
+      await pose(page, width, height);
+      await staysUnderBar(start, 260, 24, `${width}x${height}`);
+    }
+    // The middle of a reply longer than the screen, with no message's start in sight: the
+    // paragraph at the reading line holds the place.
+    const middle = paragraph(page, 3, 4);
+    await putUnderBar(page, middle, 180);
+    for (const [width, height] of ROUND) {
+      await pose(page, width, height);
+      await staysUnderBar(middle, 180, 24, `${width}x${height}`);
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+test("a session followed at its end is still followed after a turn and a fold, and the next reply shows", async ({
+  browser,
+}) => {
+  const b = await longOpen(browser, "951x669");
+  const { page } = b;
+  try {
+    for (const [width, height] of [
+      [669, 951],
+      [466, 678],
+    ] as const) {
+      await pose(page, width, height);
+      await expect.poll(() => gapToEnd(page), { message: `${width}x${height}` }).toBeLessThanOrEqual(1);
+    }
+    const reply = "A reply that comes after the fold: the last line of it.";
+    b.s.clock = Date.now();
+    b.ss.push([
+      b.s.ev("turn.started", { turn_id: "t9" }, LONG),
+      b.s.ev(
+        "turn.progress",
+        { turn_id: "t9", user: "One more thing: is the dispute export covered?", assistant: reply },
+        LONG,
+      ),
+    ]);
+    // It is on screen, not under a pill that says there is something new below.
+    await expect(page.getByText(reply).first()).toBeInViewport({ timeout: 30_000 });
+    await expect.poll(() => gapToEnd(page)).toBeLessThanOrEqual(1);
+    await expect(page.locator(".sess-new")).toHaveCount(0);
+  } finally {
+    await b.close();
+  }
+});
+
+test("a board scrolled to a row keeps that row in place as the phone is unfolded and turned", async ({ browser }) => {
+  const b = await bedWith(browser, "466x678", manyRows(24));
+  const { page } = b;
+  try {
+    // 231 pt from the top of the outer display, under its 45 pt bar. Turned, the board's
+    // rows are a wide window's two lines, not a phone's three: those above it take less room.
+    const row = page.locator("article.card").filter({ hasText: "Row 09:" });
+    await expect(page.locator("article.card").filter({ hasText: "Row 20:" })).toBeAttached();
+    await putUnderBar(page, row, 186);
+    for (const [width, height] of ROUND.slice(0, 3)) {
+      await pose(page, width, height);
+      await staysUnderBar(row, 186, 24, `${width}x${height}`);
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+test("the Inbox's prompt and Search's result stay in place as the phone is unfolded and turned", async ({
+  browser,
+}) => {
+  const b = await bedWith(browser, "466x678", [...manyPrompts(14), ...manyRows(24)]);
+  const { page } = b;
+  try {
+    await page.goto(`${b.server.url}/inbox`);
+    const prompt = page.locator(".inbox-row").filter({ hasText: "Ask 06:" });
+    await expect(page.locator(".inbox-row").filter({ hasText: "Ask 14:" })).toBeAttached();
+    await putUnderBar(page, prompt, 186);
+    for (const [width, height] of ROUND.slice(0, 3)) {
+      await pose(page, width, height);
+      await staysUnderBar(prompt, 186, 24, `Inbox, ${width}x${height}`);
+    }
+    await pose(page, 466, 678);
+    await page.goto(`${b.server.url}/search`);
+    await page.getByRole("combobox", { name: "Search" }).first().fill("tidy");
+    const result = page.locator(".sx-row").filter({ hasText: "Row 09:" });
+    await expect(page.locator(".sx-row").filter({ hasText: "Row 20:" })).toBeAttached();
+    await putUnderBar(page, result, 186);
+    for (const [width, height] of ROUND.slice(0, 3)) {
+      await pose(page, width, height);
+      await staysUnderBar(result, 186, 24, `Search, ${width}x${height}`);
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+test("twelve folds and turns faster than the page settles keep the draft, the caret and the reading place", async ({
+  browser,
+}) => {
+  const b = await longOpen(browser, "466x678");
+  const { page } = b;
+  try {
+    const draft = "Check the refund export too.";
+    await composer(page).click();
+    await composer(page).fill(draft);
+    await composer(page).evaluate((t: HTMLTextAreaElement) => t.setSelectionRange(8, 8));
+    const start = paragraph(page, 4, 1);
+    await page.evaluate(() => window.scrollBy(0, -600));
+    await putUnderBar(page, start, 260);
+    const shapes = [
+      [669, 951],
+      [466, 678],
+      [669, 951],
+      [951, 669],
+      [669, 951],
+      [466, 678],
+      [669, 951],
+      [951, 669],
+      [470, 669],
+      [951, 669],
+      [466, 678],
+      [669, 951],
+    ] as const;
+    for (const [width, height] of shapes) await pose(page, width, height, undefined, false);
+    // On the inner display, where the hand stopped, and folded once more.
+    for (const [width, height] of [
+      [669, 951],
+      [466, 678],
+    ] as const) {
+      await pose(page, width, height);
+      const at = `${width}x${height}`;
+      await staysUnderBar(start, 260, 40, at);
+      await expect(composer(page), at).toHaveValue(draft);
+      await expect(composer(page), at).toBeFocused();
+      expect(await composer(page).evaluate((t: HTMLTextAreaElement) => [t.selectionStart, t.selectionEnd]), at).toEqual(
+        [8, 8],
+      );
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+test("New session's machine list stays open through an unfold and a fold, with its filter's text, the focus and the row it was on", async ({
+  browser,
+}) => {
+  const b = await duoBed(browser, "466x678");
+  const { page } = b;
+  // Nine computers: enough for the list to have a filter, which is where the focus is.
+  for (let i = 1; i <= 8; i++)
+    b.ss.machines.push({ ...b.ss.machines[0]!, id: `m_build${i}0123456789abcde`, name: `build-0${i}` });
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await b.approve();
+    // A page opened after the approval knows of it.
+    await page.reload();
+    await page
+      .getByRole("button", { name: /new session/i })
+      .first()
+      .click();
+    const sheet = page.locator("[data-new-session]");
+    await sheet.getByRole("combobox", { name: "Machine" }).click();
+    const list = page.getByRole("listbox", { name: "Machine" });
+    const filter = page.getByRole("textbox", { name: "Filter options" });
+    const active = page.locator("[role=option].sel-opt--active");
+    await expect(filter).toBeFocused();
+    await filter.pressSequentially("build-0");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await expect(active).toHaveText(/build-03/);
+    // A sheet on the outer display, a pop-up under its button on the inner one: one list.
+    for (const [width, height, form] of [
+      [669, 951, ".sel-pop"],
+      [466, 678, ".sel-sheet"],
+    ] as const) {
+      await pose(page, width, height);
+      const at = `${width}x${height}`;
+      await expect(page.locator(form), at).toBeVisible();
+      await expect(list, at).toBeVisible();
+      await expect(active, at).toHaveText(/build-03/);
+      await expect(active, at).toBeInViewport();
+      await expect(filter, at).toBeFocused();
+      await expect(filter, at).toHaveValue("build-0");
+      expect(await filter.getAttribute("aria-activedescendant"), at).toBe(await active.getAttribute("id"));
+    }
+    // The keys still move it, and Return picks.
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(list).toHaveCount(0);
+    await expect(sheet.getByRole("combobox", { name: "Machine" })).toHaveText(/build-04/);
+  } finally {
+    await b.close();
+  }
 });
 
 test.describe("what duo.ts promises a test, in both engines", () => {

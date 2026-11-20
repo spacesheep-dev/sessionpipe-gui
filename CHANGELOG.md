@@ -64,6 +64,23 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **Copy beside a tool's input or output, and on a block of code, takes a finger.** On a
   touch screen the button answered only on its 24 points; it looks the same and now takes a
   tap 44 points across.
+- **A window that changes width keeps the place being read.** A phone unfolded, folded or
+  turned, or a window dragged narrower, kept its scroll offset while the page above
+  wrapped anew: the reply being read, or the row on the Board, in the Inbox or in Search,
+  ended up as much as a screen away. The row a third of the way down the view now stays
+  where it was under the bar, and inside a reply longer than the screen the paragraph does.
+  Folded back, the page is where it began.
+- **A session followed at its end is still followed after the phone is turned.** In the
+  iPhone app, turning the phone upright again left the session short of its end and no
+  longer following: the next reply came in below, behind a "new" pill. A scroll the
+  browser made to fit the page to its new window was taken for the person's.
+- **Rows no longer glide after a window changes width.** The Board's and the Inbox's rows
+  slid from where the old layout had them to their new places, as they do when the list is
+  sorted anew. Nothing had moved in the list: they now stand where they are.
+- **An open list stays open as the phone is unfolded or folded.** A list that is a sheet on
+  a narrow screen and a pop-up under its button on a wider one was drawn anew as the
+  screen changed, and its filter lost the focus (and with it the keyboard). It is now the
+  same list in both forms: the filter's text, the focus and the row it was on are kept.
 
 ## [0.8.7] - 2026-11-20
 

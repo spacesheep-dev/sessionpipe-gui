@@ -255,6 +255,10 @@ function Picker<T>({
     });
   }, [align]);
 
+  // As a sheet the list has no place; turned back into a pop-up it is measured afresh.
+  useLayoutEffect(() => {
+    if (phone) setPlace(null);
+  }, [phone]);
   useLayoutEffect(() => {
     if (!open || phone) return;
     const fit = () => {
@@ -479,41 +483,38 @@ function Picker<T>({
   );
 
   // data-dismiss: a dialog's focus trap (lib/focus.ts) lets focus move into the filter.
+  // One element for both forms, the sheet and the pop-up: when the window crosses the
+  // width between them with the list open (a phone unfolded or folded), the list stays the
+  // list it was, with the filter's focus, its text and where the rows were scrolled to.
   const popover = open
     ? createPortal(
-        phone ? (
-          <>
-            <button type="button" className="sel-scrim" aria-label="Close" onClick={() => close()} />
-            <div className="sel-sheet" ref={pop} data-dismiss>
-              <span className="sel-grab" aria-hidden="true" />
-              {filterBox}
-              {rows}
-              {footer && <p className="sel-foot">{footer}</p>}
-            </div>
-          </>
-        ) : (
+        <>
+          {phone && <button type="button" className="sel-scrim" aria-label="Close" onClick={() => close()} />}
           <div
-            className={`sel-pop ${place?.above ? "sel-pop--above" : ""}`}
+            className={phone ? "sel-sheet" : `sel-pop ${place?.above ? "sel-pop--above" : ""}`}
             ref={pop}
             data-dismiss
             style={
-              place
-                ? {
-                    top: place.top,
-                    bottom: place.bottom,
-                    left: place.left,
-                    minWidth: place.minWidth,
-                    maxWidth: place.maxWidth,
-                    maxHeight: place.maxHeight,
-                  }
-                : { visibility: "hidden", top: 0, left: 0 }
+              phone
+                ? undefined
+                : place
+                  ? {
+                      top: place.top,
+                      bottom: place.bottom,
+                      left: place.left,
+                      minWidth: place.minWidth,
+                      maxWidth: place.maxWidth,
+                      maxHeight: place.maxHeight,
+                    }
+                  : { visibility: "hidden", top: 0, left: 0 }
             }
           >
+            {phone && <span className="sel-grab" aria-hidden="true" />}
             {filterBox}
             {rows}
             {footer && <p className="sel-foot">{footer}</p>}
           </div>
-        ),
+        </>,
         document.body,
       )
     : null;

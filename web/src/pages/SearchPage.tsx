@@ -24,6 +24,7 @@ import { useBackgroundMenu } from "../components/SessionCard";
 import { useStore } from "../data/hooks";
 import { usePhoneLayout, wideLayout } from "../lib/device";
 import { focusSearch } from "../lib/keys";
+import { pageBarBottom, useResizeAnchor } from "../lib/resizeAnchor";
 import { parseRoute, SPLIT_ACTIVE_PARAM, SPLIT_PARAM } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
 import { closeTab, type OpenHow, openWay, parseSplit } from "../lib/split";
@@ -142,6 +143,14 @@ export function Search() {
   const onRow = useRef<string | null>(null);
   const field = useRef<FieldHandle>(null);
   const listRef = useRef<HTMLOListElement>(null);
+  // A phone unfolded, folded or turned: the result being read stays where it was under the
+  // bar (lib/resizeAnchor.ts).
+  useResizeAnchor({
+    rows: ".sx-row[data-key]",
+    key: "data-key",
+    root: () => listRef.current,
+    barBottom: pageBarBottom(() => listRef.current),
+  });
   // The field takes the focus as the page is entered, in a wide window (a phone would
   // raise its keyboard): once. A change of layout mounts the field anew, and gives the
   // new one the focus only if the one it replaces had it (search/Field.tsx).

@@ -129,12 +129,14 @@ export async function insetsInit(
 /** Moves a live page to another window, as a fold, an unfold, a turn or Split View does:
  *  the size and that shape's insets together (`insets`: others, as with the band on the
  *  left), then waits until the page has the size and has drawn two frames at it, so what
- *  the resize set off is laid out. A page loaded afterwards keeps them. */
+ *  the resize set off is laid out (`settle` false: only for the size, as a hand that does
+ *  not wait goes on). A page loaded afterwards keeps them. */
 export async function pose(
   page: Page,
   width: number,
   height: number,
   insets: Insets = DUO[`${width}x${height}`]?.insets ?? NONE,
+  settle = true,
 ): Promise<void> {
   const armed = await page.evaluate((v) => {
     const duo = (window as unknown as DuoWindow).__duoInsets;
@@ -147,6 +149,7 @@ export async function pose(
   await page.evaluate(() => (window as unknown as DuoWindow).__duoInsets?.apply());
   // A state, not a time: the window is the size, then two frames have been drawn at it.
   await page.waitForFunction(([w, h]) => innerWidth === w && innerHeight === h, [width, height] as const);
+  if (!settle) return;
   await page.evaluate(
     () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
   );

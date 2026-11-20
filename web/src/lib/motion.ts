@@ -209,11 +209,16 @@ const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
  *  row is drawn right now, and the playing move is cancelled before the new one starts,
  *  so a row that moves twice glides on without a jump. A row inside another FLIP row (a
  *  subagent under its parent) is its own list's to move, never this one's. Positions are
- *  container-relative, so a scroll is not a move. Off under reduced motion, and past
- *  `max` rows (a long list just snaps). */
+ *  container-relative, so a scroll is not a move. Nor is a list in another width than at
+ *  its last commit (a window resized, a phone unfolded or turned): its rows are laid out
+ *  anew, and none of them went anywhere. (A list that was hidden then had no width: shown,
+ *  its rows come in as new ones do.) Off under reduced motion, and past `max` rows (a
+ *  long list just snaps). */
 export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
   /** Each row's layout top (no transform), relative to the container, at the last commit. */
   const prev = useRef<Map<string, number> | null>(null);
+  /** The container's width at the last commit; 0 while it had no box. */
+  const width = useRef(0);
   const moving = useRef(new Map<string, Animation>());
   useLayoutEffect(() => {
     const box = ref.current;
@@ -222,7 +227,9 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
       const outer = el.parentElement?.closest("[data-flip]");
       return !outer || !box.contains(outer);
     });
-    const top = box.getBoundingClientRect().top;
+    const { top, width: wide } = box.getBoundingClientRect();
+    const rewrapped = width.current > 0 && wide > 0 && Math.round(wide) !== width.current;
+    width.current = Math.round(wide);
     // A hidden page (an occluded or minimised window, a background tab) draws nothing and
     // WebKit holds its animation clock: a row would wait there, transparent or half-moved,
     // until the window is seen again. Nobody can see a move then, so it just snaps.
@@ -242,7 +249,7 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
     }
     const before = prev.current;
     prev.current = now;
-    if (!before || !motion) return;
+    if (!before || !motion || rewrapped) return;
     const slow = tokenMs("--dur-slow", 280);
     const dur = tokenMs("--dur", 200);
     const live = new Map<string, Animation>();
