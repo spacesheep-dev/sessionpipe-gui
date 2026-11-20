@@ -9,7 +9,8 @@
 // the port. Success is said only once config.json holds a key other than the one before.
 // A run file whose receiver does not answer is from an earlier run, and is passed. A
 // receiver on the port that serves another folder means nothing is changed, and it says
-// which. Only when no receiver serves the folder is config.json written here.
+// which. Only when no receiver serves the folder is config.json written here; a folder it
+// cannot write is said in one line, not as an error stack.
 //
 // It prints no key and no link that holds one.
 import { existsSync, realpathSync } from "node:fs";
@@ -134,8 +135,20 @@ export async function runKeyCommand(verb: string | undefined, io: KeyCommandIo):
       `the receiver on port ${elsewhere.port} serves ${elsewhere.dir}, not ${dir}; nothing was changed.`,
       `http://localhost:${elsewhere.port}`,
     );
-  // 3. No receiver serves the folder: config.json holds the new key.
-  renewUiKey(dir, readGuiConfig(dir));
+  // 3. No receiver serves the folder: config.json holds the new key. A folder it cannot
+  // write (read-only, another account's, a full disk) is said in one line; writePrivate
+  // leaves no file of its own behind. The key is said to be unchanged only when
+  // config.json still holds the one before (readGuiConfig completing a file without a key
+  // may have written one first). A config.json that does not read is a ConfigError,
+  // which has no code and is said by the CLI.
+  try {
+    renewUiKey(dir, readGuiConfig(dir));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (typeof code !== "string") throw e;
+    err(`${dir} could not be written (${code})${keyNow() === before ? "; the key was not changed" : ""}.`);
+    return 1;
+  }
   out(RENEWED_LATER);
   return 0;
 }

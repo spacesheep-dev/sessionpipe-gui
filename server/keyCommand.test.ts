@@ -6,6 +6,7 @@
 // written there, so no later write of its own puts an older key back.
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -23,7 +24,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { ROUTES, UI_KEY_COOKIE } from "../shared/api.js";
 import { tempDir } from "../test/events.js";
 import { type App, createApp } from "./app.js";
-import { hashSecret, readGuiConfig, writeGuiConfig } from "./config.js";
+import { ConfigError, hashSecret, readGuiConfig, writeGuiConfig } from "./config.js";
 import { lanAddresses } from "./http/net.js";
 import { RENEWED_LATER, renewed, runKeyCommand } from "./keyCommand.js";
 import { DOOR_HEADER, doorsDir, listDoors } from "./localDoor.js";
@@ -354,6 +355,39 @@ describe("key renew says only what happened", () => {
     expect(err.join("")).toBe(`sessionpipe-gui: no board in ${typo}: it holds no config.json. Nothing was changed.\n`);
     expect(out).toEqual([]);
     expect(existsSync(typo)).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "a folder it cannot write: one line, the key and the folder as they were",
+    async () => {
+      // A whole config.json (the write of a new key) and one without a key (readGuiConfig
+      // completes it first): both are writes the folder refuses.
+      for (const text of [null, `${JSON.stringify({ sinkToken: "s".repeat(43) })}\n`]) {
+        const dir = path.join(tmp.dir, text ? "incomplete" : "whole");
+        mkdirSync(dir);
+        if (text) writeFileSync(path.join(dir, "config.json"), text, { mode: 0o600 });
+        else readGuiConfig(dir);
+        const before = readFileSync(path.join(dir, "config.json"), "utf8");
+        chmodSync(dir, 0o500);
+        try {
+          const t = io({ stateDir: dir });
+          expect(await runKeyCommand("renew", t.io)).toBe(1);
+          expect(t.err()).toBe(`sessionpipe-gui: ${dir} could not be written (EACCES); the key was not changed.\n`);
+          expect(t.out()).toBe("");
+          expect(readFileSync(path.join(dir, "config.json"), "utf8")).toBe(before);
+          expect(readdirSync(dir)).toEqual(["config.json"]);
+        } finally {
+          chmodSync(dir, 0o700);
+        }
+      }
+    },
+  );
+
+  it("a config.json that is not JSON is still the ConfigError the CLI says, and is left as it is", async () => {
+    writeFileSync(path.join(tmp.dir, "config.json"), "{ not json", { mode: 0o600 });
+    const t = io();
+    await expect(runKeyCommand("renew", t.io)).rejects.toBeInstanceOf(ConfigError);
+    expect(readFileSync(path.join(tmp.dir, "config.json"), "utf8")).toBe("{ not json");
   });
 
   it("a receiver on the port that serves another folder: nothing changed, and that folder named", async () => {
