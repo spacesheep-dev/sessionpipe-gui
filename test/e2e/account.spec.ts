@@ -116,7 +116,7 @@ test.beforeAll(async ({ browser }) => {
       folders: ["/Users/me"],
       mode: "safe",
       agents: ["claude-code"],
-      cli_version: "sessionpipe 0.14.2",
+      cli_version: "sessionpipe 0.9.4",
       modes: ["waiter"],
       passkey_ids: ["a-passkey-made-on-spacesheep"],
       key_types: ["passkey", "device"],
