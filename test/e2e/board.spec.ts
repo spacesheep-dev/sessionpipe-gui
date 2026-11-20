@@ -291,6 +291,7 @@ test.describe("board", () => {
     // A turn 30 m old, its tool fresh; one 5 m tool, slow; a Bash 49 m quiet, stale; a Bash that failed.
     const old = session("E2E row time: old turn, fresh tool");
     const slow = session("E2E row time: slow tool");
+    const first = session("E2E row time: slow first tool");
     const stale = session("E2E row time: quiet Bash");
     const failed = session("E2E row time: failed Bash", "~/code/a-rather-long-repository-name-for-the-where-line");
     await post([
@@ -300,6 +301,9 @@ test.describe("board", () => {
       slow.ev("session.started", ago(7), { source: "startup" }),
       slow.ev("turn.started", ago(6)),
       slow.ev("tool.started", ago(5), bash("b1")),
+      first.ev("session.started", ago(5.2), { source: "startup" }),
+      first.ev("turn.started", ago(5)),
+      first.ev("tool.started", ago(5), bash("b1")),
       stale.ev("session.started", ago(51), { source: "startup" }),
       stale.ev("turn.started", ago(50)),
       stale.ev("tool.started", ago(49), bash("b1")),
@@ -325,6 +329,9 @@ test.describe("board", () => {
       // A slow tool says its own age once, after its name.
       await expect(slow.card.locator(".card-tool")).toHaveText("Bash · 5 m");
       await expect(slow.card.locator(".card-flags")).toHaveCount(0);
+      // One that began with the turn: the row's time is its age, said once.
+      await expect(first.card.locator(".card-time")).toHaveText("5 m");
+      await expect(first.card.locator(".card-tool")).toHaveText("Bash");
       // Stale: since the last word, the tool named without a second clock.
       await expect(stale.card.locator(".card-time")).toHaveText("49 m");
       await expect(stale.card.locator(".card-time")).toHaveAttribute("title", /^No word since \S/);

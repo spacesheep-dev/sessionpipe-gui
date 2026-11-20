@@ -215,7 +215,8 @@ export const SessionCard = memo(function SessionCard({
   const isLiveText = !!s.progress?.assistant?.trim();
   // A stale row names its tool too, with no age: the time already says how long it is quiet.
   const tool = showTools && s.currentTool && (s.state === "working" || s.state === "stale") ? s.currentTool : undefined;
-  // A working row's tool shows its age once the store calls it slow ("Bash · 12 m").
+  // A working row's tool shows its age once the store calls it slow ("Bash · 12 m"), when
+  // that is not the row's own time (toolAge, below).
   const slow = !!tool && s.state === "working" && !!s.flags?.some((f) => f.kind === "slow_tool");
   const attnTool = attention?.tool && showTools ? attention.tool : undefined;
   const ref = useRef<HTMLElement>(null);
@@ -293,6 +294,9 @@ export const SessionCard = memo(function SessionCard({
   );
   const repo = repoShort(s.repo);
   const { iso: time, tip: timeTip } = rowTime(s);
+  // Its own age only when the tool began a minute or more after the row's time: otherwise
+  // the number at the row's end already says it ("Edit · 4 m … 4 m").
+  const toolAge = !!tool && slow && Date.parse(tool.since) - Date.parse(time) >= 60_000;
   const failed = showTools && lastFailed(s);
   // The counts the row no longer prints are its tooltip: "2 turns · 5 tools · 1 error".
   const tip = [title, countsLine(s, showTools)].filter(Boolean).join("\n");
@@ -392,7 +396,7 @@ export const SessionCard = memo(function SessionCard({
             {!attention && tool && (
               <code className="card-tool">
                 {toolLabel(tool.tool)}
-                {slow && (
+                {toolAge && (
                   <>
                     {" · "}
                     {frozenAt ? <Frozen iso={tool.since} at={frozenAt} /> : <Since iso={tool.since} title={false} />}
