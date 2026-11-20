@@ -1978,8 +1978,11 @@ function TurnBlock({
         {items.length === 0 && status && <StatusRow {...status} chat={false} />}
         {items.map((it) => {
           if (it.kind === "tool") {
-            const row = <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} look={look} />;
-            if (!isPlanCall(it)) return row;
+            const plan = isPlanCall(it);
+            // A plan's call is its name alone: the panel under it draws the plan (the raw
+            // input stays under the chevron).
+            const row = <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} look={look} bare={plan} />;
+            if (!plan) return row;
             // A plan review's plan, right under its own call: the turn goes on under it.
             return (
               <Fragment key={it.key}>
@@ -2984,6 +2987,7 @@ function ToolRow({
   now,
   fill,
   look,
+  bare = false,
 }: {
   item: ToolItem;
   lens: Tier;
@@ -2992,6 +2996,8 @@ function ToolRow({
   /** How it shows while it has no end (its turn's look, a subagent's own state); none, it
    *  was cut off with its turn and is not running. */
   look?: ToolLook;
+  /** No subject after its name: what is drawn under it shows the input (a plan's panel). */
+  bare?: boolean;
 }) {
   const e = item.ended ?? item.started!;
   const tool = String(e.data.tool);
@@ -3010,7 +3016,7 @@ function ToolRow({
   const output = lens >= 3 ? item.ended?.data.output : undefined;
   const error = item.ended?.data.error as string | undefined;
   const expandable = input !== undefined || output !== undefined || !!error;
-  const subject = toolSubject(input);
+  const subject = bare ? "" : toolSubject(input);
   const details = useRef<HTMLDetailsElement>(null);
   const inputEvent = item.ended?.data.input !== undefined ? item.ended : item.started;
   const cutIn = inputEvent?.preview?.input !== undefined;

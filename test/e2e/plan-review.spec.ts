@@ -157,12 +157,17 @@ for (const size of [
         await expect(dock.getByRole("button", { name: "Approve plan" })).toBeVisible();
         const h = (await dock.boundingBox())!.height;
         expect(h, `the dock is ${h} px`).toBeLessThan(160);
-        // In Advanced, right under its own call's row.
-        if (!simple)
+        // In Advanced, right under its own call's row, which is its name alone: the plan is
+        // not said a second time as the call's raw input.
+        if (!simple) {
           expect(
             await panel.evaluate((el) => el.previousElementSibling?.textContent?.includes("Plan") ?? false),
             "under the ExitPlanMode row",
           ).toBe(true);
+          const call = page.locator(".timeline li.tool:has(+ .turn-plan)");
+          await expect(call.locator(".tool-name")).toHaveText("Plan");
+          await expect(call.locator(".tool-subject")).toHaveCount(0);
+        }
         // The page opens on the plan's first line, not on its last.
         await expect.poll(() => inView(page, HEAD), "its heading is in view").toBe(true);
         expect(await inView(page, LAST), "its last line is below the fold").toBe(false);
