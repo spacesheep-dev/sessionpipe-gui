@@ -471,6 +471,8 @@ export function ControlStrip({
     enabled,
     mode,
     onRefused: () => setRefusedAt(refusedKey),
+    // A picture in the tray keeps a preview tab beside the page, as typing does (lib/split.ts).
+    onAdded: () => keepTab(session.key),
   });
   // A held message confirmed from its notice (control/HeldNotice.tsx) went: the composer
   // is clear, as after Send. Until then its words stayed here.

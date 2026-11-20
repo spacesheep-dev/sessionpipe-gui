@@ -50,8 +50,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   Board stays in view. Where the panel can't show, and on the phone, a session opens as its
   page. The two choices read Beside and As a page, in Settings and in the Board's ⋯ menu.
 - **Sessions opened one after another beside the page share one tab.** A plain open beside
-  the page reuses one preview tab, its title in italics; typing in it, a double-click on the
-  tab or a drag keeps it, and an open holding ⌘ adds a kept tab. Answering keeps nothing, so
+  the page reuses one preview tab, its title in italics; typing in it, a picture added to it,
+  a double-click on the tab or a drag keeps it, and an open holding ⌘ adds a kept tab. Answering keeps nothing, so
   going down the Inbox leaves one tab.
 - **On a computer, the notifications hold still under your hand.** Prompts sit nearest the
   corner, newest first, with a failed turn, Delivered and "Hidden · Undo" under them, so a

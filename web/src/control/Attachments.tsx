@@ -367,12 +367,14 @@ export interface AttachmentsHandle {
 
 /** `mode`: how this session's machine takes pictures (`pictureMode`); `machineId`: the
  *  machine an upload is for. `onRefused`: a picture was pasted or dropped where none can be
- *  sent ("off"), so the composer says why (`picturesOffWords`); nothing is swallowed. */
+ *  sent ("off"), so the composer says why (`picturesOffWords`); nothing is swallowed.
+ *  `onAdded`: a picture went into the tray (pasted, dropped or picked). */
 export function useAttachments(o: {
   machineId?: string;
   enabled?: boolean;
   mode?: PictureMode;
   onRefused?: () => void;
+  onAdded?: () => void;
 }): AttachmentsHandle {
   const [items, setItems] = useState<PendingItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -389,6 +391,8 @@ export function useAttachments(o: {
   itemsRef.current = items;
   const onRefused = useRef(o.onRefused);
   onRefused.current = o.onRefused;
+  const onAdded = useRef(o.onAdded);
+  onAdded.current = o.onAdded;
 
   // Object URLs of what was never sent are let go with the composer.
   useEffect(
@@ -446,6 +450,7 @@ export function useAttachments(o: {
       // Now, not at the next render: a second add in the same tick sees these names and this count.
       itemsRef.current = [...itemsRef.current, ...added];
       setItems((prev) => [...prev, ...added]);
+      if (added.length > 0) onAdded.current?.();
     },
     [enabled, takes],
   );
