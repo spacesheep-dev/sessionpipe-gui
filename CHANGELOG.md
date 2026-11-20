@@ -74,6 +74,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   new CA that phones must trust again, or nothing, when the file has to be fixed by hand
   (or the folder deleted with `sessionpipe-gui tls reset`). A `tls` folder this account
   cannot read is named too, instead of "none yet".
+- **Search's `since:` and `until:` refuse a day the month does not have.** `until:2026-02-30`
+  searched up to March 2, `since:2026-11-31` from December 1 and `2026-02-29` read as March
+  1, without a word, and the Date chip said "Until Mar 2". Such a date is now left out, as
+  `2026-13-01` already was, and the receiver's Search page and `sessionpipe-gui search`
+  name it ("“until:2026-02-30” isn't a date, so it was left out"). `2028-02-29` still reads.
 - **A picture is made smaller before it uploads.** In the message box and in New session,
   a big photo or screenshot is redrawn at most 2560 px on its long edge, as WebP (JPEG
   where the browser can't write WebP), the way spacesheep does it: a 13 MB phone photo
