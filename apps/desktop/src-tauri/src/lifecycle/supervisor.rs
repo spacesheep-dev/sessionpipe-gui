@@ -2904,10 +2904,11 @@ mod tests {
     /// get it, and a receiver that is still loading is never said not to have started.
     #[test]
     fn the_page_is_told_which_start_failed_by_kind_and_given_the_line() {
+        let no_node = StartError::NoNode.to_string();
         let f = UpdateFailure::from(&StartError::NoNode);
         assert_eq!(
             (f.kind, f.line.as_str(), f.log),
-            ("noNode", "sessionpipe needs Node 20 or later", None)
+            ("noNode", no_node.as_str(), None)
         );
         let f = UpdateFailure::from(&StartError::Timeout(7373));
         assert_eq!(f.kind, "timeout");
@@ -2923,7 +2924,7 @@ mod tests {
         // As the page reads it: camelCase, and no log where the line names none.
         assert_eq!(
             serde_json::to_value(UpdateFailure::from(&StartError::NoNode)).unwrap(),
-            serde_json::json!({ "kind": "noNode", "line": "sessionpipe needs Node 20 or later" })
+            serde_json::json!({ "kind": "noNode", "line": no_node })
         );
     }
 
