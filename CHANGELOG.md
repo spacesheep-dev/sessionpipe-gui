@@ -45,11 +45,6 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
-- **`--rp-id` takes a host name alone.** `--rp-id https://foo.example`,
-  `--rp-id foo.example:7373`, a path or an empty value started a receiver whose passkey
-  origin (`https://https://foo.example:<port>`, `https://:<port>`) no browser makes a
-  passkey for, without a word. Each now stops with an `--rp-id` message; an IP address is
-  taken as before.
 - **`--port` and `--keep-days` take digits only, and a flag is never another flag's
   value.** `--port ""` (a script's unset `$PORT`) started on a random port and
   `--keep-days ""` kept every event whole, both without a word; `--port 0x1F90` listened on
@@ -63,6 +58,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   receiver runs in (SIGHUP) ended it at once and left its `run.json` behind; it now stops
   as Ctrl-C does. A receiver whose output was already gone when it was stopped (a `| tee`
   ended by the same Ctrl-C) no longer exits with an error before it has closed.
+- **Search's status line says which computer to restart.** With history search off and its
+  index still on disk, a viewer on another device read "Restarting the app tries again",
+  which could mean the app on the phone; it now reads "Restarting the app on that computer
+  tries again".
+- **`--rp-id` takes a host name alone.** `--rp-id https://foo.example`,
+  `--rp-id foo.example:7373`, a path or an empty value started a receiver whose passkey
+  origin (`https://https://foo.example:<port>`, `https://:<port>`) no browser makes a
+  passkey for, without a word. Each now stops with an `--rp-id` message; an IP address is
+  taken as before.
 
 ## [0.8.6] - 2026-11-19
 

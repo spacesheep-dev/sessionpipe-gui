@@ -132,7 +132,7 @@ can a skin: a `src` must be a file in the folder.
 |---|---|---|
 | `radius` | `--radius` and `--radius-sm`, in px | `6` is the stock value; `2` reads sharp, `12` soft. Pills (`--radius-pill`) stay round. |
 | `hairline` | `--hairline` | `1` (stock), `1.5` or `2`: every rule and border that is a hairline today (`var(--hairline) solid var(--line…)`). On a 1× display `1.5` paints as 2. |
-| `density` | `data-density` on `<html>` | `compact` (rows 28 / 32 / 36 px), `default` (32 / 36 / 40), `comfortable` (36 / 40 / 44), with the padding between settings rows following (4 / 8 / 12). `app.css` maps the attribute to `--row-sm`, `--row`, `--row-lg` and `--row-pad`. |
+| `density` | `data-density` on `<html>` | `compact` (rows 28 / 32 / 36 px), `default` (32 / 36 / 40), `comfortable` (36 / 40 / 44), with the padding between settings rows following (4 / 8 / 12). `web/src/styles/density.css` maps the attribute to `--row-sm`, `--row`, `--row-lg` and `--row-pad`; `default` leaves the attribute off, so the stock values in `web/src/styles/tokens.css` apply. |
 
 ## Your own stylesheet
 

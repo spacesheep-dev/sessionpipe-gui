@@ -63,7 +63,7 @@ describe("words", () => {
     );
     // a viewer on another device has no Rebuild button
     expect(statusWords(left)).toBe(
-      "History search is off, but its index could not be deleted. Restarting the app tries again.",
+      "History search is off, but its index could not be deleted. Restarting the app on that computer tries again.",
     );
   });
 });
