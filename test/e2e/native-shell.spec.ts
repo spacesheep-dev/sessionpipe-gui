@@ -8,7 +8,18 @@
 // the flag never loads a byte of the native code.
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { dropStream, EVENTS, holdBoard, INFO, openPrompt, sessionUrl, tapStream, tier1Batch, ulid } from "./helpers.js";
+import {
+  dropStream,
+  EVENTS,
+  holdBoard,
+  INFO,
+  openPrompt,
+  openSessionsUnchosen,
+  sessionUrl,
+  tapStream,
+  tier1Batch,
+  ulid,
+} from "./helpers.js";
 import { openInPhone } from "./phone-shell.js";
 
 interface FakeOptions {
@@ -519,6 +530,43 @@ test.describe("inside the native shell", () => {
     await emit(page, "menu", { action: "toggle-sidebar" });
     await expect(page.locator("html")).toHaveAttribute("data-rail-hidden", "");
     await expect(page.locator(".rail")).toBeHidden();
+  });
+
+  test("a session the app asks for while its window is up opens beside the page, as a preview tab; on Usage it is the page", async ({
+    page,
+  }) => {
+    await openSessionsUnchosen(page);
+    await openInShell(page, "/");
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    await holdBoard(page);
+    const links = page.locator("article.card a.card-link");
+    await expect.poll(() => links.count()).toBeGreaterThanOrEqual(3);
+    const hrefs = await links.evaluateAll((els) => els.slice(0, 3).map((el) => el.getAttribute("href")!));
+    const keys = hrefs.map((h) =>
+      h
+        .replace(/^\/s\//, "")
+        .split("/")
+        .map(decodeURIComponent)
+        .join(":"),
+    );
+    const panel = page.locator("aside.panel");
+    const tabKeys = () =>
+      panel
+        .locator("[role='tablist'] [role='tab']")
+        .evaluateAll((els) => els.map((el) => el.getAttribute("data-tab-key")));
+    await emit(page, "navigate", { to: `/inbox?s=${encodeURIComponent(`${keys[0]},${keys[1]}`)}` });
+    await expect.poll(tabKeys).toEqual([keys[0], keys[1]]);
+    // A notification's click (notifications.rs) or the menu bar's session (tray.rs): /s/<h>/<id>.
+    await emit(page, "navigate", { to: hrefs[2] });
+    await expect.poll(tabKeys).toEqual(keys);
+    await expect(panel).toHaveAttribute("data-split", keys[2]!);
+    await expect(panel.locator(".tab--preview")).toHaveAttribute("data-tab-key", keys[2]!);
+    expect(new URL(page.url()).pathname).toBe("/inbox");
+    // Where the panel does not show, the session is its page.
+    await emit(page, "navigate", { to: "/usage" });
+    await expect(page).toHaveURL(/\/usage/);
+    await emit(page, "navigate", { to: hrefs[0] });
+    await expect(page).toHaveURL((u) => u.pathname === hrefs[0]);
   });
 
   test("a machine that doesn't trust the app's key: the palette lists no Allow for it, and its session says Approve this Mac", async ({

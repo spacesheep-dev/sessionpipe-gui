@@ -38,7 +38,7 @@ import { reducedMotion, tokenMs, useListHold } from "../lib/motion";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit, openWay } from "../lib/split";
+import { openSession, openSplit, openWay } from "../lib/split";
 import { atTier } from "../lib/tier";
 import { clock, dayLabel, durShort, useToday } from "../lib/time";
 import { eventWords as turnWords } from "../lib/turns";
@@ -357,8 +357,7 @@ export function Feed() {
   // The tier lens: rows a receiver at that tier would not have got leave; the rest lose
   // the fields it would not carry (lib/tier.ts).
   const lens = useLens();
-  const { openSessions, mode } = useAppSettings();
-  const beside = openSessions === "beside";
+  const { mode } = useAppSettings();
   const rows = useMemo(
     () => (lens === null ? loaded : loaded.map((e) => atTier(e, lens)).filter((e): e is StoredEvent => e !== null)),
     [loaded, lens],
@@ -540,7 +539,6 @@ export function Feed() {
               day={showDay ? sentence(day) : undefined}
               title={s ? sessionTitle(s) : e.session.title ? plainTitle(e.session.title) : e.session.id.slice(0, 8)}
               agent={agent}
-              beside={beside}
               ctx={ctx}
               more={more}
             />
@@ -675,7 +673,6 @@ const FeedRow = memo(function FeedRow({
   day,
   title,
   agent,
-  beside,
   ctx,
   more = false,
 }: {
@@ -687,7 +684,6 @@ const FeedRow = memo(function FeedRow({
   title: string;
   /** The subagent's type, when the event is one of its own. */
   agent?: string;
-  beside: boolean;
   ctx: { current: FeedMenuContext };
 }) {
   const key = storedKey(e);
@@ -764,12 +760,8 @@ const FeedRow = memo(function FeedRow({
           className="ev-session ellipsis"
           data-nav-item=""
           title={`${title} · ${e.session.id}`}
-          plainClick={beside ? () => openSplit(key, { from: rect(), preview: true }) : undefined}
-          modClick={(o) => {
-            const way = openWay(o.background ? "background" : "other");
-            if (way === "page") navigate(path);
-            else openSplit(key, { from: rect(), background: way === "background" });
-          }}
+          plainClick={() => openSession(key, "primary", { from: rect() })}
+          modClick={(o) => openSession(key, o.background ? "background" : "other", { from: rect() })}
         >
           <LabelDot session={key} />
           <span className="ev-title ellipsis">{title}</span>

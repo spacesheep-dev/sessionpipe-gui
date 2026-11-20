@@ -84,7 +84,7 @@ import { accountMode, apiFetch } from "../lib/net";
 import { Link, navigate, searchAll, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
 import { hintFor, useBindingVersion, useShortcut } from "../lib/shortcuts";
-import { openSplit, useSplitKey } from "../lib/split";
+import { openSession, openSplit, useSplitKey } from "../lib/split";
 import { useNow } from "../lib/time";
 import { NEW_WORDS as N } from "../native/accountWords";
 import { useSetupStatus } from "../setup/api";
@@ -149,13 +149,8 @@ function viewItems(o: {
     {
       label: "Open sessions",
       items: [
+        { label: "Beside", radio: true, checked: o.beside, run: () => setSettings({ openSessions: "beside" }) },
         { label: "As a page", radio: true, checked: !o.beside, run: () => setSettings({ openSessions: "page" }) },
-        {
-          label: "Beside the page",
-          radio: true,
-          checked: o.beside,
-          run: () => setSettings({ openSessions: "beside" }),
-        },
       ],
     },
     ...(rows ? lensMenu(o.lens, o.simple) : []),
@@ -494,7 +489,6 @@ export function Board() {
         cursor={s.key === cursorKey ? cursor : undefined}
         lens={lens}
         simple={simple}
-        openBeside={beside}
         open={s.key === openKey}
         openTab={s.agents?.length ? openKey : null}
         agentsMatch={lq.rest && agentsMatch(s, lq.rest) ? lq.rest : undefined}
@@ -1004,7 +998,14 @@ function StartingCard({
   return (
     <article className="card card--working card--starting" data-starting={a.session}>
       <div className="card-row">
-        <Link to={sessionPath(harness, id)} className="card-link" title={title} data-nav-item="">
+        <Link
+          to={sessionPath(harness, id)}
+          className="card-link"
+          title={title}
+          data-nav-item=""
+          plainClick={() => openSession(a.session!, "primary")}
+          modClick={(o) => openSession(a.session!, o.background ? "background" : "other")}
+        >
           <h3 className="card-title ellipsis">{title}</h3>
           <span className="card-status">
             <span className="card-state">

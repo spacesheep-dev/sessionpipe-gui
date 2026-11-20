@@ -4,13 +4,14 @@
 // Sessions (fuzzy over title, repo, branch, machine, model; the ones that need you or work
 // first), the open permissions ("Allow Read in …"), actions on the session in view (a
 // message, open beside, open as page, forget) and the places to go. Enter runs the row
-// under the cursor, shift+Enter opens a session beside, `>` keeps only actions, `#` only
-// places. A row with › pushes a second list in place (the machines to start on, the
-// appearance, the skin); Esc or Backspace on an empty field steps back. Typing a paired
-// machine or a repo offers "New session on studio-mac in acme/billing" first. On a wide
-// window the session under the cursor is previewed beside the list. Messages and answers
-// leave the way the control strip sends them (web/src/control/command.ts), and are listed
-// only where they would be sent (control/useSend.ts answerState).
+// under the cursor (a session the way Settings says), shift+Enter opens a session the
+// other way, `>` keeps only actions, `#` only places. A row with › pushes a second list
+// in place (the machines to start on, the appearance, the skin); Esc or Backspace on an
+// empty field steps back. Typing a paired machine or a repo offers "New session on
+// studio-mac in acme/billing" first. On a wide window the session under the cursor is
+// previewed beside the list. Messages and answers leave the way the control strip sends
+// them (web/src/control/command.ts), and are listed only where they would be sent
+// (control/useSend.ts answerState).
 import type { AgentRun, Attention, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
 import { isEmptySession, LABEL_COLORS, SNIPPET_CHARS, sessionKey, splitKey } from "@shared/api";
 import {
@@ -58,7 +59,7 @@ import { accountMode } from "../lib/net";
 import { navigate, openSettings, parseRoute, searchAll, sessionPath, useRoute } from "../lib/router";
 import { useSimple } from "../lib/settings";
 import { hintFor, IS_MAC, matches, useShortcutMap } from "../lib/shortcuts";
-import { openSplit, useSplitKey } from "../lib/split";
+import { openSession, openSplit, openWay, useSplitKey } from "../lib/split";
 import { setSkin, setTextSize, setTheme, TEXT_SIZES, type Theme, useSettings } from "../lib/theme";
 import { askOff } from "../orchestrate/handoff/handoff";
 import { openHandoffFor } from "../orchestrate/handoff/handoffState";
@@ -643,10 +644,10 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
       at: s.lastAt,
       session: s,
       score: (m?.score ?? 0) + (ACTIVE.has(s.state) ? 1.5 : 0),
+      // ↵ the way Settings says, ⇧↵ the other way (lib/split.ts openSession).
       run: ({ beside }) => {
         closePalette();
-        if (beside) openSplit(s.key);
-        else navigate(sessionPath(s.harness, s.id));
+        openSession(s.key, beside ? "other" : "primary");
       },
     });
 
@@ -845,6 +846,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           },
           hintFor("session.ask") || undefined,
         );
+        // ⇧↵ on a session's row opens it the other way (lib/split.ts openWay): its key goes
+        // on that item.
+        const otherWay = openWay("other");
         if (!simple && !(isCtx && splitActive === s.key && !onItsPage(s)))
           add(
             "Open beside",
@@ -852,7 +856,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               closePalette();
               openSplit(s.key);
             },
-            hintFor("palette.beside"),
+            otherWay === "beside" ? hintFor("palette.beside") : undefined,
           );
         if (!onItsPage(s))
           add(
@@ -861,7 +865,11 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               closePalette();
               navigate(sessionPath(s.harness, s.id));
             },
-            splitActive === s.key ? hintFor("session.openPage") : undefined,
+            splitActive === s.key
+              ? hintFor("session.openPage")
+              : otherWay === "page" && openWay("primary") === "beside"
+                ? hintFor("palette.beside")
+                : undefined,
           );
         if (isCtx) add("Label…", () => push({ id: "label", session: s.key }), undefined, { sub: true });
         if (isCtx && !simple)
@@ -1257,13 +1265,14 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
       return rows;
     }
 
-    /** The newest session that touched the file, opened on it: as the page (`?file=`), or
-     *  beside, where the panel's drawer takes the file. */
-    function openFileIn(key: string, path: string, beside: boolean): void {
+    /** The newest session that touched the file, opened on it the way ↵ or ⇧↵ asks
+     *  (lib/split.ts openWay): as the page (`?file=`), or beside, where the panel's drawer
+     *  takes the file. */
+    function openFileIn(key: string, path: string, other: boolean): void {
       closePalette();
       const { harness, id } = splitKey(key);
-      if (beside) {
-        openSplit(key);
+      if (openWay(other ? "other" : "primary") === "beside") {
+        openSplit(key, { preview: !other });
         openDrawer(key, path, "panel");
       } else navigate(`${sessionPath(harness, id)}?file=${encodeURIComponent(path)}`);
     }
@@ -1516,6 +1525,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
   };
 
   const { only, text } = parseQuery(q);
+  // The foot's ⇧↵ says the way it opens a session, the other one from ↵'s (lib/split.ts).
+  const primaryWay = openWay("primary");
+  const otherWay = openWay("other");
   const placeholder =
     mode.kind === "prompt"
       ? `Message for ${sessionTitle(mode.session)} · Enter sends`
@@ -1724,7 +1736,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             <>
               <FootKey keys="↑↓">Move</FootKey>
               <FootKey keys="↵">{items[at]?.sub ? "Choose" : "Open"}</FootKey>
-              {!sub && <FootKey keys="⇧↵">Beside</FootKey>}
+              {!sub && otherWay !== primaryWay && (
+                <FootKey keys="⇧↵">{otherWay === "beside" ? "Beside" : "As a page"}</FootKey>
+              )}
               {txOn && q.trim().length >= PALETTE_MIN && <FootKey keys={IS_MAC ? "⌘↵" : "Ctrl ↵"}>Search all</FootKey>}
               <span className="pal-foot-spring" />
               {sub ? (

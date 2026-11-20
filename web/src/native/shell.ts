@@ -8,7 +8,7 @@
 import "./chrome.css";
 import type { Store } from "../data/store";
 import { shellStreams } from "../lib/net";
-import { navigate } from "../lib/router";
+import { openAsked } from "../lib/split";
 import { invoke, listen } from "./bridge";
 import { installKeyFilter, type MenuPayload, restoreSidebar, runMenu } from "./menu";
 import { openStream, resyncAll } from "./stream";
@@ -207,8 +207,9 @@ export async function start(): Promise<boolean> {
   const on = <T>(event: string, fn: (p: T) => void) => listen<T>(event, fn).catch(() => {});
   void on<MenuPayload>("menu", (p) => p?.action && runMenu(p.action, p));
   void on<{ to?: string }>("navigate", (p) => {
+    // A session's page opens the way a click does (lib/split.ts openAsked), keeping the page.
     const to = safePath(p?.to);
-    if (to) navigate(to);
+    if (to) openAsked(to);
   });
   void on("wake", () => resyncAll());
   void import("./appState").then((m) => m.wire(on, info.features.includes("updater")));

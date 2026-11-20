@@ -15,6 +15,7 @@ import { labelMenu } from "../lib/labels";
 import { absoluteUrl } from "../lib/menus";
 import { receiverOrigin } from "../lib/net";
 import { sessionPath } from "../lib/router";
+import { openWay } from "../lib/split";
 import { pushToast } from "../lib/toasts";
 import { type OpenMode, openResult, resultLink } from "./open";
 import type { SearchClient } from "./types";
@@ -87,12 +88,21 @@ export function rowMenu(m: SessionMatch, ctx: RowMenuContext): MenuList {
     if (m.summary) openResult(m, undefined, ctx.q, "page");
     else openResult(m, m.hits[m.hits.length - 1], ctx.q, "page");
   };
+  const besideFirst = openWay("primary") === "beside";
   const canReveal = !phoneLayout() && ctx.status?.local === true && m.thisMachine;
   const repo = repoShortName(m.repo);
   const withToken = (key: "repo" | "machine", value: string) => ctx.setQuery(setFilter(ctx.q, key, value));
   const items: (MenuItem | null | false)[] = [
-    { label: "Open", keys: "↵", run: open("page") },
-    !phoneLayout() && { label: "Open beside", keys: "⇧↵", run: open("beside") },
+    // ↵'s way first, with ↵; the other way with ⇧↵ (lib/split.ts openWay).
+    ...(besideFirst
+      ? [
+          { label: "Open beside", keys: "↵", run: open("beside") },
+          { label: "Open as page", keys: "⇧↵", run: open("page") },
+        ]
+      : [
+          { label: "Open", keys: "↵", run: open("page") },
+          !phoneLayout() && { label: "Open beside", keys: "⇧↵", run: open("beside") },
+        ]),
     { label: "Open at the latest", run: latest },
     { sep: true },
     m.resume

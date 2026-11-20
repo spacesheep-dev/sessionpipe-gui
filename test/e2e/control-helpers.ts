@@ -10,6 +10,7 @@
 // size and hash that were signed, as a daemon does before it delivers anything.
 import { createHash, randomUUID } from "node:crypto";
 import type { BrowserContext, Page } from "@playwright/test";
+import { SUITE_SETTINGS } from "../../playwright.config.js";
 import { ulid } from "./helpers.js";
 
 export const CONTROL_PORT = Number(process.env.SPGUI_E2E_TLS_PORT ?? 7312);
@@ -371,10 +372,12 @@ export async function postPrompt(
   };
 }
 
-/** The setup page's first-run redirect and Simple mode stay out of these pages. */
-export async function seenSetupHere(context: BrowserContext): Promise<void> {
-  await context.addInitScript(() => {
+/** The setup page's first-run redirect and Simple mode stay out of these pages, and sessions
+ *  open as pages, as in the rest of the suite (playwright.config.ts), unless `settings` says
+ *  otherwise (`{ mode: "advanced" }`: a computer that has not chosen how sessions open). */
+export async function seenSetupHere(context: BrowserContext, settings: object = SUITE_SETTINGS): Promise<void> {
+  await context.addInitScript((settings) => {
     localStorage.setItem("sessionpipe-gui.setup.seen", "1");
-    localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "advanced" }));
-  });
+    localStorage.setItem("sessionpipe-gui.settings", JSON.stringify(settings));
+  }, settings);
 }

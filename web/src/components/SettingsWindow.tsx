@@ -509,6 +509,7 @@ export function ModeRow({ hint = true }: { hint?: boolean }) {
 
 function General() {
   const s = useAppSettings();
+  const phone = usePhoneLayout();
   return (
     <>
       <Group>
@@ -524,18 +525,20 @@ function General() {
             options={DEFAULT_PAGES}
           />
         </Row>
-        <Row label="Open sessions" hint={OPEN_SESSIONS_HINT}>
-          <Choice<OpenSessions>
-            value={s.openSessions}
-            onChange={(openSessions) => setSettings({ openSessions })}
-            label="Open sessions"
-            note={OPEN_SESSIONS_HINT}
-            options={[
-              { value: "page", label: "As page" },
-              { value: "beside", label: "Beside" },
-            ]}
-          />
-        </Row>
+        {/* The phone opens every session as its page: there is nothing to choose. */}
+        {!phone && (
+          <Row label="Open sessions" hint={OPEN_SESSIONS_HINT}>
+            <Choice<OpenSessions>
+              value={s.openSessions}
+              onChange={(openSessions) => setSettings({ openSessions })}
+              label="Open sessions"
+              options={[
+                { value: "beside", label: "Beside" },
+                { value: "page", label: "As a page" },
+              ]}
+            />
+          </Row>
+        )}
         <Row label="Confirm before Forget" hint="Forget deletes what is held for a session here.">
           <Toggle
             on={s.confirmForget}

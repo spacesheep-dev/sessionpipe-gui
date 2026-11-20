@@ -11,9 +11,10 @@ import { HarnessGlyph } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { LabelDot } from "../components/LabelDot";
 import { toolLabel } from "../lib/format";
+import { howOf } from "../lib/split";
 import { Marked } from "./Marked";
 import { menuSubtitle, menuTitle, type RowMenuContext, rowMenu, snippetMenu } from "./menu";
-import { openResult, resultLink } from "./open";
+import { openResultAs, resultLink } from "./open";
 import { metaFacts, shortDate, spanTip, toolText } from "./words";
 
 const FIELD_WORD = { prompt: "Prompt", reply: "Reply", tool: "Tool call" } as const;
@@ -115,13 +116,8 @@ export const Row = memo(function Row({ m, index, active, stop, now, ctx, onCurso
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.defaultPrevented || e.button !== 0) return;
     onCursor(index);
-    if (e.metaKey || e.ctrlKey) {
-      e.preventDefault();
-      openResult(m, hit, ctx().q, "background", rect());
-      return;
-    }
     e.preventDefault();
-    openResult(m, hit, ctx().q, e.shiftKey || e.altKey ? "beside" : "page", rect());
+    openResultAs(m, hit, ctx().q, howOf(e), rect());
   };
   return (
     <a

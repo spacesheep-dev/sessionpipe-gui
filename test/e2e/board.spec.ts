@@ -484,7 +484,7 @@ test.describe("board", () => {
   test("keyboard: / focuses search, j/k move the cursor, Enter opens the session", async ({ page }) => {
     // Open sessions: As a page, so Enter opens the session's page and Back returns here.
     await page.addInitScript(
-      (key) => localStorage.setItem(key, JSON.stringify({ mode: "advanced", openSessions: "page" })),
+      (key) => localStorage.setItem(key, JSON.stringify({ mode: "advanced", openSessions: "page", v: 2 })),
       SETTINGS_KEY,
     );
     await openBoard(page);

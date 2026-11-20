@@ -12,7 +12,7 @@ import { answerState, useSessionSend } from "../control/useSend";
 import { useAnswerClock } from "../lib/answerWindow";
 import { askFitsRow } from "../lib/format";
 import { copyItem } from "../lib/menus";
-import { openSplit } from "../lib/split";
+import { openSession, openSplit } from "../lib/split";
 import { dismissToast, type Toast } from "../lib/toasts";
 import { NEW_WORDS } from "../native/accountWords";
 import { Redacted } from "./bits";
@@ -33,10 +33,13 @@ export function ToastCard({
   control: (machine: string) => MachineControl | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  // A click is a plain open, a preview tab (lib/split.ts); the menu's Open beside keeps it.
+  // A click is a plain open, by the one rule (lib/split.ts openSession): beside, a preview
+  // tab, or the page. The menu's Open beside keeps its tab.
   const open = (preview = true) => {
     if (!t.session) return;
-    openSplit(t.session, { from: ref.current?.getBoundingClientRect(), preview });
+    const from = ref.current?.getBoundingClientRect();
+    if (preview) openSession(t.session, "primary", { from });
+    else openSplit(t.session, { from });
     dismissToast(t.id);
   };
   const attention = t.attentionId ? session?.openAttentions.find((a) => a.attentionId === t.attentionId) : undefined;

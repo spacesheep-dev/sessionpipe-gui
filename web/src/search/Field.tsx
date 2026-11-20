@@ -9,12 +9,14 @@ import { forwardRef, type KeyboardEvent, useImperativeHandle, useLayoutEffect, u
 import { HarnessGlyph } from "../components/bits";
 import { LabelSwatch } from "../components/LabelDot";
 import { IS_MAC } from "../lib/shortcuts";
+import type { OpenHow } from "../lib/split";
 import { markTyped } from "./client";
 import { applyCompletion, type Completion, completionAt } from "./complete";
 
 export interface FieldKeys {
   move: (d: 1 | -1) => void;
-  open: (mode: "page" | "beside" | "background") => void;
+  /** ↵, ⇧↵ and ⌘↵: the way Settings says, the other way, a background tab (lib/split.ts). */
+  open: (how: OpenHow) => void;
   /** Focus the row under the cursor; false when there are no rows. */
   leave: () => boolean;
 }
@@ -99,7 +101,7 @@ export const SearchField = forwardRef<
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      keys.open(mod ? "background" : e.shiftKey ? "beside" : "page");
+      keys.open(mod ? "background" : e.shiftKey ? "other" : "primary");
       return;
     }
     if (e.key === "Escape") {

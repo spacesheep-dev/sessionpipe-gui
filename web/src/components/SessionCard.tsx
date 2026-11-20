@@ -60,11 +60,11 @@ import { inPanel, panelAnswers } from "../lib/keys";
 import { labelItems } from "../lib/labels";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { reducedMotion, tokenMs, useFlip, useHeldOrder, useListHold } from "../lib/motion";
-import { Link, navigate, sessionPath } from "../lib/router";
+import { Link, sessionPath } from "../lib/router";
 import { backgroundFact, quietRun, submittedLabel } from "../lib/runs";
 import { LENSES, type Lens, setTierLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit, openWay } from "../lib/split";
+import { type OpenHow, openSession, openSplit } from "../lib/split";
 import { durCoarse, ms } from "../lib/time";
 import { AgentRow, useAgentsOpen } from "./AgentRow";
 import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
@@ -91,8 +91,6 @@ interface SessionCardProps {
   lens?: Lens;
   /** Simple mode: no counts. */
   simple?: boolean;
-  /** A plain click opens the session beside the page instead of as the page. */
-  openBeside?: boolean;
   /** The session is the panel's active tab: the row stays selected. */
   open?: boolean;
   /** The panel's active tab, when it is one of this session's agents (that row is open). */
@@ -139,7 +137,6 @@ const sameCard = (a: SessionCardProps, b: SessionCardProps): boolean =>
   a.cursor === b.cursor &&
   a.lens === b.lens &&
   a.simple === b.simple &&
-  a.openBeside === b.openBeside &&
   a.open === b.open &&
   a.openTab === b.openTab &&
   a.agentsMatch === b.agentsMatch &&
@@ -167,7 +164,6 @@ export const SessionCard = memo(function SessionCard({
   cursor,
   lens = null,
   simple = false,
-  openBeside = false,
   open = false,
   openTab = null,
   agentsMatch,
@@ -223,14 +219,10 @@ export const SessionCard = memo(function SessionCard({
   const slow = !!tool && s.state === "working" && !!s.flags?.some((f) => f.kind === "slow_tool");
   const attnTool = attention?.tool && showTools ? attention.tool : undefined;
   const ref = useRef<HTMLElement>(null);
-  const beside = (o: { background?: boolean; preview?: boolean } = {}) =>
-    openSplit(s.key, { from: ref.current?.getBoundingClientRect(), ...o });
-  // ⇧-click goes the other way from a plain click, ⌘-click to a background tab (lib/split.ts).
-  const modClick = (o: { background: boolean }) => {
-    const way = openWay(o.background ? "background" : "other");
-    if (way === "page") navigate(sessionPath(s.harness, s.id));
-    else beside({ background: way === "background" });
-  };
+  // A click opens the way Settings says, ⇧-click the other way, ⌘-click a background tab
+  // (lib/split.ts openSession).
+  const openAs = (how: OpenHow) => openSession(s.key, how, { from: ref.current?.getBoundingClientRect() });
+  const modClick = (o: { background: boolean }) => openAs(o.background ? "background" : "other");
   // Allow / Deny in the menu, through the same signed send as the inbox, while a
   // permission is open (CardAnswer keeps them current) and the row's one line shows it
   // whole, which on a phone a command often is not. The line is read as the menu opens, so
@@ -354,7 +346,7 @@ export const SessionCard = memo(function SessionCard({
           className="card-link"
           title={tip}
           modClick={modClick}
-          plainClick={openBeside ? () => beside({ preview: true }) : undefined}
+          plainClick={() => openAs("primary")}
           data-nav-item=""
           onKeyDown={
             agents.length > 0
@@ -470,7 +462,7 @@ export const SessionCard = memo(function SessionCard({
             </span>
           )}
         </Link>
-        <BesideButton onClick={() => beside()} />
+        <BesideButton onClick={() => openSplit(s.key, { from: ref.current?.getBoundingClientRect() })} />
       </div>
       {(showAgents || (kids && kids.length > 0)) && (
         <KidList
@@ -592,7 +584,8 @@ function KidRow({
         to={sessionPath(c.harness, c.id)}
         className="kid"
         title={sessionTitle(c)}
-        modClick={(o) => openSplit(c.key, { background: o.background })}
+        plainClick={() => openSession(c.key, "primary")}
+        modClick={(o) => openSession(c.key, o.background ? "background" : "other")}
       >
         <StateDot state={c.state} decorative />
         {/* An asked session is another harness's: its glyph says which (a subagent shares

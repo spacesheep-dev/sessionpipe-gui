@@ -27,7 +27,7 @@ const labelRooms = (page: Page) =>
 export function segmentTests() {
   for (const [name, path, labels] of [
     ["Search", "/search", ["Best match", "Newest"]],
-    ["Settings › General", "/settings?section=general", ["Simple", "Advanced", "As page", "Beside"]],
+    ["Settings › General", "/settings?section=general", ["Simple", "Advanced", "Beside", "As a page"]],
     ["Settings › Tier lens", "/settings?section=lens", ["All", "0", "1", "2", "3"]],
   ] as const) {
     test(`${name}: every label sits inside its segment, and the segments are equal`, async ({ page }) => {

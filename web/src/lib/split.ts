@@ -15,7 +15,7 @@
 // list (lib/transitions.ts), a session's page carries no tabs, and nothing of the panel
 // is restored on the next launch (a modal sheet over every page is not how a phone wakes
 // up).
-import { type SessionKey, splitKey } from "@shared/api";
+import { type SessionKey, sessionKey, splitKey } from "@shared/api";
 import { useMemo, useSyncExternalStore } from "react";
 import { phoneLayout } from "./device";
 import {
@@ -357,6 +357,47 @@ export function openWay(how: OpenHow): "page" | "beside" | "background" {
   if (how === "background") return "background";
   const beside = getSettings().openSessions === "beside";
   return (how === "primary") === beside ? "beside" : "page";
+}
+
+/** How a click asked: ⌘ (Ctrl) a background tab, ⇧ (or ⌥) the other way, else plain. */
+export const howOf = (e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): OpenHow =>
+  e.metaKey || e.ctrlKey ? "background" : e.shiftKey || e.altKey ? "other" : "primary";
+
+/** Opens a session by the one rule (openWay): as its page, beside the page (a plain open
+ *  is the preview tab; one that went the other way, or a menu's (`keep`), is kept) or as a
+ *  background tab. `hash`
+ *  (`#seq-N`) lands it on a row: the page carries it, the panel reads it once
+ *  (components/SessionView.tsx). Not the theme API's openSession, which is always the page. */
+export function openSession(
+  key: SessionKey,
+  how: OpenHow,
+  opts: { from?: Rect; hash?: string; keep?: boolean } = {},
+): void {
+  const way = openWay(how);
+  if (way === "page") {
+    navigate(tabPath(key));
+    if (opts.hash) history.replaceState(history.state, "", `${location.pathname}${location.search}${opts.hash}`);
+    return;
+  }
+  openSplit(key, { from: opts.from, background: way === "background", preview: how === "primary" && !opts.keep });
+  if (!opts.hash) return;
+  history.replaceState(history.state, "", `${location.pathname}${location.search}${opts.hash}`);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+/** A page the app asks for while its window is up (a notification's click, the menu bar's
+ *  session): a session's own page opens by the one rule, as a plain open, so the page and
+ *  its tabs stay; any other address is navigated to. A cold start is not asked here: the
+ *  window opens on the address. */
+export function openAsked(to: string): void {
+  const at = to.indexOf("#");
+  const bare = at < 0 ? to : to.slice(0, at);
+  const r = parseRoute(bare);
+  if (r.name !== "session" || bare.includes("?")) {
+    navigate(to);
+    return;
+  }
+  openSession(sessionKey(r.harness, r.id), "primary", at < 0 ? {} : { hash: to.slice(at) });
 }
 
 /** Whether the panel shows on the current page (its tabs stay in the URL either way). */

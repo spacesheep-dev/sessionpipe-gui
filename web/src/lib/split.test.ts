@@ -9,9 +9,12 @@ import { setSettings } from "./settings";
 import {
   agentTabKey,
   closeTab,
+  howOf,
   keepTab,
   moveTab,
   type OpenHow,
+  openAsked,
+  openSession,
   openSplit,
   openWay,
   parseSplit,
@@ -239,5 +242,98 @@ describe("openWay: ↵ (primary), ⇧↵ (other) and ⌘↵ (background) through
     setSettings({ openSessions: "page" });
     at("/");
     expect(ways()).toEqual(["page", "beside", "background"]);
+  });
+});
+
+describe("openSession: every opener asks the one rule", () => {
+  const q = () => new URL(where(), "http://x/").searchParams;
+  const tabs = () => parseSplit(q().get("s"), null).tabs;
+  beforeEach(() => {
+    phone(false);
+    g.HashChangeEvent ??= class extends Event {};
+    restoreSplit();
+  });
+  afterEach(() => setSettings({ openSessions: "page" }));
+
+  it("with Beside set a plain open is the preview tab, ⇧ goes to the page, ⌘ a kept tab behind", () => {
+    setSettings({ openSessions: "beside" });
+    at("/");
+    openSession("claude-code:a", "primary");
+    openSession("claude-code:b", "primary");
+    expect(where()).toBe("/?s=claude-code%3Ab");
+    expect(previewTab()).toBe("claude-code:b");
+    openSession("claude-code:c", "background");
+    expect(tabs()).toEqual(["claude-code:b", "claude-code:c"]);
+    expect(previewTab()).toBe("claude-code:b");
+    openSession("claude-code:d", "other");
+    expect((g.location as URL).pathname).toBe("/s/claude-code/d");
+  });
+
+  it("with As a page set a plain open is the page, with its hash; ⇧ a kept tab beside", () => {
+    setSettings({ openSessions: "page" });
+    at("/review");
+    openSession("claude-code:a", "primary", { hash: "#seq-4" });
+    expect((g.location as URL).pathname).toBe("/s/claude-code/a");
+    expect((g.location as URL).hash).toBe("#seq-4");
+    at("/review");
+    openSession("claude-code:b", "other", { hash: "#seq-9" });
+    expect(tabs()).toEqual(["claude-code:b"]);
+    expect(previewTab()).toBeNull();
+    expect((g.location as URL).hash).toBe("#seq-9");
+  });
+
+  it("a menu's plain open keeps its tab", () => {
+    setSettings({ openSessions: "beside" });
+    at("/review");
+    openSession("claude-code:a", "primary", { keep: true });
+    expect(tabs()).toEqual(["claude-code:a"]);
+    expect(previewTab()).toBeNull();
+  });
+
+  it("a click's keys say how: ⌘ or Ctrl the background, ⇧ or ⌥ the other way", () => {
+    const e = { metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
+    expect(howOf(e)).toBe("primary");
+    expect(howOf({ ...e, shiftKey: true })).toBe("other");
+    expect(howOf({ ...e, altKey: true })).toBe("other");
+    expect(howOf({ ...e, ctrlKey: true, shiftKey: true })).toBe("background");
+    expect(howOf({ ...e, metaKey: true })).toBe("background");
+  });
+});
+
+describe("openAsked: a page the app asks for while its window is up (a notification, the menu bar)", () => {
+  const q = () => new URL(where(), "http://x/").searchParams;
+  beforeEach(() => {
+    phone(false);
+    restoreSplit();
+    setSettings({ openSessions: "beside" });
+  });
+  afterEach(() => setSettings({ openSessions: "page" }));
+
+  it("a session opens as the preview tab beside the page, the page and its other tabs staying", () => {
+    at("/inbox?s=claude-code%3Ax%2Cclaude-code%3Ay&t=1");
+    openAsked("/s/claude-code/z");
+    expect((g.location as URL).pathname).toBe("/inbox");
+    expect(parseSplit(q().get("s"), null).tabs).toEqual(["claude-code:x", "claude-code:y", "claude-code:z"]);
+    expect(previewTab()).toBe("claude-code:z");
+  });
+
+  it("where the panel cannot show, and any other address, it is navigated to", () => {
+    at("/usage");
+    openAsked("/s/claude-code/z");
+    expect(where()).toBe("/s/claude-code/z");
+    at("/");
+    openAsked("/feed");
+    expect(where()).toBe("/feed");
+    // A session's page asked with more than its address (an agent, a file) is that page.
+    at("/");
+    openAsked("/s/claude-code/z?agent=a1");
+    expect(where()).toBe("/s/claude-code/z?agent=a1");
+  });
+
+  it("on the phone it is the page", () => {
+    phone(true);
+    at("/inbox");
+    openAsked("/s/claude-code/z");
+    expect(where()).toBe("/s/claude-code/z");
   });
 });

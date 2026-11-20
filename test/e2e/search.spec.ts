@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
 // Owned by: search-ui. Session search end to end (SEARCH-SPEC.md §8.7): typing shows one
-// row per session with the engine's marks, instant and still; ⏎ / ⇧⏎ / ⌘⏎ and Space open
-// it as a page, beside, beside in the background and as a peek; ⌘K's In transcripts
+// row per session with the engine's marks, instant and still; ⏎ opens it the way Settings
+// says, ⇧⏎ the other way, ⌘⏎ beside in the background and Space as a peek; ⌘K's In transcripts
 // section and its Search-all row; the history transcript's find bar stepping "2 of N";
 // the row menu; the phone. The demo's own sessions answer the live parts; the history
 // transcript runs on the mock (`?mock=1`), which ships in every build, so it needs no
 // history home on the server.
 import { expect, type Page, test } from "@playwright/test";
-import { openPage } from "./helpers.js";
+import { openPage, openSessionsUnchosen } from "./helpers.js";
 
 const rows = (page: Page) => page.locator("ol.sx-list a.sx-row");
 const field = (page: Page) => page.getByRole("combobox", { name: /Search prompts, replies and tool calls/ });
@@ -113,7 +113,41 @@ test.describe("search", () => {
     await expect(page.locator(".sx-note")).toContainText("“foo:” isn't a filter");
   });
 
-  test("⏎ opens as a page and Back returns to the results; ⇧⏎ beside; ⌘⏎ beside keeping focus", async ({ page }) => {
+  test("⏎ opens the way Settings says, beside on a computer that has not chosen; ⇧⏎ the page, and Back returns; ⌘⏎ beside keeping focus", async ({
+    page,
+  }) => {
+    await openSessionsUnchosen(page);
+    const panel = page.locator("aside.panel");
+    await openPage(page, "/search?q=webhook");
+    await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
+    await field(page).focus();
+    await page.keyboard.press("Enter");
+    await expect(panel).toHaveClass(/panel--open/);
+    await expect(page).toHaveURL(/\/search\?q=webhook&s=/);
+
+    await openPage(page, "/search?q=webhook");
+    await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
+    await field(page).focus();
+    await page.keyboard.press("Shift+Enter");
+    await expect(page).toHaveURL(/\/s\/[^/]+\/[^?#]+/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/search\?q=webhook/);
+    await expect(rows(page).first()).toBeVisible();
+
+    await field(page).focus();
+    await page.keyboard.press("ControlOrMeta+Enter");
+    await expect(panel).toHaveClass(/panel--open/);
+    // Focus stayed on the results' field: the next key still types.
+    await expect(field(page)).toBeFocused();
+  });
+
+  test("with As a page chosen ⏎ opens the page and ⇧⏎ beside", async ({ page }) => {
+    await page.addInitScript(() =>
+      localStorage.setItem(
+        "sessionpipe-gui.settings",
+        JSON.stringify({ mode: "advanced", openSessions: "page", v: 2 }),
+      ),
+    );
     await openPage(page, "/search?q=webhook");
     await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
     await field(page).focus();
@@ -122,19 +156,9 @@ test.describe("search", () => {
     await page.goBack();
     await expect(page).toHaveURL(/\/search\?q=webhook/);
     await expect(rows(page).first()).toBeVisible();
-
     await field(page).focus();
     await page.keyboard.press("Shift+Enter");
     await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
-    await page.keyboard.press("Escape");
-
-    await openPage(page, "/search?q=webhook");
-    await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
-    await field(page).focus();
-    await page.keyboard.press("ControlOrMeta+Enter");
-    await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
-    // Focus stayed on the results' field: the next key still types.
-    await expect(field(page)).toBeFocused();
   });
 
   test("j/k walk the rows, ⌘C copies the resume line, Space peeks beside with focus kept, `.` opens the row menu", async ({

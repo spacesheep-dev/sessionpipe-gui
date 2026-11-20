@@ -9,7 +9,18 @@
 // launch lands on the page Settings › General › Open on names with the tabs put back.
 import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { SETTINGS_KEY } from "../../playwright.config.js";
-import { EVENTS, holdBoard, INFO, openBoard, openPage, openPrompt, sessionUrl, tier1Batch, ulid } from "./helpers.js";
+import {
+  EVENTS,
+  holdBoard,
+  INFO,
+  openBoard,
+  openPage,
+  openPrompt,
+  openSessionsUnchosen,
+  sessionUrl,
+  tier1Batch,
+  ulid,
+} from "./helpers.js";
 
 const panel = (page: Page) => page.locator("aside.panel");
 const mainWidth = (page: Page) => page.locator("main.main").evaluate((el) => el.getBoundingClientRect().width);
@@ -942,6 +953,68 @@ test.describe("split panel", () => {
         await expect(row.locator(".settings-hint")).toHaveText(
           /^(Click or ↵\. Hold ⇧ for the other way\.|Click or Enter\. Hold Shift for the other way\.)$/,
         );
+      });
+    });
+
+    test.describe("with nothing chosen", () => {
+      test.beforeEach(({ page }) => openSessionsUnchosen(page));
+      const openSettings = async (page: Page) => {
+        await page.locator("nav.rail a[aria-label='Settings']").click();
+        const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+        return settings.locator(".settings-row").filter({ hasText: "Open sessions" });
+      };
+
+      test("a plain click on a computer opens the session beside the Board, one preview tab, and Settings says Beside", async ({
+        page,
+      }) => {
+        const [a, b] = await cards(page, 2);
+        await click(page, a!.href, []);
+        await expect(panel(page)).toHaveClass(/panel--open/);
+        expect(where(page)).toEqual({ path: "/", s: a!.key, t: null });
+        await click(page, b!.href, []);
+        await expect.poll(() => where(page)).toEqual({ path: "/", s: b!.key, t: null });
+        await expect(panel(page).locator(".tab--preview")).toHaveCount(1);
+        const row = await openSettings(page);
+        await expect(row.getByRole("radio", { name: "Beside" })).toBeChecked();
+        await expect(row.locator(".seg-opt")).toHaveText(["Beside", "As a page"]);
+      });
+
+      test("the As a page every save used to store gives way to Beside once; As a page chosen again sticks, and ↵ does what the menu says", async ({
+        page,
+      }) => {
+        // What 0.8.5 kept after any change in Settings: every field, openSessions "page" with them.
+        await page.addInitScript((key) => {
+          if (sessionStorage.getItem("e2e-seeded")) return;
+          sessionStorage.setItem("e2e-seeded", "1");
+          localStorage.setItem(key, JSON.stringify({ mode: "advanced", defaultPage: "/", openSessions: "page" }));
+        }, SETTINGS_KEY);
+        const [a] = await cards(page, 1);
+        await click(page, a!.href, []);
+        await expect(panel(page)).toHaveClass(/panel--open/);
+        expect(where(page)).toEqual({ path: "/", s: a!.key, t: null });
+        const row = await openSettings(page);
+        await row.locator(".seg-opt").filter({ hasText: "As a page" }).click();
+        await expect(row.getByRole("radio", { name: "As a page" })).toBeChecked();
+        await page.keyboard.press("Escape");
+        await expect(page).toHaveURL((u) => !u.searchParams.has("settings"));
+        await page.goto("/");
+        await live(page);
+        await holdBoard(page);
+        // Not the row whose tab is open beside (its menu has no Open beside).
+        const link = another(page, [a!.href]);
+        const href = (await link.getAttribute("href"))!;
+        await page.locator(`article.card a.card-link[href="${href}"]`).focus();
+        await expect(page.locator("article.card[aria-current='true'] a.card-link")).toHaveAttribute("href", href);
+        await page.keyboard.press(".");
+        const menu = page.getByRole("menu");
+        const opens = menu.getByRole("menuitem", { name: /^Open (beside|as page)/ });
+        await expect(opens.nth(0)).toHaveAccessibleName("Open as page");
+        await expect(opens.nth(0).locator(".menu-keys")).toHaveText(/^(↵|Enter)$/);
+        await expect(opens.nth(1)).toHaveAccessibleName("Open beside");
+        await page.keyboard.press("Escape");
+        await expect(menu).toHaveCount(0);
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL((u) => u.pathname === href);
       });
     });
 

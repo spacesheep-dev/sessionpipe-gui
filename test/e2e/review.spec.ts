@@ -3,7 +3,7 @@
 // Review: the files changed grouped by repo, and the day's digest. Search lives on /search
 // (search.spec.ts).
 import { expect, test } from "@playwright/test";
-import { openPage } from "./helpers.js";
+import { openPage, openSessionsUnchosen } from "./helpers.js";
 
 test.describe("review", () => {
   test("the files view groups changed paths by repo with the sessions that touched them", async ({ page }) => {
@@ -49,9 +49,10 @@ test.describe("review", () => {
     await expect(rows.first()).toBeVisible();
   });
 
-  test("a row's click opens one preview tab that the next replaces; holding ⌘ adds a kept tab behind", async ({
+  test("a row's click on a computer that has not chosen opens one preview tab that the next replaces; holding ⌘ adds a kept tab behind", async ({
     page,
   }) => {
+    await openSessionsUnchosen(page);
     await openPage(page, "/review");
     await page.getByRole("tab", { name: "Day" }).click();
     const links = page.locator("table.rv-table tbody tr button.rv-link");

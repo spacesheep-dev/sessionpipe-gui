@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { EVENTS, INFO, openPage, ulid } from "./helpers.js";
+import { EVENTS, INFO, openPage, openSessionsUnchosen, ulid } from "./helpers.js";
 
 declare global {
   interface Window {
@@ -143,6 +143,8 @@ test.describe("toasts", () => {
     request,
   }) => {
     const s = sink(request, await token(request), `Toast target ${randomUUID().slice(0, 6)}`);
+    // Its click opens the session the way Settings says: beside, where nothing is chosen.
+    await openSessionsUnchosen(page);
     await openPage(page, "/feed");
     await s.start();
     const card = page.locator(`.toast[data-session="${s.key}"]`);
@@ -531,6 +533,8 @@ test.describe("toasts: the stack holds still", TEST_DOOR, () => {
     request,
   }) => {
     const s = ours(request, await sinkToken(), "Hold long");
+    // Its Open opens the session the way Settings says: beside, where nothing is chosen.
+    await openSessionsUnchosen(page);
     await openOurs(page, `${CONTROL_BASE}/feed`, [s.key]);
     await s.start();
     const command = `rsync -av --delete ./build/ deploy@staging.example.com:/srv/app/releases/2026-11-18/ --exclude node_modules ${"x".repeat(20)}`;

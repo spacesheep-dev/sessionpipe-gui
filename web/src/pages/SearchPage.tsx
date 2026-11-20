@@ -26,13 +26,13 @@ import { usePhoneLayout } from "../lib/device";
 import { focusSearch } from "../lib/keys";
 import { parseRoute, SPLIT_ACTIVE_PARAM, SPLIT_PARAM } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
-import { closeTab, parseSplit } from "../lib/split";
+import { closeTab, type OpenHow, openWay, parseSplit } from "../lib/split";
 import { useNow } from "../lib/time";
 import { markTyped, PAGE_SIZE, useFacets, useSearchClient, useSearchStatus, useSessionSearch } from "../search/client";
 import { DateRange, rangeLabel } from "../search/DateRange";
 import { type FieldHandle, SearchField } from "../search/Field";
 import { copyResume, type RowMenuContext } from "../search/menu";
-import { type OpenMode, openResult } from "../search/open";
+import { openResult, openResultAs } from "../search/open";
 import { Row } from "../search/Row";
 import {
   forgetSearch,
@@ -179,14 +179,16 @@ export function Search() {
     },
     [cursor, keyList, focusRow, sessions, res.loadMore],
   );
+  // ↵ opens the way Settings says, ⇧↵ the other way, ⌘↵ a background tab (lib/split.ts
+  // openWay), as a click on the row does.
   const open = useCallback(
-    (mode: OpenMode, i = cursor) => {
+    (how: OpenHow, i = cursor) => {
       const m = sessions[i < 0 ? 0 : i];
       if (!m) return false;
       rememberSearch(q);
       const rect = listRef.current?.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect();
-      if (mode !== "page") peeked = null;
-      openResult(m, m.hits[0], q, mode, rect);
+      if (openWay(how) !== "page") peeked = null;
+      openResultAs(m, m.hits[0], q, how, rect);
       return true;
     },
     [cursor, sessions, q],
@@ -240,8 +242,8 @@ export function Search() {
   const listOn = sessions.length > 0;
   useShortcut("list.down", () => move(1), { enabled: listOn });
   useShortcut("list.up", () => move(-1), { enabled: listOn });
-  useShortcut("list.open", () => open("page"), { enabled: listOn });
-  useShortcut("list.beside", () => open("beside"), { enabled: listOn });
+  useShortcut("list.open", () => open("primary"), { enabled: listOn });
+  useShortcut("list.beside", () => open("other"), { enabled: listOn });
   useShortcut("list.background", () => open("background"), { enabled: listOn });
   useShortcut("search.peek", () => peek(sessions[cursor < 0 ? 0 : cursor]), { enabled: listOn });
   useShortcut(
@@ -460,7 +462,7 @@ export function Search() {
   const keys = useMemo(
     () => ({
       move: (d: 1 | -1) => void move(d),
-      open: (mode: OpenMode) => void open(mode),
+      open: (how: OpenHow) => void open(how),
       leave: () => focusRow(cursor < 0 ? 0 : cursor),
     }),
     [move, open, cursor, focusRow],

@@ -10,6 +10,16 @@ export const INFO = "/api/ui/info";
 export const EVENTS = "/api/sessionpipe/v1/events";
 export const WELL_KNOWN = "/.well-known/sessionpipe";
 
+/** A computer that has not chosen how sessions open (the suite chooses As a page,
+ *  playwright.config.ts): from the page's first load, and not again, so a choice made in
+ *  the test outlives a reload. */
+export const openSessionsUnchosen = (page: Page) =>
+  page.addInitScript(() => {
+    if (sessionStorage.getItem("e2e-unchosen")) return;
+    sessionStorage.setItem("e2e-unchosen", "1");
+    localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "advanced" }));
+  });
+
 export const sessionUrl = (harness: string, id: string) =>
   `/s/${encodeURIComponent(harness)}/${encodeURIComponent(id)}`;
 

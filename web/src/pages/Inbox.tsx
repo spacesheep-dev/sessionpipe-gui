@@ -71,7 +71,7 @@ import { setNotifyPref, useNotifyPref } from "../lib/notify";
 import { Link, openSettings, sessionPath } from "../lib/router";
 import { type Lens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit, useSplitKey } from "../lib/split";
+import { howOf, type OpenHow, openSession, useSplitKey } from "../lib/split";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
@@ -405,9 +405,9 @@ function InboxRow({
   // Below tier 1 the message and the tool stay on the sending machine.
   const a = lens === 0 ? { ...raw, message: undefined, tool: undefined } : raw;
   const ref = useRef<HTMLLIElement>(null);
-  // A plain click is a preview, which the next one replaces; ⌘-click a kept background tab.
-  const open = (background = false) =>
-    openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background, preview: !background });
+  // A click opens the way Settings says (beside, a preview tab the next one replaces), ⇧-click
+  // the other way, ⌘-click a kept background tab (lib/split.ts openSession).
+  const open = (how: OpenHow) => openSession(s.key, how, { from: ref.current?.getBoundingClientRect() });
   const answerMenu = useRef<MenuList>([]);
   const menu = useContextMenu(
     () => [
@@ -463,7 +463,7 @@ function InboxRow({
         type="button"
         className="inbox-main"
         data-nav-item=""
-        onClick={(e) => open(e.metaKey || e.ctrlKey)}
+        onClick={(e) => open(howOf(e))}
         title="Open the session"
         {...prefetchProps(store, s)}
       >
@@ -553,7 +553,7 @@ function Answer({
   /** The row shows the whole request (lib/format.ts askFitsRow): Allow and Deny, else Open. */
   whole: boolean;
   /** What a tap on the row does: the session beside the page, or pushed on a phone. */
-  onOpen: (background?: boolean) => void;
+  onOpen: (how: OpenHow) => void;
   /** The id of the row's title, which Open is described by. */
   titleId: string;
   control?: MachineControl;
@@ -687,7 +687,7 @@ function Answer({
           type="button"
           className="btn btn--sm inbox-open"
           aria-describedby={titleId}
-          onClick={(e) => onOpen(e.metaKey || e.ctrlKey)}
+          onClick={(e) => onOpen(howOf(e))}
         >
           {NEW_WORDS.inboxOpen}
         </button>

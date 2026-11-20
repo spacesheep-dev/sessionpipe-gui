@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { openPage, strandedMarks } from "./helpers.js";
+import { openPage, openSessionsUnchosen, strandedMarks } from "./helpers.js";
 
 declare global {
   interface Window {
@@ -146,8 +146,9 @@ test.describe("inbox", () => {
     await expect(page.locator("nav.rail a[data-nav='board'] .nav-badge")).toHaveCount(0);
   });
 
-  test("a row click opens the session beside the page", async ({ page }) => {
+  test("a row click on a computer that has not chosen opens the session beside the page", async ({ page }) => {
     test.setTimeout(90_000);
+    await openSessionsUnchosen(page);
     await openPage(page, "/inbox");
     await expect.poll(() => page.locator(".inbox-row").count(), { timeout: 60_000 }).toBeGreaterThan(0);
     const row = page.locator(".inbox-row").first();
@@ -327,7 +328,8 @@ test.describe("inbox: Allow only beside a whole request", () => {
   }) => {
     test.setTimeout(60_000);
     expect(LONG_COMMAND).toHaveLength(140);
-    await seenSetupHere(context);
+    // Open opens the session the way Settings says: beside, where nothing is chosen.
+    await seenSetupHere(context, { mode: "advanced" });
     const key = await passkeyPage(context, page);
     const token = await sinkToken();
     const d = await fakeDaemon(key, { name: `whole-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
@@ -555,7 +557,8 @@ test.describe("inbox: one preview tab", () => {
     page,
   }) => {
     test.setTimeout(90_000);
-    await seenSetupHere(context);
+    // A row's click opens beside, where nothing is chosen.
+    await seenSetupHere(context, { mode: "advanced" });
     const key = await passkeyPage(context, page);
     const token = await sinkToken();
     const d = await fakeDaemon(key, { name: `preview-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });

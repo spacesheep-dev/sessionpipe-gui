@@ -42,6 +42,14 @@ All notable changes to `sessionpipe-gui`. The format follows
   before (a deleted `uiKey` gives a new one, as before); a running receiver takes one of
   at least 16 characters at once and leaves any other until then. `sessionpipe-gui key renew` gives a
   new key while the receiver runs.
+- **On a computer a session opens beside the page.** A click or ↵ on a session opens it
+  the way Settings › General › Open sessions says on every page that lists sessions: the
+  Board, the Inbox, Search, the Feed, Review, ⌘K, a notification and the menu bar. ⇧ opens
+  it the other way, ⌘ in a background tab. A computer that has not chosen opens it beside
+  the page, so the Board stays in view; an earlier version saved As a page with any change
+  in Settings, so that counts as not chosen, once. Where the panel can't show, and on the
+  phone, a session opens as its page. The two choices read Beside and As a page, in
+  Settings and in the Board's ⋯ menu.
 - **Sessions opened one after another beside the page share one tab.** A plain open beside
   the page reuses one preview tab, its title in italics; typing in it, a double-click on the
   tab or a drag keeps it, and an open holding ⌘ adds a kept tab. Answering keeps nothing, so

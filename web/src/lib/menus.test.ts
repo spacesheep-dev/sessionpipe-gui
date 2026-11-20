@@ -100,20 +100,21 @@ describe("sessionItems", () => {
   ];
 
   it("leads with what the surface can answer, then a rule, then Open", () => {
+    // A computer that has not chosen opens beside: that comes first.
     expect(labels(menu(asking, { answer })).slice(0, 9)).toEqual([
       "Allow Bash",
       "Deny Bash",
       "─",
-      "Open as page",
       "Open beside",
+      "Open as page",
       "Open in background tab",
       "Open in new window",
       "─",
       "New session here",
     ]);
     // Nothing to answer: the menu starts as it always did, with no rule at its head.
-    expect(labels(menu(asking))[0]).toBe("Open as page");
-    expect(labels(menu(asking, { answer: [] }))[0]).toBe("Open as page");
+    expect(labels(menu(asking))[0]).toBe("Open beside");
+    expect(labels(menu(asking, { answer: [] }))[0]).toBe("Open beside");
     // A panel's tab and its head lead with the answer too.
     for (const surface of ["tab", "panel", "page"] as const)
       expect(labels(menu(asking, { surface, answer })).slice(0, 3)).toEqual(["Allow Bash", "Deny Bash", "─"]);

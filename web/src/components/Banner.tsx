@@ -8,7 +8,7 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react
 import { copyItem } from "../lib/menus";
 import { tokenMs } from "../lib/motion";
 import { navigate } from "../lib/router";
-import { openSplit } from "../lib/split";
+import { openSession, openSplit } from "../lib/split";
 import { dismissToast, holdToasts, type Toast } from "../lib/toasts";
 import { useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
@@ -30,7 +30,7 @@ export function Banner({ toast: t, closing }: { toast: Toast; closing: boolean }
   const open = () => {
     dismissToast(t.id);
     if (prompt) navigate("/inbox");
-    else if (t.session) openSplit(t.session, { from: ref.current?.getBoundingClientRect() });
+    else if (t.session) openSession(t.session, "primary", { from: ref.current?.getBoundingClientRect() });
   };
   const drag = useRef<{ y: number; t: number; dy: number; v: number; moved: boolean } | null>(null);
   const held = useRef(false);
