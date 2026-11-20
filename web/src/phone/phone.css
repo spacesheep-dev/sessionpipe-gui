@@ -192,10 +192,9 @@
     gap: 24px;
   }
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .ph-lanes .seg {
-    display: flex;
-    width: 100%;
+    display: grid;
   }
   .ph-address .url-value {
     text-align: left;

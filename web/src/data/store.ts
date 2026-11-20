@@ -43,7 +43,7 @@ export interface AppState {
    *  a page asked (`loadControl`), read again after every snapshot that follows the first.
    *  Of two copies of one message the one further along stays (`furthest`). */
   control: readonly ControlActivity[];
-  /** The snapshots since the first. Each is the stream come back (a drop, Retry now, a
+  /** The snapshots since the first. Each is the stream come back (a drop, Retry, a
    *  pull to refresh, the page shown again after a long time away): what a page read on
    *  its own, a session's events, is read again when this moves. */
   resyncs: number;
@@ -244,7 +244,7 @@ export class Store {
     return this.state.connection === "reconnecting" || this.state.connection === "offline";
   }
 
-  /** "Retry now": drop the backoff and open the stream again at once. The rows stay as
+  /** "Retry": drop the backoff and open the stream again at once. The rows stay as
    *  they were until the fresh snapshot lands, and a page that knows it dropped goes on
    *  saying so until then. */
   reconnect() {

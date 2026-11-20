@@ -2,19 +2,20 @@
 /* ---------- toasts (components/Toasts.tsx) ---------- */
 
 /* Notification banners, the OS's shape: top-right on a desktop under the title band and
-   left of an open panel, newest on top; a compact banner under the status bar on a
-   phone. The raised surface every floating thing has, no stripe: the orange dot is the
+   left of an open panel, prompts nearest the corner, newest first, passing cards under
+   them, in the list's order (Tab and a screen reader meet them as drawn); a compact
+   banner under the status bar on a phone. The raised surface every floating thing has, no stripe: the orange dot is the
    one signal that a prompt needs a person, and only a banner that carries a mark keeps
    the 16 px column for it. Each sits in a slot that keeps the 8 px between banners, so
-   when one leaves (pop-out, then its slot closes) the rest close up without a jump. */
+   when one leaves (pop-out, then its slot closes) the rest close up without a jump; while
+   the stack is held (the pointer on it) the slot keeps its room until the hold ends. */
 .toasts {
   position: fixed;
   z-index: var(--z-toast);
   top: calc(var(--bar) + 4px);
   right: calc(var(--split-width, 0px) + 16px);
   display: flex;
-  flex-direction: column-reverse;
-  justify-content: flex-end;
+  flex-direction: column;
   width: min(360px, calc(100vw - 32px));
   pointer-events: none;
 }
@@ -50,6 +51,13 @@
 .toast-slot[data-closing] > .toast {
   pointer-events: none;
   animation: pop-out var(--dur-exit) var(--ease-in) both;
+}
+/* Held: the room stays, and is still the stack's under the pointer, so nothing closes up
+   under the hand until it leaves. Paused, not stopped: a room already closing stays at the
+   height it had, and closes on from there once let go. */
+.toast-slot[data-closing][data-held] {
+  pointer-events: auto;
+  animation-play-state: paused;
 }
 @keyframes toast-collapse {
   to {
@@ -145,6 +153,23 @@
 .toast-msg {
   color: var(--fg-3);
 }
+/* Beside Allow the request is whole (ToastCard's `whole`): no clamp. A command stands on
+   its own line under "Bash wants to run:", from its first character; anywhere but beside
+   Allow, two lines and an ellipsis. */
+.toast--whole .toast-body,
+.toast-body:has(> .toast-msg.mono) {
+  display: block;
+}
+.toast-msg.mono {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+}
+.toast:not(.toast--whole) .toast-msg.mono {
+  -webkit-line-clamp: 2;
+}
 .toast-body:empty {
   display: none;
 }
@@ -222,7 +247,7 @@
     transform: translateY(8px);
   }
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .toasts--phone {
     inset: 0;
     width: auto;
@@ -280,5 +305,9 @@
   .toast-slot[data-closing],
   .toast-slot[data-closing] > .toast {
     animation: none;
+  }
+  /* No pop-out to hide it: a held room is empty at once. */
+  .toast-slot[data-closing][data-held] > .toast {
+    visibility: hidden;
   }
 }

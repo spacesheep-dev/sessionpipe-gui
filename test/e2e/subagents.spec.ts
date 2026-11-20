@@ -134,7 +134,7 @@ test.describe("subagents", () => {
 
   test("a search for an agent's description finds its parent, open", async ({ page }) => {
     await bm25(page);
-    await page.getByRole("searchbox", { name: "Search sessions" }).fill("hot path");
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill("hot path");
     // The run may end meanwhile and go under the folded done group: open it then.
     const done = page.locator("section.group--done button.group-toggle");
     await expect
@@ -236,6 +236,13 @@ test.describe("subagents", () => {
     const first = pal.locator(".pal-row").first();
     await expect(first.locator(".pal-label")).toContainText("Explore · Check cache invalidation");
     await expect(first.locator(".pal-detail")).toHaveText(TITLE);
+    // An agent found by a word of its session's title shows the word there, bold.
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("is:subagent bm25");
+    await expect(pal.locator(".pal-row", { hasText: TITLE }).first().locator(".pal-detail u")).toHaveText(["BM25"]);
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("is:subagent invalidation");
+    await expect(first.locator(".pal-label")).toContainText("Explore · Check cache invalidation");
     await page.keyboard.press("Enter");
     await expect(pal).toBeHidden();
     await expect(page.locator("aside.panel [role=tab].tab--agent, aside.panel .panel-parent").first()).toBeVisible();
@@ -260,7 +267,7 @@ test.describe("subagents on a phone", () => {
     const { title, row } = await postParent(page, { running: 1, finished: 19 });
     await openBoard(page);
     // The board filtered to this row: the demo's rows (and other tests') never move it.
-    await page.getByRole("searchbox", { name: "Search sessions" }).fill(title);
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill(title);
     await expect(page.locator("article.card")).toHaveCount(1);
     const disclose = row.locator("button.card-disclose");
     await expect(disclose).toHaveAttribute("aria-expanded", "true");
@@ -311,7 +318,7 @@ test.describe("subagents on a phone", () => {
   test("a tree opened by hand with nothing running shows the three newest finished", async ({ page }) => {
     const { title, row } = await postParent(page, { finished: 20 });
     await openBoard(page);
-    await page.getByRole("searchbox", { name: "Search sessions" }).fill(title);
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill(title);
     const disclose = row.locator("button.card-disclose");
     await expect(disclose).toHaveAttribute("aria-expanded", "false");
     await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
@@ -325,7 +332,7 @@ test.describe("subagents on a phone", () => {
     // One agent running, three finished, and two finished before them of a type the search finds.
     const { scout, row } = await postParent(page, { running: 1, finished: 3, scouts: 2, tool: true });
     await openBoard(page);
-    await page.getByRole("searchbox", { name: "Search sessions" }).fill(scout);
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill(scout);
     await expect(page.locator("article.card")).toHaveCount(1);
     await expect(row.locator("button.card-disclose")).toHaveAttribute("aria-expanded", "true");
     // The running one and the two it found, older than the three left under "Show 3 more".

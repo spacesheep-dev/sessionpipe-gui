@@ -252,8 +252,7 @@
   grid-template-areas:
     "glyph head when"
     ".     meta meta"
-    ".     hits hits"
-    ".     more more";
+    ".     hits more";
   column-gap: 12px;
   align-items: baseline;
   padding: 10px 8px 11px;
@@ -285,7 +284,7 @@
 }
 .sx-row:focus-visible {
   background: var(--sel);
-  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--focus) 60%, transparent);
+  box-shadow: var(--cursor-edge);
 }
 .sx-glyph {
   grid-area: glyph;
@@ -339,6 +338,7 @@
   flex-direction: column;
   gap: 3px;
   min-width: 0;
+  max-width: var(--measure-read);
   margin-top: 5px;
 }
 .sx-hit {
@@ -348,7 +348,6 @@
   min-width: 0;
   color: var(--fg-3);
   font-size: var(--text-sm);
-  cursor: pointer;
 }
 .sx-field {
   flex: none;
@@ -403,19 +402,16 @@
 .sx-row .inline-code .sx-mark {
   color: var(--fg);
 }
+/* The count of the rest, under the time: the row opens at its moment, and the session's
+   find bar steps through them all. */
 .sx-more {
   grid-area: more;
-  justify-self: start;
-  margin-top: 4px;
+  justify-self: end;
+  padding-left: 12px;
+  margin-top: 5px;
   color: var(--fg-3);
   font-size: var(--text-xs);
-  cursor: pointer;
-}
-@media (hover: hover) {
-  .sx-more:hover,
-  .sx-hit:hover .sx-snip {
-    color: var(--fg-2);
-  }
+  white-space: nowrap;
 }
 
 .sx-day {
@@ -812,7 +808,7 @@
 
 /* ---------- the phone ---------- */
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .sx-filters {
     margin-top: -16px;
     margin-left: calc(-1 * var(--gutter));
@@ -834,7 +830,13 @@
     margin-left: calc(-1 * var(--gutter) + 4px);
     margin-right: calc(-1 * var(--gutter) + 4px);
   }
+  /* The moment takes the width, two lines; the count goes under it. */
   .sx-row {
+    grid-template-areas:
+      "glyph head when"
+      ".     meta meta"
+      ".     hits hits"
+      ".     more more";
     padding: 12px 12px 13px;
     border-radius: 0;
   }
@@ -842,9 +844,10 @@
     left: 48px;
     right: 0;
   }
-  /* Two moments at most, each two lines. */
-  .sx-hit:nth-child(n + 3) {
-    display: none;
+  .sx-more {
+    justify-self: start;
+    padding-left: 0;
+    margin-top: 4px;
   }
   .sx-snip {
     display: -webkit-box;
@@ -973,7 +976,7 @@
   justify-content: flex-end;
   gap: 8px;
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .sx-range {
     position: fixed;
     top: auto;

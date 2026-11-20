@@ -24,9 +24,10 @@ import {
 import { useBehind } from "../account/current";
 // The one reading of `answerable` the strip and the inbox share (an older server leaves the field unset).
 import { answerable } from "../components/ControlStrip";
-import { answersOut } from "../control/answers";
+import { type AnswerOut, answersOut } from "../control/answers";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { isQuestion, sessionTitle } from "../lib/format";
+import { isHidden, useHidden } from "../lib/hidden";
 import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
 import { useShortcut } from "../lib/shortcuts";
 import type { AppState, Store } from "./store";
@@ -50,7 +51,7 @@ export function useConnection() {
 }
 
 /** How long a page shows its skeleton while the first snapshot is on its way; past this
- *  it says it is still connecting, with Retry now. A receiver answers in well under a
+ *  it says it is still connecting, with Retry. A receiver answers in well under a
  *  second, so this is a wait worth saying out loud, not a failure: the stream stays open. */
 export const SLOW_FIRST_LOAD_MS = 6000;
 
@@ -80,21 +81,23 @@ export function useFirstLoad(): "loading" | "slow" | "down" | null {
 /** How long a drop has to last before the lists say so: a blip is never drawn. */
 const DOWN_GRACE_MS = 400;
 
-/** The instant the stream went down, once it has been down DOWN_GRACE_MS (the shell's
- *  footer says "Reconnecting" at the same moment); null while live, connecting for the
- *  first time, or within the grace. The board keeps its rows and stops their clocks at
- *  this instant (POLISH-PLAN.md §6 #17). */
+/** The instant the stream went down, once it has been down DOWN_GRACE_MS (the page bar
+ *  says "Reconnecting…" at the same moment); null while live, connecting for the first
+ *  time, or within the grace. The board keeps its rows and stops their clocks at this
+ *  instant (POLISH-PLAN.md §6 #17), and a session's composer waits from it. A reader that
+ *  mounts while the stream is already down (a page opened during a drop) is down at once,
+ *  as the bar is: the grace is for a drop it watched begin. */
 export function useStreamDown(): number | null {
   const { connection, snapshotAt } = useAppState();
   const down = !!snapshotAt && (connection === "reconnecting" || connection === "offline");
-  const [at, setAt] = useState<number | null>(null);
+  const [at, setAt] = useState<number | null>(() => (down ? Date.now() : null));
   useEffect(() => {
     if (!down) {
       setAt(null);
       return;
     }
     const began = Date.now();
-    const t = window.setTimeout(() => setAt(began), DOWN_GRACE_MS);
+    const t = window.setTimeout(() => setAt((was) => was ?? began), DOWN_GRACE_MS);
     return () => window.clearTimeout(t);
   }, [down]);
   return down ? at : null;
@@ -377,21 +380,35 @@ export function useOpenAttentions(): OpenAttention[] {
   return markLate(all, machines, now);
 }
 
-/** Open attentions a person can answer from here: the inbox badge, the title's "(n)" and
- *  the app's badge. One with an answer out, or that its computer closed (control/answers.ts),
- *  no longer counts, from the moment the answer went. */
-export function useAnswerableCount(): number {
+/** Every open prompt of `s` has its answer out, or its computer closed it
+ *  (control/answers.ts): it needs nobody now, though it waits for its computer to say so. */
+export const answeredAll = (s: SessionSummary, out: Readonly<Record<string, AnswerOut>>): boolean =>
+  s.openAttentions.length > 0 && s.openAttentions.every((a) => !!out[a.attentionId]);
+
+/** The sessions that need you: the inbox badge, the title's "(n)" and the app's badge, the
+ *  same number the Board's Needs you, the Dock and the menu bar count. Every session in
+ *  that state, the Board's filters or not, less one hidden on this device and one whose
+ *  every prompt has its answer out, from the moment the answer went. */
+export function useNeedsYouCount(): number {
   const store = useStore();
-  const { control } = useAppState();
-  const rows = useOpenAttentions().filter((r) => r.answerable);
-  // Which prompts have an answer out is the activity's word: read it while one is open.
-  const asks = rows.length > 0;
+  const { sessions, control } = useAppState();
+  const hidden = useHidden();
+  const waiting = useMemo(
+    () => [...sessions.values()].filter((s) => s.state === "needs_you" && !isHidden(hidden, s.key, s.stateSince, true)),
+    [sessions, hidden],
+  );
+  // Which prompts have an answer out is the activity's word: read it while one waits.
+  const asks = waiting.length > 0;
   useEffect(() => {
     if (asks) store.loadControl();
   }, [store, asks]);
-  const out = answersOut(
-    control,
-    rows.map((r) => r.attention),
+  const out = useMemo(
+    () =>
+      answersOut(
+        control,
+        waiting.flatMap((s) => s.openAttentions),
+      ),
+    [control, waiting],
   );
-  return rows.filter((r) => !out[r.attention.attentionId]).length;
+  return waiting.filter((s) => !answeredAll(s, out)).length;
 }

@@ -5,9 +5,13 @@
 // asks for a permission, the collapsed done group,
 // live counts without a reload (with Advanced → Show counts), a list that holds still
 // under the pointer, the search that finds nothing, the keyboard (e with Hidden open
-// too), and the Hidden header's own menu.
+// too), the Hidden header's own menu, and a row's menu that the click which opened it
+// chooses nothing from. One needs-you number: the Inbox badge, the title's "(n)" and Needs
+// you's own count agree.
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
+import { SETTINGS_KEY } from "../../playwright.config.js";
+import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
 import { EVENTS, holdBoard, INFO, openBoard, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 test.describe("board", () => {
@@ -240,13 +244,122 @@ test.describe("board", () => {
 
   test("by default a row says two facts; Show counts in the view menu adds the columns", async ({ page }) => {
     await openBoard(page);
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
     // The counts are the row's tooltip instead.
     await expect(page.locator("article.card a.card-link").first()).toHaveAttribute("title", /\d+ (turn|tool)/);
     await page.getByRole("button", { name: "View options" }).click();
     await page.getByRole("menuitemcheckbox", { name: "Show counts" }).click();
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)").first()).toBeVisible();
+    await expect(page.locator("article.card .card-foot").first()).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem("sessionpipe-gui.board.counts"))).toBe("1");
+  });
+
+  test("a row's one time is how long it has been in its group, with one tooltip, and the ✕ beside it", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const { sinkToken } = (await (await page.request.get(INFO)).json()) as { sinkToken: string };
+    const now = Date.now();
+    const ago = (m: number) => now - m * 60_000;
+    const ids: string[] = [];
+    /** A session of its own, its events dated as given. */
+    const session = (title: string, cwd = "~/code/e2e") => {
+      const id = randomUUID();
+      ids.push(id);
+      let seq = 0;
+      const ev = (type: string, at: number, data: Record<string, unknown> = {}) => ({
+        protocol: 1,
+        id: ulid(at),
+        type,
+        time: new Date(at).toISOString(),
+        tier: 3,
+        harness: { name: "claude-code", version: "2.1.296", event: "Hook" },
+        session: { id, seq: seq++, machine: "e2e-box", cwd, title, title_source: "custom" },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data: { turn_id: "t1", ...data },
+      });
+      const card = page.locator(`article.card:has(a.card-link[href^="${sessionUrl("claude-code", id)}"])`);
+      return { ev, card };
+    };
+    const post = async (events: unknown[]) => {
+      const res = await page.request.post(EVENTS, {
+        headers: { authorization: `Bearer ${sinkToken}` },
+        data: { events },
+      });
+      expect(res.status()).toBe(202);
+    };
+    const bash = (call: string) => ({ tool: "Bash", call_id: call, input: { command: "npm ci" } });
+    // A turn 30 m old, its tool fresh; one 5 m tool, slow; a Bash 49 m quiet, stale; a Bash that failed.
+    const old = session("E2E row time: old turn, fresh tool");
+    const slow = session("E2E row time: slow tool");
+    const first = session("E2E row time: slow first tool");
+    const stale = session("E2E row time: quiet Bash");
+    const failed = session("E2E row time: failed Bash", "~/code/a-rather-long-repository-name-for-the-where-line");
+    await post([
+      old.ev("session.started", ago(31), { source: "startup" }),
+      old.ev("turn.started", ago(30)),
+      old.ev("tool.started", now, { tool: "Read", call_id: "r1", input: { file_path: "a.ts" } }),
+      slow.ev("session.started", ago(7), { source: "startup" }),
+      slow.ev("turn.started", ago(6)),
+      slow.ev("tool.started", ago(5), bash("b1")),
+      first.ev("session.started", ago(5.2), { source: "startup" }),
+      first.ev("turn.started", ago(5)),
+      first.ev("tool.started", ago(5), bash("b1")),
+      stale.ev("session.started", ago(51), { source: "startup" }),
+      stale.ev("turn.started", ago(50)),
+      stale.ev("tool.started", ago(49), bash("b1")),
+      failed.ev("session.started", ago(2), { source: "startup" }),
+      failed.ev("turn.started", ago(1.5)),
+      failed.ev("tool.started", ago(1), bash("b1")),
+      failed.ev("tool.ended", ago(0.9), { ...bash("b1"), ok: false, ms: 900 }),
+    ]);
+    try {
+      await openBoard(page);
+      // Working: the turn's 30 m, not the fresh tool's seconds, and still after a second tool.
+      await expect(old.card.locator(".card-tool")).toHaveText("Read");
+      await expect(old.card.locator(".card-time")).toHaveText("30 m");
+      await post([
+        old.ev("tool.ended", Date.now(), { tool: "Read", call_id: "r1", ok: true, ms: 40 }),
+        old.ev("tool.started", Date.now(), bash("b2")),
+      ]);
+      await expect(old.card.locator(".card-tool")).toHaveText("Bash");
+      await expect(old.card.locator(".card-time")).toHaveText("30 m");
+      // One tooltip, on the cell: what the number measures.
+      await expect(old.card.locator(".card-time")).toHaveAttribute("title", /^Working since \S/);
+      await expect(old.card.locator(".card-time time")).not.toHaveAttribute("title");
+      // A slow tool says its own age once, after its name.
+      await expect(slow.card.locator(".card-tool")).toHaveText("Bash · 5 m");
+      await expect(slow.card.locator(".card-flags")).toHaveCount(0);
+      // One that began with the turn: the row's time is its age, said once.
+      await expect(first.card.locator(".card-time")).toHaveText("5 m");
+      await expect(first.card.locator(".card-tool")).toHaveText("Bash");
+      // Stale: since the last word, the tool named without a second clock.
+      await expect(stale.card.locator(".card-time")).toHaveText("49 m");
+      await expect(stale.card.locator(".card-time")).toHaveAttribute("title", /^No word since \S/);
+      await expect(stale.card.locator(".card-tool")).toHaveText("Bash");
+      await expect(stale.card.locator(".card-flags")).toHaveCount(0);
+      // The last tool failed: the ✕ just before the time, at every width, and no foot.
+      for (const [width, height] of [
+        [1440, 900],
+        [393, 852],
+      ] as const) {
+        await page.setViewportSize({ width, height });
+        const mark = failed.card.locator(".card-time .card-err");
+        await expect(mark).toBeVisible();
+        await expect(failed.card.locator(".card-foot")).toHaveCount(0);
+        const [x, t] = await Promise.all([mark.boundingBox(), failed.card.locator(".card-time time").boundingBox()]);
+        const gap = t!.x - (x!.x + x!.width);
+        expect(gap, `${width}: the ✕ sits just before the time`).toBeGreaterThanOrEqual(0);
+        expect(gap, `${width}: the ✕ sits just before the time`).toBeLessThanOrEqual(8);
+      }
+      // With Show counts on, the ✕ is in the errors column, and only there.
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.evaluate(() => localStorage.setItem("sessionpipe-gui.board.counts", "1"));
+      await openBoard(page);
+      await expect(failed.card.locator(".card-foot .card-err")).toBeVisible();
+      await expect(failed.card.locator(".card-err")).toHaveCount(1);
+    } finally {
+      for (const id of ids) await page.request.post(`/api/ui/sessions/claude-code/${id}/forget`);
+    }
   });
 
   test("the list holds still under the pointer: no row moves while it rests on one", async ({ page }) => {
@@ -296,7 +409,7 @@ test.describe("board", () => {
       // fill() types without moving the pointer, so the list is still held when the filter
       // changes: the rows it took away leave now, not when the pointer does. The session's
       // id is the one thing no other row has.
-      await page.getByRole("searchbox", { name: "Search sessions" }).fill(b.sessionId);
+      await page.getByRole("searchbox", { name: "Filter sessions" }).fill(b.sessionId);
       await expect(page.locator("article.card")).toHaveCount(1);
       await expect(card).toBeVisible();
     } finally {
@@ -305,23 +418,82 @@ test.describe("board", () => {
     }
   });
 
-  test("a search that finds nothing says so, with Clear search", async ({ page }) => {
+  test("a filter that finds nothing says so in one line, with Clear filter", async ({ page }) => {
     await openBoard(page);
-    await page.getByRole("searchbox", { name: "Search sessions" }).fill("zzzz-nothing");
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill("zzzz-nothing");
     await expect(page.locator(".board-nomatch .state-title")).toHaveText("No sessions match “zzzz-nothing”");
-    await page.getByRole("button", { name: "Clear search" }).click();
+    // The title says it: no paragraph explains the field, and no way on below the list.
+    await expect(page.locator(".board-nomatch .state-text")).toHaveCount(0);
+    await expect(page.locator(".board-more")).toHaveCount(0);
+    await page.getByRole("button", { name: "Clear filter" }).click();
     await expect(page.locator("section.group").first()).toBeVisible();
-    await expect(page.getByRole("searchbox", { name: "Search sessions" })).toHaveValue("");
+    await expect(page.getByRole("searchbox", { name: "Filter sessions" })).toHaveValue("");
   });
 
   test("a filter that finds nothing hands the words to Search, which reads every session", async ({ page }) => {
     await openBoard(page);
-    await page.getByRole("searchbox", { name: "Search sessions" }).fill("zzzz nothing");
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill("zzzz nothing");
     await page.getByRole("button", { name: "Search every session for “zzzz nothing”" }).click();
     await expect(page).toHaveURL((u) => u.pathname === "/search" && u.searchParams.get("q") === "zzzz nothing");
   });
 
+  test("a list the field narrows ends with the way on to Search, with the words", async ({ page }) => {
+    await openBoard(page);
+    // A word of the first row's title, which the board keeps.
+    const title = ((await page.locator("article.card .card-title").first().textContent()) ?? "").trim();
+    const word = title.split(/\s+/).find((w) => /^[a-z]{4,}$/i.test(w)) ?? title.split(/\s+/)[0]!;
+    const field = page.getByRole("searchbox", { name: "Filter sessions" });
+    await field.fill(word);
+    // The demo moves sessions while it runs: the rows with the word may all be in Done,
+    // which stays folded, so the test waits on the row it is about, not on a card.
+    await expect(page.locator(".board-more")).toBeVisible();
+    const more = page.locator(".board-list > :last-child");
+    await expect(more).toHaveClass(/board-more/);
+    await expect(more).toHaveAccessibleName(`Search every session for “${word}”`);
+    // Only words get it: a label: token alone, or an empty field, does not.
+    await field.fill("label:red");
+    await expect(page.locator(".board-more")).toHaveCount(0);
+    await field.fill("");
+    await expect(page.locator(".board-more")).toHaveCount(0);
+    await field.fill(word);
+    await page.locator(".board-more").click();
+    await expect(page).toHaveURL((u) => u.pathname === "/search" && u.searchParams.get("q") === word);
+  });
+
+  test("⇧⌘F takes the field's words to Search; with none it is Search as anywhere", async ({ page, isMobile }) => {
+    test.skip(!!isMobile, "desktop project only");
+    await openBoard(page);
+    const field = page.getByRole("searchbox", { name: "Filter sessions" });
+    await field.fill("webhook");
+    await page.keyboard.press("ControlOrMeta+Shift+F");
+    await expect(page).toHaveURL((u) => u.pathname === "/search" && u.searchParams.get("q") === "webhook");
+    await expect(page.locator("input[data-search]")).toHaveValue("webhook");
+    await expect(page.locator("input[data-search]")).toBeFocused();
+
+    await openBoard(page);
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("ControlOrMeta+Shift+F");
+    await expect(page).toHaveURL((u) => u.pathname === "/search" && !u.searchParams.get("q"));
+
+    // With the focus in a session open beside the board, the key is the session's: plain Search.
+    await openBoard(page);
+    await page
+      .locator("article.card a.card-link")
+      .first()
+      .click({ modifiers: ["Shift"] });
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill("webhook");
+    const more = page.locator("aside.panel .panel-head").getByRole("button", { name: "More actions" });
+    await more.focus();
+    await page.keyboard.press("ControlOrMeta+Shift+F");
+    await expect(page).toHaveURL((u) => u.pathname === "/search" && !u.searchParams.get("q"));
+  });
+
   test("keyboard: / focuses search, j/k move the cursor, Enter opens the session", async ({ page }) => {
+    // Open sessions: As a page, so Enter opens the session's page and Back returns here.
+    await page.addInitScript(
+      (key) => localStorage.setItem(key, JSON.stringify({ mode: "advanced", openSessions: "page", v: 2 })),
+      SETTINGS_KEY,
+    );
     await openBoard(page);
     await page.locator("body").click({ position: { x: 5, y: 5 } });
     await page.keyboard.press("/");
@@ -397,7 +569,7 @@ test.describe("board", () => {
 
   test("Esc clears the search first, then the cursor", async ({ page }) => {
     await openBoard(page);
-    const search = page.getByRole("searchbox", { name: "Search sessions" });
+    const search = page.getByRole("searchbox", { name: "Filter sessions" });
     await search.fill("a");
     await page.locator("body").click({ position: { x: 5, y: 5 } });
     await page.keyboard.press("j");
@@ -425,5 +597,392 @@ test.describe("board", () => {
     await expect(page.getByRole("menuitemcheckbox", { name: "Show done sessions" })).toHaveCount(0);
     await item.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("the right-click that opens a row's menu chooses nothing from it; a press held and dragged onto an item does", async ({
+    page,
+  }) => {
+    await openBoard(page);
+    await holdBoard(page);
+    const title = page.locator("section.group--working article.card .card-title").first();
+    const box = (await title.boundingBox())!;
+    const at = { x: Math.round(box.x + 40), y: Math.round(box.y + 6) };
+    // The page's clock in the test's hands: how long the button was held is what is tested.
+    await page.evaluate(() => {
+      const w = window as unknown as { heldAt: number };
+      w.heldAt = Date.now();
+      Date.now = () => w.heldAt;
+    });
+    // The press opens the menu under the pointer (as a Mac's right button does, before it
+    // is let go).
+    await title.evaluate((el, { x, y }) => {
+      el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+    }, at);
+    const first = page.getByRole("menu").getByRole("menuitem").first();
+    await expect(first).toHaveText(/^Open as page/);
+    /** The right button let go over the menu's first item, the pointer at `x`, `y`. */
+    const release = (x: number, y: number) =>
+      first.dispatchEvent("mouseup", { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y });
+    // Let go at once, the hand having drifted onto the item: a click, and the menu stays.
+    await release(at.x + 9, at.y + 9);
+    await expect(first).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    // Held, and let go where it was pressed: nothing either.
+    await page.evaluate(() => {
+      (window as unknown as { heldAt: number }).heldAt += 300;
+    });
+    await release(at.x + 1, at.y + 1);
+    await expect(first).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    // Held and dragged onto the item: that is choosing it.
+    await release(at.x + 9, at.y + 9);
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/s\//);
+  });
+
+  test("a right-click the moment a menu has closed opens its row's menu; the browser's own event for a keys' menu still up opens nothing", async ({
+    page,
+  }) => {
+    await openBoard(page);
+    await holdBoard(page);
+    const menu = page.locator(".menu[data-depth='0']");
+    const cards = page.locator("article.card");
+    /** Whether the menu up is this row's: its element is marked while its menu is open. */
+    const owns = (i: number) =>
+      cards.nth(i).evaluate((el) => el.matches("[data-menu-open]") || !!el.querySelector("[data-menu-open]"));
+    // The page's clock in the test's hands: each step below comes 50 ms after the one before,
+    // well inside the 0.4 s after a menu opens, however fast or slow the machine running it.
+    await page.evaluate(() => {
+      const w = window as unknown as { at: number };
+      w.at = Date.now();
+      Date.now = () => w.at;
+    });
+    const later = () =>
+      page.evaluate(() => {
+        (window as unknown as { at: number }).at += 50;
+      });
+    // `.` on the j cursor: the first row's menu, the keys', on its first item.
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("j");
+    await page.keyboard.press(".");
+    await expect(menu).toBeVisible();
+    await expect(menu.locator(".menu-item--active")).toHaveCount(1);
+    // The menu as drawn now, marked: a menu opened again is drawn anew, without the mark.
+    await menu.evaluate((el) => {
+      el.dataset.seen = "";
+    });
+    await later();
+    // The browser's own event for the same gesture on the row, sent after ours (as Android's
+    // long-press is): the same menu, not opened again, still the keys'.
+    await cards
+      .first()
+      .locator("a.card-link")
+      .evaluate((el) =>
+        el.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 600, clientY: 600 }),
+        ),
+      );
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    await expect(menu).toHaveCount(1);
+    await expect(menu).toHaveAttribute("data-seen", "");
+    await expect(menu.locator(".menu-item--active")).toHaveCount(1);
+    // Closed, then a right-click on the second row at once: that row's menu.
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await later();
+    await cards.nth(1).locator("a.card-link").click({ button: "right" });
+    await expect(menu).toBeVisible();
+    expect(await owns(1)).toBe(true);
+    // And one opened by a right-click, closed, then another at once.
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await later();
+    await cards.first().locator("a.card-link").click({ button: "right" });
+    await expect(menu).toBeVisible();
+    expect(await owns(0)).toBe(true);
+    await page.keyboard.press("Escape");
+  });
+});
+
+test.describe("board: one needs-you number", () => {
+  test("the Inbox badge, the title's (n) and Needs you's count agree with a question open, and drop together after Allow and after Hide", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `count-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    // A question waits in its terminal, a command takes an answer from here.
+    const question = await postPrompt(token, {
+      machine: d.name,
+      title: "Which voice?",
+      agoMs: 3_000,
+      tool: "AskUserQuestion",
+      message: "AskUserQuestion",
+    });
+    const command = await postPrompt(token, { machine: d.name, title: "Deploy it", agoMs: 4_000 });
+    /** The three numbers, and Needs you's rows less those with an answer out, read at once
+     *  (other tests on this receiver raise prompts of their own meanwhile). */
+    const counts = () =>
+      page.evaluate(() => {
+        const num = (sel: string) => Number(document.querySelector(sel)?.textContent ?? 0);
+        const group = document.querySelector("section.group--needs_you");
+        const rows = group?.querySelectorAll("article.card").length ?? 0;
+        const out = group?.querySelectorAll("article.card .card-attn[data-said='receipt']").length ?? 0;
+        return {
+          badge: num("nav.rail a[data-nav='inbox'] .nav-badge"),
+          title: Number(/^\((\d+)\) /.exec(document.title)?.[1] ?? 0),
+          heading: num("section.group--needs_you .group-count"),
+          waiting: rows - out,
+        };
+      });
+    const agree = () =>
+      expect
+        .poll(
+          async () => {
+            const c = await counts();
+            return c.badge > 0 && c.title === c.badge && c.heading === c.badge && c.waiting === c.badge
+              ? "agree"
+              : JSON.stringify(c);
+          },
+          { timeout: 15_000 },
+        )
+        .toBe("agree");
+    const card = (p: { key: string }) => page.locator(`article.card[data-flip="${p.key}"]`);
+    const needsYou = page.locator("section.group--needs_you");
+    try {
+      await page.goto(`${CONTROL_BASE}/`);
+      await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+      await page.mouse.move(0, 0);
+      await expect(needsYou.locator(`article.card[data-flip="${question.key}"]`)).toBeVisible({ timeout: 15_000 });
+      await expect(needsYou.locator(`article.card[data-flip="${command.key}"]`)).toBeVisible();
+      // The question counts on the badge and in the title, as it does under Needs you.
+      await agree();
+      // Read out as the Inbox and its number: "Inbox, 3 need you".
+      await expect(page.locator("nav.rail a[data-nav='inbox']")).toHaveAccessibleName(/^Inbox\s*, \d+ needs? you$/);
+      await expect(page.locator("nav.rail a[data-nav='inbox'] .nav-badge")).toHaveAttribute("aria-hidden", "true");
+      // Allow: its answer is out, the row keeps its place, and no number counts it.
+      await card(command).locator("a.card-link").click({ button: "right" });
+      await page.getByRole("menuitem", { name: /^Allow/ }).click();
+      await expect(card(command).locator(".card-attn[data-said='receipt']")).toBeVisible({ timeout: 15_000 });
+      await expect(needsYou.locator(`article.card[data-flip="${command.key}"]`)).toBeVisible();
+      await page.mouse.move(0, 0);
+      await agree();
+      // Hide: the question leaves Needs you on this device, and every number with it.
+      await card(question).locator("a.card-link").click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Hide", exact: true }).click();
+      await expect(needsYou.locator(`article.card[data-flip="${question.key}"]`)).toHaveCount(0);
+      await page.mouse.move(0, 0);
+      const after = await counts();
+      if (after.badge > 0) await agree();
+      else expect(after).toEqual({ badge: 0, title: 0, heading: 0, waiting: 0 });
+    } finally {
+      await question.clear();
+      await command.clear();
+      await d.stop();
+    }
+  });
+});
+
+// A paired machine that stopped polling, with a turn running on it: the board's quiet line.
+test.describe("board: the offline line", () => {
+  test("Machines follows the sentence, and × keeps the trailing edge", async ({ context, page }) => {
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(
+      key,
+      { name: `gone-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] },
+      { offline: true },
+    );
+    try {
+      const id = randomUUID();
+      let seq = 0;
+      const ev = (type: string, data: Record<string, unknown>, hook: string) => ({
+        protocol: 1,
+        id: ulid(),
+        type,
+        time: new Date().toISOString(),
+        tier: 1,
+        harness: { name: "claude-code", version: "2.1.296", event: hook },
+        session: { id, seq: seq++, machine: d.name, cwd: "~/code/e2e", title: "Run the suite", title_source: "custom" },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data,
+      });
+      const r = await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${await sinkToken()}`,
+          "sessionpipe-protocol": "1",
+        },
+        body: JSON.stringify({
+          events: [
+            ev("session.started", { source: "startup" }, "SessionStart"),
+            ev("turn.started", { turn_id: "p0", prompt_chars: 20, submitted_by: "user" }, "UserPromptSubmit"),
+          ],
+        }),
+      });
+      expect(r.status).toBe(202);
+      await page.goto(`${CONTROL_BASE}/`);
+      await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+      const line = page.locator(".offline-line").filter({ hasText: d.name });
+      await expect(line).toBeVisible();
+      const box = async (sel: string) => (await line.locator(sel).boundingBox())!;
+      // Where the sentence's words end, not its button's box.
+      const words = await line.locator(".offline-line-text").evaluate((el) => {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        const b = r.getBoundingClientRect();
+        return { x: b.x, width: b.width };
+      });
+      const open = await box(".offline-line-open");
+      const x = await box(".offline-line-x");
+      const all = (await line.boundingBox())!;
+      // The next step beside its sentence, × at the end of the line.
+      expect(open.x - (words.x + words.width)).toBeLessThanOrEqual(24);
+      expect(open.x).toBeGreaterThanOrEqual(words.x + words.width);
+      expect(all.x + all.width - (x.x + x.width)).toBeLessThanOrEqual(24);
+      expect(x.x - (open.x + open.width)).toBeGreaterThan(200);
+    } finally {
+      await d.stop();
+    }
+  });
+});
+
+test.describe("the board's bar on a computer", () => {
+  test.skip(({ isMobile }) => !!isMobile, "desktop project only");
+
+  test("one Filter button narrows to a machine, says so, and the field holds still", async ({ page }) => {
+    await openBoard(page);
+    const bar = page.locator(".page.board > .bar");
+    // No row of "All …" pop-ups and no Clear: one button, then the lens, then the field.
+    await expect(bar.locator(".chipsel")).toHaveCount(0);
+    const filter = bar.getByRole("button", { name: "Filter", exact: true });
+    await expect(filter).toHaveText("Filter");
+    await expect(filter).toHaveAttribute("title", "Filter by machine, agent or label");
+    const field = bar.getByRole("searchbox", { name: "Filter sessions" });
+    const x = (await field.boundingBox())!.x;
+
+    await filter.click();
+    const menu = page.getByRole("menu");
+    await expect(menu.getByText("Machine", { exact: true })).toBeVisible();
+    await expect(menu.getByText("Agent", { exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitemradio", { name: "All machines" })).toHaveAttribute("aria-checked", "true");
+    await expect(menu.getByRole("menuitemradio", { name: "All agents" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Clear filters" })).toHaveCount(0);
+    const radios = await menu.getByRole("menuitemradio").allInnerTexts();
+    const machine = radios[radios.indexOf("All machines") + 1]!.trim();
+    await menu.getByRole("menuitemradio", { name: machine, exact: true }).click();
+
+    const named = bar.getByRole("button", { name: `Filter: ${machine}` });
+    await expect(named).toHaveText(machine);
+    await expect(named).toHaveClass(/filter-btn--on/);
+    const machines = await page
+      .locator("article.card:visible > .card-row .card-meta")
+      .evaluateAll((els) => els.map((el) => el.textContent ?? ""));
+    for (const m of machines) expect(m).toContain(machine);
+    expect((await field.boundingBox())!.x, "the field did not move").toBe(x);
+    await expect(bar.getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
+
+    // Clear filters is in the menu only while filtered, and leaves the field's words.
+    await field.fill("a");
+    await named.click();
+    await page.getByRole("menu").getByRole("menuitem", { name: "Clear filters" }).click();
+    await expect(bar.getByRole("button", { name: "Filter", exact: true })).toBeVisible();
+    await expect(field).toHaveValue("a");
+  });
+
+  test("the Shortcuts page names / for what it does on every page: Find on this page", async ({ page }) => {
+    await page.goto("/shortcuts");
+    const row = page.locator(".sc-row[data-action='search.focus']");
+    await expect(row.locator(".sc-row-label")).toHaveText("Find on this page");
+    await expect(row.locator(".sc-key").first()).toHaveText("/");
+    // No row's "Also … elsewhere" names the row itself (Allow is Allow on the Board and in the Inbox).
+    const rows = await page.locator(".sc-row").evaluateAll((els) =>
+      els.map((el) => ({
+        name: el.querySelector(".sc-row-name")?.textContent ?? "",
+        also: Array.from(el.querySelectorAll(".sc-row-hint"))
+          .map((h) => h.textContent ?? "")
+          .find((t) => t.startsWith("Also ")),
+      })),
+    );
+    expect(rows.length).toBeGreaterThan(20);
+    const self = rows.filter((r) => r.also?.slice(5, -" elsewhere".length).split(", ").includes(r.name));
+    expect(self).toEqual([]);
+    const allow = page.locator(".sc-row[data-action='inbox.allow']");
+    await expect(allow.locator(".sc-row-name")).toHaveText("Allow the prompt under the cursor");
+    await expect(allow).not.toContainText("Also Allow the prompt");
+  });
+
+  test("Tab goes along the bar in the order it is drawn on the Board, the Inbox and the Feed", async ({ page }) => {
+    test.setTimeout(90_000);
+    await openBoard(page);
+    for (const path of ["/", "/inbox", "/feed"]) {
+      // One load; the Inbox and the Feed are reached through the sidebar.
+      if (path !== "/") await page.locator(`nav.rail a[data-nav='${path.slice(1)}']`).click();
+      await expect(page).toHaveURL((u) => u.pathname === path);
+      const bar = page.locator(".page > .bar").first();
+      await expect(bar.locator(".bar-actions")).toBeVisible();
+      if (path === "/") await expect(bar.getByRole("searchbox")).toBeVisible();
+      const xs = await bar.locator("button, input, a[href], [tabindex]:not([tabindex='-1'])").evaluateAll((els) =>
+        els
+          .filter((el) => (el as HTMLElement).offsetParent !== null && el.getAttribute("tabindex") !== "-1")
+          .map((el) => ({
+            name: el.getAttribute("aria-label") ?? el.textContent ?? "",
+            x: el.getBoundingClientRect().x,
+          })),
+      );
+      expect(xs.length, `${path}: the bar's controls`).toBeGreaterThan(1);
+      for (let i = 1; i < xs.length; i++)
+        expect(xs[i]!.x, `${path}: ${xs[i]!.name} comes after ${xs[i - 1]!.name}`).toBeGreaterThan(xs[i - 1]!.x);
+    }
+  });
+
+  for (const size of [
+    { width: 1440, height: 900 },
+    { width: 1280, height: 800 },
+  ])
+    test(`beside a session the bar stays one 48 px row at ${size.width}, on the Board and the Inbox`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await openBoard(page);
+      const board = page.locator(".page.board > .bar");
+      await expect(board.locator(".search")).toBeVisible();
+      // The bar's one row at full width: --bar (48) and its hairline.
+      const row = Math.round((await board.boundingBox())!.height);
+      expect(row).toBeLessThanOrEqual(49);
+      // Three sessions beside the board, as tabs (⇧-click opens one beside).
+      for (const i of [0, 1, 2]) {
+        await page
+          .locator("article.card a.card-link")
+          .nth(i)
+          .click({ modifiers: ["Shift"] });
+        await expect(page.locator("aside.panel")).toBeVisible();
+      }
+      await expect(board.locator(".search")).toBeVisible();
+      expect(Math.round((await board.boundingBox())!.height)).toBe(row);
+      // The Inbox with the panel still beside it.
+      await page.locator("nav.rail a[data-nav='inbox']").click();
+      await expect(page).toHaveURL(/\/inbox\?/);
+      await expect(page.locator("aside.panel")).toBeVisible();
+      await expect(page.locator(".page.inbox > .bar .bar-title")).toBeVisible();
+      expect(Math.round((await page.locator(".page.inbox > .bar").boundingBox())!.height)).toBe(row);
+    });
+});
+
+test.describe("board: on a phone", () => {
+  test.use({ viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true });
+  test("the way on to Search at a narrowed list's end is a finger's 44 px tall", async ({ page }) => {
+    await openBoard(page);
+    // A word of the first row's title, which the board keeps.
+    const title = ((await page.locator("article.card .card-title").first().textContent()) ?? "").trim();
+    const word = title.split(/\s+/).find((w) => /^[a-z]{4,}$/i.test(w)) ?? title.split(/\s+/)[0]!;
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill(word);
+    const more = page.locator(".board-more");
+    await expect(more).toBeVisible();
+    expect((await more.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   });
 });

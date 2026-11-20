@@ -15,6 +15,7 @@ export type Option = keyof typeof SINCE;
 
 /** What the app's flag (window.sessionpipeShell) says that matters here. */
 export interface ShellFlag {
+  platform?: string;
   appVersion?: string;
   receiver?: { name?: string; origin?: string; local?: boolean } | null;
 }
@@ -27,9 +28,9 @@ export const updateCommand = (appVersion: string): string =>
 
 export interface OlderReceiver {
   sentence: string;
-  /** This computer's receiver: the app can update it (the "Update sessionpipe" button). */
+  /** This computer's receiver: the app can update it (the Update button). */
   here: boolean;
-  /** Shown under the sentence, to copy; absent where there is none to give. */
+  /** Folded away under the sentence, to copy; absent where there is none to give. */
   command?: string;
 }
 
@@ -45,7 +46,8 @@ export const isRouteNotFound = (status: number, body: unknown): boolean =>
  *  version says (up to 0.8.0 that could be the new one while the old code answered; the
  *  version is then left out). `localOrigin`: the receiver the app's launch check found to
  *  be this computer's (its run.json names it); a loopback address alone is not enough,
- *  since a tunnel to another machine is one. */
+ *  since a tunnel to another machine is one. This computer's is "the background service",
+ *  as Settings › About names it; another machine's is its sessionpipe. */
 export function olderReceiver(
   option: Option,
   version: string | undefined,
@@ -53,13 +55,15 @@ export function olderReceiver(
 ): OlderReceiver | null {
   const shell = opts.shell === undefined ? flag() : opts.shell;
   if (!shell) return null;
-  const below = !!version && compareVersions(version, SINCE[option]) < 0;
+  const since = SINCE[option];
+  const below = !!version && compareVersions(version, since) < 0;
   if (!below && !opts.notFound) return null;
-  const is = below ? `is ${version}, which is older than this option` : "is older than this option";
+  const is = below ? `is ${version}; this option needs ${since}` : "is too old for this option";
   const origin = shell.receiver?.origin;
   const here = !!opts.localOrigin && !!origin && opts.localOrigin === origin;
   if (!here)
     return { sentence: `sessionpipe on ${shell.receiver?.name || "that machine"} ${is}. Update it there.`, here };
   const app = shell.appVersion ?? "";
-  return { sentence: `sessionpipe on this computer ${is}.`, here, ...(app ? { command: updateCommand(app) } : {}) };
+  const whose = shell.platform === "macos" ? "This Mac's" : "This computer's";
+  return { sentence: `${whose} background service ${is}.`, here, ...(app ? { command: updateCommand(app) } : {}) };
 }

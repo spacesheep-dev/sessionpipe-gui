@@ -4,8 +4,8 @@
 // daemon played by fetch: pair → approve on /pair → the daemon collects key, proof and
 // token → hello → a session's events → a prompt from the Session page reaches the
 // daemon's poll as a verified command → taken / delivered acks show under the strip;
-// then Allow on an open permission, Cancel on a working turn, a start from /machines
-// (its New session… sheet),
+// then Allow on an open permission, Cancel on a working turn, the Board's rows answered
+// with a and d and from their menus, a start from /machines (its New session… sheet),
 // and a theme sending through api.control.
 //
 //   node scripts/build.mjs && npx vite build --config web/vite.config.ts
@@ -13,6 +13,7 @@
 //
 // CONTROL_SHOTS=<dir> also writes screenshots of /pair and the strip (desktop + 390 px).
 import { type ChildProcess, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -132,6 +133,7 @@ class Events {
     readonly sinkToken: string,
     readonly sid: string,
     readonly machine: string,
+    readonly title = "Control e2e",
   ) {}
   ev(type: string, data: Record<string, unknown> = {}) {
     const t = Date.now() - 5000 + this.seq;
@@ -142,7 +144,7 @@ class Events {
       time: new Date(t).toISOString(),
       tier: 3,
       harness: { name: "claude-code", version: "2.1.296", event: "Hook" },
-      session: { id: this.sid, seq: this.seq++, machine: this.machine, cwd: "/tmp/proj", title: "Control e2e" },
+      session: { id: this.sid, seq: this.seq++, machine: this.machine, cwd: "/tmp/proj", title: this.title },
       privacy: { rulesets: ["secrets@1"], pii: false },
       data,
     };
@@ -747,6 +749,316 @@ test("a notification-only permission (nothing the daemon can answer) says so, wi
   await expect(row).toHaveCount(0);
 });
 
+// ----- the Board's rows: a and d, the row's line, the row's menu -----
+
+/** 112 characters, a chain of two: more than a row shows beside Allow and Deny (and under
+ *  the 120 Claude Code cuts a command at), so it is answered where it is shown whole. */
+const LONG_COMMAND =
+  "rsync -avz --delete --exclude .env ./dist/ deploy@staging.acme.dev:/srv/billing/new && systemctl restart billing";
+
+/** A session of its own with one open prompt, as its hooks raise it; `clear()` is the
+ *  prompt answered on its computer. */
+async function prompted(o: { title: string; message: string; tool?: string; machine?: string }) {
+  const ev = new Events(base, sinkToken, randomUUID(), o.machine ?? MACHINE, o.title);
+  const id = `board-${ev.sid.slice(0, 8)}`;
+  await ev.post(
+    ev.ev("session.started", { source: "startup" }),
+    ev.ev("turn.started", { turn_id: "t1", prompt_chars: 20 }),
+    ev.ev("attention.needed", { attention_id: id, kind: "permission", tool: o.tool ?? "Bash", message: o.message }),
+  );
+  return {
+    key: `claude-code:${ev.sid}`,
+    id,
+    title: o.title,
+    clear: () =>
+      ev.post(
+        ev.ev("attention.cleared", { attention_id: id, how: "answered" }),
+        ev.ev("turn.ended", { reason: "stop", ms: 1200 }),
+      ),
+  };
+}
+
+const card = (p: { key: string }) => page.locator(`article.card[data-flip="${p.key}"]`);
+
+/** The board, as a device that has seen Setup, with no banner over its rows. */
+async function board(query = ""): Promise<void> {
+  await page.evaluate(() => localStorage.setItem("sessionpipe-gui.setup.seen", "1"));
+  await page.goto(`/${query}`);
+  await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+}
+
+/** No tab left beside the page: a session opened as a page keeps the panel's tabs, so the
+ *  tests after this one would carry them. */
+async function closePanel(): Promise<void> {
+  await page.evaluate(() => localStorage.removeItem("sessionpipe-gui.splitTabs"));
+  await page.goto("/inbox");
+}
+
+/** j and k until the board's cursor is on the row. */
+async function cursorTo(p: { key: string }): Promise<void> {
+  await expect(card(p)).toBeVisible();
+  for (let i = 0; i < 30; i++) {
+    const [at, to] = await page.evaluate((key) => {
+      const rows = [...document.querySelectorAll("article.card")];
+      return [
+        rows.findIndex((r) => r.getAttribute("aria-current") === "true"),
+        rows.findIndex((r) => r.getAttribute("data-flip") === key),
+      ];
+    }, p.key);
+    if (at === to) break;
+    await page.keyboard.press(at < to ? "j" : "k");
+  }
+  await expect(card(p)).toHaveAttribute("aria-current", "true");
+}
+
+test("on the Board, a answers the row under the cursor, once; the row says it went, or why it did not", async () => {
+  const deploy = await prompted({
+    title: "Ship the BM25 cache to staging",
+    message: "npm run deploy -- --target staging",
+  });
+  await board();
+  const line = card(deploy).locator(".card-attn");
+  await expect(line).toHaveText("npm run deploy -- --target staging");
+  await cursorTo(deploy);
+
+  // Refused on its way: the line says so, in the request's place, and the key works again.
+  await page.route("**/api/ui/control/send", (r) =>
+    r.fulfill({ status: 422, json: { reason: "refused", code: "nonce_store" } }),
+  );
+  await page.keyboard.press("a");
+  await expect(line).toHaveText("Not sent: the machine could not record the nonce, so it did not run it");
+  await expect(line).toHaveAttribute("data-said", "error");
+  await expect(card(deploy).locator(".card-state .dot--needs_you")).toBeVisible();
+  await page.unroute("**/api/ui/control/send");
+  expect(await daemon.poll(0)).toEqual([]);
+
+  // Pressed twice: one answer, for the prompt under the cursor.
+  await page.keyboard.press("a");
+  await page.keyboard.press("a");
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({
+    kind: "permission.answer",
+    session: deploy.key,
+    for: deploy.id,
+    decision: "allow",
+  });
+  // The receipt in the request's place, and the working ring in the orange dot's.
+  await expect(line).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  await expect(line).toHaveAttribute("role", "status");
+  await expect(card(deploy).locator(".card-tool")).toHaveText("Bash");
+  await expect(card(deploy).locator(".card-state .dot--working")).toBeVisible();
+  await expect(card(deploy).locator(".card-state .dot--needs_you")).toHaveCount(0);
+  // Nothing to answer twice: taken by the machine, it is the one answer, and neither key
+  // sends another.
+  await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  await page.keyboard.press("d");
+  await page.keyboard.press("a");
+  expect(await daemon.poll(1)).toEqual([]);
+  await expect(line).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  await deploy.clear();
+  await expect(card(deploy)).not.toHaveClass(/card--needs_you/);
+});
+
+test("on the Board, a and d never answer a session open beside it; a row that is not answered from the row is, in the panel, once it is the one open there", async () => {
+  const beside = await prompted({ title: "Open beside", message: "make deploy" });
+  const question = await prompted({ title: "A question", tool: "AskUserQuestion", message: "AskUserQuestion" });
+  expect(LONG_COMMAND).toHaveLength(112);
+  const long = await prompted({ title: "A long command", message: LONG_COMMAND });
+  // Opened beside with no row under the cursor, the focus on the page: the keys are the
+  // board's, and answer nothing.
+  await board(`?s=${beside.key}`);
+  await expect(page.locator("aside.panel")).toHaveClass(/panel--open/);
+  const allow = page.locator(`aside.panel .ctl-answer[data-attention="${beside.id}"] .btn--allow`);
+  await expect(allow).toBeEnabled({ timeout: 15_000 });
+  await expect(page.locator("article.card[aria-current='true']")).toHaveCount(0);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("a");
+  await page.keyboard.press("d");
+  // On a question's row and on one whose command the row does not show whole: nothing either.
+  for (const p of [question, long]) {
+    await cursorTo(p);
+    await page.keyboard.press("a");
+    await page.keyboard.press("d");
+  }
+  expect(await daemon.poll(1)).toEqual([]);
+  await expect(allow).toBeEnabled();
+  await expect(page.locator("aside.panel .ctl-answer-receipt")).toHaveCount(0);
+
+  // Space peeks the row under the cursor: the panel shows its command whole, and a is the
+  // panel's, with the focus still on the list.
+  await page.keyboard.press("Space");
+  await expect(page.locator("aside.panel .panel-title")).toHaveText("A long command");
+  const shown = page.locator("aside.panel .panel-body:not(.panel-body--off)");
+  await expect(shown.locator(".ctl-cmd-block")).toContainText("systemctl restart billing");
+  await expect(card(long)).toHaveAttribute("aria-current", "true");
+  expect(await page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(false);
+  await expect(shown.locator(`.ctl-answer[data-attention="${long.id}"] .btn--allow`)).toBeEnabled();
+  await page.keyboard.press("a");
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({ kind: "permission.answer", session: long.key, for: long.id, decision: "allow" });
+  await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  expect(await daemon.poll(0)).toEqual([]);
+  // The answer went from the panel; the board's row says so too.
+  await expect(card(long).locator(".card-attn")).toHaveText(`Allowed · waiting for ${MACHINE}`);
+  for (const p of [beside, question, long]) await p.clear();
+  await closePanel();
+});
+
+test("with two prompts open in one session beside the page, a and d on the one the panel's keys do not answer send nothing, on the Board and in the Inbox", async () => {
+  // This receiver keeps one prompt open a session (the next hook event closes it); another
+  // may hold two, as parallel subagents ask at once. The stream's frames give this session
+  // a question ahead of its command while the command is open: the panel's first Allow is
+  // the command's, and the board's row shows the question.
+  await page.addInitScript(() => {
+    const two = sessionStorage.getItem("e2e-two-prompts");
+    if (!two) return;
+    const { key, id } = JSON.parse(two) as { key: string; id: string };
+    type Row = { key: string; openAttentions: { attentionId: string; at: string }[] };
+    const ask = (r: Row | undefined) => {
+      const first = r?.key === key ? r.openAttentions[0] : undefined;
+      if (!r || !first || first.attentionId === id) return;
+      r.openAttentions = [
+        {
+          attentionId: id,
+          kind: "permission",
+          tool: "AskUserQuestion",
+          message: "AskUserQuestion",
+          at: first.at,
+          answerable: true,
+        },
+        ...r.openAttentions,
+      ] as Row["openAttentions"];
+    };
+    const Real = window.EventSource;
+    window.EventSource = class extends Real {
+      addEventListener(kind: string, fn: EventListenerOrEventListenerObject, o?: boolean | AddEventListenerOptions) {
+        if (typeof fn !== "function") return super.addEventListener(kind, fn, o);
+        return super.addEventListener(
+          kind,
+          (e: Event) => {
+            const m = JSON.parse((e as MessageEvent).data);
+            for (const r of m.snapshot?.sessions ?? []) ask(r);
+            ask(m.session);
+            fn(new MessageEvent(e.type, { data: JSON.stringify(m), lastEventId: (e as MessageEvent).lastEventId }));
+          },
+          o,
+        );
+      }
+    } as typeof EventSource;
+  });
+  const bash = await prompted({ title: "Two prompts", message: "make deploy" });
+  const question = `${bash.id}-q`;
+  await page.evaluate(
+    ([key, id]) => sessionStorage.setItem("e2e-two-prompts", JSON.stringify({ key, id })),
+    [bash.key, question],
+  );
+  try {
+    // The Board: the row shows the question; its session is open beside it.
+    await board(`?s=${bash.key}`);
+    const shown = page.locator("aside.panel .panel-body:not(.panel-body--off)");
+    await expect(shown.locator(`.ctl-answer[data-attention="${question}"]`)).toHaveAttribute("data-answer", "question");
+    const allow = shown.locator(`.ctl-answer[data-attention="${bash.id}"] .btn--allow`);
+    await expect(allow).toBeEnabled({ timeout: 15_000 });
+    await cursorTo(bash);
+    await expect(card(bash).locator(".card-tool")).toHaveText("Question");
+    expect(await page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(false);
+    await page.keyboard.press("a");
+    await page.keyboard.press("d");
+    expect(await daemon.poll(1)).toEqual([]);
+    await expect(allow).toBeEnabled();
+
+    // The Inbox: on the question's row, nothing; on the command's, its own answer.
+    await page.goto(`/inbox?s=${bash.key}`);
+    await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+    const row = (id: string) => page.locator(`.inbox-row[data-attention="${id}"]`);
+    await expect(allow).toBeEnabled({ timeout: 15_000 });
+    await row(question).locator(".inbox-main").focus();
+    await expect(row(question)).toHaveAttribute("aria-current", "true");
+    await page.keyboard.press("a");
+    await page.keyboard.press("d");
+    expect(await daemon.poll(1)).toEqual([]);
+    await row(bash.id).locator(".inbox-main").focus();
+    await expect(row(bash.id)).toHaveAttribute("aria-current", "true");
+    await page.keyboard.press("d");
+    const msg = await daemon.next();
+    expect(msg.cmd).toMatchObject({ kind: "permission.answer", session: bash.key, for: bash.id, decision: "deny" });
+    await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  } finally {
+    await page.evaluate(() => sessionStorage.removeItem("e2e-two-prompts"));
+    await bash.clear();
+    await closePanel();
+  }
+});
+
+test("on the Board, a on a machine that is not paired sends nothing, and the row says why until the cursor leaves it", async () => {
+  const other = await prompted({ title: "Rebuild the cache", message: "make cache", machine: "ci-box" });
+  const mine = await prompted({ title: "Run the suite", message: "npm test" });
+  await board();
+  const line = card(other).locator(".card-attn");
+  await expect(line).toHaveText("make cache");
+  await cursorTo(other);
+  await page.keyboard.press("a");
+  await expect(line).toHaveText("Pair ci-box to send messages");
+  await expect(line).toHaveAttribute("data-said", "off");
+  // Still the orange dot: nothing went.
+  await expect(card(other).locator(".card-state .dot--needs_you")).toBeVisible();
+  expect(await daemon.poll(1)).toEqual([]);
+  // The cursor on another row: the request is back.
+  await cursorTo(mine);
+  await expect(line).toHaveText("make cache");
+  await expect(line).not.toHaveAttribute("data-said");
+  expect(await daemon.poll(0)).toEqual([]);
+  for (const p of [other, mine]) await p.clear();
+});
+
+test("a row's menu leads with Allow and Deny and their keys, on the Board and in the Inbox, and shows no key that does something else", async () => {
+  const p = await prompted({ title: "Publish the docs", message: "npm run docs:publish" });
+  const items = page.getByRole("menu").getByRole("menuitem");
+  const keys = (name: string) => page.getByRole("menuitem", { name, exact: true }).locator(".menu-keys");
+  /** The menu's first two are the pair, with a and d beside them; then Open. */
+  const leads = async () => {
+    await expect(items.nth(0)).toHaveText(/^Allow Bash\s*a$/i);
+    await expect(items.nth(1)).toHaveText(/^Deny Bash\s*d$/i);
+    await expect(keys("Allow Bash")).toHaveText("a", { ignoreCase: true });
+    await expect(keys("Deny Bash")).toHaveText("d", { ignoreCase: true });
+  };
+
+  // The Inbox's row.
+  await board();
+  await page.goto("/inbox");
+  await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+  await page.locator(`.inbox-row[data-attention="${p.id}"] .inbox-main`).click({ button: "right" });
+  await leads();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+
+  // The Board's row: the pair, a rule, then the two Opens, the one ↵ does first (beside,
+  // on a computer that has not chosen); C is not beside New session here (it opens the
+  // sheet for the board's machine), and this machine's agents cannot be asked.
+  await board();
+  await card(p).locator(".card-title").click({ button: "right" });
+  await leads();
+  await expect(items.nth(2)).toHaveText(/^Open beside/);
+  await expect(items.nth(3)).toHaveText(/^Open as page/);
+  await expect(page.getByRole("menuitem", { name: "New session here" })).toBeVisible();
+  await expect(keys("New session here")).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Ask another agent…" })).toHaveCount(0);
+  // The menu's Deny goes as the key's does, and the row says so.
+  await page.getByRole("menuitem", { name: "Deny Bash" }).click();
+  const msg = await daemon.next();
+  expect(msg.cmd).toMatchObject({ kind: "permission.answer", session: p.key, for: p.id, decision: "deny" });
+  await expect(card(p).locator(".card-attn")).toHaveText(`Denied · waiting for ${MACHINE}`);
+  // With an answer out the menu offers none.
+  await expect(async () => {
+    await card(p).locator(".card-title").click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: "Open as page" })).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  await expect(page.getByRole("menuitem", { name: /^(Allow|Deny) Bash$/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await daemon.ack(msg.id, "delivered", { mode: "waiter" });
+  await p.clear();
+});
+
 test("a session is started from /machines in one of the machine's folders", async () => {
   await page.goto("/machines");
   const block = page.getByRole("region", { name: MACHINE });
@@ -914,6 +1226,9 @@ test("a phone adds its own passkey: the paired browser approves with a key.add, 
   await expect(p2.locator("[data-check]")).toBeVisible({ timeout: 20_000 });
   const spare = page.locator(".pending-devices .pending-item").filter({ hasText: "Spare phone" });
   await expect(spare).toBeVisible();
+  // The phone's "delivered" notification can sit over the row, and one under the pointer
+  // stays for as long as the pointer does: out of the way, as in the row-menu test.
+  await page.addStyleTag({ content: ".toasts { display: none !important; }" });
   await spare.getByRole("button", { name: "Reject" }).click();
   await expect(spare).toHaveCount(0);
   await expect(p2.locator(".pair-note--quiet")).toContainText("Rejected", { timeout: 10_000 });

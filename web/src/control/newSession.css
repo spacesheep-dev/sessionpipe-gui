@@ -12,7 +12,7 @@
 .icon-btn.compose-btn--phone {
   display: none;
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .icon-btn.compose-btn--phone {
     display: inline-flex;
   }

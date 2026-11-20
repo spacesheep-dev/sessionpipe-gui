@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { isRouteNotFound, olderReceiver, SINCE, updateCommand } from "./serverAge";
 
 const ORIGIN = "http://127.0.0.1:7373";
-const shell = { appVersion: "0.8.1", receiver: { name: "studio-mac", origin: ORIGIN, local: true } };
+const shell = { platform: "macos", appVersion: "0.8.1", receiver: { name: "studio-mac", origin: ORIGIN, local: true } };
 /** The app's launch check found this receiver to be this computer's (its run.json names it). */
 const here = { shell, localOrigin: ORIGIN };
 const g = globalThis as { sessionpipeShell?: unknown };
@@ -12,9 +12,9 @@ afterEach(() => {
 });
 
 describe("olderReceiver", () => {
-  it("on this computer, in the app: the sentence, the button, and the command to copy", () => {
+  it("on this Mac, in the app: the sentence, the button, and the command to copy", () => {
     expect(olderReceiver("spacesheep", "0.7.2", here)).toEqual({
-      sentence: "sessionpipe on this computer is 0.7.2, which is older than this option.",
+      sentence: "This Mac's background service is 0.7.2; this option needs 0.7.5.",
       here: true,
       command:
         "npx -y --package=https://github.com/spacesheep-dev/sessionpipe-gui/releases/download/v0.8.1/sessionpipe-gui-0.8.1.tgz -- sessionpipe-gui service install",
@@ -34,14 +34,22 @@ describe("olderReceiver", () => {
   it("takes the receiver's own 404 as older, and names the version only when it is below the option's", () => {
     // A stale process whose info names the new version (up to 0.8.0): no "is 0.8.0, which is older".
     expect(olderReceiver("spacesheep", "0.8.0", { ...here, notFound: true })?.sentence).toBe(
-      "sessionpipe on this computer is older than this option.",
+      "This Mac's background service is too old for this option.",
     );
     expect(olderReceiver("spacesheep", undefined, { ...here, notFound: true })?.sentence).toBe(
-      "sessionpipe on this computer is older than this option.",
+      "This Mac's background service is too old for this option.",
     );
     expect(olderReceiver("spacesheep", "0.7.2", { ...here, notFound: true })?.sentence).toBe(
-      "sessionpipe on this computer is 0.7.2, which is older than this option.",
+      "This Mac's background service is 0.7.2; this option needs 0.7.5.",
     );
+    // Off a Mac: this computer's.
+    const windows = { ...shell, platform: "windows" };
+    expect(olderReceiver("spacesheep", "0.7.2", { shell: windows, localOrigin: ORIGIN })?.sentence).toBe(
+      "This computer's background service is 0.7.2; this option needs 0.7.5.",
+    );
+    expect(
+      olderReceiver("spacesheep", "0.8.0", { shell: windows, localOrigin: ORIGIN, notFound: true })?.sentence,
+    ).toBe("This computer's background service is too old for this option.");
   });
 
   it("tells the receiver's 404 from the app proxy's: only `{ reason: \"not_found\" }` is a missing route", () => {
@@ -55,24 +63,27 @@ describe("olderReceiver", () => {
   it("a loopback receiver the launch check didn't find to be this computer's (a tunnel) is another machine's", () => {
     for (const localOrigin of [null, undefined, "http://127.0.0.1:7380"]) {
       expect(olderReceiver("spacesheep", "0.7.2", { shell, localOrigin })).toEqual({
-        sentence: "sessionpipe on studio-mac is 0.7.2, which is older than this option. Update it there.",
+        sentence: "sessionpipe on studio-mac is 0.7.2; this option needs 0.7.5. Update it there.",
         here: false,
       });
     }
     const there = { appVersion: "0.8.1", receiver: { name: "build-box", origin: "http://build-box.local:7373" } };
     expect(olderReceiver("spacesheep", "0.7.2", { shell: there, localOrigin: ORIGIN })?.sentence).toBe(
-      "sessionpipe on build-box is 0.7.2, which is older than this option. Update it there.",
+      "sessionpipe on build-box is 0.7.2; this option needs 0.7.5. Update it there.",
+    );
+    expect(olderReceiver("spacesheep", "0.8.0", { shell: there, localOrigin: ORIGIN, notFound: true })?.sentence).toBe(
+      "sessionpipe on build-box is too old for this option. Update it there.",
     );
     // No app version in the flag: no command.
     expect(olderReceiver("spacesheep", "0.7.2", { shell: { receiver: shell.receiver }, localOrigin: ORIGIN })).toEqual({
-      sentence: "sessionpipe on this computer is 0.7.2, which is older than this option.",
+      sentence: "This computer's background service is 0.7.2; this option needs 0.7.5.",
       here: true,
     });
   });
 
   it("reads the app's flag from the page when none is given", () => {
     expect(olderReceiver("spacesheep", "0.7.2")).toBeNull();
-    g.sessionpipeShell = { v: 1, platform: "macos", ...shell };
+    g.sessionpipeShell = { v: 1, ...shell };
     expect(olderReceiver("spacesheep", "0.7.2", { localOrigin: ORIGIN })?.command).toContain("/v0.8.1/");
   });
 });

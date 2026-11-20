@@ -3,9 +3,10 @@
 /* The Workflows page (orchestrate/workflows, UX-SPEC §4), in the Machines page's column:
    the list of saved workflows and the templates as 1-line rows under hairlines, the editor
    as native rows (label | control, the sheet's grammar), the run view as rows with one
-   glyph, one right column and at most one second line. No box per item, no colour but the
-   one accent for "waiting for a signer" and --err for a failure. On a phone the groups
-   are inset cells on the grouped ground, rows 44 px, as the document pages are. */
+   glyph, one right column and at most one second line. Each group is an inset panel on
+   the grouped ground, as the document pages' are; no box per item, no colour but the one
+   accent for "waiting for a signer" and --err for a failure. On a phone the rows are
+   44 px and the panels have no edge. */
 
 .workflows {
   gap: 24px;
@@ -25,8 +26,7 @@
   align-items: center;
   gap: 8px;
   min-height: 28px;
-  padding: 0 4px;
-  border-bottom: var(--hairline) solid var(--line);
+  padding: 0 12px 6px;
   color: var(--fg-2);
   font-size: var(--text-xs);
   font-weight: 600;
@@ -600,22 +600,81 @@ button.wf-row:active {
   padding-top: 32px;
 }
 
+/* ----- a group's panel ----- */
+
+.wf-list,
+.wf-form,
+.wf-steps,
+.wf-run-steps,
+.wf-kv {
+  border-radius: var(--radius-pop);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+/* On a desktop the panel has an edge, the rows 12 px insets, and a row's fill runs to the
+   panel's edge (its corners are the panel's), its focus ring inside it. */
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+  .wf-list,
+  .wf-form,
+  .wf-steps,
+  .wf-run-steps,
+  .wf-kv {
+    border: var(--hairline) solid var(--line);
+  }
+  .wf-form > .wf-field:last-child {
+    border-bottom: none;
+  }
+  .wf-row {
+    padding: 0 calc(12px - var(--hairline));
+    border-radius: 0;
+  }
+  .wf-row:focus-visible,
+  .wf-step-btn:focus-visible,
+  .wf-add:focus-visible {
+    outline-offset: -2px;
+  }
+  .wf-item + .wf-item::before,
+  .wf-run-step + .wf-run-step::before {
+    left: calc(40px - var(--hairline));
+  }
+  .wf-field,
+  .wf-step-head {
+    padding: 0 calc(12px - var(--hairline));
+  }
+  .wf-step-btn {
+    margin-left: calc(var(--hairline) - 12px);
+    padding-left: calc(12px - var(--hairline));
+    border-radius: 0;
+  }
+  .wf-add {
+    padding: 0 calc(12px - var(--hairline)) 0 calc(40px - var(--hairline));
+    border-radius: 0;
+  }
+  .wf-kv {
+    padding: var(--row-pad) calc(12px - var(--hairline));
+  }
+  .wf-second,
+  .wf-run-step > .chat-tools {
+    margin-left: calc(40px - var(--hairline));
+    padding-right: calc(12px - var(--hairline));
+  }
+  .workflows .page-note {
+    padding: 0 12px;
+  }
+}
+
 /* ----- the phone: grouped cells, 44 px rows ----- */
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .wf-head {
     padding: 0 16px 6px;
-    border-bottom: none;
   }
   .wf-list,
   .wf-form,
   .wf-steps,
   .wf-run-steps,
   .wf-kv {
-    border-radius: var(--radius-pop);
     border: none;
-    background: var(--bg-2);
-    overflow: hidden;
   }
   .wf-row {
     min-height: var(--tap);

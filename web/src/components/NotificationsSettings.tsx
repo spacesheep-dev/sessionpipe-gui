@@ -3,8 +3,12 @@
 // switch rows for system notifications (lib/notify.ts) and sounds (lib/sounds.ts), the
 // volume, one row per kind of moment with its sound and a ▶ to test it, and the file you can
 // upload for any of them. The window's grouped form: each control on the same trailing
-// edge as every other section's, one caption line under a label.
-import { useId, useRef, useState } from "react";
+// edge as every other section's, one caption line under a label. The Mac app posts its
+// notifications itself, so there the app's own switch, Pause and kinds (native/AppSettings.tsx
+// SystemNotifications, fetched only there) stand in place of the page's "Notify me" row and
+// its captions, and the sounds follow. (The phone's switch is in Settings › App.)
+import { lazy, Suspense, useId, useRef, useState } from "react";
+import { nativeNotify, phoneShell } from "../lib/device";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
 import {
   BUILTIN_SOUNDS,
@@ -22,7 +26,21 @@ import {
 import { Slider, Switch } from "./bits";
 import { Select } from "./Select";
 
+const SystemNotifications =
+  nativeNotify() && !phoneShell()
+    ? lazy(() => import("../native/AppSettings").then((m) => ({ default: m.SystemNotifications })))
+    : null;
+
+/** The section, drawn whole: nothing shows until the Mac app's own group is in. */
 export function NotificationsSettings() {
+  return (
+    <Suspense fallback={null}>
+      <Section />
+    </Suspense>
+  );
+}
+
+function Section() {
   const notify = useNotifyPref();
   const s = useSounds();
   const id = useId();
@@ -41,22 +59,25 @@ export function NotificationsSettings() {
   };
   return (
     <div className="ntf" data-sounds={s.on ? "on" : "off"}>
-      <section className="settings-group" aria-label="Alerts">
+      {SystemNotifications && <SystemNotifications full />}
+      <section className="settings-group" aria-label={SystemNotifications ? "Sounds" : "Alerts"}>
         <div className="settings-cells">
-          <div className="settings-row ntf-row" data-row="notify">
-            <div className="settings-row-text">
-              <span className="settings-label ntf-label" id={`${id}-notify`}>
-                Notify me
-              </span>
-              <span className="settings-hint ntf-hint">{notifyHint}</span>
-              <span className="settings-hint ntf-hint">
-                Each session's menu has Notify me: be told when it finishes, or turn it off.
-              </span>
+          {!SystemNotifications && (
+            <div className="settings-row ntf-row" data-row="notify">
+              <div className="settings-row-text">
+                <span className="settings-label ntf-label" id={`${id}-notify`}>
+                  Notify me
+                </span>
+                <span className="settings-hint ntf-hint">{notifyHint}</span>
+                <span className="settings-hint ntf-hint">
+                  Each session's menu has Notify me: be told when it finishes, or turn it off.
+                </span>
+              </div>
+              <div className="settings-row-ctl">
+                <Switch on={notify.on} onChange={(v) => void setNotifyPref(v)} label="Notify me" disabled={blocked} />
+              </div>
             </div>
-            <div className="settings-row-ctl">
-              <Switch on={notify.on} onChange={(v) => void setNotifyPref(v)} label="Notify me" disabled={blocked} />
-            </div>
-          </div>
+          )}
           <div className="settings-row ntf-row" data-row="sounds">
             <div className="settings-row-text">
               <span className="settings-label ntf-label">Sounds</span>
@@ -95,7 +116,7 @@ export function NotificationsSettings() {
                 <label className="settings-label ntf-label" htmlFor={`${id}-${k.kind}`}>
                   {k.label}
                 </label>
-                <span className="settings-hint ntf-hint">{k.hint.charAt(0).toUpperCase() + k.hint.slice(1)}.</span>
+                {k.hint && <span className="settings-hint ntf-hint">{k.hint}</span>}
               </div>
               <div className="settings-row-ctl">
                 <Select<SoundChoice>

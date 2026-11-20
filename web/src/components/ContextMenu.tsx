@@ -25,6 +25,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/clipboard";
+import { phoneLayout } from "../lib/device";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { usePath } from "../lib/router";
 import { hintFor } from "../lib/shortcuts";
@@ -144,8 +145,6 @@ export function useMenuOpen(): boolean {
   return useSyncExternalStore(subscribe, getMenuOpen, getMenuOpen);
 }
 
-const PHONE = "(max-width: 839px)";
-const isPhone = () => typeof matchMedia === "function" && matchMedia(PHONE).matches;
 let lastOpenAt = 0;
 
 /** Opens a menu at a point, under a rect, or under an element (a "⋯" button). */
@@ -157,6 +156,7 @@ export function openMenu(list: MenuList, at: { x: number; y: number } | DOMRect 
   const point = rect ? { x: rect.left, y: rect.bottom + 4 } : (at as { x: number; y: number });
   const source = o.source ?? "mouse";
   lastOpenAt = Date.now();
+  openedAt = point;
   menu?.owner?.removeAttribute("data-menu-open");
   const owner = o.owner ?? el;
   owner?.setAttribute("data-menu-open", "");
@@ -168,7 +168,7 @@ export function openMenu(list: MenuList, at: { x: number; y: number } | DOMRect 
     title: o.title,
     subtitle: o.subtitle,
     source,
-    sheet: source === "touch" || isPhone(),
+    sheet: source === "touch" || phoneLayout(),
     invoker: o.invoker ?? el ?? (document.activeElement as HTMLElement | null),
     owner,
   };
@@ -192,7 +192,7 @@ export function confirmAction(o: { title: string; body?: string; action: string;
     confirmReq = {
       ...o,
       resolve,
-      sheet: isPhone(),
+      sheet: phoneLayout(),
       invoker: document.activeElement as HTMLElement | null,
     };
     emit();
@@ -269,8 +269,10 @@ function useMenuPolicy() {
     const onCtx = (ev: MouseEvent) => {
       const e = ev as MenuEvent;
       const t = e.target as HTMLElement | null;
-      // A keyboard-made menu we already opened, or Android's own long-press after ours.
-      if (!e.__kbd && !e.__touch && Date.now() - lastOpenAt < 400) {
+      // A keyboard-made menu we already opened, or Android's own long-press after ours: the
+      // browser's own event for the same gesture, while that menu is still up. Once it has
+      // closed, a right-click is a new one, however soon it comes.
+      if (!e.__kbd && !e.__touch && menu && Date.now() - lastOpenAt < 400) {
         e.preventDefault();
         return;
       }
@@ -400,6 +402,18 @@ function useMenuPolicy() {
 
 const EDGE = 8;
 
+/** Where the menu opened, which a right-click's pointer is still on. Letting the button go
+ *  chooses the item under it only for a press dragged there, as NSMenu tells one from the
+ *  click that opened the menu: the pointer has moved this far from that point, and the
+ *  button was held this long. (Distance alone lets a click made with the hand still moving
+ *  through: the first item starts a few pixels from the pointer.) */
+let openedAt = { x: 0, y: 0 };
+const DRAG_MIN = 4;
+const HOLD_MIN_MS = 200;
+/** Whether a right-button release at this point is a press dragged onto an item. */
+const dragged = (x: number, y: number): boolean =>
+  Date.now() - lastOpenAt >= HOLD_MIN_MS && Math.hypot(x - openedAt.x, y - openedAt.y) >= DRAG_MIN;
+
 function shortcutOf(i: Leaf): string {
   if (i.keys) return i.keys;
   return i.action ? hintFor(i.action) : "";
@@ -489,6 +503,9 @@ function MenuPanel({
   const actionable = items.map((i, n) => (isAction(i) ? n : -1)).filter((n) => n >= 0);
   const [active, setActive] = useState<number>(keyboard ? (actionable[0] ?? -1) : -1);
   const [open, setOpen] = useState<{ index: number; keyboard: boolean } | null>(null);
+  /** The keys moved the highlight last (or opened the menu): the item gets the cursor edge.
+   *  The pointer's highlight is the plain fill. */
+  const [byKeys, setByKeys] = useState(keyboard);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const typed = useRef({ text: "", at: 0 });
   const hoverTimer = useRef<number | null>(null);
@@ -605,6 +622,7 @@ function MenuPanel({
       if (hit !== undefined) setActive(hit);
     } else handled = false;
     if (handled) {
+      setByKeys(true);
       e.preventDefault();
       e.stopPropagation();
     }
@@ -621,6 +639,7 @@ function MenuPanel({
         role="menu"
         aria-label={label ?? "Actions"}
         tabIndex={-1}
+        data-keys={byKeys || undefined}
         onKeyDown={onKeyDown}
         onMouseMove={(e) => {
           const p = { x: e.clientX, y: e.clientY };
@@ -664,6 +683,7 @@ function MenuPanel({
                 onClick: () => run(n, false),
                 onMouseEnter: () => {
                   setActive(n);
+                  setByKeys(false);
                   if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
                   // On the way into the open submenu: wait longer before letting it go.
                   const heading = !!open && open.index !== n && towardSub();
@@ -677,9 +697,10 @@ function MenuPanel({
                     hoverTimer.current = window.setTimeout(() => setOpen(null), heading ? 400 : 120);
                   }
                 },
-                // A right-press dragged onto an item runs it, as a native menu does.
+                // A right-press dragged onto an item runs it, as a native menu does; the
+                // click that opened the menu chooses nothing, wherever it is let go.
                 onMouseUp: (e) => {
-                  if (e.button === 2) run(n, false);
+                  if (e.button === 2 && dragged(e.clientX, e.clientY)) run(n, false);
                 },
               })}
             >
@@ -715,13 +736,16 @@ function MenuPanel({
           label={sub.label}
           depth={depth + 1}
           onClose={() => {
+            // ← or Esc in the submenu: the keys are back on its row here.
             setOpen(null);
+            setByKeys(true);
             subRow.focus({ preventScroll: true });
           }}
           onCloseAll={onCloseAll}
           onPanelEnter={() => {
             if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
             setActive(open!.index);
+            setByKeys(false);
           }}
         />
       )}

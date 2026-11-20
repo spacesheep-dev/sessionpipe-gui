@@ -2,15 +2,21 @@
 // A desktop's notification banner (Toasts.tsx draws it with a pointer-sized screen only, so
 // its code loads there alone, warmed at idle, long before a first banner can arrive): what
 // happened and where, the session, the detail; Allow and Deny right on it when a control
-// answer can reach it (control/useSend.ts). A click opens the session beside the page, a
+// answer can reach it (control/useSend.ts) and the banner shows the request whole (the
+// Inbox's rule, lib/format.ts askFitsRow), else one Open. A shell command stands on its
+// own line under "Bash wants to run:". A click opens the session the way Settings says, a
 // right-click has the rest.
 import type { MachineControl, SessionSummary } from "@shared/api";
 import { type MutableRefObject, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { answerState, useSessionSend } from "../control/useSend";
 import { useAnswerClock } from "../lib/answerWindow";
+import { askFitsRow } from "../lib/format";
 import { copyItem } from "../lib/menus";
-import { openSplit } from "../lib/split";
+import { usePath } from "../lib/router";
+import { useAppSettings } from "../lib/settings";
+import { openSession, openSplit, openWay } from "../lib/split";
 import { dismissToast, type Toast } from "../lib/toasts";
+import { NEW_WORDS } from "../native/accountWords";
 import { Redacted } from "./bits";
 import { type MenuList, useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
@@ -29,16 +35,25 @@ export function ToastCard({
   control: (machine: string) => MachineControl | undefined;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const open = () => {
+  // A click is a plain open, by the one rule (lib/split.ts openSession): beside, a preview
+  // tab, or the page. The menu's Open beside keeps its tab.
+  const open = (preview = true) => {
     if (!t.session) return;
-    openSplit(t.session, { from: ref.current?.getBoundingClientRect() });
+    const from = ref.current?.getBoundingClientRect();
+    if (preview) openSession(t.session, "primary", { from });
+    else openSplit(t.session, { from });
     dismissToast(t.id);
   };
+  // The tooltip says where the click goes (openWay reads the address and Settings: these
+  // two keep it current).
+  usePath();
+  useAppSettings();
+  const openTitle = openWay("primary") === "beside" ? "Open the session beside this page" : "Open the session";
   const attention = t.attentionId ? session?.openAttentions.find((a) => a.attentionId === t.attentionId) : undefined;
   const answerMenu = useRef<MenuList>([]);
   const menu = useContextMenu(
     () => [
-      t.session && { label: "Open beside", run: open },
+      t.session && { label: "Open beside", run: () => open(false) },
       ...answerMenu.current,
       { sep: true },
       { label: "Copy", items: [copyItem("Title", t.title), copyItem("Message", t.body)] },
@@ -47,13 +62,16 @@ export function ToastCard({
     ],
     { title: () => t.title, subtitle: () => t.machine ?? "" },
   );
-  // With nothing after it (a question, a plan), the tool's name stands alone.
-  const verb = t.tool && t.body ? (SHELL.test(t.tool) ? " wants to run " : " wants to use ") : "";
+  // With nothing after it (a question, a plan), the tool's name stands alone. A command
+  // goes on its own line, after the colon.
+  const verb = t.tool && t.body ? (SHELL.test(t.tool) ? " wants to run:" : " wants to use ") : "";
   const marked = t.kind === "needs-you" || t.kind === "error";
+  // Allow only beside a request shown whole: a long one is cut, and offers Open.
+  const whole = !!(t.answerable && session && attention && askFitsRow(attention, session.harness));
   return (
     <div
       ref={ref}
-      className={`toast toast--${t.kind}${marked ? " toast--marked" : ""}`}
+      className={`toast toast--${t.kind}${marked ? " toast--marked" : ""}${whole ? " toast--whole" : ""}`}
       data-toast={t.kind}
       data-session={t.session}
       data-attention={t.attentionId}
@@ -69,9 +87,9 @@ export function ToastCard({
       <button
         type="button"
         className="toast-main"
-        onClick={open}
+        onClick={() => open()}
         disabled={!t.session}
-        title={t.session ? "Open the session beside this page" : undefined}
+        title={t.session ? openTitle : undefined}
       >
         <span className="toast-head">
           {t.verb ?? t.label}
@@ -110,6 +128,8 @@ export function ToastCard({
           attention={attention}
           control={session.machine ? control(session.machine) : undefined}
           into={answerMenu}
+          whole={whole}
+          onOpen={() => open()}
         />
       )}
     </div>
@@ -117,19 +137,25 @@ export function ToastCard({
 }
 
 /** Allow / Deny on the banner, through the same signed send as the session page and the
- *  inbox; the banner leaves once an answer is out. Its menu gets the same two. */
+ *  inbox; the banner leaves once an answer is out. Its menu gets the same two. Beside a
+ *  request the banner cuts (`whole` false), one Open in the pair's place, never off, and
+ *  nothing in the menu. */
 function ToastAnswer({
   toast,
   session: s,
   attention: a,
   control,
   into,
+  whole,
+  onOpen,
 }: {
   toast: Toast;
   session: SessionSummary;
   attention: NonNullable<SessionSummary["openAttentions"]>[number];
   control?: MachineControl;
   into: MutableRefObject<MenuList>;
+  whole: boolean;
+  onOpen: () => void;
 }) {
   // This banner's prompt only: another prompt's refused answer is not this one's to say.
   const send = useSessionSend(
@@ -148,7 +174,7 @@ function ToastAnswer({
       .then(() => dismissToast(toast.id))
       .catch(() => {});
   useLayoutEffect(() => {
-    into.current = answerItems(a.tool, st, answer);
+    into.current = whole ? answerItems(a.tool, st, answer) : [];
   });
   useEffect(
     () => () => {
@@ -158,7 +184,13 @@ function ToastAnswer({
   );
   return (
     <span className="toast-actions" data-answer={tag}>
-      {!shut && (
+      {!shut && !whole && (
+        // Deny's face: it answers nothing, it opens the session where the request is whole.
+        <button type="button" className="btn btn--sm btn--deny toast-open" onClick={onOpen}>
+          {NEW_WORDS.inboxOpen}
+        </button>
+      )}
+      {!shut && whole && (
         <>
           <button type="button" className="btn btn--sm btn--deny" disabled={off} onClick={() => answer(false)}>
             Deny
@@ -170,7 +202,7 @@ function ToastAnswer({
       )}
       {send.error ? (
         <span className="toast-note toast-note--err">{send.error}</span>
-      ) : reason ? (
+      ) : reason && (whole || shut) ? (
         <span className="toast-note">{reason}</span>
       ) : null}
     </span>

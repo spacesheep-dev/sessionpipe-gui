@@ -19,7 +19,7 @@ import { type CommandFields, HeldForConfirm, heldWhy, sendCommand, UnheardSend }
 import { type Held, useHeld } from "./HeldNotice";
 import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
-import { useControlActivity, useGrant, useRpId } from "./hooks";
+import { useAnswersOut, useControlActivity, useGrant, useRpId } from "./hooks";
 import { remoteHostFor } from "./remoteRp";
 import {
   canSign,
@@ -133,6 +133,46 @@ export function answerState(
     ...(sentence ? { sentence } : {}),
     ...(receipt && reason === receipt.text ? { receipt } : {}),
   };
+}
+
+/** What `answerState` reads of this device and one machine, with no send behind it. */
+export type SendGate = Pick<SessionSend, "rp" | "secure" | "tap" | "cooling" | "sendable" | "approval" | "catching">;
+
+/** The gate for any machine, for a surface over many sessions (the palette): the parts
+ *  useSessionSend builds for its one, by the same rules, so both say the same of a
+ *  machine. `cooling`: the hour's line, where its end is known (approve.ts `exact`). */
+export function useSendGate(): (control: MachineControl | undefined) => SendGate {
+  const rp = useRpId();
+  const secure = canSign(rp);
+  const sendTo = useSendStates(rp);
+  const catching = useCatching();
+  const phase = usePhone().view?.phase;
+  const cooling = phase?.kind === "cooling" && phase.exact ? SEND.long.from(ThisPhone(), clock(phase.until)) : null;
+  const device = signerKind() === "device";
+  const keyKnown = !!rp && ownKeyKnown(rp);
+  return useCallback(
+    (control) => {
+      const sendable = sendTo(control);
+      const approval = approvalOf(sendable, { device, keyKnown });
+      return { rp, secure, tap: false, cooling, sendable, approval, catching };
+    },
+    [rp, secure, sendTo, catching, cooling, device, keyKnown],
+  );
+}
+
+/** Whether Allow / Deny is off for a prompt of any session, as every surface reads it
+ *  (`answerState(...).off`). For a surface that lists the prompts of many sessions and has
+ *  no disabled row to show: it offers an answer only where this says false (the palette).
+ *  `open`: the prompts it may ask about, whose answers out are read off the page's activity. */
+export function useAnswerOff(
+  open: readonly Attention[],
+): (s: SessionSummary, a: Attention, control: MachineControl | undefined, now: number) => boolean {
+  const gate = useSendGate();
+  const answers = useAnswersOut(open);
+  return useCallback(
+    (s, a, control, now) => answerState(s, a, control, { ...gate(control), answers }, now).off,
+    [gate, answers],
+  );
 }
 
 /** A send nobody heard the answer to, as the line under the field says it. */

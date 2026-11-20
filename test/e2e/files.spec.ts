@@ -16,9 +16,10 @@ const readResult = (filePath: string, lines: string[]) => ({
 });
 
 /** One tier-3 Claude Code session: a Read of a file (the result object Claude Code returns
- *  it), two Edits to it, a Write of a new file, a Bash that failed, then a second Read of
- *  the first file (a later version). */
-async function postSession(request: APIRequestContext) {
+ *  it), an Edit to it, a Write of a new file and a Bash that failed; with `reread`, then a
+ *  second Read of the first file (a later version); with `crowd`, twelve more new files and
+ *  eleven more failed commands, so both of the drawer's counts have two digits. */
+async function postSession(request: APIRequestContext, { reread = false, crowd = false } = {}) {
   const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
   const harness = "claude-code";
   const sessionId = randomUUID();
@@ -74,17 +75,48 @@ async function postSession(request: APIRequestContext) {
     ),
     ...tool("Write", { file_path: `${cwd}/src/new.test.ts`, content: "test('x', () => {});\n" }, "ok"),
     ...tool("Bash", { command: "npm test" }, "FAIL src/new.test.ts\n  expected 1, got 2", false),
+    ...(reread
+      ? tool(
+          "Read",
+          { file_path: file },
+          readResult(file, [
+            banner,
+            "import { open } from 'node:fs';",
+            "const limit = MAX_BATCH;",
+            "export { limit };",
+          ]),
+        )
+      : []),
+    ...(crowd
+      ? Array.from({ length: 12 }, (_, i) => [
+          ...tool("Write", { file_path: `${cwd}/src/more-${i}.ts`, content: "export {};\n" }, "ok"),
+          ...(i ? tool("Bash", { command: `npm test -- more-${i}` }, `FAIL src/more-${i}.ts`, false) : []),
+        ]).flat()
+      : []),
     ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 5000 }),
   ];
-  const res = await request.post(EVENTS, {
-    headers: { "content-type": "application/json", authorization: `Bearer ${sinkToken}`, "sessionpipe-protocol": "1" },
-    data: { events },
-  });
-  expect(res.status()).toBe(202);
+  // A batch holds 50 events at most.
+  for (let i = 0; i < events.length; i += 50) {
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events: events.slice(i, i + 50) },
+    });
+    expect(res.status()).toBe(202);
+  }
   return { harness, sessionId, title };
 }
 
 const drawer = (page: Page) => page.locator(".files");
+/** The session's page, its keys listening: the page's code in and the session read (a key
+ *  pressed before then has no session to act on, as a click on a page still loading). */
+async function openSession(page: Page, s: { harness: string; sessionId: string }): Promise<void> {
+  await openPage(page, sessionUrl(s.harness, s.sessionId));
+  await expect(page.locator(".page.session:not(.starting)")).toBeVisible();
+}
 
 test.describe("files drawer", () => {
   test("lists the files a session touched and shows one as its changes, then its text", async ({ page, request }) => {
@@ -123,6 +155,85 @@ test.describe("files drawer", () => {
     await drawer(page).getByRole("button", { name: "Back to the files" }).click();
     await expect(rows).toHaveCount(2);
     await expect(page).not.toHaveURL(/file=/);
+  });
+
+  test("a file read twice steps through its versions: two arrows and a count, with no box of the browser's around them", async ({
+    page,
+    request,
+  }) => {
+    const s = await postSession(request, { reread: true });
+    await openPage(page, `${sessionUrl(s.harness, s.sessionId)}?file=src%2Foutbox.ts`);
+    const stepper = drawer(page).locator("fieldset.fv-versions");
+    await expect(stepper.locator(".num")).toHaveText("2 of 2");
+    // The group is there for a screen reader: no groove, no padding, so it is no taller
+    // than the switch it shares the bar with.
+    for (const side of ["top", "right", "bottom", "left"]) {
+      await expect(stepper).toHaveCSS(`border-${side}-width`, "0px");
+      await expect(stepper).toHaveCSS(`padding-${side}`, "0px");
+    }
+    const [group, track] = await Promise.all([
+      stepper.boundingBox(),
+      drawer(page).locator(".fv-bar .seg").boundingBox(),
+    ]);
+    expect(group!.height).toBeLessThanOrEqual(track!.height);
+    const earlier = stepper.getByRole("button", { name: "Earlier version" });
+    const later = stepper.getByRole("button", { name: "Later version" });
+    await expect(later).toBeDisabled();
+    await earlier.click();
+    await expect(stepper.locator(".num")).toHaveText("1 of 2");
+    await expect(earlier).toBeDisabled();
+  });
+
+  test("on a 320 px phone at the largest text size, the head holds both counts and Done", async ({ page, request }) => {
+    const s = await postSession(request, { crowd: true });
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.textSize", "1.25"));
+    await openPage(page, `${sessionUrl(s.harness, s.sessionId)}?file=src%2Foutbox.ts`);
+    await expect(page.locator("html")).toHaveCSS("font-size", "20px");
+    await drawer(page).getByRole("button", { name: "Back to the files" }).click();
+    const head = drawer(page).locator(".files-head");
+    const options = head.locator("label.seg-opt");
+    await expect(options).toHaveText(["Files · 14", "Problems · 12"]);
+    const [bar, track, actions, files, problems] = await Promise.all([
+      head.boundingBox(),
+      head.locator(".seg").boundingBox(),
+      head.locator(".files-actions").boundingBox(),
+      options.first().boundingBox(),
+      options.last().boundingBox(),
+    ]);
+    expect(actions!.x + actions!.width, "Done ends inside the head").toBeLessThanOrEqual(bar!.x + bar!.width);
+    expect(track!.x + track!.width, "the switch ends before Done").toBeLessThanOrEqual(actions!.x);
+    // What makes the room: on a phone each option is as wide as its own label, not as
+    // the longer one.
+    expect(files!.width, '"Files · 14" is narrower than "Problems · 12"').toBeLessThan(problems!.width - 10);
+  });
+
+  test("with no room beside the session, the drawer covers the page and the sidebar stays", async ({
+    page,
+    request,
+  }) => {
+    const s = await postSession(request);
+    await page.setViewportSize({ width: 900, height: 800 });
+    await openPage(page, sessionUrl(s.harness, s.sessionId));
+    await page.locator(".sess-bar").getByRole("button", { name: "Files" }).click();
+    await expect(drawer(page)).toBeVisible();
+    const rail = page.locator("nav.rail");
+    // Under 1000 px, down to a window half a 13-inch screen wide: from the rail's edge to
+    // the window's, once it has slid in, with the rail still there to press.
+    for (const width of [900, 760, 720]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect(rail).toBeVisible();
+      const edge = Math.round((await rail.boundingBox())!.width);
+      await expect.poll(async () => Math.round((await drawer(page).boundingBox())!.x)).toBe(edge);
+      const box = (await drawer(page).boundingBox())!;
+      expect(Math.round(box.x + box.width)).toBe(width);
+      const top = await page.evaluate((x) => !!document.elementFromPoint(x, 200)?.closest("nav.rail"), edge / 2);
+      expect(top, `the rail is on top of its own column at ${width}`).toBe(true);
+    }
+    // The phone's layout has no rail: there the drawer has the screen.
+    await page.setViewportSize({ width: 700, height: 800 });
+    await expect(rail).toBeHidden();
+    await expect.poll(async () => Math.round((await drawer(page).boundingBox())!.x)).toBe(0);
   });
 
   test("a comment on a range of lines becomes a review message in the composer", async ({ page, request }) => {
@@ -177,7 +288,7 @@ test.describe("files drawer", () => {
 
   test("the Problems tab lists the failed tool and jumps to its row; Esc steps back", async ({ page, request }) => {
     const s = await postSession(request);
-    await openPage(page, sessionUrl(s.harness, s.sessionId));
+    await openSession(page, s);
     await page.keyboard.press("Shift+F");
     await expect(drawer(page)).toBeVisible();
     await drawer(page).locator("label.seg-opt", { hasText: "Problems · 1" }).click();
@@ -206,7 +317,7 @@ test.describe("files drawer", () => {
     request,
   }) => {
     const s = await postSession(request);
-    await openPage(page, sessionUrl(s.harness, s.sessionId));
+    await openSession(page, s);
     await page.keyboard.press("Shift+F");
     // ⇧F puts focus in the filter; ↓ moves to the rows, Enter opens.
     await expect(drawer(page).getByRole("searchbox", { name: "Filter files" })).toBeFocused();

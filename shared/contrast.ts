@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // WCAG contrast for the token values a skin sets, so the server can say when a skin's
-// text tiers fall under the floors tokens.css promises (fg ≥ 7:1, fg-2 ≥ 5:1, fg-3 ≥ 4.5:1
-// for 12–13 px meta text, fg-4 ≥ 3:1 for marks only) on the page and the card. Parses the
-// colour forms a skin is likely to use: oklch(), #hex, rgb(). Anything else is left
-// unmeasured rather than guessed. No dependencies.
+// text tiers or marks fall under the floors tokens.css promises (fg ≥ 7:1, fg-2 ≥ 5:1,
+// fg-3 ≥ 4.5:1 for 12–13 px meta text, fg-4 ≥ 3:1 for marks only, the focus ring ≥ 3:1)
+// on the page and the card. Parses the colour forms a skin is likely to use: oklch(),
+// #hex, rgb(). Anything else is left unmeasured rather than guessed. No dependencies.
 import type { SkinTokens } from "./skin-api.js";
 
 export type Rgb = [number, number, number];
@@ -60,14 +60,18 @@ export const TEXT_TIERS: readonly [token: "--fg" | "--fg-2" | "--fg-3" | "--fg-4
   ["--fg-3", 4.5],
   ["--fg-4", 3],
 ];
+/** The marks that are not text and the floor each must clear on `--bg` and `--bg-2`: the
+ *  keyboard's focus ring (WCAG 1.4.11). Not measured against `--sel`, a color-mix() the
+ *  parser leaves alone. */
+export const MARKS: readonly [token: "--focus", floor: number][] = [["--focus", 3]];
 const GROUNDS = ["--bg", "--bg-2"] as const;
 
-/** The stock values of the six tokens the check reads (tokens.css), so a skin that sets
+/** The stock values of the seven tokens the check reads (tokens.css), so a skin that sets
  *  only some of them is measured against what the page fills in for the rest. Kept by
  *  hand beside tokens.css; shared/skins-builtin.test.ts holds them equal. */
 export const STOCK_TEXT_TOKENS: Record<
   "dark" | "light",
-  Record<(typeof GROUNDS)[number] | "--fg" | "--fg-2" | "--fg-3" | "--fg-4", string>
+  Record<(typeof GROUNDS)[number] | "--fg" | "--fg-2" | "--fg-3" | "--fg-4" | "--focus", string>
 > = {
   light: {
     "--bg": "#ffffff",
@@ -76,6 +80,7 @@ export const STOCK_TEXT_TOKENS: Record<
     "--fg-2": "#454545",
     "--fg-3": "#5c5c5a",
     "--fg-4": "#858581",
+    "--focus": "#141414",
   },
   dark: {
     "--bg": "#141414",
@@ -84,19 +89,20 @@ export const STOCK_TEXT_TOKENS: Record<
     "--fg-2": "#c4c4c0",
     "--fg-3": "#9a9a96",
     "--fg-4": "#6e6e6a",
+    "--focus": "#f5f5f3",
   },
 };
 
-/** Every text tier under its floor on the page or the card, as one short line each
+/** Every text tier and mark under its floor on the page or the card, as one short line each
  *  ("--fg-3 on --bg 3.9:1, needs 4.5"); empty when all clear or nothing is measurable. */
 export function textTierWarnings(tokens: SkinTokens, scheme: "dark" | "light"): string[] {
   const stock = STOCK_TEXT_TOKENS[scheme];
   const value = (k: keyof typeof stock): string => tokens[k] ?? stock[k];
   const out: string[] = [];
-  for (const [fg, floor] of TEXT_TIERS) {
+  for (const [fg, floor] of [...TEXT_TIERS, ...MARKS]) {
     for (const bg of GROUNDS) {
-      // Only pairs the skin has a hand in: a skin that sets no text tier and no ground is
-      // the stock scheme, which clears its own floors.
+      // Only pairs the skin has a hand in: a skin that sets neither the token nor the
+      // ground is the stock scheme, which clears its own floors.
       if (tokens[fg] === undefined && tokens[bg] === undefined) continue;
       const r = contrastRatio(value(fg), value(bg));
       if (r !== null && r < floor) out.push(`${fg} on ${bg} ${r.toFixed(1)}:1, needs ${floor}`);

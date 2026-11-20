@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // The welcome (NATIVE-SPEC §3.9): the app found no receiver. One grouped list, no cards:
-// start sessionpipe on this Mac (the background service, with its progress), connect to
-// another computer by its address or its phone link, or try the demo board offline. A
-// phone runs no receiver of its own, so there the first run is Onboarding.tsx: scan the
-// code on your computer, or type its address.
+// start sessionpipe on this Mac (the background service, with its progress and what went
+// wrong: StartHere.tsx), connect to another computer by its address or its phone link, or
+// try the demo board offline. A phone runs no receiver of its own, so there the first run
+// is Onboarding.tsx: scan the code on your computer, or type its address.
 import { StrictMode, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { CommandWell } from "../components/bits";
-import { channel, invoke } from "./bridge";
-import { INSTALL_COMMAND, isCancel, parseAddress, type StartState, startStep } from "./logic";
+import { invoke } from "./bridge";
+import { isCancel, parseAddress } from "./logic";
 import { Onboarding } from "./PhoneOnboarding";
+import { StartRow } from "./StartHere";
 import type { ShellInfo } from "./shell";
 import "./native.css";
 
@@ -31,25 +31,11 @@ const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function Welcome({ info }: { info: ShellInfo }) {
   // What this device is, in the welcome's words: a Windows or Linux PC is no Mac.
   const here = info.platform === "macos" ? "Mac" : "computer";
-  const [start, setStart] = useState<StartState>({ kind: "idle" });
   const [connecting, setConnecting] = useState(false);
   const [address, setAddress] = useState("");
   const [connectError, setConnectError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const field = useRef<HTMLInputElement>(null);
-
-  const startHere = async () => {
-    setStart((s) => startStep(s, { type: "begin" }));
-    try {
-      const onProgress = channel<{ step?: string; message?: string }>((p) =>
-        setStart((s) => startStep(s, { type: "progress", ...p })),
-      );
-      const rx = await invoke<Receiver>("rx_start_local", { onProgress });
-      await invoke("rx_select", { id: rx.id });
-    } catch (error) {
-      setStart((s) => startStep(s, { type: "error", error }));
-    }
-  };
 
   const connect = async () => {
     const url = parseAddress(address);
@@ -71,7 +57,6 @@ export function Welcome({ info }: { info: ShellInfo }) {
     }
   };
 
-  const busy = start.kind === "starting";
   return (
     <div className="welcome">
       <header className="welcome-bar" />
@@ -82,34 +67,7 @@ export function Welcome({ info }: { info: ShellInfo }) {
         </div>
         <section className="form-group" aria-label="Get started">
           <ul className="form-list welcome-list">
-            <li className="form-row" data-welcome="start">
-              <span className="form-row-text">
-                <span className="form-label">This {here}</span>
-                <span className="form-caption" aria-live="polite">
-                  {start.kind === "starting"
-                    ? start.message
-                    : start.kind === "failed"
-                      ? `It didn't start: ${start.message}`
-                      : start.kind === "needsNode"
-                        ? "sessionpipe needs Node 22.12 or later, or Node 20 from 20.19 on. Install it from nodejs.org, then run:"
-                        : `Runs sessionpipe in the background, so this ${here}'s sessions show up here.`}
-                </span>
-              </span>
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={() => void startHere()}
-                disabled={busy}
-                aria-busy={busy || undefined}
-              >
-                {start.kind === "failed" || start.kind === "needsNode" ? "Try again" : "Start sessionpipe"}
-              </button>
-            </li>
-            {start.kind === "needsNode" && (
-              <li className="form-row form-row--stack">
-                <CommandWell command={INSTALL_COMMAND} />
-              </li>
-            )}
+            <StartRow here={here} />
             <li className="form-row" data-welcome="connect">
               <span className="form-row-text">
                 <span className="form-label">Another computer</span>

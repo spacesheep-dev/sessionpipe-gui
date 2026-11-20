@@ -2,15 +2,12 @@
 /* ---------- usage ---------- */
 /* One grouped section per account (the grouped form, settings.css), in a reading column
    centred in the window as Machines' is: a header row with the harness's mark, the title
-   at 600 and, when the report is old, its age in the meta tier; a muted line of where it
-   reported; then a row per window on hairlines. No box, no tint; on a phone each account
-   is an inset group, its windows stacked, the where-line its footer. The bar is neutral
+   at 600 and, when the report is old, its age in the meta tier; a row per window on
+   hairlines in an inset panel; under it, a muted line of where it reported. On a phone
+   the windows are stacked and the where-line carries the age. The bar is neutral
    (the second hairline token for the track, the secondary ink for what is left); only
    "None left" and "N% over" take the attention colour, on their words. */
 
-.usage {
-  gap: 32px;
-}
 .usage > :not(.bar):not(.bar-below):not(.sr-only) {
   margin-inline: auto;
 }
@@ -22,6 +19,7 @@
   align-items: center;
   gap: 8px;
   min-height: 32px;
+  padding: 0 12px 6px;
   border-radius: var(--radius);
   -webkit-user-select: none;
   user-select: none;
@@ -49,8 +47,17 @@
 .usage-head .icon-btn {
   margin-right: -6px;
 }
+/* The where-line is the group's footer, under its panel. */
+.usage-acct > .usage-head {
+  order: 0;
+}
+.usage-acct > .form-list {
+  order: 1;
+}
 .usage-where {
-  margin: -2px 0 6px 24px;
+  order: 2;
+  margin: 8px 0 0;
+  padding: 0 12px;
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
@@ -69,6 +76,7 @@
   column-gap: 16px;
   min-height: var(--row);
   margin-left: 24px;
+  padding-right: 12px;
 }
 .usage-label {
   grid-area: label;
@@ -132,22 +140,20 @@
 }
 .usage-note {
   margin-top: -8px;
+  padding: 0 12px;
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+  .usage {
+    gap: 32px;
+  }
   .usage-acct > .usage-head {
-    order: 0;
     padding: 0 16px 6px;
   }
-  .usage-acct > .form-list {
-    order: 1;
-  }
-  /* The where-line is the group's footer, with the age after it. */
+  /* The where-line carries the age after it. */
   .usage-where {
-    order: 2;
-    margin: 8px 0 0;
     padding: 0 16px;
   }
   .usage-where-age,
@@ -182,8 +188,8 @@
   .usage-note {
     padding: 0 16px;
   }
-  /* A well straight on the grouped ground reads as a cell. */
-  .usage .state .cmdwell {
-    background: var(--bg-2);
-  }
+}
+/* A well straight on the grouped ground reads as a cell. */
+.usage .state .cmdwell {
+  background: var(--bg-2);
 }

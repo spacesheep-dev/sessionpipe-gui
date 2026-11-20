@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // The board: every session in one grouped list, needs_you first, under sticky section
-// headers. Filters by machine, harness and text in the page bar; done sessions folded
+// headers. Filters by machine, agent, label and text in the page bar; done sessions folded
 // behind a disclosure with a count, and after them, folded the same way, the ones this
 // device hid (lib/hidden.ts). A session started from here shows at once, as a
 // "starting" row from its signed start, until its first event makes it an ordinary row
@@ -22,14 +22,15 @@ import {
   EmptyState,
   HarnessGlyph,
   Listening,
-  Notice,
   SearchInput,
   Since,
   StateDot,
 } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
+import { type BoardFilter, boardFilterItems, boardFilterSummary, FilterMenu } from "../components/FilterMenu";
 import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
+import { NoConnection } from "../components/NoConnection";
 import { OfflineLine } from "../components/OfflineLine";
 import { BarStatus, PageBar } from "../components/PageBar";
 import {
@@ -43,12 +44,13 @@ import {
   useStickyTop,
 } from "../components/SessionCard";
 import { machineHome, tildify } from "../control/folders";
-import { useControlActivity } from "../control/hooks";
+import { useAnswersOut, useControlActivity } from "../control/hooks";
 import { ComposeButton } from "../control/NewSession";
 import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
 import { useStartTitles } from "../control/Starting";
-import { isFinal } from "../control/words";
+import { cliCommand, isFinal } from "../control/words";
 import {
+  answeredAll,
   byStateThenRecent,
   useAppState,
   useFirstLoad,
@@ -61,6 +63,7 @@ import {
 } from "../data/hooks";
 import { agentFound } from "../lib/agents";
 import { foldsAway, nestDelegated } from "../lib/delegated";
+import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import {
   canHideUntilNeeded,
@@ -78,10 +81,10 @@ import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRenam
 import { isUnread, setUnread } from "../lib/marks";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
 import { accountMode, apiFetch } from "../lib/net";
-import { Link, navigate, sessionPath } from "../lib/router";
+import { Link, navigate, searchAll, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
-import { useShortcut } from "../lib/shortcuts";
-import { openSplit, useSplitKey } from "../lib/split";
+import { hintFor, useBindingVersion, useShortcut } from "../lib/shortcuts";
+import { openSession, openSplit, useSplitKey } from "../lib/split";
 import { useNow } from "../lib/time";
 import { NEW_WORDS as N } from "../native/accountWords";
 import { useSetupStatus } from "../setup/api";
@@ -117,8 +120,11 @@ const matches = (s: SessionSummary, q: string) => {
 };
 
 /** The board's view options: the page's right-click menu, its "⋯" and (Show done) the
- *  Done header's. Built when a menu opens, from the state of the last render. */
+ *  Done header's. Built when a menu opens, from the state of the last render. An `empty`
+ *  board has no rows to find, fold, count, label or mark: its menu is how sessions open,
+ *  and the mode. */
 function viewItems(o: {
+  empty: boolean;
   filtered: boolean;
   clear: () => void;
   showDone: boolean;
@@ -131,27 +137,24 @@ function viewItems(o: {
   unread: SessionSummary[];
   markRead: () => void;
 }): MenuList {
+  const rows = !o.empty;
   return [
-    { label: "Find…", action: "search.focus", run: () => void focusSearch() },
-    o.filtered && { label: "Clear filters", run: o.clear },
-    { label: "Show done sessions", checked: o.showDone, run: () => o.setShowDone(!o.showDone) },
-    !o.simple && { label: "Show counts", checked: o.counts, run: () => setShowCounts(!o.counts) },
-    { label: "Edit labels…", run: () => requestLabelRename() },
-    { label: "Mark all as read", disabled: o.unread.length === 0 || undefined, run: o.markRead },
+    rows && { label: "Find…", action: "search.focus", run: () => void focusSearch() },
+    rows && o.filtered && { label: "Clear filters", run: o.clear },
+    rows && { label: "Show done sessions", checked: o.showDone, run: () => o.setShowDone(!o.showDone) },
+    rows && !o.simple && { label: "Show counts", checked: o.counts, run: () => setShowCounts(!o.counts) },
+    rows && { label: "Edit labels…", run: () => requestLabelRename() },
+    rows && { label: "Mark all as read", disabled: o.unread.length === 0 || undefined, run: o.markRead },
     { sep: true },
-    {
+    // The phone has no beside: every session opens as its page, so there is nothing to choose.
+    !phoneLayout() && {
       label: "Open sessions",
       items: [
+        { label: "Beside", radio: true, checked: o.beside, run: () => setSettings({ openSessions: "beside" }) },
         { label: "As a page", radio: true, checked: !o.beside, run: () => setSettings({ openSessions: "page" }) },
-        {
-          label: "Beside the page",
-          radio: true,
-          checked: o.beside,
-          run: () => setSettings({ openSessions: "beside" }),
-        },
       ],
     },
-    ...lensMenu(o.lens, o.simple),
+    ...(rows ? lensMenu(o.lens, o.simple) : []),
     { sep: true },
     {
       label: "Mode",
@@ -192,11 +195,6 @@ const markFirstRow = () => {
 };
 /** The empty state's exit before the first row comes in (POLISH-PLAN.md §3.3). */
 const EMPTY_EXIT_MS = 160;
-const isMock = () => !!(window as unknown as { __sessionpipeMock?: unknown }).__sessionpipeMock;
-
-/** "Claude Code, Codex, Gemini CLI or Antigravity". */
-const either = (names: string[]) =>
-  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
 
 export function Board() {
   const store = useStore();
@@ -369,6 +367,14 @@ export function Board() {
     for (const h of held) g.get(h.group as SessionState)?.push(h);
     return g;
   }, [held]);
+  // Needs you counts what still needs you, as the Inbox badge does: a row whose every
+  // prompt has its answer out, or that has moved on under the hand, keeps its place and
+  // counts no more.
+  const asked = useMemo(() => groups.get("needs_you")!.flatMap((h) => h.item.openAttentions), [groups]);
+  const answered = useAnswersOut(asked);
+  const stillNeeds = groups
+    .get("needs_you")!
+    .filter((h) => !h.gone && h.item.state === "needs_you" && !answeredAll(h.item, answered)).length;
 
   const [showHidden, setShowHiddenState] = useState(hiddenOpen);
   const toggleHidden = useCallback(() => {
@@ -415,6 +421,12 @@ export function Board() {
     store,
   });
   const cursorKey = ordered[cursor]?.key;
+  // `a` and `d` with no row of the board to take them (none under the cursor; the row
+  // under it has its own, components/SessionCard.tsx): taken and dropped, so they never
+  // answer a session open beside it; with the focus in that panel they are the panel's.
+  const drop = () => (inPanel() ? false : undefined);
+  useShortcut("board.allow", drop, { enabled: !cursorKey, priority: 1 });
+  useShortcut("board.deny", drop, { enabled: !cursorKey, priority: 1 });
   // ⌥⌘1 … ⌥⌘7 label the row under the cursor, ⌥⌘0 clears it; u marks it read or unread.
   useLabelKeys(() => (cursorKey ? [cursorKey] : []));
   useUnreadKeys(() => (ordered[cursor] ? [ordered[cursor]!.item] : []));
@@ -426,11 +438,22 @@ export function Board() {
     () => follow(inItsPlace(hrefs, cursor)),
   );
   const hiddenByLens = useMemo(() => ordered.reduce((n, h) => n + cardHides(h.item, lens), 0), [ordered, lens]);
+  // ⇧⌘F with words in the field takes them to Search; with none, or with the focus in a
+  // session open beside the board, it is Search as anywhere.
+  useShortcut(
+    "search.global",
+    () => {
+      if (!lq.rest.trim() || inPanel()) return false;
+      searchAll(q);
+      requestAnimationFrame(() => focusSearch());
+    },
+    { priority: 1 },
+  );
 
   const view = () => {
     const unread = visible.filter((s) => isUnread(s, store.get().marks));
     const markRead = () => setUnread(store, unread, false);
-    return viewItems({ filtered, clear, showDone, setShowDone, beside, lens, simple, counts, unread, markRead });
+    return viewItems({ empty, filtered, clear, showDone, setShowDone, beside, lens, simple, counts, unread, markRead });
   };
   const pageMenu = useBackgroundMenu(view, { title: () => "Board" });
   const doneMenu = useContextMenu(() => [
@@ -467,7 +490,6 @@ export function Board() {
         cursor={s.key === cursorKey ? cursor : undefined}
         lens={lens}
         simple={simple}
-        openBeside={beside}
         open={s.key === openKey}
         openTab={s.agents?.length ? openKey : null}
         agentsMatch={lq.rest && agentsMatch(s, lq.rest) ? lq.rest : undefined}
@@ -493,6 +515,24 @@ export function Board() {
   const noMatch =
     ready && !empty && visible.length === 0 && hiddenList.length === 0 && pending.length === 0 && all.length > 0;
 
+  const phone = usePhoneLayout();
+  const filterState: BoardFilter = {
+    machines,
+    machine,
+    setMachine,
+    harnesses,
+    harness,
+    setHarness,
+    labels,
+    label,
+    setLabel: setLabelFilter,
+  };
+  // The field narrows what the board holds; the way on to every session, what was sent
+  // included, is Search, which the end of a filtered list and ⇧⌘F take its words to.
+  const search = <SearchInput value={q} onChange={setQ} placeholder="Filter" label="Filter sessions" />;
+  const words = lq.rest.trim();
+  const moreShown = ready && !!words && !noMatch && !emptyShown.mounted;
+
   return (
     <div
       className={`page board${downAt ? " board--down" : ""}`}
@@ -503,13 +543,17 @@ export function Board() {
       <PageBar
         title="Board"
         meta={catchingUp ? <BarStatus>{N.catchingUp}</BarStatus> : undefined}
+        connSaid={
+          // Before the first snapshot the page itself says where the connection stands
+          // (its loading rows, or the state below with its own Retry).
+          firstLoad !== null
+        }
         tools={
           // Not before the first snapshot: the filters it decides would push the search
           // over as they arrive (the layout shift the board had on every load).
-          !loaded || emptyShown.mounted ? null : (
+          !loaded || emptyShown.mounted ? null : phone ? (
             <>
-              <SearchInput value={q} onChange={setQ} placeholder="Search" label="Search sessions" />
-              <LensChip />
+              {search}
               {machines.length > 1 && (
                 <ChipSelect
                   value={machine}
@@ -524,20 +568,35 @@ export function Board() {
                   value={harness}
                   options={harnesses}
                   onChange={setHarness}
-                  all="All harnesses"
-                  label="Harness"
+                  all="All agents"
+                  label="Agent"
                   optionLabel={(h) => harnessMark(h).label}
                   icon={(h) => <HarnessGlyph name={h} size="sm" />}
                 />
               )}
               <LabelChip value={label} onChange={setLabelFilter} />
-              {/* For the chips: a search has its own way out (Esc, the field's ✕, the
-                  no-match state's Clear search), and the bar does not shift as one types. */}
               {(machine || harness || label) && (
                 <button type="button" className="btn btn--ghost btn--sm" onClick={clear}>
                   Clear
                 </button>
               )}
+              <LensChip />
+            </>
+          ) : (
+            // A computer's bar, in the order it is drawn: Filter, the lens, and the
+            // field at the trailing edge, so a filter that grows its button never
+            // moves the field.
+            <>
+              {boardFilterItems(filterState).length > 0 && (
+                <FilterMenu
+                  on={!!(machine || harness || label)}
+                  summary={boardFilterSummary(filterState)}
+                  hint="Filter by machine, agent or label"
+                  build={() => boardFilterItems(filterState)}
+                />
+              )}
+              <LensChip />
+              {search}
             </>
           )
         }
@@ -549,17 +608,6 @@ export function Board() {
         }
       />
 
-      {isMock() && (
-        <Notice
-          action={
-            <a className="btn btn--sm" href="/">
-              Leave samples
-            </a>
-          }
-        >
-          These are sample sessions, made up in this page.
-        </Notice>
-      )}
       <LensNote lens={lens} hidden={hiddenByLens} />
 
       {firstLoad === "loading" || filling ? (
@@ -575,19 +623,7 @@ export function Board() {
           ))}
         </div>
       ) : firstLoad ? (
-        <EmptyState
-          center
-          title={firstLoad === "slow" ? "Still connecting to the receiver…" : "No connection to the receiver"}
-          actions={
-            <button type="button" className="btn btn--sm" onClick={() => store.reconnect()}>
-              Retry now
-            </button>
-          }
-        >
-          {firstLoad === "slow"
-            ? "Its sessions show up here as soon as the first update arrives."
-            : "The board fills in as soon as the stream is back."}
-        </EmptyState>
+        <NoConnection slow={firstLoad === "slow"} />
       ) : null}
       {emptyShown.mounted && (
         <div className="board-empty" data-closing={emptyShown.closing ? "" : undefined}>
@@ -614,14 +650,20 @@ export function Board() {
             const list = groups.get(st)!;
             const starting = st === "working" ? pending : [];
             if (list.length === 0 && starting.length === 0) return null;
-            const n = list.length + starting.length;
+            const n = st === "needs_you" ? stillNeeds : list.length + starting.length;
             return (
-              <section key={st} className={`group group--${st}`} aria-label={`${n} ${STATE_HEADING[st](n)}`}>
+              <section
+                key={st}
+                className={`group group--${st}`}
+                aria-label={n > 0 ? `${n} ${STATE_HEADING[st](n)}` : STATE_HEADING[st](n)}
+              >
                 <h2 className="group-head" title={STATE_HINT[st]}>
                   {STATE_HEADING[st](n)}
-                  <span key={n} className="group-count num">
-                    {n}
-                  </span>
+                  {n > 0 && (
+                    <span key={n} className="group-count num">
+                      {n}
+                    </span>
+                  )}
                 </h2>
                 <div className="grid">
                   {starting.map((a) => (
@@ -703,6 +745,8 @@ export function Board() {
             {showHidden && <div className="grid grid--hidden">{hiddenHeld.map((h) => row(h, index++, true))}</div>}
           </section>
         )}
+
+        {moreShown && <SearchMore q={q.trim()} />}
       </div>
     </div>
   );
@@ -731,6 +775,41 @@ function useHideKeys(row: () => SessionSummary | undefined, leave: () => void): 
 
 const keyOf = (s: SessionSummary) => s.key;
 const stateOf = (s: SessionSummary) => s.state;
+
+/** The end of a list the field narrows: the way on to Search, for every session with
+ *  these words, what was sent included. Its key (⇧⌘F, or what it is bound to) with a
+ *  pointer; a chevron for a finger, or with no key. */
+function SearchMore({ q }: { q: string }) {
+  useBindingVersion();
+  const key = hintFor("search.global");
+  return (
+    <button
+      type="button"
+      className="board-more"
+      aria-label={`Search every session for “${q}”`}
+      onClick={() => searchAll(q)}
+    >
+      <svg className="board-more-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+      <span className="board-more-text">
+        Search every session for “<span className="board-more-q">{q}</span>”
+      </span>
+      {key && <kbd className="board-more-key">{key}</kbd>}
+      <svg className="board-more-go" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+        <path
+          d="M6 4l4 4-4 4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
 
 /** Nothing passes the filter: say what was asked, and the one way back. */
 function NoMatch({
@@ -765,16 +844,11 @@ function NoMatch({
       actions={
         only ? (
           <>
-            {/* The board filters what it holds; Search reads every session, prompts included. */}
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => navigate(`/search?q=${encodeURIComponent(q.trim())}`)}
-            >
+            <button type="button" className="btn btn--primary" onClick={() => searchAll(q)}>
               Search every session for “{q.trim()}”
             </button>
             <button type="button" className="btn" onClick={clearSearch}>
-              Clear search
+              Clear filter
             </button>
           </>
         ) : (
@@ -784,45 +858,50 @@ function NoMatch({
         )
       }
     >
-      {only
-        ? "This box filters the board by title, folder, machine and the latest reply. Search reads every session, what you sent included."
-        : "Other sessions are hidden by the filter."}
+      {only ? null : "Other sessions are hidden by the filter."}
     </EmptyState>
   );
 }
 
 /** The first run, as a listening state at the content's optical centre: what to do (one
- *  line naming this machine and the agents whose hooks are on), the command, and the
- *  live wait itself. When nothing is hooked yet, the install command instead. */
+ *  line naming this machine and the first agent whose hooks are on), its command, and the
+ *  live wait itself, which names every hooked agent. An agent with no command to type (an
+ *  app) gets no command; with no hooked agent known, Claude Code stands in. When
+ *  sessionpipe is not installed, the install command instead. */
 function FirstRun({ paired }: { paired?: string }) {
   const setup = useSetupStatus();
   const st = setup.status;
-  const hooked = (st?.harnesses ?? []).filter((h) => h.installed && h.hooks === "on").map((h) => shortName(h.label));
+  const on = (st?.harnesses ?? []).filter((h) => h.installed && h.hooks === "on");
+  const lead = on.find((h) => cliCommand(h.name)) ?? on[0];
+  const name = lead ? shortName(lead.label) : "Claude Code";
+  const cmd = lead ? cliCommand(lead.name) : "claude";
   const here = st?.daemon.name ?? st?.tls.hostname?.replace(/\.local\.?$/, "");
   const sp = st?.sessionpipe.installed;
-  const names = hooked.length ? hooked : ["Claude Code", "Codex", "Gemini", "Antigravity"];
-  const samples = () => {
-    location.assign("/?mock=1");
-  };
+  const demo = (
+    <button type="button" className="btn btn--ghost" onClick={() => location.assign("/?mock=1")}>
+      Try the demo
+    </button>
+  );
   return (
     <EmptyState
       center
       title="Waiting for your first session"
       actions={
-        <>
-          {paired ? (
+        paired ? (
+          <>
             <button type="button" className="btn" onClick={() => openNewSession({ machine: paired })}>
               Start a session on {paired}
             </button>
-          ) : (
-            <Link to="/connect" className="btn">
+            {demo}
+          </>
+        ) : (
+          <>
+            {demo}
+            <Link to="/connect" className="btn btn--ghost">
               Pair another machine
             </Link>
-          )}
-          <button type="button" className="btn btn--ghost" onClick={samples}>
-            See it with sample sessions
-          </button>
-        </>
+          </>
+        )
       }
     >
       {st && sp === false ? (
@@ -833,13 +912,13 @@ function FirstRun({ paired }: { paired?: string }) {
       ) : (
         <>
           <p>
-            Start {either(names)} in any terminal on {here ? <strong>{here}</strong> : "this machine"} and it appears
-            here.
+            Start a new {name} session{cmd ? " in any terminal" : ""} on{" "}
+            {here ? <strong>{here}</strong> : "this machine"}.
           </p>
-          <CommandWell command="claude" />
+          {cmd && <CommandWell command={cmd} />}
         </>
       )}
-      <Listening>{(hooked.length ? hooked : names).join(", ")}</Listening>
+      <Listening>{on.map((h) => shortName(h.label)).join(", ")}</Listening>
     </EmptyState>
   );
 }
@@ -920,7 +999,14 @@ function StartingCard({
   return (
     <article className="card card--working card--starting" data-starting={a.session}>
       <div className="card-row">
-        <Link to={sessionPath(harness, id)} className="card-link" title={title} data-nav-item="">
+        <Link
+          to={sessionPath(harness, id)}
+          className="card-link"
+          title={title}
+          data-nav-item=""
+          plainClick={() => openSession(a.session!, "primary")}
+          modClick={(o) => openSession(a.session!, o.background ? "background" : "other")}
+        >
           <h3 className="card-title ellipsis">{title}</h3>
           <span className="card-status">
             <span className="card-state">

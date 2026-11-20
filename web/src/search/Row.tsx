@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: search-ui. One session in the results (ux-search.md §2.2): its agent's glyph,
 // its title with the marks the engine sent and its label dot, at most three facts (where ·
-// what · how long), then 1–3 moments in transcript order, each a line with its field's
-// glyph, and "N more matches". At the right: "Needs you" in the accent, "Working", or the
-// last day it was active. Hairline rows, no box. Clicking the row opens it at its best hit;
-// clicking a moment opens it at that moment. Memoised: a cursor move re-renders two rows.
+// what · how long), then its best moment, a line with its field's glyph, and at its right
+// "N more matches". At the right of the title: "Needs you" in the accent, "Working", or the
+// last day it was active. Hairline rows, no box. Clicking the row opens it at that moment.
+// Memoised: a cursor move re-renders two rows.
 import type { SessionMatch, SessionSearchHit } from "@shared/api";
 import { type MouseEvent, memo, useCallback, useRef } from "react";
 import { HarnessGlyph } from "../components/bits";
 import { useContextMenu } from "../components/ContextMenu";
 import { LabelDot } from "../components/LabelDot";
 import { toolLabel } from "../lib/format";
+import { howOf } from "../lib/split";
 import { Marked } from "./Marked";
 import { menuSubtitle, menuTitle, type RowMenuContext, rowMenu, snippetMenu } from "./menu";
-import { openResult, resultLink } from "./open";
-import { metaFacts, shortDate, spanTip } from "./words";
+import { openResultAs, resultLink } from "./open";
+import { metaFacts, shortDate, spanTip, toolText } from "./words";
 
 const FIELD_WORD = { prompt: "Prompt", reply: "Reply", tool: "Tool call" } as const;
 
@@ -47,41 +48,10 @@ export function FieldGlyph({ field }: { field: SessionSearchHit["field"] }) {
   );
 }
 
-/** A tool line's text without its leading tool name (the verb is drawn on its own), the
- *  marks moved with it. */
-export function toolText(hit: Pick<SessionSearchHit, "text" | "marks" | "tool">): {
-  text: string;
-  marks: SessionSearchHit["marks"];
-} {
-  const name = hit.tool;
-  let text = hit.text;
-  let cut = 0;
-  const lead = text.startsWith("…") ? 1 : 0;
-  if (name && text.slice(lead).startsWith(`${name} `)) {
-    cut = name.length + 1;
-    text = text.slice(0, lead) + text.slice(lead + cut);
-  }
-  const marks = cut
-    ? hit.marks
-        .filter(([a]) => a >= lead + cut || a < lead)
-        .map(([a, b]) => (a >= lead + cut ? ([a - cut, b - cut] as [number, number]) : ([a, b] as [number, number])))
-    : hit.marks;
-  return { text, marks };
-}
-
-export function HitLine({
-  hit,
-  onOpen,
-  menu,
-}: {
-  hit: SessionSearchHit;
-  onOpen?: (e: MouseEvent) => void;
-  menu?: ReturnType<typeof useContextMenu>;
-}) {
+export function HitLine({ hit, menu }: { hit: SessionSearchHit; menu?: ReturnType<typeof useContextMenu> }) {
   const t = hit.field === "tool" ? toolText(hit) : hit;
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: the row is the keyboard's target; a moment is a pointer shortcut into it
-    <span className="sx-hit" data-field={hit.field} onClick={onOpen} {...menu}>
+    <span className="sx-hit" data-field={hit.field} {...menu}>
       <FieldGlyph field={hit.field} />
       {hit.agent ? <span className="sx-agent">{hit.agent.type || "Subagent"}</span> : null}
       {hit.field === "tool" && hit.tool ? <span className="sx-verb">{toolLabel(hit.tool)}</span> : null}
@@ -95,13 +65,7 @@ function Moment({ m, hit, ctx }: { m: SessionMatch; hit: SessionSearchHit; ctx: 
     title: () => menuTitle(m),
     subtitle: () => FIELD_WORD[hit.field],
   });
-  const open = (e: MouseEvent) => {
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    e.preventDefault();
-    e.stopPropagation();
-    openResult(m, hit, ctx().q, "page");
-  };
-  return <HitLine hit={hit} onOpen={open} menu={menu} />;
+  return <HitLine hit={hit} menu={menu} />;
 }
 
 /** The whole message a moment is cut from (the transcript holds it). */
@@ -119,13 +83,15 @@ export interface RowProps {
   m: SessionMatch;
   index: number;
   active: boolean;
+  /** The list's one tab stop: the cursor's row, or the first. Not `active`, which the phone layout never sets. */
+  stop: boolean;
   now: number;
   /** The context read when a menu opens or a row is clicked (a ref's getter: stable). */
   ctx: () => RowMenuContext;
   onCursor: (i: number) => void;
 }
 
-export const Row = memo(function Row({ m, index, active, now, ctx, onCursor }: RowProps) {
+export const Row = memo(function Row({ m, index, active, stop, now, ctx, onCursor }: RowProps) {
   const ref = useRef<HTMLAnchorElement>(null);
   const rect = useCallback(() => ref.current?.getBoundingClientRect(), []);
   const menu = useContextMenu(() => rowMenu(m, { ...ctx(), from: rect }), {
@@ -144,17 +110,14 @@ export const Row = memo(function Row({ m, index, active, now, ctx, onCursor }: R
       </span>
     );
   const facts = metaFacts(m);
-  const href = resultLink(m, m.hits[0], ctx().q);
+  // Search asks for one hit, the best (or, under Newest, the newest): the row is its moment.
+  const hit = m.hits[0];
+  const href = resultLink(m, hit, ctx().q);
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.defaultPrevented || e.button !== 0) return;
     onCursor(index);
-    if (e.metaKey || e.ctrlKey) {
-      e.preventDefault();
-      openResult(m, m.hits[0], ctx().q, "background", rect());
-      return;
-    }
     e.preventDefault();
-    openResult(m, m.hits[0], ctx().q, e.shiftKey || e.altKey ? "beside" : "page", rect());
+    openResultAs(m, hit, ctx().q, howOf(e), rect());
   };
   return (
     <a
@@ -164,7 +127,7 @@ export const Row = memo(function Row({ m, index, active, now, ctx, onCursor }: R
       data-nav-item=""
       data-key={m.key}
       aria-current={active ? "true" : undefined}
-      tabIndex={-1}
+      tabIndex={stop ? 0 : -1}
       onClick={onClick}
       onFocus={() => onCursor(index)}
       {...menu}
@@ -178,24 +141,13 @@ export const Row = memo(function Row({ m, index, active, now, ctx, onCursor }: R
       </span>
       {right}
       <span className="sx-meta">{facts.join(" · ")}</span>
-      {m.hits.length > 0 && (
+      {hit && (
         <span className="sx-hits">
-          {m.hits.map((h) => (
-            <Moment key={h.ref} m={m} hit={h} ctx={ctx} />
-          ))}
+          <Moment m={m} hit={hit} ctx={ctx} />
         </span>
       )}
       {m.moreHits > 0 && (
-        // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: a pointer shortcut; the row's menu has "Find in this session…"
-        <span
-          className="sx-more num"
-          onClick={(e) => {
-            if (e.button !== 0) return;
-            e.preventDefault();
-            e.stopPropagation();
-            ctx().find(m);
-          }}
-        >
+        <span className="sx-more num">
           {m.moreHits === 1 ? "1 more match" : `${m.moreHits.toLocaleString()} more matches`}
         </span>
       )}

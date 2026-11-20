@@ -3,8 +3,9 @@
 // Settings: the Display popover in the sidebar (appearance, the two shipped skins, text
 // size) and the settings window at /settings (the mode, the app-wide tier lens), each
 // remembered per device.
-import { expect, type Page, test } from "@playwright/test";
-import { openBoard, openPage } from "./helpers.js";
+import { randomUUID } from "node:crypto";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
+import { EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
 
 test.describe("quick settings", () => {
   test("skin and text size apply, and persist across a reload", async ({ page }) => {
@@ -79,7 +80,7 @@ test.describe("quick settings", () => {
     await page.getByRole("dialog", { name: "Quick settings" }).locator("[data-nav='all-settings']").click();
     await expect(dialog(page)).toBeVisible();
     await expect(page.getByRole("dialog", { name: "Quick settings" })).toHaveCount(0);
-    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page).toHaveURL(/\/\?settings$/);
   });
 });
 
@@ -98,7 +99,7 @@ test.describe("a device that has not chosen", () => {
     await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.setup.seen", "1"));
     await openBoard(page);
     await expect(page.locator("nav.rail a[data-nav='feed']")).toHaveCount(0);
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
     await openPage(page, "/settings");
     await expect(dialog(page).locator(".settings-row").first()).toContainText("Simple mode");
     await expect(dialog(page).locator(".settings-row").first()).toContainText("Switch to Advanced");
@@ -115,7 +116,7 @@ test.describe("settings dialog", () => {
     await openBoard(page);
     await page.locator("nav.rail a[aria-label='Settings']").click();
     await expect(dialog(page)).toBeVisible();
-    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page).toHaveURL(/\/\?settings$/);
     await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("General");
     for (const s of ["Tier lens", "Notifications", "Keyboard", "Views & skins", "Data", "About"]) {
       await dialog(page).getByRole("tab", { name: s }).click();
@@ -128,8 +129,52 @@ test.describe("settings dialog", () => {
     await expect(dialog(page)).toHaveCount(0);
     await expect(page).toHaveURL(/\/$/);
     // Straight to a section by URL.
-    await openPage(page, "/settings?section=data");
+    await openPage(page, "/?settings=data");
     await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Data");
+  });
+
+  // The spacesheep account is an option, so its Connect… is a row button like the others,
+  // under a one-word heading and one sentence that says what it keeps, with its policy.
+  test("Data: the spacesheep account is a quiet option, said in one sentence with its privacy policy", async ({
+    page,
+  }) => {
+    await openPage(page, "/?settings=data");
+    const d = dialog(page);
+    const group = d.getByRole("region", { name: "spacesheep", exact: true });
+    await expect(group.getByRole("heading", { name: "spacesheep", exact: true })).toBeVisible();
+    await expect(group.getByText("Use a spacesheep account")).toBeVisible();
+    await expect(group.getByText("which keeps them")).toBeVisible();
+    await expect(d.getByText("not the default")).toHaveCount(0);
+    await expect(group.getByRole("link", { name: "Privacy policy" })).toHaveAttribute(
+      "href",
+      "https://spacesheep.dev/privacy",
+    );
+    await expect(group.getByRole("button", { name: "Connect…" })).toBeVisible();
+    await expect(d.locator(".btn--primary")).toHaveCount(0);
+  });
+
+  // In a browser the page is the receiver's: its version, what it is in one line, and
+  // nothing about updates, which only the desktop app does for itself.
+  test("About says the receiver's version and what this is, and nothing about updates", async ({ page, request }) => {
+    const { version } = (await (await request.get("/api/ui/info")).json()) as { version: string };
+    const asked: string[] = [];
+    page.on("request", (r) => asked.push(new URL(r.url()).pathname));
+    await openPage(page, "/settings?section=about");
+    const pane = dialog(page).getByRole("tabpanel", { name: "About" });
+    await expect(pane.getByRole("heading", { name: "sessionpipe gui" })).toBeVisible();
+    await expect(pane.getByText(`Version ${version}`, { exact: true })).toBeVisible();
+    await expect(pane.getByText("Every coding agent you run, on one board.")).toBeVisible();
+    await expect(pane.locator(".about-foot")).toHaveText("Apache-2.0");
+    await expect(pane.getByText(/update/i)).toHaveCount(0);
+    await expect(pane.getByText(/ runs /)).toHaveCount(0);
+    await expect(pane.getByRole("button")).toHaveCount(0);
+    await expect(pane.getByRole("switch")).toHaveCount(0);
+    await expect(pane.getByRole("link", { name: "Release notes" })).toBeVisible();
+    expect(asked.filter((p) => p.startsWith("/api/ui/update"))).toEqual([]);
+    // The sidebar's Settings button is plain: no update to mark.
+    const settings = page.locator("nav.rail a[data-nav='settings']");
+    await expect(settings).toHaveAttribute("aria-label", "Settings");
+    await expect(settings.locator(".nav-dot")).toHaveCount(0);
   });
 
   test("Simple mode hides Feed and Review from the rail and the card footers, and persists", async ({ page }) => {
@@ -137,20 +182,20 @@ test.describe("settings dialog", () => {
     await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.board.counts", "1"));
     await openBoard(page);
     await expect(page.locator("nav.rail a[data-nav='feed']")).toBeVisible();
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)").first()).toBeVisible();
+    await expect(page.locator("article.card .card-foot").first()).toBeVisible();
     await openPage(page, "/settings");
     await mode(page, "Simple").click();
     await expect(page.locator("nav.rail a[data-nav='feed']")).toHaveCount(0);
     await expect(page.locator("nav.rail a[data-nav='review']")).toHaveCount(0);
     await expect(page.locator("nav.rail a[data-nav='inbox']")).toBeVisible();
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
     // The lens chip is gone with it.
     await expect(page.locator(".lens-chip")).toHaveCount(0);
 
     await page.reload();
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
     await expect(page.locator("nav.rail a[data-nav='feed']")).toHaveCount(0);
-    await expect(page.locator("article.card .card-foot:not(.card-foot--mark)")).toHaveCount(0);
+    await expect(page.locator("article.card .card-foot")).toHaveCount(0);
     // Feed is still a page (⌘K and the URL reach it).
     await openPage(page, "/feed");
     await expect(page.locator(".page.feed")).toBeVisible();
@@ -158,6 +203,54 @@ test.describe("settings dialog", () => {
     await openPage(page, "/settings");
     await mode(page, "Advanced").click();
     await expect(page.locator("nav.rail a[data-nav='feed']")).toBeVisible();
+  });
+
+  test("the sidebar's groups are set off by hairlines, and its rows are 13 px regular, selected too", async ({
+    page,
+  }) => {
+    // The rows and the hairlines, in order, the views' own aside.
+    const order = () =>
+      page
+        .locator("nav.rail .rail-nav > :is(a, hr)")
+        .evaluateAll((els) =>
+          els
+            .map((el) => (el.tagName === "HR" ? "hr" : el.getAttribute("data-nav")))
+            .filter((k) => !k?.startsWith("t:")),
+        );
+    await openBoard(page);
+    expect((await order()).slice(0, 10)).toEqual([
+      "board",
+      "inbox",
+      "search",
+      "hr",
+      "feed",
+      "review",
+      "hr",
+      "workflows",
+      "machines",
+      "hr",
+    ]);
+    await expect(page.locator("nav.rail a[data-nav='connect']")).toHaveCount(0);
+    // Simple is Advanced less its middle group: no row stands alone between two lines.
+    await page.evaluate(() => localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "simple" })));
+    await openBoard(page);
+    expect((await order()).slice(0, 7)).toEqual(["board", "inbox", "search", "hr", "workflows", "machines", "hr"]);
+    // Finder's sidebar type: 13 px, regular weight, the selected row too; 16 px glyphs.
+    const type = await page.locator("nav.rail .rail-nav > a.nav-link").evaluateAll((els) =>
+      els.map((el) => {
+        const glyph = el.querySelector(".nav-glyph")!.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return `${s.fontSize} ${s.fontWeight} ${glyph.width}x${glyph.height}`;
+      }),
+    );
+    expect(new Set(type)).toEqual(new Set(["13px 400 16x16"]));
+    await expect(page.locator("nav.rail a[data-nav='board']")).toHaveAttribute("aria-current", "page");
+    // So is the Settings window's section list.
+    await openPage(page, "/settings");
+    const tabs = await dialog(page)
+      .getByRole("tab")
+      .evaluateAll((els) => els.map((el) => `${getComputedStyle(el).fontSize} ${getComputedStyle(el).fontWeight}`));
+    expect(new Set(tabs)).toEqual(new Set(["13px 400"]));
   });
 
   test("the lens chip picks from a menu; at lens 1 the board hides snippets and says so", async ({ page }) => {
@@ -258,5 +351,199 @@ test.describe("settings dialog", () => {
     await expect(view.getByRole("link", { name: /Add this device|Add it/ })).toHaveCount(0);
     await openPage(page, "/settings");
     await mode(page, "Advanced").click();
+  });
+});
+
+// Settings is a window over the page you are on, not a page of its own: `?settings=` on
+// that page's address, which stays mounted under it, and goes when Settings closes.
+test.describe("settings over the page", () => {
+  const gear = (page: Page) => page.locator("nav.rail a[data-nav='settings']");
+
+  test("opens over Machines and closes onto the same page, at the same place", async ({ page }) => {
+    // Short enough for Machines to scroll.
+    await page.setViewportSize({ width: 1440, height: 420 });
+    await openPage(page, "/machines");
+    const heading = page.locator(".page .bar-title", { hasText: "Machines" });
+    await expect(heading).toBeVisible();
+    await heading.evaluate((el) => {
+      (window as unknown as { __page: Element }).__page = el;
+    });
+    const y = await page.evaluate(() => {
+      window.scrollTo({ top: 120 });
+      return window.scrollY;
+    });
+    await gear(page).click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(page).toHaveURL(/\/machines\?settings$/);
+    // The page is still there under it, its row lit; no board is drawn in its place.
+    await expect(heading).toBeAttached();
+    await expect(page.locator("nav.rail a[data-nav='machines']")).toHaveAttribute("aria-current", "page");
+    await expect(page.locator(".board-list")).toHaveCount(0);
+    expect(await page.title()).toMatch(/^(\(\d+\) )?Machines · /);
+    // The sliders are lit and say they opened a dialog, not a page.
+    await expect(gear(page)).toHaveClass(/nav-link--on/);
+    await expect(gear(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(gear(page)).not.toHaveAttribute("aria-current", /./);
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/machines$/);
+    expect(await heading.evaluate((el) => el === (window as unknown as { __page: Element }).__page)).toBe(true);
+    expect(await page.evaluate(() => window.scrollY)).toBe(y);
+    await expect(gear(page)).toHaveAttribute("aria-expanded", "false");
+  });
+
+  /** A session that read one file, src/outbox.ts, so its page can open it in the drawer. */
+  async function sessionWithFile(request: APIRequestContext): Promise<string> {
+    const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const id = randomUUID();
+    const cwd = "/Users/dev/code/e2e";
+    let seq = 0;
+    let clock = Date.now() - 60_000;
+    const ev = (type: string, data: Record<string, unknown>) => {
+      clock += 1000;
+      return {
+        protocol: 1,
+        id: ulid(clock),
+        type,
+        time: new Date(clock).toISOString(),
+        tier: 3,
+        harness: { name: "claude-code", version: "2.1.296" },
+        session: { id, seq: seq++, machine: "e2e-box", cwd, title: `E2E settings ${id.slice(0, 8)}` },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data,
+      };
+    };
+    const file = `${cwd}/src/outbox.ts`;
+    const input = { file_path: file };
+    const output = { type: "text", file: { filePath: file, content: "export {};\n", numLines: 1, startLine: 1 } };
+    const events = [
+      ev("session.started", { source: "startup" }),
+      ev("turn.started", { turn_id: "t1", prompt_chars: 4 }),
+      ev("tool.started", { tool: "Read", call_id: "c1", turn_id: "t1", input }),
+      ev("tool.ended", { tool: "Read", call_id: "c1", turn_id: "t1", input, output, ok: true, ms: 20 }),
+      ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 2000 }),
+    ];
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events },
+    });
+    expect(res.status()).toBe(202);
+    return sessionUrl("claude-code", id);
+  }
+
+  test("over a session with a file open, the file stays in the address and the drawer", async ({ page, request }) => {
+    const session = await sessionWithFile(request);
+    await openPage(page, `${session}?file=src%2Foutbox.ts`);
+    await expect(page.locator("[data-files-open]")).toBeVisible();
+    await expect(page).toHaveURL((u) => u.searchParams.get("file") === "src/outbox.ts");
+    const seen: string[] = [];
+    page.on("framenavigated", (f) => {
+      if (f === page.mainFrame()) seen.push(f.url());
+    });
+    await page.evaluate(() => {
+      const w = window as unknown as { __urls: string[] };
+      w.__urls = [];
+      for (const k of ["pushState", "replaceState"] as const) {
+        const orig = history[k].bind(history);
+        history[k] = (s: unknown, t: string, u?: string | URL | null) => {
+          w.__urls.push(String(u));
+          orig(s, t, u);
+        };
+      }
+    });
+    await gear(page).click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(page).toHaveURL((u) => u.pathname === session && u.searchParams.get("file") === "src/outbox.ts");
+    await dialog(page).getByRole("tab", { name: "Data" }).click();
+    await expect(page).toHaveURL(/[?&]settings=data$/);
+    // Esc closes Settings, not the file under it.
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page.locator("[data-files-open]")).toBeVisible();
+    await expect(page).toHaveURL((u) => u.pathname === session && u.search === "?file=src%2Foutbox.ts");
+    const urls = await page.evaluate(() => (window as unknown as { __urls: string[] }).__urls);
+    expect(urls.filter((u) => u.startsWith("/settings"))).toEqual([]);
+    expect(seen.filter((u) => new URL(u).pathname === "/settings")).toEqual([]);
+  });
+
+  test("its old address opens it over the page Open on names, on the section asked for", async ({ page }) => {
+    await openPage(page, "/settings?section=data");
+    await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Data");
+    await expect(page).toHaveURL(/\/\?settings=data$/);
+    await openPage(page, "/settings#notifications");
+    await expect(dialog(page).getByRole("tab", { selected: true })).toHaveText("Notifications");
+    await expect(page).toHaveURL(/\/\?settings=notifications$/);
+    // Opened by its address, it closes onto the same page without it.
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator("section.group").first()).toBeVisible();
+  });
+
+  test("a link inside it goes to its page and leaves Settings behind", async ({ page }) => {
+    await openPage(page, "/machines?settings=keyboard");
+    await dialog(page).getByRole("link", { name: "Customize shortcuts…" }).click();
+    await expect(page).toHaveURL(/\/shortcuts$/);
+    await expect(dialog(page)).toHaveCount(0);
+  });
+
+  test("one height per window: 720 px in a large one, all but a margin in a short one", async ({ page }) => {
+    await openPage(page, "/?settings=general");
+    const sheet = page.locator(".settings");
+    const height = async () => (await sheet.boundingBox())!.height;
+    // Measured once its zoom-in has played.
+    await expect.poll(height).toBe(720);
+    // Switching section never makes it jump.
+    await dialog(page).getByRole("tab", { name: "About" }).click();
+    expect(await height()).toBe(720);
+    // A window under 600 px tall (the app's smallest is 480): 16 px clear above and below.
+    await page.setViewportSize({ width: 720, height: 480 });
+    await expect.poll(height).toBe(448);
+  });
+
+  test("the scrim is the one light token every dialog shares", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await openBoard(page);
+    await page.keyboard.press("ControlOrMeta+k");
+    const scrim = page.locator(".pal-scrim");
+    await expect(scrim).toBeVisible();
+    const [painted, token] = await scrim.evaluate((el) => {
+      const probe = document.createElement("div");
+      // The token itself, as the build writes it (Vite 8's minifier turns oklch() into lab()).
+      probe.style.background = "var(--scrim)";
+      document.body.append(probe);
+      const want = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return [getComputedStyle(el).backgroundColor, want];
+    });
+    expect(painted).toBe(token);
+  });
+});
+
+// The phone keeps its full-screen sheet and its stack: the list, a section pushed over it.
+test.describe("settings on a phone", () => {
+  test.use({ viewport: { width: 393, height: 852 } });
+  test("list › section is pushed, Back is the list, Done is the page it was opened on", async ({ page }) => {
+    await openPage(page, "/machines");
+    await page.locator("[data-nav=more]").first().click();
+    await page.locator(".more-sheet [data-nav='settings']").click();
+    await expect(dialog(page)).toBeVisible();
+    await expect(page.locator(".more-sheet")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/machines\?settings$/);
+    await expect(dialog(page)).toHaveAttribute("data-view", "list");
+    await dialog(page).getByRole("tab", { name: "Data" }).click();
+    await expect(dialog(page)).toHaveAttribute("data-view", "pane");
+    await expect(page).toHaveURL(/\/machines\?settings=data$/);
+    await dialog(page).locator(".settings-back").click();
+    await expect(dialog(page)).toHaveAttribute("data-view", "list");
+    await expect(page).toHaveURL(/\/machines\?settings$/);
+    await dialog(page).getByRole("tab", { name: "About" }).click();
+    await dialog(page).locator(".settings-bar .settings-done").click();
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/machines$/);
   });
 });

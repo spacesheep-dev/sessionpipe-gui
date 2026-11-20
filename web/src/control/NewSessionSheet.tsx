@@ -42,6 +42,7 @@ import { ActionButton, EmptyState, HarnessGlyph } from "../components/bits";
 import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
 import { useAppState, useLimits, useListedSessions, useMachines } from "../data/hooks";
+import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import "../lib/acp";
 import { UPLOAD_REFUSED, UPLOAD_WORDS } from "@shared/attachments";
@@ -107,20 +108,8 @@ const PERMISSION_HINT: Record<RunLevel, string> = {
 /** The default on an `inherit` machine, as the Permission pop-up names it. */
 const INHERIT_DEFAULT = "As your own sessions on this machine";
 
-const PHONE = "(max-width: 839px)";
 const TEXT_MAX = 20_000;
 const COUNTER_AT = 18_000;
-
-function usePhone(): boolean {
-  const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(PHONE).matches);
-  useEffect(() => {
-    const mq = matchMedia(PHONE);
-    const up = () => setOn(mq.matches);
-    mq.addEventListener("change", up);
-    return () => mq.removeEventListener("change", up);
-  }, []);
-  return on;
-}
 
 /** A file on its way into the start: uploading, held (its entry), or refused in place. */
 /** What a start was made of when it was pressed: all its "started" needs, so nothing after
@@ -160,7 +149,7 @@ interface FileItem {
 }
 
 export function Sheet({ target, closing }: { target: NewSessionTarget; closing: boolean }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const machines = useMachines();
   const { snapshotAt } = useAppState();
   // Recent folders come from the sessions the board lists, not from a harness a program

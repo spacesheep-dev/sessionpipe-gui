@@ -6,8 +6,8 @@
    and focus), the name with the email muted after it, the status word at the right and
    its ···; a pooled account's window rows sit under it, indented one step further with
    their bars aligned to the page's. The last row is "Add account…", the whole row a
-   button. No card, tint, stripe or chip: the one accent is the words "Used up". On a
-   phone the section is one inset group, the grip at the trailing edge and always drawn. */
+   button. The section is one inset panel; no tint, stripe or chip in it: the one accent is
+   the words "Used up". On a phone the grip is at the trailing edge and always drawn. */
 
 .pool-section {
   scroll-margin-top: calc(var(--bar) + 16px);
@@ -28,16 +28,17 @@
 .pool-foot {
   display: none;
 }
+/* The note's inset is the group's (settings.css). */
 .pool-section .page-note {
-  margin: 2px 0 6px 24px;
+  margin: 2px 0 6px;
 }
 .pool-section .notice {
-  /* The well starts at the text column, as the note under it and the switch's label do. */
-  margin: 4px 0 6px 24px;
+  /* The well starts at the head's inset, as the note under it does. */
+  margin: 4px 0 6px 12px;
 }
-/* Why nothing can be signed here: the Machines page's line, above the first section. */
+/* Why nothing can be signed here: the Machines page's line, 16 px above the first section. */
 .usage .machines-note {
-  margin-bottom: -16px;
+  margin-bottom: -8px;
 }
 /* The switch row: the label, the hint as its caption, the Toggle at the right, on the
    label's line (not centred on the paragraph): the row aligns to its start and the
@@ -83,7 +84,7 @@
 }
 .pool-acct {
   position: relative;
-  background: var(--bg);
+  background: var(--bg-2);
   transition:
     background-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
@@ -94,7 +95,7 @@
   align-items: center;
   column-gap: 0;
   min-height: var(--row-lg);
-  padding: var(--row-pad) 0;
+  padding: var(--row-pad) 12px var(--row-pad) 0;
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;
@@ -414,9 +415,22 @@
   margin-left: auto;
 }
 
+/* A notice straight on the grouped ground reads as a cell, as a well there does. */
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+  .pool-section > .notice {
+    background: var(--bg-2);
+    box-shadow: inset 0 0 0 var(--hairline) var(--line);
+  }
+  /* The panel clips nothing: the switch's reach runs past its edge, and a row in flight
+     keeps its shadow. Its rows are its own ground, so its corners need no clip. */
+  .pool-section > .form-list {
+    overflow: visible;
+  }
+}
+
 /* ----- the phone ----- */
 
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .pool-section > .usage-head {
     padding: 0 16px 6px;
   }
@@ -443,9 +457,6 @@
   }
   .pool-switch {
     padding-left: 0;
-  }
-  .pool-acct {
-    background: var(--bg-2);
   }
   /* A cell: name and status on the first line, the email on the second, the grip at the
      trailing edge, always drawn, 44 pt around its mark. */

@@ -241,7 +241,7 @@ describe("the stream coming back", () => {
     expect(store.get()).toMatchObject({ connection: "live", snapshotAt: "b", resyncs: 1 });
   });
 
-  it("Retry now from a drop goes on saying so until the snapshot; from live it says connecting", () => {
+  it("Retry from a drop goes on saying so until the snapshot; from live it says connecting", () => {
     const { store, streams, last } = wired();
     store.start();
     last().onMessage({ kind: "snapshot", snapshot: snap("a") });

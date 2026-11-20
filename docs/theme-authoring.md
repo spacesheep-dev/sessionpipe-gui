@@ -68,7 +68,7 @@ sessionpipe-gui view link ./tally       # or: link it while you work on it
 | `style` | no | A stylesheet the host links before mounting and removes after. Scope your selectors: it lands in the whole page. |
 | `icon` | no | Inline SVG for the rail (24×24 viewBox, `currentColor`). Without one you get a plug. |
 | `description` | no | One line for the Themes page. |
-| `experimental` | no | `true` puts the entry under the "experimental" divider. |
+| `experimental` | no | `true` puts the entry under the "experimental" divider, which Simple mode leaves out of the sidebar. |
 | `source` | — | Written by the host on install; leave it out. |
 
 ## The `ThemeApi`

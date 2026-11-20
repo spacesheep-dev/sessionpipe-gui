@@ -2,38 +2,47 @@
 // The side panel: sessions open beside the current page, as tabs. Which tabs and which
 // is active live in the URL (`?s=<key>,<key>&t=<active>`; a lone `?s=<key>` still works),
 // mirrored to localStorage so a plain reload without params restores them (the URL wins
-// when present). The width is per device; the rectangle an open animates out of is
-// handed over once and consumed by the panel. The panel belongs beside the pages that
-// list sessions (and a session's own page, and Settings, a window over the board); on
-// the others (Setup, Connect, /phone, a missing page) it steps aside, its tabs kept for
-// the way back. On the phone there is no beside: a session opened "beside" is its page,
-// pushed over the list (lib/transitions.ts), and nothing of the panel is restored on the
-// next launch (a modal sheet over every page is not how a phone wakes up).
-import { type SessionKey, splitKey } from "@shared/api";
+// when present); the mirror follows the URL, whatever moved it. The width is per device;
+// the rectangle an open animates out of is handed over once and consumed by the panel.
+// The panel stays until it is closed: it goes along to every page (lib/router.tsx), and a
+// session opened as a page leaves it, the other tabs staying beside that page. It shows
+// beside the pages that list sessions (and a session's page, and Settings, a window over
+// the board); on the others (Setup, Connect, /phone, a missing page) it steps aside, its
+// tabs kept for the way back. A plain open is a preview (italic): the next plain open
+// takes its place instead of adding a tab, until the person keeps it (keepTab); which tab
+// that is lives here, not in the URL, so a reload keeps every tab and drops the mark. On
+// the phone there is no beside: a session opened "beside" is its page, pushed over the
+// list (lib/transitions.ts), a session's page carries no tabs, and nothing of the panel
+// is restored on the next launch (a modal sheet over every page is not how a phone wakes
+// up).
+import { type SessionKey, sessionKey, splitKey } from "@shared/api";
 import { useMemo, useSyncExternalStore } from "react";
 import { phoneLayout } from "./device";
 import {
+  AGENT_PARAM,
   agentPath,
   navigate,
+  onLocation,
+  panelOnto,
   parseRoute,
   SPLIT_ACTIVE_PARAM,
   SPLIT_PARAM,
   sessionPath,
   setSearchParams,
+  settingsOpen,
   usePath,
   useSearchParam,
 } from "./router";
+import { getSettings } from "./settings";
+import { AGENT_TAB_SEP, agentTabKey, dropTab, isKey, parseSplit, type SplitState, splitParams } from "./splitState";
+
+export { AGENT_TAB_SEP, agentTabKey, parseSplit, type SplitState } from "./splitState";
 
 export interface Rect {
   x: number;
   y: number;
   width: number;
   height: number;
-}
-
-export interface SplitState {
-  tabs: SessionKey[];
-  active: number;
 }
 
 export const SPLIT_MIN = 420;
@@ -46,6 +55,11 @@ const KEY_WIDTH = "sessionpipe-gui.splitWidth";
 const KEY_TABS = "sessionpipe-gui.splitTabs";
 
 let pendingFrom: Rect | null = null;
+/** The row an open beside asks its tab to land on (`#seq-N`), held for that tab alone: the
+ *  address's hash is the page's, and every mounted tab hears a hashchange. */
+let pendingJump: { key: SessionKey; seq: number } | null = null;
+/** Said when a jump is handed over, for a tab that is already open (takeJump). */
+export const JUMP_EVENT = "sessionpipe:jump";
 let width: number | null = (() => {
   try {
     const v = Number(localStorage.getItem(KEY_WIDTH));
@@ -93,16 +107,6 @@ export function useSplitWidth(): number {
 
 // ----- tabs -----
 
-const isKey = (k: string): k is SessionKey => k.includes(":");
-
-/** The separator of a tab that holds one subagent of a session: `<sessionKey>#<agentId>`
- *  (ORGANIZE-SPEC.md §4.5). Its view is the session's, opened on that agent. */
-export const AGENT_TAB_SEP = "#";
-
-/** The tab of one agent of a session. */
-export const agentTabKey = (session: SessionKey, agentId: string): SessionKey =>
-  `${session}${AGENT_TAB_SEP}${agentId}` as SessionKey;
-
 /** A tab's session and, for an agent tab, the agent. */
 export function parseTab(tab: string): { session: SessionKey; agent?: string } {
   const i = tab.indexOf(AGENT_TAB_SEP);
@@ -122,18 +126,6 @@ function insertAt(tabs: readonly SessionKey[], key: SessionKey): number {
   return i;
 }
 
-/** Parses `s` and `t` as the URL carries them. */
-export function parseSplit(s: string | null, t: string | null): SplitState {
-  const tabs = (s ?? "")
-    .split(",")
-    .map((k) => k.trim())
-    .filter(isKey)
-    .filter((k, i, all) => all.indexOf(k) === i);
-  const n = Number(t);
-  const active = tabs.length === 0 ? 0 : Number.isInteger(n) ? Math.max(0, Math.min(tabs.length - 1, n)) : 0;
-  return { tabs, active };
-}
-
 function current(): SplitState {
   const q = new URLSearchParams(location.search);
   return parseSplit(q.get(SPLIT_PARAM), q.get(SPLIT_ACTIVE_PARAM));
@@ -150,24 +142,31 @@ function remember(state: SplitState): void {
   }
 }
 
-/** Writes the state to the URL (and the mirror). A change to the set of tabs is a
- *  history entry; switching or reordering replaces the current one. */
+/** The mirror follows the URL, so the next launch shows the tabs last seen: a tab that
+ *  left for its own page, or a strip Back put back, is mirrored like a change made in
+ *  the panel. Not before the boot has read the last visit's tabs (restoreSplit): an
+ *  address that moves while the app starts carries no tabs yet, and would empty it. */
+let mirroring = false;
+onLocation(() => {
+  if (mirroring) remember(current());
+});
+
+/** Writes the state to the URL (the mirror follows it). A change to the set of tabs is
+ *  a history entry; switching or reordering replaces the current one. */
 function commit(state: SplitState, opts: { replace?: boolean } = {}): void {
   const tabs = state.tabs;
   const active = Math.max(0, Math.min(tabs.length - 1, state.active));
-  remember({ tabs, active });
-  setSearchParams(
-    {
-      [SPLIT_PARAM]: tabs.length ? tabs.join(",") : null,
-      [SPLIT_ACTIVE_PARAM]: tabs.length > 1 || active > 0 ? String(active) : null,
-    },
-    opts,
-  );
+  const { s, t } = splitParams({ tabs, active });
+  setSearchParams({ [SPLIT_PARAM]: s, [SPLIT_ACTIVE_PARAM]: t }, opts);
 }
 
 /** At boot, with no `?s=` in the URL: the tabs of the last visit, if any. Never on the
- *  phone, whose pages open clean; its mirror (a desktop visit's) stays for a desktop. */
+ *  phone, whose pages open clean; its mirror (a desktop visit's) stays for a desktop.
+ *  On a session's own page (the app opened by a notification) that session's tab is not
+ *  put back beside it, as when a move carries the panel there (panelOnto). From here on
+ *  the mirror follows the URL. */
 export function restoreSplit(): void {
+  mirroring = true;
   if (phoneLayout()) return;
   if (new URLSearchParams(location.search).has(SPLIT_PARAM)) return;
   try {
@@ -178,7 +177,9 @@ export function restoreSplit(): void {
       ? parsed.tabs.filter((k): k is string => typeof k === "string" && isKey(k))
       : [];
     if (tabs.length === 0) return;
-    commit({ tabs, active: typeof parsed.active === "number" ? parsed.active : 0 }, { replace: true });
+    const last = splitParams({ tabs, active: typeof parsed.active === "number" ? parsed.active : 0 });
+    const here = panelOnto(`${location.pathname}${location.search}`, last.s ?? "", last.t);
+    if (here) commit(parseSplit(here.s, here.t), { replace: true });
   } catch {
     // ignore a bad mirror
   }
@@ -188,6 +189,50 @@ export interface OpenSplitOptions {
   from?: Rect;
   /** Add the tab without switching to it (unless the panel was closed). */
   background?: boolean;
+  /** A plain open (a click, ↵, Space, a toast): it takes the preview tab's place, if
+   *  there is one, instead of adding a tab. Without it the tab is kept. */
+  preview?: boolean;
+}
+
+// ----- the preview tab -----
+
+/** The one tab a plain open may replace, by its key; null when every tab is kept. */
+let preview: SessionKey | null = null;
+const previewListeners = new Set<() => void>();
+function setPreview(key: SessionKey | null): void {
+  if (preview === key) return;
+  preview = key;
+  for (const l of previewListeners) l();
+}
+// A preview tab that left the strip (closed, opened as its page, Back) is no longer one.
+onLocation(() => {
+  if (preview && !current().tabs.includes(preview)) setPreview(null);
+});
+
+/** The preview tab's key, or null. */
+export function previewTab(): SessionKey | null {
+  return preview && current().tabs.includes(preview) ? preview : null;
+}
+
+/** Keeps the tab from now on: the next plain open adds its own. For a key that is no
+ *  tab's, or a kept one, nothing. A session's key keeps its agents' tab too, as typing
+ *  in the session's composer does. */
+export function keepTab(key: SessionKey): void {
+  if (preview && (preview === key || parseTab(preview).session === key)) setPreview(null);
+}
+
+/** The preview tab's key, live (null when every tab is kept). */
+export function usePreviewTab(): SessionKey | null {
+  return useSyncExternalStore(
+    (l) => {
+      previewListeners.add(l);
+      return () => {
+        previewListeners.delete(l);
+      };
+    },
+    () => preview,
+    () => preview,
+  );
 }
 
 /** The page a tab opens as on the phone: the session's, on its agent for an agent tab. */
@@ -198,22 +243,37 @@ export function tabPath(tab: SessionKey): string {
 }
 
 /** Opens `key` beside the page. On the phone that is its page, pushed (a row opens its
- *  detail, with the list behind the back button); `background` has no meaning there. */
+ *  detail, with the list behind the back button); `background` and `preview` have no
+ *  meaning there. A session already open is switched to (an explicit open keeps it).
+ *  Otherwise a preview open takes the preview tab's place, in the same history entry,
+ *  or adds a preview tab when there is none; any other open adds a kept tab. */
 export function openSplit(key: SessionKey, opts: OpenSplitOptions = {}): void {
   if (phoneLayout()) {
     navigate(tabPath(key));
     return;
   }
   const st = current();
+  const asPreview = !!opts.preview && !opts.background;
   const i = st.tabs.indexOf(key);
   if (i >= 0) {
+    if (!asPreview && preview === key) setPreview(null);
     if (!opts.background && i !== st.active) commit({ ...st, active: i }, { replace: true });
+    return;
+  }
+  const was = previewTab();
+  if (asPreview && was) {
+    const tabs = st.tabs.map((k) => (k === was ? key : k));
+    setPreview(key);
+    commit({ tabs, active: tabs.indexOf(key) }, { replace: true });
     return;
   }
   if (st.tabs.length === 0) pendingFrom = opts.from ?? null;
   const at = insertAt(st.tabs, key);
   const tabs = [...st.tabs.slice(0, at), key, ...st.tabs.slice(at)];
   const kept = st.tabs[st.active];
+  if (asPreview) setPreview(key);
+  // An agent's tab opened beside its session keeps the session's: the pair stays together.
+  else if (preview && preview === parseTab(key).session) setPreview(null);
   commit({ tabs, active: opts.background && kept ? tabs.indexOf(kept) : at });
 }
 
@@ -234,11 +294,7 @@ export function cycleTab(delta: 1 | -1): void {
 export function closeTab(index: number): void {
   const st = current();
   if (index < 0 || index >= st.tabs.length) return;
-  const tabs = st.tabs.filter((_, i) => i !== index);
-  let active = st.active;
-  if (index < st.active) active -= 1;
-  else if (index === st.active) active = Math.min(index, tabs.length - 1);
-  commit({ tabs, active });
+  commit(dropTab(st, index));
 }
 
 /** Keeps the tab at `index` and closes every other one (the tab's menu). */
@@ -255,12 +311,37 @@ export function moveTab(from: number, to: number): void {
   const tabs = [...st.tabs];
   const [k] = tabs.splice(from, 1);
   tabs.splice(to, 0, k!);
+  // A tab moved by hand is one the person means to keep.
+  if (preview === k) setPreview(null);
   const activeKey = st.tabs[st.active]!;
   commit({ tabs, active: tabs.indexOf(activeKey) }, { replace: true });
 }
 
 export function closeSplit(): void {
   commit({ tabs: [], active: 0 });
+}
+
+/** Closes the panel within the history entry that is open: for a move to another page
+ *  that takes the panel away (it covered the page, Shell.tsx), so Back is still one step. */
+export function leaveSplit(): void {
+  commit({ tabs: [], active: 0 }, { replace: true });
+}
+
+/** Hands `#seq-N` to the tab `key` opened beside: its view takes it on its first paint, or
+ *  now when it is already open (takeJump). Any other hash is not a row's. */
+export function handJump(key: SessionKey, hash: string): void {
+  const m = /^#seq-(\d+)$/.exec(hash);
+  if (!m) return;
+  pendingJump = { key, seq: Number(m[1]) };
+  window.dispatchEvent(new Event(JUMP_EVENT));
+}
+
+/** The seq handed to the tab `key`, once; null when none was, or it was another tab's. */
+export function takeJump(key: SessionKey): number | null {
+  if (pendingJump?.key !== key) return null;
+  const { seq } = pendingJump;
+  pendingJump = null;
+  return seq;
 }
 
 /** The rectangle the last `openSplit` asked to animate from, once. */
@@ -279,12 +360,88 @@ export function useSplit(): SplitState {
   return useMemo(() => parseSplit(s, t), [s, t]);
 }
 
-/** The pages the panel opens beside: the session lists, a session, the installed views
- *  (canvas, office), and Settings (a window over the board, which keeps its layout under
- *  it). Never Setup, Connect, /phone, a pairing page or a path the app has no page for,
- *  where a live session beside it reads as broken. */
-const BESIDE = new Set(["board", "inbox", "search", "feed", "review", "machines", "session", "theme", "settings"]);
+/** The pages the panel opens beside: the session lists, a session and the installed views
+ *  (canvas, office); Settings is over whichever page is open, and keeps its layout. Never
+ *  Setup, Connect, /phone, a pairing page or a path the app has no page for, where a live
+ *  session beside it reads as broken. */
+const BESIDE = new Set(["board", "inbox", "search", "feed", "review", "machines", "session", "theme"]);
 export const panelBeside = (path: string): boolean => BESIDE.has(parseRoute(path).name);
+
+/** How an open was asked for: "primary" is a plain click or ↵, "other" holds ⇧ (⇧↵), and
+ *  "background" holds ⌘ (⌘↵). */
+export type OpenHow = "primary" | "other" | "background";
+
+/** The one rule for where a session opens: "primary" goes the way Settings › Open sessions
+ *  says, "other" the other way, and "background" is a tab that does not take the panel.
+ *  Where the panel cannot show (the phone, Usage, Workflows, Shortcuts…, under Settings)
+ *  every way is the page, so no tab opens out of sight. Callers keep their own extras
+ *  (where it animates from, a #seq, a file) and only ask which way. */
+export function openWay(how: OpenHow): "page" | "beside" | "background" {
+  if (phoneLayout() || !panelBeside(location.pathname) || settingsOpen()) return "page";
+  if (how === "background") return "background";
+  const beside = getSettings().openSessions === "beside";
+  return (how === "primary") === beside ? "beside" : "page";
+}
+
+/** On a computer, Settings is over the page: a session opened now takes Settings' place in
+ *  the history (navigate's `replace`), so it shows and Back is the page Settings was over.
+ *  The phone's sheet keeps its stack. */
+export const overSettings = (): boolean => settingsOpen() && !phoneLayout();
+
+/** How a click asked: ⌘ (Ctrl) a background tab, ⇧ (or ⌥) the other way, else plain. */
+export const howOf = (e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): OpenHow =>
+  e.metaKey || e.ctrlKey ? "background" : e.shiftKey || e.altKey ? "other" : "primary";
+
+/** The tab key of the session (or subagent) whose page is open, else null. */
+function ownPageKey(): SessionKey | null {
+  const r = parseRoute(location.pathname);
+  if (r.name !== "session") return null;
+  const session = sessionKey(r.harness, r.id);
+  const agent = new URLSearchParams(location.search).get(AGENT_PARAM);
+  return agent ? agentTabKey(session, agent) : session;
+}
+
+/** Opens a session by the one rule (openWay): as its page, beside the page (a plain open
+ *  is the preview tab; one that went the other way, or a menu's (`keep`), is kept) or as a
+ *  background tab. The session whose page is open stays its page: no copy of it opens
+ *  beside. `hash` (`#seq-N`) lands it on a row: the page carries it, a tab beside is
+ *  handed it (handJump). Not the theme API's openSession, which is always the
+ *  page. */
+export function openSession(
+  key: SessionKey,
+  how: OpenHow,
+  opts: { from?: Rect; hash?: string; keep?: boolean } = {},
+): void {
+  const here = ownPageKey() === key;
+  const way = here ? "page" : openWay(how);
+  if (way === "page") {
+    const over = overSettings();
+    if (!here || over) navigate(tabPath(key), { replace: over });
+    if (!opts.hash) return;
+    history.replaceState(history.state, "", `${location.pathname}${location.search}${opts.hash}`);
+    // The page already open reads the hash as it moves; a page just opened reads it on arrival.
+    if (here) window.dispatchEvent(new HashChangeEvent("hashchange"));
+    return;
+  }
+  openSplit(key, { from: opts.from, background: way === "background", preview: how === "primary" && !opts.keep });
+  if (opts.hash) handJump(key, opts.hash);
+}
+
+/** A page the app asks for while its window is up (a notification's click, the menu bar's
+ *  session): a session's own page opens by the one rule, as a plain open, so the page and
+ *  its tabs stay, and over Settings it takes Settings' place (openSession); any other
+ *  address is navigated to, and so is a session asked for over the phone's Settings. A
+ *  cold start is not asked here: the window opens on the address. */
+export function openAsked(to: string): void {
+  const at = to.indexOf("#");
+  const bare = at < 0 ? to : to.slice(0, at);
+  const r = parseRoute(bare);
+  if (r.name !== "session" || bare.includes("?") || (settingsOpen() && phoneLayout())) {
+    navigate(to);
+    return;
+  }
+  openSession(sessionKey(r.harness, r.id), "primary", at < 0 ? {} : { hash: to.slice(at) });
+}
 
 /** Whether the panel shows on the current page (its tabs stay in the URL either way). */
 export function usePanelHere(): boolean {

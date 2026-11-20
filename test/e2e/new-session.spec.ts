@@ -102,11 +102,24 @@ test("right-click a session: New session here, prefilled; a machine's menu: New 
   const name = `ns-here-${tag()}`;
   const m = await fakeDaemon(key, advertising(name), { sinkToken: sink });
   daemons.push(m);
-  await postSession(sink, { machine: name, harness: "codex", cwd: "~/code/billing", title: `Billing ${name}` });
+  const s = await postSession(sink, {
+    machine: name,
+    harness: "codex",
+    cwd: "~/code/billing",
+    title: `Billing ${name}`,
+  });
+  const here = page.getByRole("menuitem", { name: "New session here" });
+  // No key beside it, on its own page or on its row: C opens the sheet for the board's
+  // machine, never for this session's machine and folder.
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  await page.getByRole("button", { name: "More actions" }).click();
+  await expect(here).toBeVisible();
+  await expect(here.locator(".menu-keys")).toHaveCount(0);
   await page.goto(`${CONTROL_BASE}/`);
   const card = page.locator("article.card", { hasText: `Billing ${name}` });
   await card.locator(".card-title").click({ button: "right" });
-  await page.getByRole("menuitem", { name: "New session here" }).click();
+  await expect(here.locator(".menu-keys")).toHaveCount(0);
+  await here.click();
   await expect(rowValue(page, "machine")).toHaveAttribute("data-value", name);
   await expect(rowValue(page, "agent")).toHaveAttribute("data-value", "codex");
   // sessionpipe 0.10's hello names no home folder: the session's own `~/…` folder is what

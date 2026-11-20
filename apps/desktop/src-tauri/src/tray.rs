@@ -32,15 +32,18 @@ pub struct Model {
     /// Receivers that can't be reached, by name.
     pub unreachable: Vec<String>,
     pub update: Option<String>,
+    /// This computer's background service is behind the app and waits for a click.
+    pub service_behind: bool,
     pub hotkey: Option<String>,
     pub paused: bool,
 }
 
-/// The tray's name for the receiver on this machine.
+/// The tray's name for the receiver on this machine, inside "Can't reach {name}" (the
+/// page's words for it name the same place: web/src/lib/device.ts reachName).
 const THIS_MACHINE: &str = if cfg!(target_os = "macos") {
-    "This Mac"
+    "this Mac"
 } else {
-    "This computer"
+    "this computer"
 };
 
 /// One row's text: title, the machine when there are several receivers, then what it needs.
@@ -63,6 +66,7 @@ pub fn model(
     items: &[NeedsYouItem],
     receivers: &[(ReceiverRef, bool)],
     update: Option<&str>,
+    service_behind: bool,
     hotkey: Option<&str>,
     paused: bool,
 ) -> Model {
@@ -93,9 +97,21 @@ pub fn model(
             })
             .collect(),
         update: update.map(str::to_string),
+        service_behind,
         hotkey: hotkey.map(str::to_string),
         paused,
     }
+}
+
+/// The item under Pause Notifications, when there is something to update: the app's
+/// downloaded update first, else this computer's background service when it is behind the
+/// app (it opens Settings › About, where Update runs and shows how it goes).
+pub fn update_item(m: &Model) -> Option<(&'static str, String)> {
+    if let Some(v) = &m.update {
+        return Some(("update:restart", crate::updater::menu_title(Some(v))));
+    }
+    m.service_behind
+        .then(|| ("update:service", "Update Background Service…".to_string()))
 }
 
 /// "Control+Alt+N" → the menu accelerator string Tauri takes ("Ctrl+Alt+N").
@@ -199,14 +215,8 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>, m: &Model) -> tauri::Result<Menu<R
         )?
     };
     menu.append(&pause)?;
-    if let Some(v) = &m.update {
-        menu.append(&MenuItem::with_id(
-            app,
-            "update:restart",
-            format!("Install {v} and relaunch"),
-            true,
-            None::<&str>,
-        )?)?;
+    if let Some((id, title)) = update_item(m) {
+        menu.append(&MenuItem::with_id(app, id, title, true, None::<&str>)?)?;
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(
@@ -275,6 +285,7 @@ pub fn current_model<R: Runtime>(app: &AppHandle<R>) -> Model {
         &shell.hub.needs_you(),
         &rx,
         update.as_deref(),
+        crate::lifecycle::supervisor::local_behind(),
         s.hotkey.as_deref(),
         paused,
     )
@@ -319,8 +330,8 @@ pub fn refresh<R: Runtime>(app: &AppHandle<R>) {
         static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
         let rows: Vec<&str> = m.rows.iter().map(|r| r.label.as_str()).collect();
         let line = format!(
-            "tray: title={:?} dimmed={} rows={:?} more={} unreachable={:?} update={:?}",
-            m.title, m.dimmed, rows, m.more, m.unreachable, m.update
+            "tray: title={:?} dimmed={} rows={:?} more={} unreachable={:?} update={:?} service_behind={}",
+            m.title, m.dimmed, rows, m.more, m.unreachable, m.update, m.service_behind
         );
         let mut last = LAST.lock().unwrap();
         if *last != line {
@@ -342,6 +353,7 @@ pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
         "retry" => shell.hub.reconnect_all(),
         "open:inbox" => crate::actions::navigate(app, "/inbox"),
         "update:restart" => crate::updater::restart(app.clone()),
+        "update:service" => crate::actions::navigate(app, "/settings?section=about"),
         p if p.starts_with("pause:") => {
             let until = match p {
                 "pause:hour" => Some(sp_receivers::status::iso(
@@ -507,7 +519,14 @@ mod tests {
 
     #[test]
     fn nothing_needs_you() {
-        let m = model(&[], &[(rx("a", "studio", true), true)], None, None, false);
+        let m = model(
+            &[],
+            &[(rx("a", "studio", true), true)],
+            None,
+            false,
+            None,
+            false,
+        );
         assert_eq!(m.title, None, "no number at 0");
         assert!(!m.dimmed);
         assert!(m.rows.is_empty() && m.unreachable.is_empty());
@@ -532,6 +551,7 @@ mod tests {
             &items,
             &[(rx("a", "studio", true), true)],
             Some("0.3.1"),
+            false,
             Some("Control+Alt+N"),
             false,
         );
@@ -553,6 +573,7 @@ mod tests {
                 (rx("b", "build-box", false), true),
             ],
             None,
+            false,
             None,
             false,
         );
@@ -565,6 +586,7 @@ mod tests {
             &[item("a", 1, "Bash")],
             &[(rx("a", "studio", true), false)],
             None,
+            false,
             None,
             false,
         );
@@ -572,9 +594,9 @@ mod tests {
         assert_eq!(m.title, None, "no number when disconnected");
         assert_eq!(m.unreachable, vec![THIS_MACHINE.to_string()]);
         #[cfg(target_os = "macos")]
-        assert_eq!(THIS_MACHINE, "This Mac");
+        assert_eq!(THIS_MACHINE, "this Mac");
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(THIS_MACHINE, "This computer");
+        assert_eq!(THIS_MACHINE, "this computer");
         let m = model(
             &[],
             &[
@@ -582,14 +604,35 @@ mod tests {
                 (rx("b", "build-box", false), false),
             ],
             None,
+            false,
             None,
             true,
         );
         assert!(!m.dimmed);
         assert_eq!(m.unreachable, vec!["build-box".to_string()]);
         assert!(m.paused);
-        let m = model(&[], &[], None, None, false);
+        let m = model(&[], &[], None, false, None, false);
         assert!(m.dimmed);
+    }
+
+    #[test]
+    fn the_update_slot() {
+        let rx = [(rx("a", "studio", true), true)];
+        // Nothing to update: no item.
+        assert_eq!(
+            update_item(&model(&[], &rx, None, false, None, false)),
+            None
+        );
+        // The background service behind the app: it opens Settings › About.
+        assert_eq!(
+            update_item(&model(&[], &rx, None, true, None, false)),
+            Some(("update:service", "Update Background Service…".to_string()))
+        );
+        // The app's own downloaded update comes first.
+        assert_eq!(
+            update_item(&model(&[], &rx, Some("0.8.5"), true, None, false)),
+            Some(("update:restart", "Install 0.8.5 and Relaunch".to_string()))
+        );
     }
 
     #[test]

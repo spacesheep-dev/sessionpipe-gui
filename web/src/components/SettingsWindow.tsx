@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Settings: /settings, a fixed-size window over the page (the sliders in the sidebar's
-// foot, a row in the phone's More sheet, "Settings…" at the foot of Display). The section
+// Settings: `?settings=<section>`, a fixed-size window over the page you are on, which
+// stays as it was under it (the sliders in the sidebar's foot, ⌘, in the app, a row in the
+// phone's More sheet, "Settings…" at the foot of Display). The section
 // list on the chrome ground at the left; the pane under a 44 px title bar with the
 // section's name and the close button, as macOS System Settings draws it: inset groups,
 // each row a label (one caption under it) and its control on one trailing edge. On a
@@ -25,16 +26,24 @@ import {
   useId,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { deviceWords } from "../control/signer";
 import { useAppState, useConnection, useStore } from "../data/hooks";
+import { usePhoneLayout } from "../lib/device";
 import { tablistKey } from "../lib/focus";
 import { bytes } from "../lib/format";
 import { reducedMotion, tokenMs } from "../lib/motion";
 import { accountMode, apiFetch } from "../lib/net";
-import { back, hasInAppHistory, Link, navigate, useSearchParam } from "../lib/router";
-import { isRouteNotFound, olderReceiver } from "../lib/serverAge";
+import {
+  closeSettings,
+  Link,
+  SETTINGS_PARAM,
+  settingsBackToList,
+  showSettingsSection,
+  useSearchParam,
+} from "../lib/router";
+import { selfUpdating } from "../lib/selfUpdate";
+import { isRouteNotFound, olderReceiver, updateCommand } from "../lib/serverAge";
 import {
   DEFAULT_PAGES,
   type DefaultPage,
@@ -43,18 +52,18 @@ import {
   setSettings,
   useAppSettings,
 } from "../lib/settings";
-import { allActions, applyPreset, getPreset, PRESETS, useShortcutMap } from "../lib/shortcuts";
+import { allActions, applyPreset, getPreset, IS_MAC, PRESETS, useShortcutMap } from "../lib/shortcuts";
 import { DEFAULT_SKIN, type InstalledSkin } from "../lib/skins";
 import { resolvedScheme, setSkin, setTextSize, setTheme, type Theme, useSettings } from "../lib/theme";
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
-import { ago } from "../lib/time";
+import { serviceRow, useLocalUpdate, useUpdateRun } from "../native/receiverUpdate";
 import { SearchDataGroup } from "../search/SettingsRows";
 import { useThemes } from "../themes/host/registry";
 import { AppIcon } from "./AppIcon";
-import { ActionButton, CommandWell, CopyIconButton, Segmented, Toggle } from "./bits";
+import { CopyIconButton, Segmented, Toggle } from "./bits";
 import { LensPicker } from "./LensChip";
 import { NotificationsSettings } from "./NotificationsSettings";
-import { type LocalUpdateState, OlderReceiverNotice } from "./OlderReceiverNotice";
+import { OlderReceiverNotice } from "./OlderReceiverNotice";
 import { APPEARANCE, noContextMenu, SKIN_ADD_LINE, TextSizeSlider, useListedSkins } from "./QuickSettings";
 import { Select } from "./Select";
 import { Keys } from "./ShortcutHelp";
@@ -117,6 +126,21 @@ const GLYPH: Record<Section, ReactNode> = {
 /** Inside the native app (NATIVE-SPEC §2.5): Settings › App, its own lazy section. */
 const inShell = "sessionpipeShell" in window;
 const AppSection = inShell ? lazy(() => import("../native/AppSettings")) : null;
+/** About's updates, in an app that updates itself: the same module, fetched only there. */
+const UpdatesGroup = selfUpdating()
+  ? lazy(() => import("../native/AppSettings").then((m) => ({ default: m.UpdatesGroup })))
+  : null;
+/** The app around the page, as its flag says it (the shell's own module is never loaded
+ *  here): the computer it runs on, its version, and the receiver this window shows. */
+const shellApp = (
+  window as {
+    sessionpipeShell?: {
+      platform?: string;
+      appVersion?: string;
+      receiver?: { name?: string; origin?: string; local?: boolean } | null;
+    };
+  }
+).sessionpipeShell;
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "general", label: "General" },
@@ -128,31 +152,25 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: "data", label: "Data" },
   { id: "about", label: "About" },
 ];
-const isSection = (v: string | null): v is Section => SECTIONS.some((s) => s.id === v);
+/** What a click and ↵ do is the setting; ⇧ goes the other way (keys.ts, SessionCard). */
+const OPEN_SESSIONS_HINT = IS_MAC
+  ? "Click or ↵. Hold ⇧ for the other way."
+  : "Click or Enter. Hold Shift for the other way.";
 
-export const settingsPath = (section?: Section) => (section ? `/settings?section=${section}` : "/settings");
+const isSection = (v: string | null): v is Section => SECTIONS.some((s) => s.id === v);
 
 const FOCUSABLE =
   "a[href], button:not(:disabled), input:not(:disabled), select, textarea, [tabindex]:not([tabindex='-1'])";
 
-/** The section the URL asks for: `?section=data`, or `#notifications` (a link from
+/** The section the URL asks for: `?settings=data`, or `#notifications` (a link from
  *  elsewhere); null when it names none. */
 function useAskedSection(): Section | null {
-  const param = useSearchParam("section");
+  const param = useSearchParam(SETTINGS_PARAM);
   const hash = location.hash.replace(/^#/, "");
   if (isSection(param)) return param;
   if (isSection(hash)) return hash;
   return null;
 }
-
-const PHONE = "(max-width: 839px)";
-const subscribePhone = (l: () => void) => {
-  const mq = matchMedia(PHONE);
-  mq.addEventListener("change", l);
-  return () => mq.removeEventListener("change", l);
-};
-const isPhone = () => typeof matchMedia === "function" && matchMedia(PHONE).matches;
-const usePhone = () => useSyncExternalStore(subscribePhone, isPhone, () => false);
 
 /** A choice pushed as its own page on a phone (iOS Settings): the options as rows with
  *  the current one checked; the bar's back goes to the section. */
@@ -182,7 +200,7 @@ export function Choice<T extends string | number>({
   note?: ReactNode;
   disabled?: boolean;
 }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const push = useContext(PickerCtx);
   if (!phone)
     return <Segmented<T> value={value} options={options} onChange={onChange} label={label} disabled={disabled} />;
@@ -203,18 +221,21 @@ export function Choice<T extends string | number>({
 export function Settings() {
   const asked = useAskedSection();
   const section = asked ?? "general";
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   // The phone's stack: no section asked for is the list; a section is pushed over it.
   const view = phone && !asked ? "list" : "pane";
   const ref = useRef<HTMLDivElement>(null);
   const strip = useRef<HTMLDivElement>(null);
   const [picker, setPicker] = useState<Picker | null>(null);
+  // About's background service row, once shown in this window: kept here, so it stays
+  // through a visit to another section, and is gone the next time Settings opens.
+  const [service, setService] = useState<ServiceSeen>({ shown: false, running: "" });
   // A picker belongs to its section.
   useEffect(() => setPicker(null), [section, view]);
-  // Back to the page under the dialog (opened by its URL, to the board; the split panel
-  // stays), after the window's exit has played.
+  // Back to the page under the dialog, as it was (the split panel stays), after the
+  // window's exit has played.
   const [closing, setClosing] = useState(false);
-  const leave = () => (hasInAppHistory() ? back("/") : navigate("/"));
+  const leave = closeSettings;
   // The exit takes no click, so a click on the page under it lands at once; when that
   // click navigates, the dialog is gone before its exit ends and must not go Back then
   // (that would undo the click and bring the dialog back).
@@ -227,10 +248,16 @@ export function Settings() {
     leaving.current = window.setTimeout(leave, tokenMs("--dur-exit", 140));
   };
 
-  // The window takes focus on open (no ring on a section until the keyboard moves);
-  // Tab and shift+Tab cycle inside it.
+  // The window takes focus on open (no ring on a section until the keyboard moves), and
+  // gives it back on close to what had it, on the page that stayed under it; Tab and
+  // shift+Tab cycle inside it.
   useEffect(() => {
+    const had = document.activeElement as HTMLElement | null;
     ref.current?.focus({ preventScroll: true });
+    return () => {
+      const now = document.activeElement;
+      if (had?.isConnected && (!now || now === document.body || !now.isConnected)) had.focus({ preventScroll: true });
+    };
   }, []);
   const onKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Tab" || !ref.current) return;
@@ -246,7 +273,7 @@ export function Settings() {
       first.focus();
     }
   };
-  const pick = (id: Section) => navigate(settingsPath(id), { replace: !phone });
+  const pick = (id: Section) => showSettingsSection(id, { push: phone });
   const index = SECTIONS.findIndex((s) => s.id === section);
   const label = SECTIONS[index]?.label ?? "Settings";
 
@@ -259,6 +286,7 @@ export function Settings() {
           role="dialog"
           aria-label="Settings"
           aria-modal="true"
+          data-settings-window
           ref={ref}
           tabIndex={-1}
           onKeyDown={onKey}
@@ -330,7 +358,7 @@ export function Settings() {
               <button
                 type="button"
                 className="settings-back"
-                onClick={() => (picker ? setPicker(null) : back(settingsPath()))}
+                onClick={() => (picker ? setPicker(null) : settingsBackToList())}
               >
                 <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
                   <path
@@ -385,7 +413,7 @@ export function Settings() {
                   {/* No machine's own agent history is on a spacesheep account to switch on. */}
                   {section === "data" && !accountMode() && <SearchDataGroup Group={Group} Row={Row} />}
                   {section === "data" && <Data />}
-                  {section === "about" && <About />}
+                  {section === "about" && <About seen={service} onSeen={setService} />}
                 </>
               )}
             </div>
@@ -481,6 +509,7 @@ export function ModeRow({ hint = true }: { hint?: boolean }) {
 
 function General() {
   const s = useAppSettings();
+  const phone = usePhoneLayout();
   return (
     <>
       <Group>
@@ -496,18 +525,20 @@ function General() {
             options={DEFAULT_PAGES}
           />
         </Row>
-        <Row label="Open sessions" hint="A plain click. Shift-click always opens beside.">
-          <Choice<OpenSessions>
-            value={s.openSessions}
-            onChange={(openSessions) => setSettings({ openSessions })}
-            label="Open sessions"
-            note="A plain click. Shift-click always opens beside."
-            options={[
-              { value: "page", label: "As page" },
-              { value: "beside", label: "Beside" },
-            ]}
-          />
-        </Row>
+        {/* The phone opens every session as its page: there is nothing to choose. */}
+        {!phone && (
+          <Row label="Open sessions" hint={OPEN_SESSIONS_HINT}>
+            <Choice<OpenSessions>
+              value={s.openSessions}
+              onChange={(openSessions) => setSettings({ openSessions })}
+              label="Open sessions"
+              options={[
+                { value: "beside", label: "Beside" },
+                { value: "page", label: "As a page" },
+              ]}
+            />
+          </Row>
+        )}
         <Row label="Confirm before Forget" hint="Forget deletes what is held for a session here.">
           <Toggle
             on={s.confirmForget}
@@ -830,6 +861,10 @@ const AGES: { days: number; label: string }[] = [
   { days: 90, label: "three months" },
 ];
 
+/** Where the receiver connects when no origin is named (native/accountConnect.ts
+ *  DEFAULT_ORIGIN, which this window does not import: it brings the phone's shell code). */
+const SPACESHEEP_ORIGIN = "https://spacesheep.dev";
+
 /** "Use a spacesheep account": the relay option (docs/rfcs/08). Off by default; the copy
  *  names the trade. Connect opens spacesheep's confirm page with four digits; the server
  *  polls and connects; the group follows through the info it re-reads. */
@@ -843,7 +878,7 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   const [err, setErr] = useState<string | null>(null);
   // In the app the receiver can be older than this page (lib/serverAge.ts): it says so. Its
   // version is read again when the stream comes back (a receiver restarted by an update),
-  // when the window comes forward, and after "Update sessionpipe".
+  // when the window comes forward, and after an update (this window's or another's) ends.
   const store = useStore();
   const { connection } = useConnection();
   const [version, setVersion] = useState<string | undefined>(undefined);
@@ -851,8 +886,8 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
   // The process that 404'd, by its info's startedAt: the notice stays until another answers.
   const notFoundAt = useRef<string | null>(null);
   const startedAt = useRef<string | null>(null);
-  const [local, setLocal] = useState<LocalUpdateState | null>(null);
-  const refresh = useCallback(() => {
+  const { local, reload } = useLocalUpdate();
+  const readInfo = useCallback(() => {
     store.transport
       .info()
       .then((i) => {
@@ -865,19 +900,24 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
         }
       })
       .catch(() => {});
-    if (inShell) void import("../native/receiverUpdate").then((m) => m.localUpdate()).then(setLocal);
   }, [store]);
+  const refresh = useCallback(() => {
+    readInfo();
+    reload();
+  }, [readInfo, reload]);
+  // Read on opening, when an update stops running, and when the stream comes back: a
+  // receiver an update restarted.
+  const updating = !!local?.busy;
   useEffect(() => {
-    refresh();
-  }, [refresh]);
-  // Read again when the stream comes back: a receiver an update restarted.
+    if (!updating) readInfo();
+  }, [readInfo, updating]);
   useEffect(() => {
-    if (connection === "live") refresh();
-  }, [refresh, connection]);
+    if (connection === "live") readInfo();
+  }, [readInfo, connection]);
   useEffect(() => {
-    window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
-  }, [refresh]);
+    window.addEventListener("focus", readInfo);
+    return () => window.removeEventListener("focus", readInfo);
+  }, [readInfo]);
   const localOrigin = local?.origin ?? null;
   const older = olderReceiver("spacesheep", version, { notFound, localOrigin });
   const read = async () => {
@@ -965,18 +1005,31 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
     limited: "this app is reading too often for spacesheep; it catches up by itself",
     gap: "reading (an older gap the relay no longer holds)",
   };
+  // The privacy policy is the account's spacesheep's: the one connected, the one a confirm
+  // is pending on, else the default.
+  let origin = SPACESHEEP_ORIGIN;
+  try {
+    origin = link?.origin || (p ? new URL(p.url).origin : origin);
+  } catch {}
   return (
     <G
-      label="A spacesheep account"
+      label="spacesheep"
       note={
-        link
-          ? `Connected as ${link.email} since ${new Date(link.connectedAt).toLocaleDateString()}. ${link.events} events so far · ${stateWords[link.state] ?? link.state}${link.lastError && link.state !== "ok" ? ` · ${link.lastError}` : ""}${link.machines.length ? ` · machines there: ${link.machines.join(", ")}` : ""}. ${
-              account
-                ? // What Disconnect removes (account/backend.ts `drop`, account/local.ts), and what it does not.
-                  `Disconnect removes the account from ${deviceWords().this}: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.`
-                : "The key is under Settings → API keys on spacesheep; revoking it there disconnects this app."
-            }`
-          : "An option, not the default: read the sessions and machines paired on a spacesheep account through spacesheep, with nothing to host here. spacesheep then holds what those machines send, at the tier they send, under its privacy policy; a self-hosted board keeps everything on this disk. You can run both."
+        link ? (
+          `Connected as ${link.email} since ${new Date(link.connectedAt).toLocaleDateString()}. ${link.events} events so far · ${stateWords[link.state] ?? link.state}${link.lastError && link.state !== "ok" ? ` · ${link.lastError}` : ""}${link.machines.length ? ` · machines there: ${link.machines.join(", ")}` : ""}. ${
+            account
+              ? // What Disconnect removes (account/backend.ts `drop`, account/local.ts), and what it does not.
+                `Disconnect removes the account from ${deviceWords().this}: its key, its sessions, labels and read marks, drafts and recent searches. The key keeps working until you revoke it on spacesheep: Settings → API keys.`
+              : "The key is under Settings → API keys on spacesheep; revoking it there disconnects this app."
+          }`
+        ) : (
+          <>
+            Also shows the sessions your computers send to spacesheep, which keeps them.{" "}
+            <a href={`${origin}/privacy`} target="_blank" rel="noreferrer noopener">
+              Privacy policy
+            </a>
+          </>
+        )
       }
     >
       <R
@@ -992,15 +1045,15 @@ function SpacesheepGroup({ Group: G, Row: R }: { Group: typeof Group; Row: typeo
         }
       >
         {link ? (
-          <button type="button" className="btn" disabled={busy} onClick={() => void disconnect()}>
+          <button type="button" className="btn btn--sm" disabled={busy} onClick={() => void disconnect()}>
             Disconnect
           </button>
         ) : p && p.state === "pending" ? (
-          <a className="btn btn--primary" href={p.url} target="_blank" rel="noreferrer">
+          <a className="btn btn--sm btn--primary" href={p.url} target="_blank" rel="noreferrer">
             Open the confirm page
           </a>
         ) : (
-          <button type="button" className="btn btn--primary" disabled={busy || !!older} onClick={() => void connect()}>
+          <button type="button" className="btn btn--sm" disabled={busy || !!older} onClick={() => void connect()}>
             Connect…
           </button>
         )}
@@ -1076,7 +1129,8 @@ function Data() {
       <Row
         label="Storage"
         hint={
-          info ? (
+          // On an account there is no folder (dir ""): the sentence says what it is instead.
+          info?.storage.dir ? (
             <span className="settings-path">{info.storage.dir}</span>
           ) : (
             "The events this receiver holds, one file per session."
@@ -1159,57 +1213,69 @@ function LinkRow({ href, to, children }: { href?: string; to?: string; children:
   );
 }
 
-/** What `/api/ui/update` answers (the installer's release notice; absent before it). */
-interface UpdateStatus {
-  current: string;
-  latest?: string;
-  checkedAt?: string;
-  available: boolean;
-  command: string;
-  notesUrl?: string;
-  error?: string;
+/** About's background service row, once shown in this Settings window, and the version it
+ *  last said. */
+interface ServiceSeen {
+  shown: boolean;
+  running: string;
 }
-const UPDATE = "/api/ui/update";
 
-function About() {
+/** About: what this is and which version, as a macOS About window says it. In the app the
+ *  version is the app's own, and the receiver's is said under it only when it differs (an
+ *  older background service, another computer's); in a browser the page is the receiver's.
+ *  When this computer's background service is behind the app, the update group says so in
+ *  a row of its own, with Update (native/receiverUpdate.ts serviceRow), in place of that
+ *  line. */
+function About({ seen, onSeen }: { seen: ServiceSeen; onSeen: (s: ServiceSeen) => void }) {
   const store = useStore();
   const [info, setInfo] = useState<Info | null>(null);
-  /** undefined: not asked yet; null: this receiver has no updater. */
-  const [update, setUpdate] = useState<UpdateStatus | null | undefined>(undefined);
-  const [err, setErr] = useState<string | null>(null);
-  useEffect(() => {
+  // Whether the receiver has answered once (or failed to): until then the row waits, so
+  // a service updated from a terminal never shows as behind for a moment.
+  const [asked, setAsked] = useState(false);
+  const read = useCallback(() => {
     store.transport
       .info()
       .then(setInfo)
-      .catch(() => {});
-    // The app updates as the phone's apps do; there is no receiver with an updater to ask.
-    if (accountMode()) return setUpdate(null);
-    apiFetch(UPDATE, { headers: { accept: "application/json" } })
-      .then((r) => (r.ok ? (r.json() as Promise<UpdateStatus>) : null))
-      .then(setUpdate)
-      .catch(() => setUpdate(null));
+      .catch(() => {})
+      .finally(() => setAsked(true));
   }, [store]);
-  // Nothing asks github.com until this is pressed; the receiver does the asking.
-  const check = async () => {
-    setErr(null);
-    try {
-      const r = await apiFetch(`${UPDATE}/check`, { method: "POST", headers: { accept: "application/json" } });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setUpdate((await r.json()) as UpdateStatus);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    }
-  };
-  const version = info?.version ?? update?.current;
-  const status = !update
-    ? undefined
-    : update.error
-      ? `The last check failed: ${update.error}`
-      : update.available && update.latest
-        ? `${update.latest} is out.`
-        : update.checkedAt
-          ? `Up to date · checked ${ago(update.checkedAt, Date.now())}`
-          : "Not checked yet.";
+  useEffect(() => {
+    read();
+    window.addEventListener("focus", read);
+    return () => window.removeEventListener("focus", read);
+  }, [read]);
+  // Only an app that updates itself (the desktop app) checks its background service.
+  const checks = !!UpdatesGroup && !accountMode();
+  const { local, reload } = useLocalUpdate(checks);
+  const run = useUpdateRun(local, () => {
+    reload();
+    read();
+  });
+  // The version this window's receiver answers, when it is the one the launch check found.
+  const mine = !!local && local.origin === shellApp?.receiver?.origin;
+  const live = mine ? info?.version : undefined;
+  // Once shown, the row stays until the window closes, saying the version the update
+  // brought; the last version it said stands in when a failed run knows none.
+  const row =
+    checks && (asked || !mine) ? serviceRow(local, run, { live, shown: seen.shown, seen: seen.running }) : null;
+  const said = row ? row.running || seen.running : null;
+  useEffect(() => {
+    if (said !== null && (!seen.shown || said !== seen.running)) onSeen({ shown: true, running: said });
+  }, [said, seen, onSeen]);
+  const appVersion = shellApp?.appVersion || "";
+  const version = appVersion || info?.version;
+  // The receiver's own version, said only where it is not the app's. (An account has no
+  // receiver behind it: its version is the app's.)
+  const rx = shellApp?.receiver;
+  const theirs = appVersion && rx && !accountMode() && info?.version !== appVersion ? info?.version : undefined;
+  const runs =
+    !theirs || row
+      ? null
+      : rx?.local
+        ? `${shellApp?.platform === "macos" ? "This Mac" : "This computer"}'s background service runs ${theirs}.`
+        : rx?.name
+          ? `${rx.name} runs ${theirs}.`
+          : null;
   return (
     <>
       <div className="about-head">
@@ -1218,41 +1284,17 @@ function About() {
         </span>
         <h3 className="about-name">sessionpipe gui</h3>
         <p className="about-version num">{version ? `Version ${version}` : "–"}</p>
-        <p className="about-lede">A sessionpipe receiver with a face: one process, no database, no account.</p>
+        {runs && <p className="about-version num">{runs}</p>}
+        <p className="about-lede">Every coding agent you run, on one board.</p>
       </div>
-      <Group>
-        <Row
-          label="Updates"
-          hint={
-            err
-              ? `Couldn't check: ${err}`
-              : update === null
-                ? "This copy doesn't check for updates itself; update it the way it was installed."
-                : status
-          }
-        >
-          {update ? (
-            <ActionButton className="btn btn--sm" pendingLabel="Checking…" onClick={check}>
-              Check for updates
-            </ActionButton>
-          ) : null}
-        </Row>
-        {update?.available && update.command ? (
-          <div className="settings-row settings-row--stack">
-            <div className="settings-row-text">
-              <span className="settings-label">Update on the receiver machine</span>
-              {update.notesUrl ? (
-                <a className="settings-hint" href={update.notesUrl} target="_blank" rel="noreferrer noopener">
-                  What's new in {update.latest} ↗
-                </a>
-              ) : null}
-            </div>
-            <div className="settings-well">
-              <CommandWell command={update.command} label="Copy the update command" />
-            </div>
-          </div>
-        ) : null}
-      </Group>
+      {UpdatesGroup && (
+        <Suspense fallback={null}>
+          <UpdatesGroup
+            appVersion=""
+            service={row ? { row, update: run.run, command: updateCommand(appVersion || local?.app || "") } : undefined}
+          />
+        </Suspense>
+      )}
       <Group>
         <LinkRow href="https://github.com/spacesheep-dev/sessionpipe-gui">sessionpipe gui on GitHub</LinkRow>
         <LinkRow href="https://github.com/spacesheep-dev/sessionpipe-gui/releases">Release notes</LinkRow>
@@ -1262,7 +1304,7 @@ function About() {
         </LinkRow>
         <LinkRow href="https://github.com/spacesheep-dev/sessionpipe-gui/issues">Report an issue</LinkRow>
       </Group>
-      <p className="about-foot">Apache-2.0 · nothing here calls anywhere but its own origin.</p>
+      <p className="about-foot">Apache-2.0</p>
     </>
   );
 }

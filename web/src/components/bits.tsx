@@ -154,14 +154,19 @@ export function Ago({ iso, prefix }: { iso: string | undefined; prefix?: string 
 }
 
 /** Elapsed since an instant, ticking, in the one grammar: "12 s", "4 m", "1 h 05 m".
- *  `coarse` is kept for its callers; every duration is coarse now (lib/time.ts). */
-export function Since({ iso }: { iso: string | undefined; coarse?: boolean }) {
+ *  `coarse` is kept for its callers; every duration is coarse now (lib/time.ts). `title`:
+ *  its tooltip, the instant by default; `false` where the cell around it has its own. */
+export function Since({ iso, title }: { iso: string | undefined; coarse?: boolean; title?: string | false }) {
   // Every second in the first minute; after that the text changes once a minute, and a
   // ten-second tick is plenty.
   const now = useNow(iso ? tickFor(Date.now() - ms(iso), 60_000) : "off");
   if (!iso) return null;
   return (
-    <time dateTime={iso} className="num" title={new Date(iso).toLocaleString()}>
+    <time
+      dateTime={iso}
+      className="num"
+      title={title === false ? undefined : (title ?? new Date(iso).toLocaleString())}
+    >
       {durCoarse(now - ms(iso))}
     </time>
   );
@@ -297,7 +302,7 @@ export function SearchInput({
         autoComplete="off"
         enterKeyHint="search"
       />
-      <kbd title="Press / to search">/</kbd>
+      <kbd title="Press / to find">/</kbd>
     </label>
   );
 }
@@ -591,6 +596,7 @@ export function EmptyState({
   center = false,
   glyph,
   className = "",
+  role,
 }: {
   title: ReactNode;
   children?: ReactNode;
@@ -598,9 +604,11 @@ export function EmptyState({
   center?: boolean;
   glyph?: ReactNode;
   className?: string;
+  /** "status" for a state that changes in place and is read out as it does. */
+  role?: "status";
 }) {
   return (
-    <div className={`state ${center ? "state--center" : ""} ${className}`}>
+    <div className={`state ${center ? "state--center" : ""} ${className}`} role={role}>
       {glyph ? <div className="state-glyph">{glyph}</div> : null}
       <h2 className="state-title">{title}</h2>
       {children ? <div className="state-text">{children}</div> : null}

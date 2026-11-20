@@ -211,8 +211,8 @@ export interface ThemeApi {
      *  action sheet, `title` / `subtitle` heading it; `"keyboard"` highlights the first item. */
     open(items: readonly ViewMenuItem[], at: { x: number; y: number }, opts?: ViewMenuOptions): void;
     /** The menu a session has everywhere else (Open as page, Open beside, Label ▸, Open
-     *  parent, Subagents ▸, Copy ▸, Forget…), with the view's own items after the open
-     *  group (`answer`, e.g. Allow / Deny) and before Copy (`extra`). */
+     *  parent, Subagents ▸, Copy ▸, Forget…), with the view's own items at its head
+     *  (`answer`, e.g. Allow / Deny) and before Copy (`extra`). */
     session(
       key: SessionKey,
       at: { x: number; y: number },

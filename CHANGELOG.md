@@ -43,9 +43,236 @@ All notable changes to `sessionpipe-gui`. The format follows
   before (a deleted `uiKey` gives a new one, as before); a running receiver takes one of
   at least 16 characters at once and leaves any other until then. `sessionpipe-gui key renew` gives a
   new key while the receiver runs.
+- **On a computer a session opens beside the page.** A click or ↵ on a session opens it
+  the way Settings › General › Open sessions says on every page that lists sessions: the
+  Board, the Inbox, Search, the Feed, Review, ⌘K, a notification and the menu bar. ⇧ opens
+  it the other way, ⌘ in a background tab. A computer that has not chosen, including one
+  where an earlier version saved As a page on its own, now opens sessions beside, so the
+  Board stays in view. Where the panel can't show, and on the phone, a session opens as its
+  page. The two choices read Beside and As a page, in Settings and in the Board's ⋯ menu.
+- **Sessions opened one after another beside the page share one tab.** A plain open beside
+  the page reuses one preview tab, its title in italics; typing in it, a picture added to
+  it, a double-click on the tab or a drag keeps it, and an open holding ⌘ adds a kept tab.
+  Answering keeps nothing, so going down the Inbox leaves one tab.
+- **On a computer, the notifications hold still under your hand.** Prompts sit nearest the
+  corner, newest first, with a failed turn, Delivered and "Hidden · Undo" under them, so a
+  passing card never pushes a prompt's Allow down. While the pointer or focus is on them,
+  or the window is hidden, nothing leaves by itself and a new card waits; a card you
+  dismiss keeps its room until the pointer leaves. On a phone a finger on a banner holds it
+  the same way.
+- **Allow and Deny on a notification stand only beside a request shown whole.** "Bash
+  wants to run:" has the command on its own line under it; a request too long to show
+  whole is two lines and "…" with one Open, which opens the session beside the page, and
+  its menu has no Allow or Deny.
+- **⌘⇧T and back.** ⌘⇧T goes to the newest prompt, and Tab goes down the cards as they
+  are drawn. × moves focus to the next card, and from the last one back where ⌘⇧T was
+  pressed; Esc goes back there too and closes nothing (it used to close the panel beside
+  the page). While focus is in the notifications only the keys that work everywhere do:
+  Enter, a or d no longer reach past the cards to the row under the cursor.
+- **The offline line's Machines follows its sentence** ("old-mbp is offline. Machines"),
+  where it sat at the far right under the notifications; × stays at the end of the line.
+- **The desktop app on Windows and Linux has its own menu bar.** It had the Mac's: a first
+  menu named after the app, with Services, Hide Others and Show All, and a Window menu. It
+  is now File (New Session, Settings…, and Exit on Windows or Quit on Linux), Edit, View, Go
+  and Help (Keyboard Shortcuts, Check for Updates…, About sessionpipe), and Alt+F opens
+  File, as Alt+E, V, G and H open the rest. A Mac's menu bar is as it was.
+- **On Windows and Linux the pages are Ctrl+Shift+1 to 5, and Toggle Sidebar is Ctrl+B.**
+  They were Ctrl+Alt+1 to 5 and Ctrl+Alt+S, which are the colour labels' keys and, on
+  Windows, the characters AltGr types. A Mac keeps ⌃⌘1 to 5 and ⌃⌘S.
+- **Off a Mac the command palette's rows move with the arrows alone.** Ctrl+N and Ctrl+P
+  were listed too; there they are New Session and the browser's print. A Mac keeps ⌃N and
+  ⌃P.
+- **The desktop app's updates are in Settings › About, under its version.** They were the
+  last group of Settings › App, while About read "This copy doesn't check for updates
+  itself; update it the way it was installed." The row is one sentence for each state:
+  "Not checked yet" until a check has run, then "Up to date" with "Checked 40 min ago.";
+  "Checking…" and "Downloading 0.8.5… 42%", with no button to press; "0.8.5 is ready",
+  with a link to what's new in it and Install and relaunch; "Couldn't check for updates"
+  or "Couldn't update to 0.8.5", with the reason and Try again. "Check for updates
+  automatically" is the row under it.
+- **A downloaded update shows in the app's menu and on the sidebar.** While one waits,
+  "Check for Updates…" reads "Install 0.8.5 and Relaunch" and does that, and the sidebar's
+  Settings button has a small dot and opens About. It showed only in the menu bar menu and
+  at the foot of Settings › App. "Check for Updates…" opens Settings › About, where the
+  check shows as it runs, with a window open or not.
+- **When this Mac's background service is behind the app, Settings › About says so**, in
+  a row under the app's own update with Update, and the menu bar menu offers "Update
+  Background Service…". Nothing said so before, unless an option was too old for it.
+- **A new version of the desktop app brings this Mac's background service along.** On
+  its first launch it updates the service to its own version, from the same release, as
+  Update would, and Settings › About shows the progress. It waited for that click unless a
+  sessionpipe-gui of the app's version was installed. A relaunch of the same version
+  still waits.
+- **An option this Mac's background service is too old for says it in fewer words.**
+  "This Mac's background service is 0.7.4; this option needs 0.7.5." (or "… is too old
+  for this option."), with Update; another machine's is "sessionpipe on studio-mac is
+  0.7.4; this option needs 0.7.5. Update it there." The command to copy, and a failure's
+  line, are in a closed "Run it yourself" instead of always shown.
+- **Setup's title is "Setup"**, as its sidebar entry reads. It was "Set up sessionpipe gui".
+- **A dropped connection is said once, in the page's bar, with one Retry.** The only words
+  were "Reconnecting · 4 s  Retry now" in the sidebar's foot, so with the sidebar hidden a
+  frozen board said nothing at all, while a session said it three times, with two Retry
+  now buttons. The bar now reads "Reconnecting…" or "Offline" beside the page's title,
+  with Retry, in the place of the page's own line there (a session's computer and repo
+  come back with the connection; in a narrow column its title gives way to the words); the
+  sidebar keeps its dot, named by its tooltip, and its foot no longer grows a line. A
+  session says only what follows from it: "You can answer once the connection is back." on
+  an open prompt's card, or "You can send once the connection is back." under the message
+  field, in place of "Sending waits for the connection", which promised a send the button
+  refused. "Ask another agent…" is not offered meanwhile, and its sheet, if open, waits
+  and says so. A drop that is over within 400 ms changes nothing (it turned the message
+  field off for an instant), and before the first sessions have loaded the Board and the
+  Inbox say it alone. The board's line for an offline computer dims with the rows it
+  stands over. Nothing counts seconds any more, on the
+  phone either, and a screen reader hears "Reconnecting." or "Offline." once and
+  "Reconnected." once, where it read the countdown out every second. "Retry now" is
+  "Retry" everywhere.
+- **A Search result is three lines: its title, where it ran, and its best moment.** A row
+  showed up to three moments, the earliest of its best three, so about five sessions fit
+  in a window; it shows the one that matched best now (under Newest, the newest), with
+  "N more matches" at its right under the time, and about eleven fit at 1440 × 900.
+  Clicking the row, ⏎, Space and "Find in this session…" open at that moment, which they
+  were meant to and did not. On a phone the row has one moment where it had two. A changed
+  file reads "Changed src/webhooks/send.ts", as an edit reads "Edit …", where it read
+  "files.changed Changed …", in the results and in a history transcript.
+- **A window with a mouse keeps the desktop's layout down to 720 px wide.** A Mac window
+  tiled to half a 13- or 14-inch screen (720 to 756 px) turned into the iPhone's app: a tab
+  bar along the bottom, a large title, buttons a finger's size, and a row's right-click as
+  a sheet from the bottom edge, with Open beside and every shortcut left out. It now keeps
+  the compact sidebar with the traffic lights in it, the title in the bar, Deny and Allow at
+  a pointer's size and menus at the pointer; so do the Windows and Linux apps, and a
+  desktop browser's window. A touch screen under 840 px (a phone, a tablet held upright)
+  keeps the phone's layout, and a view's window can no longer be made narrower than the
+  main one (720 by 480).
+- **In a window that narrow, a session opened beside a page covers the page.** There is no
+  room for both, so it runs from the sidebar to the window's edge: its tabs, its close
+  button and Esc are as before, and a wider window has it beside the page again at the
+  width it had. While it covers the page the keys are the session's (none moves a cursor
+  or opens a row under it), another page chosen in the sidebar leaves it behind, and the
+  page's own entry there brings the page back.
+- **On the Board, a and d answer the prompt under the cursor.** On a Needs you row they
+  did nothing, and with a session open beside the board they answered that session,
+  whichever row the cursor was on. They now answer the row under the cursor, as in the
+  Inbox, and never another prompt. The row then says what became of the answer, in the
+  request's place: "Allowed · waiting for studio-mac", "Not sent: …", or why it cannot go.
+- **On a computer, a Board row's menu leads with Allow and Deny, and shows their keys.**
+  The pair came after Open, New session here and Ask another agent…; it comes first now,
+  as in the Inbox, and both show A and D beside it; the phone's sheet keeps its order. On
+  a machine that is not paired a Board row's menu leaves the pair out.
+- **On a computer, a plan the agent asks to start on is read in the conversation, whole.**
+  It sat in the dock at the bottom, beside Keep planning and Approve plan, eight lines
+  until "Show the whole plan" and then a box of its own that scrolled, while the
+  conversation above it stood empty. It is now a panel right under the call that asks
+  ("Asking about the plan"), at the conversation's width, and the page opens on its
+  first line; the dock asks "Ready to start on this plan?" in one row, as for any other
+  prompt. A plan approved while the page is open stays as it was; one answered before
+  shows its first eight lines and Show all. Right-click it for Copy plan. A session that
+  sends no plan (tier 2) still has the prompt's own words in the dock, and so does one
+  read at a tier lens under 3. On a phone the plan stays on the prompt's card.
+- **A Board row's time says how long it has been in its group.** A working row counted
+  from its current tool, so a 40-minute run read "0 s" each time a tool started; it now
+  counts from when it began working and holds as tools come and go. A stale row counts
+  from its last word, so it reads "49 m" where it read "39 m" beside "Bash · 49 m", and
+  names its tool ("Bash") with no second clock; a done row counts from when it ended or
+  last spoke. A tool that has run over 3 minutes shows its age after its name, "Bash ·
+  12 m". The time has one tooltip, which says what it counts: "Working since 9:31 AM",
+  "No word since 9:13 AM", "Needs you since 10:02 AM".
+- **A row whose last tool failed has its ✕ just before the time,** "✕ 3 s", as a
+  subagent's row has it. It sat somewhere in the row's empty middle on a wide window, and
+  under the time on a phone. With Show counts on it stays in the errors column.
+- **The sidebar's groups are set off by hairlines, and Simple keeps to the daily places.**
+  Board, Inbox and Search, then (in Advanced) Feed and Review, then Workflows and Machines,
+  then the views. Simple leaves the experimental views (Canvas, Office) to Advanced, ⌘K
+  and the Views page; their `g 1` … `g 9` keys stay the same in both modes. Connect is no
+  longer a row, here or in the phone's More: it is Machines' Connect…, ⌘K and `g c`.
+  Setup is "Finish setup", at the foot of the list while steps remain.
+- **Usage is always in the sidebar.** Where its lines are not drawn (the icon-only
+  sidebar, Usage in the sidebar turned off, no numbers yet, a short window) it is a Usage
+  row after Machines.
+- **The sidebar and the Settings list are set as a Mac's are: 13 px regular.** The fill
+  marks the selected row, so its label keeps the others' weight, and the icons are 16 px.
+- **On a computer, each group on Machines, Usage, Connect, Setup, Your phone, Views,
+  Workflows, the pairing pages and the Welcome is a panel of its own**, as in Settings and
+  on the phone: its name above, its rows in a box on the page's grey ground (dark stays
+  dark), its one note under it. One machine's rows no longer run into the next one's, a
+  pool's accounts and their windows are one box, and on Connect the QR and its addresses
+  are one, each folded group one row that opens in its box. Rows keep their height, and
+  the phone looks as it did.
+- **When the first sessions never come, the Board and the Inbox name the computer they
+  can't reach, and the Mac app offers to start sessionpipe.** They said "No connection to
+  the receiver" or "Still connecting to the receiver…", with a sentence about the stream
+  and Retry, while the sidebar said "Reconnecting" about a connection there had never
+  been. They now say "Connecting to studio-mac…" while it waits, with nothing to press, and
+  "Can't reach studio-mac" with Retry when it fails ("spacesheep" for an account,
+  "sessionpipe" in a browser, "You're offline" with no network). For this Mac's own
+  sessionpipe the desktop app reads "Can't reach sessionpipe on this Mac" and puts Start
+  sessionpipe beside Retry: while it works its progress is the title, and a start that
+  didn't work says so as the welcome does, with Try again. Before the first sessions, a
+  page with no loading state of its own (Search, Machines) says "Connecting…" or "Can't
+  reach studio-mac" in its bar, and the sidebar's dot says the same. The menu bar item
+  reads "Can't reach this Mac", in lower case.
+- **Settings opens over the page you are on.** ⌘, the sidebar's sliders, Display's
+  "Settings…" and every other way in add `?settings=<section>` to the page's address, and
+  the page stays as it was under it: its scroll, its title, its lit row in the sidebar, a
+  file open in a session. It drew the Board under it before, and closing it loaded the
+  page again. Done, ×, Esc and a click beside it go back to the page as it was; a link
+  inside Settings, or another page, closes it on the way. On a computer the window is up
+  to 720 px tall, so Data's Export shows without scrolling, and the dim under every dialog
+  is lighter, so Appearance and Text size are judged on a page that is not greyed. Old
+  `/settings?section=…` links open it over the page Open on names. The phone's Settings
+  is the same full-screen sheet as before.
+- **Focus is ink, so the orange means only "needs you".** The keyboard's ring is ink in
+  every skin and both schemes, where it was the orange. A focused field's edge steps up to
+  grey with a soft grey halo; the message box, which has the focus the whole time a
+  session is read, only steps its edge up and never glows. The keyboard cursor's edge on a
+  Board, Inbox, Feed, Search, Review or Files row is drawn at full strength, 3:1 or better
+  on its fill (2 px with Increase contrast on), and a Files row no longer gets a ring of
+  its own. Selected text is the system's own colour on a computer; the phone app keeps its
+  tint.
+- **Menus, pop-up lists and the command palette mark the keys' item with the same edge.**
+  An item the arrow keys, a typed letter or a keyboard open moved to has the list rows'
+  cursor edge on its fill, where it had a faint fill alone; an item under the pointer keeps
+  the fill alone, as before. A touch screen is as it was. A skin whose focus ring is under
+  3:1 on its page or card is listed with "low contrast", as a pale text tier is.
+- **The Inbox badge counts the sessions that need you, as Needs you, the Dock and the menu
+  bar do.** It counted only the prompts you could answer from here, so it said 2 beside
+  "Needs you 3", and went dark once a prompt waited past its two minutes. The badge, the
+  title's "(n)" and the phone's app badge now count every session in Needs you, a question
+  and a prompt waiting in a terminal too (0.8.4 left both out). A session whose answer has
+  gone, or that you hid, counts no more, and the Board's Needs you drops it from its
+  number at once, its row in its place. The Dock and the menu bar still count a session
+  you hid on this device. VoiceOver reads "Inbox, 3 need you". Notifications are as they
+  were: only a prompt you can answer here raises one.
+- **Settings › Data's spacesheep account is a quiet option.** Its Connect… was the one
+  solid button in Settings; it is now a small one like Rebuild…, Forget… and Download
+  JSON, and Disconnect is the same size. "Open the confirm page" stays solid while a
+  connect waits on it. The group is "spacesheep" over "Use a spacesheep account", and its
+  four-line note is one sentence, "Also shows the sessions your computers send to
+  spacesheep, which keeps them.", with a Privacy policy link. On an account, Storage says
+  what it holds where it showed an empty line.
+- **On a computer the Board filters with one Filter button.** "All machines", "All
+  harnesses", "All labels" and Clear become one Filter pop-up: Machine and Agent (each
+  where there are two or more), Label ›, and Clear filters while one is on, which leaves
+  the field's words. Filtered, the button says what it narrows to ("lab-mac · Codex"); with
+  nothing to narrow there is no button. The field is called Filter and sits at the bar's
+  right end, so it no longer moves when a filter is set, and beside a session the bar
+  stays one row. The Inbox's label filter and the Feed's are the same button, the Feed's
+  with Label › in it; the Inbox's lens now comes before the bell, and Tab follows the bar
+  from left to right. A phone keeps its chips, under the field now called Filter, and its
+  agent chip reads "All agents".
+- **A filtered Board ends with "Search every session for “webhook”",** which opens Search
+  with the words, and ⇧⌘F in the field does the same. When nothing matches, the title says
+  so with no paragraph under it, then "Search every session for …" and Clear filter. The
+  palette says the same words, and `/` is "Find on this page" in Shortcuts.
+- **"Agent" where the app said "harness":** the Feed's filter, Setup's list and Search's
+  `agent:` hint.
 
 ### Fixed
 
+- **A right-click just after a menu closed opens its row's menu.** For 0.4 s after any menu
+  opened, a right-click did nothing: right-clicking a Board row moments after Allow, Hide or
+  Esc on another row's menu, or after `.`, showed no menu and had to be done again. Only
+  the browser's own second event for a menu still open is ignored now.
 - **`--port` and `--keep-days` take digits only, and a flag is never another flag's
   value.** `--port ""` (a script's unset `$PORT`) started on a random port and
   `--keep-days ""` kept every event whole, both without a word; `--port 0x1F90` listened on
@@ -149,11 +376,210 @@ All notable changes to `sessionpipe-gui`. The format follows
   spacesheep that takes no pictures from here says so once (`spacesheep.dev can't take
   pictures from here yet.`) and the paperclip is gone until the app or the page is opened
   again.
+- **A session's title is plain words everywhere.** A title written with Markdown showed
+  its marks: "the old \`--sink\` flag?". It now reads "the old --sink flag?" wherever a
+  title shows, in the menu bar and notifications as well. Code written without backticks
+  (`__init__.py`) stays as it is, in previews too, and a preview no longer drops a " - "
+  after a code span.
+- **↵ on a list does what the row's menu says.** With Open sessions set to Beside, the
+  menu read "Open beside ↵", but ↵ opened the page. Now ↵ and ⌘1 to 9 open the way
+  Settings says and ⇧↵ the other way, on the Board, the Inbox and the Feed, and so do a
+  click and ⇧-click on the Board and the Feed; ⌘ opens a background tab.
+- **A colour label sits after the title, so the titles line up.** Its dot sat
+  between the state and the title, which moved a labelled row's title and preview about
+  5 px right of its neighbours'. It now follows the title, 6 px after it (after the …
+  when the title is cut), on the Board, a child session's row and the Inbox, as Search
+  already had it. The lead holds the state alone, and ⌘'s jump number lands on it.
+- **"Menu bar only" can no longer hide the Mac app completely.** With "Show in menu bar"
+  off and "Menu bar only" on, the app ran with no Dock icon, no menu bar item and no app
+  menu. "Menu bar only" now sits under "Show in menu bar" and shows only while that is
+  on; turning the menu bar item off turns it off too and brings the Dock icon back, and an
+  app saved in that state opens with its Dock icon. While there is no Dock icon,
+  "Show count on the Dock icon" is not shown, where it was greyed without a reason. On
+  Windows and Linux "Menu bar only" is gone: all it did there was switch off the taskbar
+  count.
+- **The desktop app's "Start sessionpipe" says what went wrong, in one sentence.** On a
+  computer without Node the welcome read "It didn't start: sessionpipe needs Node 20 or
+  later" and gave no next step. It now reads "Install Node 20 or later from nodejs.org,
+  then try again.", with the site as a link that opens in the browser, and Try again. A
+  start that failed reads "It didn't start."; the installer's own line is under Details,
+  with Copy. A receiver that started and is still loading its board reads "Give it a
+  minute to load, then try again." instead of being called not started, and while another
+  install or update is already running the button waits for it rather than being refused.
+  The button keeps the focus while it works, so Return tries again.
+- **The welcome and the phone's install steps no longer show `npx -y sessionpipe-gui
+  service install`.** The GUI is not on npm under that name, so the command could only
+  fail, or run whatever someone published there. Try again does what it was for; on the
+  phone, step 1 is "Download it from sessionpipe.org/gui."
+- **⌘K offers Allow and Deny only where the answer would be sent.** The palette listed
+  them for every open prompt: on a machine that is not paired, on one that does not trust
+  this Mac yet, for a Claude Code prompt past its two minutes, and for one already answered
+  from a toast or the Inbox. Enter then signed an answer that was refused, or only said it
+  was not sent. Such a prompt has no Allow or Deny row now; its session keeps its row under
+  Sessions, and its page says why and what to do. "Send a message…" is listed the same
+  way, only for a session a message can go to. The cursor stays with its row: when a
+  prompt leaves the list while the palette is open, the cursor goes to that session's row
+  and never onto the row that took its place, so an Enter already on its way cannot answer
+  another prompt.
+- **The system's Increase contrast setting takes effect.** With it on (macOS:
+  Accessibility › Display; iOS: Accessibility › Display & Text Size), meta text, marks,
+  dividers and the edges of fields and buttons step up, in every skin and both schemes, as
+  soon as it is switched. Before, only the focus ring got thicker: a skin's own colours
+  outranked the rest.
+- **A switch reads on or off at a glance, in both schemes.** In dark mode a switch that was
+  on was a pale grey track under a white knob, which reads as greyed out on a Mac; it is
+  now a mid grey the knob stands out on. A switch that was off was a faint pill, in dark
+  mode a white dot with no track: on a computer it now has a thin grey edge, so the knob
+  is seen to sit left. The Text size slider's knob gets the same edge. The phone's
+  switches are as they were.
+- **A new board names the agent this machine has hooked, and the command that starts
+  it.** With only Codex hooked it read "Start Codex in any terminal…" over `$ claude`. The
+  line now reads "Start a new Codex session in any terminal on studio-mac." over `$ codex`
+  (`$ gemini` for Gemini; an agent that is an app, such as Antigravity, gets no command),
+  and says "new" because an agent already running doesn't show up. "Listening" names only
+  the agents whose hooks are on. "Try the demo" (it was "See it with sample sessions") and
+  "Pair another machine" are two quiet buttons under it. Until a session arrives, the
+  board's ⋯ and right-click menu offer only Open sessions and Mode: Find…, Show done
+  sessions, Mark all as read and the rest had nothing to act on.
+- **The demo says it is a demo once.** The board repeated the yellow bar in a second band
+  with its own way out, "Leave samples"; the bar and its "Leave the demo" are the only
+  ones now, and Needs you sits right under the page's bar. The sidebar has no Setup entry
+  in the demo: it led to the real machine's setup from a board of made-up sessions.
+- **Ctrl+Alt+1 to 5 set a colour label in the desktop app on Windows and Linux.** The menu
+  took them for the pages, so Red to Blue could not be set from the keyboard, though the
+  Shortcuts page and a row's Label menu listed them. On Windows AltGr also types again
+  where the menu had its keys: ² and @ on the 2, ś on the S.
+- **⌘K opens the command palette in the iPhone and Android app with a keyboard.** The page
+  left it, with ⌘F and ⌘[, to a menu bar a phone doesn't have.
+- **⌘1 to ⌘9 open a list's n-th item on a keyboard whose digits need Shift.** On an AZERTY
+  keyboard the key types "&", which was read as another key. A shortcut recorded with ⌘ or
+  Ctrl, Shift and a digit is now written with the digit (Ctrl+Shift+1, not Ctrl+!).
+- **The Mac app has one "Notify me" switch, in Settings › Notifications, and the Inbox's
+  bell follows it.** Settings › Notifications showed the browser's switch, which spoke of
+  "this tab" and could not be turned on in the app, while the one that works sat under App,
+  below the shortcut. Notifications now opens with "Notify me when a session needs me",
+  then Pause and what to notify about, then the sounds; App no longer has the group. A
+  pause is one row, "Paused until Thu 8:00 AM", with Resume, and the list's "Off" reads
+  "Not paused". When macOS refuses, the panel is one row, "Notifications are off for
+  sessionpipe", with Open System Settings, and no switch that can't be turned on. The
+  Inbox's bell was struck through with notifications on: the bell, its popover and the
+  Inbox's menu now read the same switch (in the phone app too), and the Inbox says
+  "Notifications are off for sessionpipe" only while the switch is on and macOS refuses.
+  On Windows and Linux, where the app posts no notifications, the switch that could only
+  be refused is gone from Settings › App and from the first-run sheet. In the phone app,
+  Settings › App keeps the switch without the kinds and Pause, which the phone never read.
+- **In the Mac app a prompt is heard once.** With the window behind another app, a
+  permission request or a question played the notification's sound and the banner's chime.
+  The banner in the window is silent now whenever macOS sounds its own; with the window in
+  front, while paused, and for an error or a finished session, whose notifications make no
+  sound, it plays as before.
+- **The sounds are named as the notifications are.** "Needs you", "Question", "Error" and
+  "Done" are "Permission requests", "Questions", "Errors" and "Delivered"; the sound
+  chosen for each is kept.
+- **Ask another agent dims the whole window, as New session does.** The sheet's backdrop
+  covered only a band in the middle of the window, so the sidebar, Back, Files and ⋯ stayed
+  bright around it and took clicks: one on the sidebar opened another page under the open
+  sheet. The whole window dims now, and a click anywhere outside the sheet closes it and
+  goes nowhere; what was typed is kept for that session. On a phone the sheet covers the
+  tab bar, which was drawn over its foot, and on an iPad held upright it fills the width,
+  where the page showed beside it. A right-click on the sheet, or a finger held on it on a
+  phone, opened the message bar's menu over it; it opens none now.
+- **Every way into Search puts the caret in its field, and Tab goes from the field to the
+  results.** Opened with g /, with / or Edit › Find on Review, from the command palette or
+  from the Board's "Search every session for…", Search left its field without the focus,
+  so the letters typed next were shortcuts: c opened New session, t switched dark and
+  light, l changed the lens. Only the sidebar's link and ⇧⌘F reached the field; they all do
+  now. From the field, Tab moves to the result under the cursor, where Space peeks, "."
+  opens its menu and ⌘C copies its resume line; no key from the field reached a row
+  before. The results are one Tab stop, the cursor's row. A filter's name still completes
+  with Tab first, and with no results Tab goes on to the next control. On a row, Esc goes
+  back to the field with its text selected, as "/" does (Esc did nothing there), and j
+  pressed from Sort lands on the top result, not the second.
+- **A session opened as a page keeps the other tabs beside it.** With sessions open as
+  tabs beside the Board, a click on a card, a search result, a notification or "Open as
+  page" closed every one of them: Back brought them back, the sidebar's Board did not, and
+  the next launch did. The panel now stays until you close it. The tabs go along beside the
+  session's page and are still there on the Board; "Open as page" moves that one tab out,
+  its neighbour taking over, in one step that Back undoes; and the next launch puts back
+  the tabs last on screen. A notification that opens the app on a session no longer shows
+  that session a second time, in a tab beside its own page. A session's link, and "Copy
+  link", still name the session alone. A phone, where a session's page is the whole
+  screen, is unchanged.
+- **"Open on" is where the app opens, also when tabs were left open beside a page.** With
+  a tab left in the panel, the next launch stayed on the Board whatever Settings › General
+  said: the tabs it put back counted as an address someone had asked for. It now lands on
+  the chosen page, with the tabs beside it. In the desktop app, Go › Board with the window
+  closed opens the Board, not the page "Open on" names.
+- **About says the app's own version.** In the desktop and phone apps it showed the
+  receiver's, which can be an older background service or another computer's. That one is
+  a line under it now, only when it differs: "This Mac's background service runs 0.8.3.",
+  or "studio-mac runs 0.8.3." The line under the name is "Every coding agent you run, on
+  one board." and the foot is "Apache-2.0", everywhere: "no account" and "nothing here
+  calls anywhere but its own origin" were not true of an app that checks for its updates
+  and can use a spacesheep account. In a browser and the phone app the Updates row is
+  gone; it could only say that the copy doesn't update itself.
+- **The desktop app no longer says "up to date" before it has checked.** For the first
+  seconds of a launch, and with the automatic check off, the row read "sessionpipe 0.8.4
+  is up to date". An install or a download that failed was titled "Couldn't check for
+  updates"; it now names the version, and the caption is the reason alone.
+- **"Check for Updates…" no longer opens General.** With the window open it showed the
+  first section of Settings while the check ran in another; with none it said nothing
+  until the download had ended, then asked in a dialog that pointed at a menu bar item
+  that may be switched off.
+- **The side panel draws a session's needs-you dot whole.** With a session open beside the
+  Board or the Inbox, the chat's tools line ("Asking to run Bash", "Ran 4 tools") hung its
+  dot, spinner or chevron into a gutter the panel doesn't have, and the panel's edge cut
+  the orange dot in half. In the panel the glyph now sits on the reply's edge, as it does
+  on a phone, and the first message starts 8 px under the tabs instead of touching them. A
+  session's own page is as it was.
+- **No box around a file's versions.** In the Files drawer, "‹ 2 of 5 ›" over an opened
+  file sat in the browser's own grooved rectangle, which read as a focus ring that never
+  left. It is gone, and the bar is only as tall as the Changes | Text switch beside it.
+- **A segmented control's labels stay inside their segments.** "Best match" ran out of its
+  pill on Search, and "Advanced" touched its edge in Settings › General. Every segment is
+  now as wide as the widest label, with the same room on both sides of it. A control that
+  spans its row (System | Light | Dark in Quick settings, the two ways on the phone page),
+  the Files drawer's switches on a phone and a view's own bar (Canvas's presets) are as
+  they were.
+- **⌘K's preview shows what a session is waiting on.** With nothing typed the cursor
+  starts on a session that needs you, and the preview beside the list showed what you had
+  asked it ("Asked"), not the command it wants to run. It now shows the request as the
+  Board's row does: the tool ("Bash", "Question", "Plan") and under it the command, the
+  path or the question, up to five lines. "Asked" is left out while a session needs you,
+  and an Allow or Deny row previews the prompt it answers.
+- **⌘K's bold letters are in the words a row shows.** Typing "webhook" left most sessions
+  with the word in their title with nothing bold: the match was marked on the branch,
+  which a row does not show. The word is bold in the title wherever the title holds it,
+  and a session found only by its branch or its model shows that after the repo
+  ("lab-mac · acme/billing · demo/webhook-backoff") with the match bold; a long branch
+  shows the end that matched ("…retry-backoff").
+- **In the Mac app the head of a session open beside a page drags the window,** as the
+  page's bar does.
+- **The Files drawer no longer lies over the sidebar in a window with a mouse under
+  1000 px wide,** nor over the Mac app's traffic lights: it starts where the sidebar ends.
+- **A session's menu shows no key that does something else, and no item that would only
+  be refused.** "New session here" showed C, which opens New session for the board's
+  machine, never for that session's machine and folder; "Ask another agent…" showed ⇧A on
+  rows and tabs, where the key does nothing or asks about another session. "New session
+  here" has no key beside it now, and "Ask another agent…" shows ⇧A only in a session's
+  own "⋯". On a machine that is not paired, or whose sessionpipe cannot ask, "Ask another
+  agent…" was greyed with its reason in a tooltip only; it is left out, as the button
+  under the composer is.
+- **The right-click that opens a menu no longer chooses from it.** Letting the button go
+  ran the item under the pointer, and the first one starts a few pixels from where the
+  menu opens. Only a press held and dragged onto an item chooses it now.
 - **The receiver rejects an event time on a day the month does not have, or at hour 24.**
   An event dated `2026-02-30`, `2026-11-31` or `T24:00:00Z` was accepted and filed under
   March 2, December 1 or the next day, though `schemas/v1/event.json` refuses it. It is now
   rejected as `bad_time`, as `T25:00:00Z` already was, and the outbox and spacesheep sources
   skip it as they skip any other invalid event; `2028-02-29` is still accepted.
+- **`tls status` agrees with the next `--tls` start in three more corners.** With the CA
+  near its end beside a file that needs a hand, status said to fix it by hand while the
+  start makes a new CA; with `server.key` or `server.crt` read-only and the server
+  certificate due to be remade, or a folder in place of `ca.crt` (or any of the four
+  files), it promised a new certificate that the start then fails to write or delete. It
+  now says a new CA in the first case and names the file to fix by hand in the others. The `tls status` line in
+  `--help` says what it prints for a broken set.
 
 ## [0.8.6] - 2026-11-19
 

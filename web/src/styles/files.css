@@ -55,8 +55,18 @@
     border-left: 0;
     z-index: var(--z-panel);
   }
+  /* In a window with a mouse (the desktop layout from 720 px) it covers the page and no
+     more: the rail stays beside it, and in the Mac app the traffic lights stay in the
+     rail, not over the drawer's title. A touch screen is left as it was. */
+  @media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+    @media (pointer: fine) {
+      .page.session.session--files > .files--page {
+        left: var(--rail);
+      }
+    }
+  }
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .files--page {
     bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
     padding-top: var(--safe-top, env(safe-area-inset-top));
@@ -130,7 +140,7 @@
 .files-done {
   display: none;
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .files-head {
     height: 44px;
     padding-left: 8px;
@@ -147,6 +157,12 @@
     color: var(--tint-fg, var(--fg));
     font-size: var(--text-md);
     font-weight: 600;
+  }
+  /* The drawer's switches have labels of unequal length ("Files · 14", "Problems · 12"):
+     here each option takes its own width rather than the widest's, which would push Done
+     off a 320 px screen at the largest text size. */
+  .files .seg {
+    grid-auto-columns: auto;
   }
 }
 .files-body {
@@ -214,8 +230,9 @@
   background: var(--press);
 }
 .files-row:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline: none;
+  background: var(--sel);
+  box-shadow: var(--cursor-edge);
 }
 .files-row.is-viewed .files-row-name,
 .files-row.is-viewed .files-row-fact {
@@ -289,11 +306,6 @@
 }
 .fv-bar .seg {
   flex: none;
-}
-/* The drawer's switches have labels of unequal length ("Changes", "Text"): each option
-   takes its own width rather than an equal share, which would clip the longer. */
-.files .seg-opt {
-  flex: 0 0 auto;
 }
 .fv-versions {
   display: inline-flex;

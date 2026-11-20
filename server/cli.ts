@@ -180,7 +180,9 @@ key (the board's key: what the phone link, the QR code and a browser's cookie ca
 tls (passkeys from a phone; README "Passkeys from a phone"):
 
   sessionpipe-gui tls status                 hostname, names in the certificate, expiry,
-                                             the CA fingerprint and the file paths
+                                             the CA fingerprint and the file paths; for a
+                                             broken set, the file at fault and what the
+                                             next --tls start does about it (exit 2)
   sessionpipe-gui tls trust                  macOS: add the CA to your login keychain
                                              (security add-trusted-cert; asks for your password)
   sessionpipe-gui tls reset                  delete the CA and the certificate; the next

@@ -31,8 +31,9 @@
     "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
 
   /* The scale, in rem so the text-size setting multiplies it: 12 for tab labels and
-     badges, 13 for meta and toolbars, 14 for everything a person reads, 15 for the page
-     title, 18 only for the phone's large title (×1.55) and the pairing digits. Three
+     badges, 13 for meta, toolbars and sidebar rows (a list item, regular weight; the fill
+     marks the selection), 14 for everything a person reads, 15 for the page title, 18
+     only for the phone's large title (×1.55) and the pairing digits. Three
      weights: 400 to read, 500 for a control's label, 600 for a title. Mono sets 0.925 of
      the text around it (base.css): Geist Mono shares Geist's x-height, and a step down
      keeps its wider letters from reading louder than the line they sit in. */
@@ -183,8 +184,8 @@
   --err: #cb234d;
   --err-soft: #e07a93;
   --err-bg: #fbf0f3;
-  /* The ring: the accent's 3:1 cut, so it reads on its own beside any control. */
-  --focus: #f24d06;
+  /* The keyboard ring: the ink. Never the orange, which says needs you. */
+  --focus: #141414;
   /* A search hit: a tint of the accent under ink. */
   --mark: #ffe1d7;
   --mark-fg: #141414;
@@ -200,10 +201,19 @@
   --raised: var(--bg-2);
   --hover: color-mix(in oklch, var(--fg) 5%, transparent);
   --sel: color-mix(in oklch, var(--fg) 9%, transparent);
+  /* A focused field: its edge steps up to the meta ink, with a soft ink halo. The keyboard
+     cursor on a list row: the same edge as a hairline inside the --sel fill (3:1 or better
+     on it), 2 px under Increase contrast; never a ring around the row. */
+  --focus-line: var(--fg-3);
+  --focus-halo: color-mix(in oklch, var(--fg) 10%, transparent);
+  --cursor-edge: inset 0 0 0 var(--hairline) var(--focus-line);
   --press: color-mix(in oklch, var(--fg) 13%, transparent);
-  --scrim: oklch(0.191 0 0 / 0.24);
-  /* A switch's track off and on (ink on a desktop; the phone's is the tint, shared.css), and
-     the knob of a switch or a slider: always light. */
+  /* Light: the page under a dialog stays readable (Settings' Appearance is judged on it);
+     the sheet's hairline and shadow set it apart. */
+  --scrim: oklch(0.191 0 0 / 0.14);
+  /* A switch's track off and on: ink on a light desktop; on a dark one the marks tier (--fg-4),
+     so the always-light knob still stands out; the phone's on is the tint (shared.css). The
+     knob of a switch or a slider: always light. */
   --switch-off: var(--line-2);
   --switch-on: var(--fg);
   --knob: oklch(0.99 0 0);
@@ -223,13 +233,15 @@
 }
 
 /* The phone: touch-sized controls and the narrower gutter. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   :root {
     --gutter: 16px;
     --bar: 44px;
     --control: 36px;
     --control-sm: 32px;
     --control-lg: 44px;
+    /* The phone's sheets keep their dim. */
+    --scrim: oklch(0.191 0 0 / 0.24);
   }
 }
 
@@ -266,13 +278,13 @@
     --err: #ef4c73;
     --err-soft: #a8405a;
     --err-bg: #23181b;
-    --focus: #ff5a1f;
+    --focus: #f5f5f3;
     --mark: #512617;
     --mark-fg: #f5f5f3;
 
     --raised: var(--bg-4);
     --switch-off: var(--bg-4);
-    --switch-on: var(--fg-2);
+    --switch-on: var(--fg-4);
     --grouped-ground: var(--bg);
     --scrim: oklch(0 0 0 / 0.5);
     --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);
@@ -316,13 +328,13 @@
   --err: #ef4c73;
   --err-soft: #a8405a;
   --err-bg: #23181b;
-  --focus: #ff5a1f;
+  --focus: #f5f5f3;
   --mark: #512617;
   --mark-fg: #f5f5f3;
 
   --raised: var(--bg-4);
   --switch-off: var(--bg-4);
-  --switch-on: var(--fg-2);
+  --switch-on: var(--fg-4);
   --grouped-ground: var(--bg);
   --scrim: oklch(0 0 0 / 0.5);
   --shadow-pop: 0 0 0 0.5px oklch(0 0 0 / 0.6), 0 2px 6px oklch(0 0 0 / 0.3), 0 16px 40px oklch(0 0 0 / 0.45);
@@ -332,14 +344,34 @@
   --brand-edge: oklch(1 0 0 / 0.2);
 }
 
-/* More contrast asked for: hairlines a step darker, the muted tiers a step up, so the
-   meta text and the dividers read on every background; a thicker ring. */
+/* Increase contrast: muted text a step up, dividers and control edges findable, a thicker
+   ring. !important so it holds over a skin's inline tokens; each value reads only --fg-2
+   and --bg. The mixes are set on the built-in skins: marks 4.5:1 on --bg-4, control edges
+   3:1 and dividers near 2.2:1 on --bg-2, so a divider stays quieter than an edge
+   (test/e2e/contrast.spec.ts). */
 @media (prefers-contrast: more) {
   :root {
-    --line: var(--fg-4);
-    --line-2: var(--fg-3);
-    --fg-3: var(--fg-2);
-    --fg-4: var(--fg-3);
+    /* biome-ignore-start lint/complexity/noImportantStyles: they must beat the tokens a skin writes inline on <html> */
+    --fg-3: var(--fg-2) !important;
+    --fg-4: color-mix(in oklab, var(--fg-2) 82%, var(--bg)) !important;
+    --line-2: color-mix(in oklab, var(--fg-2) 58%, var(--bg)) !important;
+    --line: color-mix(in oklab, var(--fg-2) 40%, var(--bg)) !important;
+    /* biome-ignore-end lint/complexity/noImportantStyles: the four above */
     --focus-width: 3px;
+    --cursor-edge: inset 0 0 0 2px var(--focus-line);
+  }
+}
+
+/* Increase contrast lifts the marks tier to a light grey, which the always-light knob would
+   sit on at 2.5:1: a dark switch that is on takes the control edges' tier instead (both dark
+   sets, which outrank :root). */
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --switch-on: var(--line-2);
+  }
+}
+@media (prefers-contrast: more) {
+  :root[data-theme="dark"] {
+    --switch-on: var(--line-2);
   }
 }

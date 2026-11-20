@@ -86,7 +86,7 @@ test.describe("the phone's first run", () => {
     await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
   });
 
-  test("the install card: three steps, the command, the site", async ({ page }) => {
+  test("the install card: three steps and the site, with no command to type", async ({ page }) => {
     await openInPhone(page, "/");
     const help = button(page, "No sessionpipe on your computer yet?");
     await expect(help).toHaveAttribute("aria-expanded", "false");
@@ -98,10 +98,14 @@ test.describe("the phone's first run", () => {
     await expect(card.getByText("Open sessionpipe there and choose Connect")).toBeVisible();
     await expect(card.getByText("Connect shows a code made for this phone.")).toBeVisible();
     await expect(card.getByText("Scan it with this phone")).toBeVisible();
-    const cmd = card.locator(".cmdwell-text");
-    await expect(cmd).toHaveText("npx -y sessionpipe-gui service install");
-    // The command wraps instead of scrolling, and there is nothing to copy with.
-    expect(await cmd.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    // Step 1 is the download, one sentence: the command it also gave named a package npm
+    // doesn't have.
+    await expect(card.locator("li").first().locator(".form-caption")).toHaveText(
+      "Download it from sessionpipe.org/gui.",
+    );
+    await expect(card).not.toContainText("npx");
+    await expect(card).not.toContainText("terminal");
+    await expect(card.locator(".cmdwell")).toHaveCount(0);
     await expect(card.getByRole("button")).toHaveCount(0);
     await card.getByRole("link", { name: "sessionpipe.org/gui" }).click();
     expect(await shellCallArgs(page, "app_open_external")).toEqual([{ url: "https://sessionpipe.org/gui" }]);

@@ -70,13 +70,17 @@ import {
 } from "../lib/format";
 
 import { Link } from "../lib/router";
+import { useLens } from "../lib/settings";
 import { askedCommand, shellLines } from "../lib/shellCommand";
 import { hintFor } from "../lib/shortcuts";
+import { keepTab } from "../lib/split";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { ActionButton, Spinner, StateDot, WithName } from "./bits";
 import "../control/control.css";
 
 // The plan reads as Markdown, whose renderer stays out of the first paint (PlanText.tsx).
+// The phone's only: on a computer the plan is read in the conversation (SessionBody's
+// PlanPanel).
 const PlanText = lazy(() => import("./PlanText").then((m) => ({ default: m.PlanText })));
 
 /** `composer`: what it signs was typed in the composer (a message, Keep planning's note),
@@ -136,15 +140,19 @@ export interface ControlStripProps {
   /** On an account, history is still being read: with no `control`, the machine is not known
    *  yet, not unpaired, and nothing says to pair it (the page bar says "Catching up…"). */
   catching?: boolean;
-  /** The app's stream to the receiver is down ("reconnecting" or "offline"): the strip
-   *  waits for it, with Retry now. */
-  stream?: { state: "reconnecting" | "offline"; retry: () => void };
+  /** The app's stream to the receiver is down (after the grace: data/hooks.ts
+   *  useStreamDown): nothing can be sent or answered until it is back. The page bar says
+   *  which state it is and holds Retry; the strip says only what follows from it here,
+   *  once: on an open prompt's card, else under the field. */
+  stream?: boolean;
   /** The next send asks for the passkey (no day grant yet): the line offers Unlock now. A
    *  browser's only: the app's first send brings up its own prompt, which says what it is. */
   unlock?: () => void;
   /** Opens the Ask another agent sheet (orchestrate/handoff), at the right end of the line
    *  under the field; absent, no button (hidden, never disabled: the line's own reason
-   *  already says why sending is off). */
+   *  already says why sending is off). Not offered while `stream`: it would only be
+   *  refused. In a mouse window the line then keeps the button's height, so the field
+   *  holds still across the drop. */
   ask?: () => void;
   /** Per attention id: "sent" while an answer is out (no second one goes; the card says
    *  which, in place of the pair), "closed" once the machine said the prompt is no longer
@@ -291,13 +299,17 @@ const CMD_LINES = 4;
  *  its message after it. A long chained command reads one step per line, four steps until
  *  "Show more"; the whole command comes from the call's own input when the session sent it
  *  (lib/askedInput.ts), else from the message, cut at 200 characters. A plan review asks
- *  about the plan, from the same input, and shows it under the question. A question from
+ *  about the plan, from the same input: on a phone it shows the plan under the question,
+ *  on a computer the conversation does (SessionBody's PlanPanel, at a lens of 3) and the
+ *  card is the question alone. A question from
  *  the agent is its own words, with the labels of its options under it to read (they are
  *  answered on its computer), or one sentence where its input was not sent. Its glyph is
  *  the orange one while it asks; with an answer out, the working ring, or a still hollow
  *  one while the computer is offline (`out`). */
 function Question({ a, session, out }: { a: Attention; session: SessionSummary; out?: "going" | "held" }) {
   const { input } = useAskedInput(session, a);
+  const phone = usePhoneLayout();
+  const lens = useLens() ?? 3;
   // The prompt whose steps are all shown: another prompt starts folded.
   const [unfolded, setUnfolded] = useState<string | null>(null);
   const blockId = useId();
@@ -313,9 +325,12 @@ function Question({ a, session, out }: { a: Attention; session: SessionSummary; 
   );
   if (isPlanReview(a)) {
     // Below tier 3 there is no plan: the prompt's own message, when it says more than the
-    // tool's name.
-    const plan = typeof input?.plan === "string" && input.plan.trim() ? input.plan : null;
+    // tool's name. On a computer the plan is the conversation's, shown there at a lens of
+    // 3 (SessionBody's PlanPanel); under it, it is nowhere, and the message stands for it.
+    const asked = typeof input?.plan === "string" && input.plan.trim() ? input.plan : null;
+    const plan = phone || lens >= 3 ? asked : null;
     const said = plan ? undefined : attentionMessage(a);
+    if (!phone && plan) return line(<>Ready to start on this plan?</>);
     return (
       <>
         {line(<>Ready to start on this plan?</>)}
@@ -492,6 +507,8 @@ export function ControlStrip({
   const enabled = paired && !!onSend && !blocked && !stream && approval === "ok";
   // Not approved: the way to approve it stands where Allow and Deny would.
   const approve = paired && !blocked && approval === "unapproved";
+  // Ask another agent… while the stream is down would only be refused: not offered.
+  const offer = stream ? undefined : ask;
   // Images beside the message (control/Attachments.tsx): paperclip, paste, drop, the phone's
   // picker. How they go is the machine's: as the command's files where its sessionpipe takes
   // them, as paths for an older one on this machine, and not at all anywhere else. There a
@@ -507,6 +524,8 @@ export function ControlStrip({
     enabled,
     mode,
     onRefused: () => setRefusedAt(refusedKey),
+    // A picture in the tray keeps a preview tab beside the page, as typing does (lib/split.ts).
+    onAdded: () => keepTab(session.key),
     initial: () => readPictures(session.key),
     land: (p) => landPicture(session.key, p),
   });
@@ -716,19 +735,8 @@ export function ControlStrip({
     if (!onSend) return null;
     if (review && tooLong) return { kind: "too-long", text: "Keep it under 2,000 characters", tone: "err" };
     if (noted) return { kind: "plan-note", text: NOTED };
-    if (stream)
-      return {
-        kind: "stream",
-        text:
-          stream.state === "offline"
-            ? "Offline. Sending waits for the connection."
-            : "Reconnecting. Sending waits for the connection.",
-        action: (
-          <button type="button" className="ctl-link" onClick={stream.retry}>
-            Retry now
-          </button>
-        ),
-      };
+    // The stream is down: beside a prompt to answer its card says so, and this line does not.
+    if (stream) return asks ? null : { kind: "stream", text: NEW_WORDS.streamSend };
     if (control && !control.online)
       return {
         kind: "offline",
@@ -800,7 +808,7 @@ export function ControlStrip({
   ) : approve ? (
     `${NEW_WORDS.answerNotYet(ThisPhone())}.`
   ) : stream ? (
-    "waiting for the connection"
+    NEW_WORDS.streamAnswer
   ) : notAdded ? (
     withWay(
       notAdded,
@@ -1053,7 +1061,11 @@ export function ControlStrip({
             <textarea
               ref={field}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                // Typed in, a preview tab beside the page is kept (lib/split.ts); an answer is not.
+                keepTab(session.key);
+              }}
               onKeyDown={onKey}
               placeholder={named}
               disabled={!enabled}
@@ -1089,8 +1101,8 @@ export function ControlStrip({
           </div>
         </div>
       )}
-      {(reason || ask) && !folded && (
-        <p className="ctl-foot" data-reason={reason?.kind}>
+      {(reason || offer) && !folded && (
+        <p className="ctl-foot" data-reason={reason?.kind} data-ask-held={ask && stream && !phone ? "" : undefined}>
           {reason && (
             <span
               id={reasonId}
@@ -1103,8 +1115,8 @@ export function ControlStrip({
             </span>
           )}
           {reason?.action}
-          {ask && (
-            <button type="button" className="btn btn--ghost btn--sm ctl-ask-agent" onClick={ask} data-ctl-ask>
+          {offer && (
+            <button type="button" className="btn btn--ghost btn--sm ctl-ask-agent" onClick={offer} data-ctl-ask>
               Ask another agent…
             </button>
           )}
