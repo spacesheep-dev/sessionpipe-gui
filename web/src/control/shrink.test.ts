@@ -298,4 +298,23 @@ describe("shrinkImage", () => {
     await Promise.all([1, 2, 3].map((i) => shrinkImage(file(5_000_000, "image/jpeg", `${i}.jpg`))));
     expect(most).toBe(1);
   });
+
+  it("starts the next decode only once a redraw past the limit has ended", async () => {
+    stub({ decode: { width: 4000, height: 3000 }, write: (t) => ({ type: t, size: 1_000_000 }) });
+    const log: string[] = [];
+    let n = 0;
+    vi.stubGlobal("createImageBitmap", async () => {
+      const i = ++n;
+      log.push(`decode ${i}`);
+      // The first goes on past the limit; the caller hears "as it is" at the limit.
+      await new Promise((r) => setTimeout(r, i === 1 ? 32 : 1));
+      log.push(`decoded ${i}`);
+      return { width: 4000, height: 3000, close() {} };
+    });
+    const first = shrinkImage(file(5_000_000, "image/png", "slow.png"), { limitMs: 20 });
+    const second = shrinkImage(file(5_000_000, "image/jpeg", "next.jpg"), { limitMs: 200 });
+    expect(await first).toBeNull();
+    expect(await second).toMatchObject({ width: 2560 });
+    expect(log).toEqual(["decode 1", "decoded 1", "decode 2", "decoded 2"]);
+  });
 });

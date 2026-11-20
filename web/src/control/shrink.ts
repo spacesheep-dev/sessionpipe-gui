@@ -253,7 +253,12 @@ async function draw(file: Blob, type: string, jpeg: boolean, must: boolean): Pro
   }
 }
 
-async function shrinkNow(file: Blob, o: { name?: string; jpeg?: boolean; limitMs?: number }): Promise<Shrunk | null> {
+/** `drawing`: hears the redraw itself as it begins, which can go on past the limit. */
+async function shrinkNow(
+  file: Blob,
+  o: { name?: string; jpeg?: boolean; limitMs?: number },
+  drawing: (d: Promise<unknown>) => void,
+): Promise<Shrunk | null> {
   const name = o.name ?? (file as Partial<File>).name ?? "";
   const type = pictureType(file.type, name);
   if (!type) return null;
@@ -266,7 +271,9 @@ async function shrinkNow(file: Blob, o: { name?: string; jpeg?: boolean; limitMs
   const late = new Promise<"failed">((resolve) => {
     timer = setTimeout(() => resolve("failed"), o.limitMs ?? SHRINK_LIMIT_MS);
   });
-  const out = await Promise.race([draw(file, type, jpeg, must), late]);
+  const drawn = draw(file, type, jpeg, must);
+  drawing(drawn);
+  const out = await Promise.race([drawn, late]);
   clearTimeout(timer);
   if (out !== "failed") return out;
   // Nothing an agent reads: the HEIC can't go. Any other picture goes as it is, if it fits.
@@ -278,12 +285,26 @@ let queue: Promise<unknown> = Promise.resolve();
 
 /** The picture redrawn smaller (or without its location, or as JPEG for a HEIC), or null
  *  to send the original. Throws ShrinkRefused for a HEIC this engine can't draw. One at a
- *  time on the page, since a 48 MP photo decoded takes a phone's memory. */
+ *  time on the page, since a 48 MP photo decoded takes a phone's memory: the limit decides
+ *  only what the caller gets, and the next picture waits for the last one's redraw itself
+ *  to end (at most a second limit more, so a decode that never ends holds up no other). */
 export function shrinkImage(
   file: Blob,
   o: { name?: string; jpeg?: boolean; limitMs?: number } = {},
 ): Promise<Shrunk | null> {
-  const run = queue.then(() => shrinkNow(file, o));
-  queue = run.catch(() => undefined);
+  let drawn: Promise<unknown> = Promise.resolve();
+  const run = queue.then(() =>
+    shrinkNow(file, o, (d) => {
+      drawn = d;
+    }),
+  );
+  const settled = () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise((resolve) => {
+      timer = setTimeout(resolve, o.limitMs ?? SHRINK_LIMIT_MS);
+    });
+    return Promise.race([drawn.catch(() => undefined), late]).finally(() => clearTimeout(timer));
+  };
+  queue = run.then(settled, settled);
   return run;
 }
