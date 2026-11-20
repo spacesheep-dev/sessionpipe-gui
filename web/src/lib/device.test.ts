@@ -343,8 +343,36 @@ describe("panelCovers", () => {
 });
 
 describe("the Select's sheet", () => {
-  it("has its own width, narrower than the phone layout's, unchanged", () => {
+  it("has its own width for a window with a mouse, narrower than the phone layout's, unchanged", () => {
     expect(SELECT_SHEET_QUERY).toBe("(max-width: 599px)");
+  });
+
+  it("is a touch screen's when the window is compact, and a pop-up where it has room: the size class's, not the width's", async () => {
+    const { selectSheet } = await fresh();
+    const media = fakeMedia({ [TOUCH_QUERY]: true, [PHONE_QUERY]: true });
+    const at = (list: string) =>
+      list.split(" ").map((s) => {
+        const [w, h] = s.split("x").map(Number) as [number, number];
+        Object.assign(g, { innerWidth: w, innerHeight: h });
+        media.set(SELECT_SHEET_QUERY, w <= 599);
+        return `${s}:${selectSheet()}`;
+      });
+    try {
+      // The outer display, Split View, iPhones, a phone on its side that is short: a sheet.
+      expect(at("466x678 470x669 393x852 320x568 678x466 915x412")).toEqual(
+        "466x678 470x669 393x852 320x568 678x466 915x412".split(" ").map((s) => `${s}:true`),
+      );
+      // The inner display, either way up, and tablets: a pop-up.
+      expect(at("669x951 951x669 820x1180 1180x820")).toEqual(
+        "669x951 951x669 820x1180 1180x820".split(" ").map((s) => `${s}:false`),
+      );
+      // A window with a mouse: a sheet under 600 px wide, whatever its height.
+      media.turn(TOUCH_QUERY, false);
+      expect(at("599x900 600x400 700x800")).toEqual(["599x900:true", "600x400:false", "700x800:false"]);
+    } finally {
+      delete g.innerWidth;
+      delete g.innerHeight;
+    }
   });
 });
 

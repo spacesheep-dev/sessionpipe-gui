@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The one custom select (house rule: no native <select> anywhere in the GUI). A
 // pop-up button (the toolbar's control height) and a listbox in a portal under document.body,
-// anchored below the trigger and flipped above when the room runs out; on a phone the
-// same list is a bottom sheet. The APG select-only combobox pattern: focus stays on the
+// anchored below the trigger and flipped above when the room runs out; on a phone without
+// room to spare, folded or upright, the same list is a bottom sheet (lib/device.ts
+// selectSheet), and on one with room a pop-up as on a tablet. The APG select-only combobox pattern: focus stays on the
 // trigger (role combobox), the list is role listbox, the row under the cursor is named by
 // aria-activedescendant. Space / Enter / arrows open; arrows, Home, End and typing move;
 // Enter picks; Esc closes and gives focus back; Tab closes. `MultiSelect` is the same

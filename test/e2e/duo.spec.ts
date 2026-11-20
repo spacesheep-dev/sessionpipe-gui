@@ -425,11 +425,12 @@ test("the inner display turned: the message field rides on the keyboard, as on t
   }
 });
 
-test("Ask another agent covers the whole window on the inner display turned and on a tablet on its side: no session shows beside it", async ({
+test("Ask another agent dims the whole window on the inner display turned and on a tablet on its side: no session takes a tap beside it", async ({
   browser,
 }) => {
-  // Wider than the docked strip's measure (760 px): the sheet is the phone's all the same,
-  // from one edge of the window to the other, and not held to the strip it is opened from.
+  // Wider than the docked strip's measure (760 px): the sheet is not held to the strip it
+  // is opened from. With room it is a form sheet over a dim from one edge of the window to
+  // the other.
   for (const size of ["951x669", "1180x820"]) {
     const b = await duoBed(browser, size);
     const { page } = b;
@@ -443,11 +444,11 @@ test("Ask another agent covers the whole window on the inner display turned and 
       await page.getByRole("button", { name: "Ask another agent…" }).click();
       const sheet = page.locator("[data-handoff]");
       await expect(sheet.locator("[data-hs-text]")).toBeVisible();
-      const box = await sheet.evaluate((el) => {
+      const dim = await page.locator(".ns-scrim--form").evaluate((el) => {
         const r = el.getBoundingClientRect();
         return [r.left, r.right];
       });
-      expect(box, size).toEqual([0, width]);
+      expect(dim, size).toEqual([0, width]);
     } finally {
       await b.close();
     }
@@ -530,7 +531,10 @@ for (const [size, insets] of REGULAR) {
       expect(sides.glyph, where).toBeGreaterThanOrEqual(left + 8);
       expect(sides.mark, where).toBe(sides.glyph);
       expect(sides.rail, where).toBe(220 + left);
-      expect(sides.title, where).toBe(sides.rail + 16);
+      // The page's column (styles/regular.css): 672 pt at most, in the middle of what is
+      // beside the sidebar.
+      const room = Number(size.split("x")[0]) - sides.rail - 16 - (16 + right);
+      expect(sides.title, where).toBe(sides.rail + 16 + Math.max(0, (room - 672) / 2));
       if (top || right || left) expect(await underBands(page), where).toEqual([]);
       // New session opens from the head, Display from the foot, Settings beside it.
       await compose.click();
@@ -632,6 +636,201 @@ test("with room, the palette's Display settings opens Display from the sidebar: 
     await expect(more).toHaveAttribute("aria-expanded", "false");
     await expect(sheet).toHaveCount(0);
     await expect(display).toHaveCount(0);
+  } finally {
+    await b.close();
+  }
+});
+
+/** Once every animation that ends has ended: a sheet on its way up is not yet where it stays. */
+const settled = (page: Page) =>
+  page.evaluate(async () => {
+    const moving = document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity);
+    await Promise.allSettled(moving.map((a) => a.finished));
+  });
+/** A box as the page has it: its left, right, top and bottom, and its width. */
+const boxOf = (l: Locator) =>
+  l.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width };
+  });
+/** Whether any of these is drawn: a grabber hidden by its stylesheet is in the page still. */
+const grabbers = (page: Page) =>
+  page
+    .locator(".ns-grab, .menu-grab, .qs-grab")
+    .evaluateAll((els) => els.filter((el) => el.getClientRects().length > 0).length);
+
+const ROOM: [size: string, insets: Insets][] = [...REGULAR, ["820x1180", [24, 0, 20, 0]]];
+for (const [size, insets] of ROOM) {
+  const where = `${size} [${insets}]`;
+  test(`with room, at ${where}, New session and Ask another agent are a centred form sheet, a row's menu and Display float as cards, and a Select is a pop-up`, {
+    tag: "@webkit",
+  }, async ({ browser }) => {
+    test.setTimeout(90_000);
+    const b = await duoBed(browser, size, { insets });
+    const { page } = b;
+    const [width, height] = size.split("x").map(Number) as [number, number];
+    const [top, right, bottom, left] = insets;
+    /** The middle of what the system leaves of the width. */
+    const middle = (left + width - right) / 2;
+    const formSheet = async (sheet: Locator, what: string) => {
+      await settled(page);
+      const box = await boxOf(sheet);
+      expect(box.width, what).toBeLessThanOrEqual(540);
+      expect(Math.abs((box.left + box.right) / 2 - middle), what).toBeLessThanOrEqual(1);
+      expect(box.top, what).toBeGreaterThanOrEqual(top + 40);
+      // Over a dim from one side of the window to the other, which takes a tap off the page.
+      const dim = await boxOf(page.locator(".ns-scrim--form"));
+      expect([dim.left, dim.right, dim.top, dim.bottom], what).toEqual([0, width, 0, height]);
+      expect(await grabbers(page), what).toBe(0);
+      if (top || right || left) expect(await underBands(page), what).toEqual([]);
+    };
+    const card = async (el: Locator, what: string) => {
+      await settled(page);
+      const box = await boxOf(el);
+      expect(box.width, what).toBeLessThanOrEqual(400);
+      expect(Math.abs((box.left + box.right) / 2 - middle), what).toBeLessThanOrEqual(1);
+      expect(box.bottom, what).toBeLessThanOrEqual(height - bottom - 16);
+      expect(await grabbers(page), what).toBe(0);
+      if (top || right || left) expect(await underBands(page), what).toEqual([]);
+    };
+    try {
+      Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+      await page.goto(b.server.url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
+      await b.approve();
+      await page.reload();
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
+      await expect(page.locator("html"), where).toHaveAttribute("data-size-class", "regular");
+
+      // New session: its machine's list is a pop-up under its button, over the sheet.
+      await page.locator("nav.rail .rail-compose").click();
+      const ns = page.locator("[data-new-session]");
+      await expect(ns.locator("[data-ns-text]")).toBeVisible();
+      await formSheet(ns, `New session, ${where}`);
+      await ns.locator("[data-ns-row=machine] button").click();
+      await expect(page.getByRole("listbox")).toBeVisible();
+      await expect(page.locator(".sel-pop"), where).toBeVisible();
+      await expect(page.locator(".sel-sheet, .sel-scrim"), where).toHaveCount(0);
+      // Its own machine, picked again, closes it (a tap: WebKit gives a tapped button no
+      // focus, so a key would go to the sheet).
+      await page
+        .getByRole("listbox")
+        .getByRole("option", { name: /studio-mac/ })
+        .click();
+      await expect(page.getByRole("listbox")).toHaveCount(0);
+      await expect(ns).toBeVisible();
+      await ns.getByRole("button", { name: "Cancel" }).click();
+      await expect(ns).toHaveCount(0);
+
+      // Display, from the sidebar's foot.
+      await page.locator("nav.rail").getByRole("button", { name: "Display" }).click();
+      const display = page.getByRole("dialog", { name: "Quick settings" });
+      await expect(display).toBeVisible();
+      await card(display, `Display, ${where}`);
+      await page.keyboard.press("Escape");
+      await expect(display).toHaveCount(0);
+
+      // A row held down: its menu is a card. (Last on the board: the finger's lift that
+      // the menu swallows never comes from a test.)
+      await page
+        .locator("article.card .card-title")
+        .first()
+        .evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          el.dispatchEvent(
+            new PointerEvent("pointerdown", {
+              bubbles: true,
+              pointerType: "touch",
+              clientX: r.left + 4,
+              clientY: r.top + 4,
+            }),
+          );
+        });
+      await expect(page.getByRole("menuitem", { name: "Preview", exact: true })).toBeVisible();
+      await card(page.locator(".menu-sheet"), `a row's menu, ${where}`);
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".menu-sheet")).toHaveCount(0);
+
+      // Ask another agent, from a session.
+      await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+      await page.getByRole("button", { name: "Ask another agent…" }).click();
+      const hs = page.locator("[data-handoff]");
+      await expect(hs.locator("[data-hs-text]")).toBeVisible();
+      await formSheet(hs, `Ask another agent, ${where}`);
+      // With the keys up, it ends above them.
+      await hs.locator("[data-hs-text]").click();
+      await fakeKeyboard(page, 300);
+      await expect.poll(async () => (await boxOf(hs)).bottom, where).toBeLessThanOrEqual(height - 300);
+      await fakeKeyboard(page, 0);
+      // A tap on the dim puts it away.
+      await page.mouse.click(left + 8, height - bottom - 8);
+      await expect(hs).toHaveCount(0);
+    } finally {
+      await b.close();
+    }
+
+    // "You're in": a card of at most 440 pt in the middle of the window.
+    const fresh = await duoBed(browser, size, { fresh: true, insets });
+    try {
+      fresh.hub.add("me@example.com", fresh.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+      await fresh.page.goto(fresh.server.url);
+      const sheet = fresh.page.locator("[data-first-run='phone']");
+      await expect(sheet.getByRole("button", { name: "Approve this iPhone" })).toBeVisible();
+      await expect
+        .poll(async () => {
+          const box = await boxOf(sheet);
+          return box.width <= 440 && Math.abs((box.left + box.right) / 2 - width / 2) <= 1;
+        }, `You're in, ${where}`)
+        .toBe(true);
+      expect(await grabbers(fresh.page), where).toBe(0);
+    } finally {
+      await fresh.close();
+    }
+  });
+}
+
+test("on a tablet on its side each page reads down one column: its title starts where its first row does, in the middle of what is beside the sidebar", async ({
+  browser,
+}) => {
+  const b = await duoBed(browser, "1180x820", { insets: [24, 0, 20, 0] });
+  const { page } = b;
+  /** The column beside the sidebar: 1180 less the sidebar's 220 and a 16 pt gutter a side,
+   *  then 672 in the middle of that. */
+  const column = 220 + 16 + (1180 - 220 - 32 - 672) / 2;
+  /** Where a box's content starts: inside its padding. */
+  const startOf = (l: Locator) =>
+    l.first().evaluate((el) => el.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(el).paddingLeft));
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
+    await b.approve();
+    for (const [path, row] of [
+      ["/", ".group-head"],
+      ["/search?q=release", ".sx-row"],
+      ["/machines", ".form-group"],
+    ] as const) {
+      await page.goto(`${b.server.url}${path}`);
+      await expect(page.locator(row).first(), path).toBeVisible();
+      const title = await startOf(page.locator(".bar-large"));
+      expect(Math.abs(title - (await startOf(page.locator(row)))), path).toBeLessThanOrEqual(1);
+      expect(Math.abs(title - column), path).toBeLessThanOrEqual(1);
+      // The bar's ground runs on from the sidebar to the window's edge.
+      const bar = await boxOf(page.locator(".main > .page > .bar"));
+      expect([bar.left, bar.right], path).toEqual([220, 1180]);
+    }
+    // Settings covers the window: its title and its list, and a section's groups, keep to
+    // a column of the same width in the middle of it.
+    await page.locator("nav.rail").getByRole("link", { name: "Settings" }).click();
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await expect(settings).toBeVisible();
+    const middle = 16 + (1180 - 32 - 672) / 2;
+    const title = await startOf(settings.locator(".settings-nav-large"));
+    expect(Math.abs(title - (await startOf(settings.locator(".settings-tabs")))), "Settings").toBeLessThanOrEqual(1);
+    expect(Math.abs(title - middle), "Settings").toBeLessThanOrEqual(1);
+    await settings.getByRole("tab", { name: "General" }).click();
+    const group = settings.locator(".settings-pane .settings-group").first();
+    await expect(group).toBeVisible();
+    expect(Math.abs((await startOf(group)) - middle), "Settings › General").toBeLessThanOrEqual(1);
   } finally {
     await b.close();
   }

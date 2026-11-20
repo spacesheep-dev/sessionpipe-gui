@@ -38,7 +38,7 @@ import {
   useState,
 } from "react";
 import { useSendStates } from "../account/sendable";
-import { ActionButton, EmptyState, HarnessGlyph } from "../components/bits";
+import { ActionButton, EmptyState, HarnessGlyph, withFormScrim } from "../components/bits";
 import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
 import { useAppState, useLimits, useListedSessions, useMachines } from "../data/hooks";
@@ -1186,7 +1186,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const form = !noMachine && !unapproved;
 
   if (phone)
-    return (
+    return withFormScrim(
+      close,
+      closing,
       <div
         className="ns-sheet ns-sheet--phone"
         role="dialog"
@@ -1251,7 +1253,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
             </>
           )}
         </div>
-      </div>
+      </div>,
     );
 
   return (

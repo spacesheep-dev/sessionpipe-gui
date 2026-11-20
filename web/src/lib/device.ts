@@ -179,14 +179,6 @@ const onCovers = subscribeTo(PANEL_COVERS_QUERY);
 /** `panelCovers`, live: re-renders when the window crosses either end of that width. */
 export const usePanelCovers = (): boolean => useSyncExternalStore(onCovers, panelCovers, () => false);
 
-/** Where a Select's list is a bottom sheet (components/Select.tsx), not a pop-up under its button. */
-export const SELECT_SHEET_QUERY = "(max-width: 599px)";
-const selectSheet = stateOf(SELECT_SHEET_QUERY);
-const onSelectSheet = subscribeTo(SELECT_SHEET_QUERY);
-
-/** Whether a Select opens as a sheet, live. */
-export const useSelectSheet = (): boolean => useSyncExternalStore(onSelectSheet, selectSheet, () => false);
-
 /** Whether the keys are a touch screen's right now: its Return is a new line, as in
  *  Messages, and the send button sends (or ⌘/Ctrl+Return from a keyboard). */
 export const touchKeys = stateOf(TOUCH_QUERY);
@@ -294,6 +286,31 @@ export const useSizeClass = (): SizeClass | null => useSyncExternalStore(onSizeC
 const regularNow = (): boolean => sizeClass() === "regular";
 /** Whether the touch app has room for its sidebar (the regular size class), live. */
 export const useRegular = (): boolean => useSyncExternalStore(onSizeClass, regularNow, () => false);
+
+/** Where a window with a mouse has a Select's list as a bottom sheet (components/Select.tsx),
+ *  not a pop-up under its button. */
+export const SELECT_SHEET_QUERY = "(max-width: 599px)";
+const narrowSelect = stateOf(SELECT_SHEET_QUERY);
+const onNarrowSelect = subscribeTo(SELECT_SHEET_QUERY);
+
+/** Whether a Select's list is a bottom sheet: on a touch screen when the window is compact
+ *  (with room it is a pop-up under its button, as an iPad's is, in the sheet it is in too);
+ *  in a window with a mouse under 600 px. */
+export const selectSheet = (): boolean => {
+  const size = sizeClass();
+  return size ? size === "compact" : narrowSelect();
+};
+const onSelectSheet = (l: () => void): (() => void) => {
+  const offSize = onSizeClass(l);
+  const offWidth = onNarrowSelect(l);
+  return () => {
+    offSize();
+    offWidth();
+  };
+};
+
+/** `selectSheet`, live. */
+export const useSelectSheet = (): boolean => useSyncExternalStore(onSelectSheet, selectSheet, () => false);
 
 /** What the system keeps at the window's two sides, in px: a notch, the rounded corners,
  *  the band its own bars stand in beside a folding phone's page. As the stylesheets have

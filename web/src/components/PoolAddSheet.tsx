@@ -40,7 +40,7 @@ import {
   turningOn,
 } from "../lib/pool";
 import { useShortcut } from "../lib/shortcuts";
-import { ActionButton, CommandWell } from "./bits";
+import { ActionButton, CommandWell, withFormScrim } from "./bits";
 import "../control/newSessionSheet.css";
 
 export function PoolAddHost() {
@@ -255,7 +255,9 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
   ) : null;
 
   if (phone)
-    return createPortal(
+    return withFormScrim(
+      close,
+      closing,
       <div
         className="ns-sheet ns-sheet--phone pa-sheet"
         role="dialog"

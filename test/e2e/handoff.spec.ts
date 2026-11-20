@@ -239,16 +239,18 @@ test("the sheet dims the whole window, as New session's does: a click on the sid
 test.describe("on a touch screen", () => {
   test.use({ hasTouch: true });
 
-  test("a phone's sheet covers the tab bar, and a tablet's fills the width over its sidebar", async ({ page }) => {
+  test("a phone's sheet covers the tab bar, and a tablet's is a form sheet over a dim that covers its sidebar", async ({
+    page,
+  }) => {
     const name = `ho-full-${tag()}`;
     const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
     daemons.push(m);
     const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Totals ${name}` });
     await postTurn(sink, { ...s, machine: name }, "The totals are summed once.");
 
-    for (const [size, pages] of [
-      [{ width: 390, height: 844 }, "nav.tabbar"],
-      [{ width: 834, height: 1194 }, "nav.rail"],
+    for (const [size, pages, beside] of [
+      [{ width: 390, height: 844 }, "nav.tabbar", "sheet"],
+      [{ width: 834, height: 1194 }, "nav.rail", "scrim"],
     ] as const) {
       await page.setViewportSize(size);
       await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
@@ -258,12 +260,25 @@ test.describe("on a touch screen", () => {
       await page.locator("[data-ctl-ask]").click();
       await expect(sheet(page)).toBeVisible();
       expect(await sheet(page).evaluate((el) => el.closest(".sess-ctl") === null)).toBe(true);
-      // The whole screen is the sheet's, edge to edge: nothing of the page beside it (the
-      // bar's ⋯, the composer), and the tab bar or the sidebar under it.
-      await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(0);
-      expect(await sheet(page).boundingBox()).toEqual({ x: 0, y: 0, ...size });
+      // Nothing of the page takes a tap beside it (the bar's ⋯, the composer), nor the tab
+      // bar or the sidebar under it: on a phone the sheet is the whole screen, edge to edge;
+      // on a tablet a sheet of at most 540 in the middle, over a dim that puts it away.
+      await page.evaluate(() =>
+        Promise.allSettled(
+          document
+            .getAnimations()
+            .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
+            .map((a) => a.finished),
+        ),
+      );
+      const box = (await sheet(page).boundingBox())!;
+      if (beside === "sheet") expect(box).toEqual({ x: 0, y: 0, ...size });
+      else {
+        expect(box.width).toBeLessThanOrEqual(540);
+        expect(Math.abs(box.x + box.width / 2 - size.width / 2)).toBeLessThanOrEqual(1);
+      }
       for (const at of [tabbar, { x: size.width - 4, y: 24 }, { x: size.width - 4, y: size.height - 120 }])
-        expect(await under(page, at), `${at.x},${at.y} at ${size.width}`).toBe("sheet");
+        expect(await under(page, at), `${at.x},${at.y} at ${size.width}`).toBe(beside);
       await sheet(page).locator("[data-hs-cancel]").click();
       await expect(sheet(page)).toHaveCount(0);
     }

@@ -400,7 +400,24 @@ test.describe("no pose swaps the app: through an unfold, a turn and Split View",
         expect(await typing(page, NODES.field), at).toEqual({ focused: true, caret: [6, 6], text: draft });
         // The phone's sheet at every one of them: Start in its bar, a word with no key beside it.
         await expect(page.locator("[data-ns-start]"), at).toHaveText("Start");
+        // Its form is the stylesheet's alone: the whole window folded or in Split View, a
+        // form sheet of at most 540 pt where the window has room. It is moved, not opened
+        // again: its entrance does not play once more.
+        expect(
+          await page
+            .locator(NODES.sheet)
+            .evaluate((el) => el.getAnimations().filter((a) => a.playState === "running").length),
+          at,
+        ).toBe(0);
+        const sheetWidth = await page.locator(NODES.sheet).evaluate((el) => el.getBoundingClientRect().width);
+        if (width >= 600 && height >= 560) expect(sheetWidth, at).toBeLessThanOrEqual(540);
+        else expect(sheetWidth, at).toBe(width);
       }
+      // And folded again: the outer display's, as it was.
+      await pose(page, 466, 678);
+      expect(await same(page, NODES)).toEqual({ sheet: true, field: true });
+      expect(await typing(page, NODES.field)).toEqual({ focused: true, caret: [6, 6], text: draft });
+      expect(await page.locator(NODES.sheet).evaluate((el) => el.getBoundingClientRect().width)).toBe(466);
     } finally {
       await b.close();
     }
@@ -424,6 +441,9 @@ test.describe("no pose swaps the app: through an unfold, a turn and Split View",
         expect(await same(page, NODES), at).toEqual({ sheet: true, picker: true });
         await expect(list, at).toHaveCount(1);
         await expect(list.getByRole("option", { name: "studio-mac" }), at).toBeVisible();
+        // On the screen, under its button where it is a pop-up: placed where the button is
+        // in the sheet's new form, not where it was.
+        await expect(list.getByRole("option", { name: "studio-mac" }), at).toBeInViewport({ ratio: 1 });
         await expect(page.locator(NODES.picker), at).toHaveAttribute("aria-expanded", "true");
       }
     } finally {

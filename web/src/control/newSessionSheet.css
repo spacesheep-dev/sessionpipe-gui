@@ -10,6 +10,11 @@
 .ns-scrim {
   z-index: var(--z-dialog);
 }
+/* A phone's sheet covers the window and needs no dim under it; with room it is a form
+   sheet over one (styles/regular.css). */
+.ns-scrim--form {
+  display: none;
+}
 @keyframes ns-drop {
   from {
     opacity: 0;

@@ -23,7 +23,7 @@ import {
   useState,
 } from "react";
 import { useSendStates } from "../../account/sendable";
-import { ActionButton, EmptyState, HarnessGlyph, Toggle } from "../../components/bits";
+import { ActionButton, EmptyState, HarnessGlyph, Toggle, withFormScrim } from "../../components/bits";
 import { MoreButton } from "../../components/ContextMenu";
 import { Select, type SelectOption } from "../../components/Select";
 import { wrongOriginHere } from "../../control/api";
@@ -629,7 +629,9 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   );
 
   if (phone)
-    return (
+    return withFormScrim(
+      close,
+      closing,
       <div
         className="ns-sheet ns-sheet--phone hs-sheet"
         role="dialog"
@@ -696,7 +698,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
             </div>
           </div>
         )}
-      </div>
+      </div>,
     );
 
   return (

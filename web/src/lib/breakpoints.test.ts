@@ -34,11 +34,6 @@ const SHARED = [PHONE_QUERY, DESKTOP_QUERY, PANEL_COVERS_QUERY];
  *  width is the same rule at every width (narrow.css, control/attachments.css). */
 const OWN: { file: string; query: string; why: string }[] = [
   {
-    file: "native/native.css",
-    query: `(min-width: ${WIDE}px), (min-width: ${MOUSE_FROM}px) and (pointer: fine)`,
-    why: "the phone app's first run on a tablet: the screen's own width, not the layout's, so a tablet on its side keeps its centred form in the touch app",
-  },
-  {
     file: "styles/chat.css",
     query: `(hover: none), ${PHONE_QUERY}`,
     why: "a bubble's time shows on hover: it is hidden where nothing hovers, at any width, and in the phone layout",

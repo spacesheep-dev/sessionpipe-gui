@@ -184,7 +184,7 @@ html[data-size-class="regular"] .toasts--phone .toast-unlock {
 
 /* With no tab bar under them, the grounds that stood on it run on under the home
    indicator to the screen's edge, their contents kept above it: a session's docked strip
-   (on the keys when they are up) and Display's sheet. */
+   (on the keys when they are up); and Display's dim (its card is below). */
 html[data-size-class="regular"] .main:has(> .session) {
   padding-bottom: 0;
 }
@@ -198,13 +198,122 @@ html[data-size-class="regular"] .sess-ctl {
 html[data-size-class="regular"] .qs-scrim {
   bottom: 0;
 }
-html[data-size-class="regular"] .qs--tabbar .qs-pop {
-  bottom: 0;
-  padding-bottom: calc(20px + var(--safe-bottom, env(safe-area-inset-bottom)));
-}
 
 /* The first frame (index.html) lists its pages as the sidebar will: in Simple, Machines
    with the tab bar's four, Workflows after it. */
 html[data-size-class="regular"] .boot[data-mode="simple"] .rail-nav > [data-boot="workflows"] {
   order: 1;
+}
+
+/* ---------- sheets and menus with room: a form sheet and floating cards ---------- */
+/* As iPadOS presents them: New session, Ask another agent and the pool's sheet are a form
+   sheet of at most 540 pt, centred on what the system leaves of the width, 40 pt under the
+   status bar, over a dim; a row's menu, Labels and Display are a card of at most 400 pt
+   that floats 16 pt over the home indicator or the keys. Every corner is rounded, and
+   none has a grabber: a pull down from the top still puts it away. They come and go as
+   the phone's do, with the same animation: one open through a fold or an unfold changes
+   its place and does not play its entrance again. */
+html[data-size-class="regular"] {
+  --inset-l: var(--safe-left, env(safe-area-inset-left));
+  --inset-r: var(--safe-right, env(safe-area-inset-right));
+  /* The middle of what the system leaves of the width, for a box translated back by half
+     its width; and that width less 24 pt a side. */
+  --float-mid: calc(var(--inset-l) + (100% - var(--inset-l) - var(--inset-r)) / 2);
+  --float-room: calc(100% - var(--inset-l) - var(--inset-r) - 48px);
+  /* What a card stands on: the home indicator, or the keys while they are up. */
+  --float-floor: max(var(--safe-bottom, env(safe-area-inset-bottom)), var(--kb, 0px));
+}
+
+html[data-size-class="regular"] .ns-sheet--phone {
+  inset: auto;
+  top: calc(var(--safe-top, env(safe-area-inset-top)) + 40px);
+  left: var(--float-mid);
+  translate: -50% 0;
+  width: min(540px, var(--float-room));
+  max-height: min(720px, calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - var(--float-floor) - 80px));
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--shadow-pop);
+}
+/* The page under it is dimmed and a tap there puts the sheet away, as the desktop's does;
+   over the notifications, as the sheet is. */
+html[data-size-class="regular"] .ns-scrim--form {
+  display: block;
+  z-index: calc(var(--z-toast) + 1);
+}
+/* Its bar is the sheet's own top, inside the safe area: no status bar over it, no band
+   beside it. */
+html[data-size-class="regular"] .ns-sheet--phone .ns-bar {
+  height: var(--bar);
+  padding: 0 8px;
+}
+html[data-size-class="regular"] .ns-sheet--phone .ns-scroll {
+  padding: 16px 16px 24px;
+}
+html[data-size-class="regular"] :is(.ns-grab, .menu-grab, .qs-grab) {
+  display: none;
+}
+
+/* The cards. */
+html[data-size-class="regular"] :is(.menu-sheet, .qs--tabbar .qs-pop) {
+  left: var(--float-mid);
+  right: auto;
+  bottom: calc(var(--float-floor) + 16px);
+  translate: -50% 0;
+  width: min(400px, var(--float-room));
+  max-height: calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - var(--float-floor) - 32px);
+  border-radius: var(--radius-sheet);
+}
+html[data-size-class="regular"] .menu-sheet {
+  padding: 8px;
+}
+html[data-size-class="regular"] .qs--tabbar .qs-pop {
+  padding: 20px 16px;
+}
+/* A Select's list is a pop-up there (lib/device.ts selectSheet), its rows a finger's, and
+   its filter in the type size WebKit does not zoom in on. */
+html[data-size-class="regular"] .sel-pop .sel-opt {
+  min-height: var(--tap);
+  font-size: var(--text-md);
+}
+html[data-size-class="regular"] .sel-pop .sel-search input {
+  height: 36px;
+  font-size: max(1rem, 16px);
+}
+
+/* ---------- one column ---------- */
+/* A page reads down one column of at most 672 pt, centred in what is beside the sidebar,
+   and its parts stand in it as they stand in a phone's page: one that runs a gutter past
+   its column (the Board's list, Search's filters) still does. The bar's ground runs on
+   to the window's edges, its words over the column; 100% there is the page's width, which
+   the bar runs past by --edge at either side. A session already keeps to the same
+   measure, and its bar does the same. */
+html[data-size-class="regular"] {
+  --measure-read: 672px;
+  --column-in: max(0px, (100% - var(--measure-read)) / 2);
+}
+html[data-size-class="regular"] .main > .page > .bar {
+  padding-left: calc(var(--edge-l) + var(--column-in));
+  padding-right: calc(var(--edge-r) + var(--column-in));
+}
+html[data-size-class="regular"] .main > .page:not(.session) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, var(--measure-read)) minmax(0, 1fr);
+  align-content: start;
+  column-gap: 0;
+}
+html[data-size-class="regular"] .main > .page:not(.session) > * {
+  grid-column: 2;
+}
+html[data-size-class="regular"] .main > .page:not(.session) > .bar {
+  grid-column: 1 / -1;
+}
+/* Settings covers the window: its list and each section keep to the same column, with
+   their gutter of 16 pt. */
+html[data-size-class="regular"] :is(.settings-nav, .settings-pane) {
+  --column-in: max(0px, (100% - 32px - var(--measure-read)) / 2);
+  padding-inline: calc(16px + var(--column-in));
+}
+html[data-size-class="regular"] .settings-bar {
+  --column-in: max(0px, (100% - 32px - var(--measure-read)) / 2);
+  padding-inline: calc(4px + var(--column-in));
 }

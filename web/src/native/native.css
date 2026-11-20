@@ -659,11 +659,31 @@
   font-size: max(1rem, 17px);
 }
 
-/* The tablet: a step keeps its title and actions in one glance, and the connected sheet
-   is a centred form sheet rather than a strip along the bottom edge. The welcome keeps
-   its full-height hero. A screen's own width, not the layout's: a tablet on its side has
-   the touch app, and still this form (breakpoints.test.ts). */
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+/* With room (a tablet, a phone opened flat: lib/device.ts sizeClass "regular"): a step
+   keeps its title and actions in one glance, and the connected sheet is a centred form
+   sheet rather than a strip along the bottom edge. The welcome keeps its full-height
+   hero. */
+html[data-size-class="regular"] .onb-body--step {
+  max-height: 720px;
+  margin: auto;
+}
+html[data-size-class="regular"] .first-run--phone {
+  left: 50%;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  translate: -50% -50%;
+  width: min(440px, calc(100vw - 48px));
+  padding: 20px 24px 24px;
+  border-radius: var(--radius-sheet);
+  animation: rise var(--dur) var(--ease-out) both;
+}
+html[data-size-class="regular"] .first-run--phone .menu-grab {
+  display: none;
+}
+/* The same in the phone's shell with a pen or a mouse, which has the desktop layout and
+   no size class (an Android tablet). */
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .onb-body--step {
     max-height: 720px;
     margin: auto;
