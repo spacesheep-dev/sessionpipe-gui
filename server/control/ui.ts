@@ -550,7 +550,11 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
         "content-security-policy": "default-src 'none'; sandbox",
         "cross-origin-resource-policy": "same-origin",
       });
-      createReadStream(f.path).pipe(ctx.res);
+      // A file that can't be read once the answer has begun (gone meanwhile, made room
+      // from) ends that answer, and nothing else.
+      createReadStream(f.path)
+        .on("error", () => ctx.res.destroy())
+        .pipe(ctx.res);
       return undefined;
     }),
   );

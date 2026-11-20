@@ -3,7 +3,7 @@
 // kept 30 days for the page to draw, while machines fetch it only until its own expiry;
 // an upload that needs room makes it among the pictures only the page keeps, oldest
 // first, before it is refused. And the page's own door to them, GET …/control/files/:sha.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ROUTES, UI_KEY_COOKIE } from "../../shared/api.js";
@@ -193,6 +193,25 @@ describe("GET /api/ui/control/files/:sha", () => {
     // The machines' own door still reads the machine's time only.
     expect((await fetch(`${app.url}${ROUTES.control}/files/${shown}`)).status).toBe(401);
     expect(fs.get(shown)).toBeUndefined();
+  });
+
+  it("a picture that can't be read once its answer has begun ends that answer, and the receiver stays up", async () => {
+    const sha = fs.put(pic(8), "image/png").sha256;
+    // Its bytes replaced by what can't be read as a file (as a file removed between the
+    // check and the open is): the check still finds it, the read fails.
+    const bytesAt = path.join(tmp.dir, "control", "files", sha);
+    rmSync(bytesAt);
+    mkdirSync(bytesAt);
+    const read = await fetch(url(sha)).then(
+      (r) => r.arrayBuffer().then(() => "whole"),
+      () => "ended",
+    );
+    expect(read).toBe("ended");
+    rmSync(bytesAt, { recursive: true });
+    // The receiver answers on.
+    const next = pic(9);
+    const ok = await fetch(url(fs.put(next, "image/png").sha256));
+    expect(Buffer.from(await ok.arrayBuffer()).equals(next)).toBe(true);
   });
 
   it("wants the UI key off loopback", async () => {

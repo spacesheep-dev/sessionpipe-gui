@@ -4,7 +4,7 @@
 // redelivery, the `taken` pause, acks, expiry, off, the early verification against
 // every control vector, the approval proof, persistence and the stream.
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -1670,6 +1670,27 @@ describe("a start's options, files and applied, through POST send", () => {
     expect((await get(entry.sha256, SINK)).status).toBe(401);
     expect((await get(missing.sha256, m.token)).status).toBe(404);
     expect((await get("not-a-hash", m.token)).status).toBe(404);
+  });
+
+  it("files: one that can't be read once its answer has begun ends that answer, and the receiver stays up", async () => {
+    const m = await enrolled(b, pk, "m_startfiles0000000003");
+    const bytes = new TextEncoder().encode("notes that go missing\n");
+    const up = await upload(bytes, "text/plain", "notes.txt");
+    expect(up.status).toBe(201);
+    const sha = fileHash(bytes);
+    // What can't be read as a file in its place (as a file removed between the check and the open is).
+    const bytesAt = path.join(b.stateDir, "control", "files", sha);
+    rmSync(bytesAt);
+    mkdirSync(bytesAt);
+    const read = await fetch(`${b.url}${CONTROL}/files/${sha}`, {
+      headers: { authorization: `Bearer ${m.token}` },
+    }).then(
+      (r) => r.arrayBuffer().then(() => "whole"),
+      () => "ended",
+    );
+    expect(read).toBe("ended");
+    rmSync(bytesAt, { recursive: true });
+    expect((await upload(bytes, "text/plain", "notes.txt")).status).toBe(201);
   });
 
   it("files: an upload is taken from the board's own page, and one from another origin is not held", async () => {
