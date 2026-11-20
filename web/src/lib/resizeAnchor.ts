@@ -7,6 +7,11 @@
 // changed: at the first sign of the new size, and again over the next frames, as the
 // layout the width decides is rendered.
 //
+// A page also changes under a view that is not scrolled: a message is opened in place, a
+// card arrives above, a list is sorted anew. The place written down is looked at again
+// then, and written down anew if its row is no longer where it was left. A row a list is
+// still moving to its new place is taken where it is laid out, not where it is drawn.
+//
 // The row being read is the one at a line a third of the way down the view, where the
 // session page itself puts what is to be read next (its New line). Everything else on
 // screen moves by what wraps between it and that row, so the row that is held is one in
@@ -17,6 +22,7 @@
 // "resize" (which there can come after a frame's ResizeObservers), so the first sign is
 // whichever comes first: that scroll, the "resize", or a ResizeObserver on the document.
 import { useEffect, useRef } from "react";
+import { drawnY } from "./drawn";
 
 /** Frames after a change of size in which the place is put back again and none is read:
  *  the other layout is rendered after the browser's "resize", and what measures itself in
@@ -63,12 +69,34 @@ export interface AnchorView<Place> {
   settle?(last: boolean): void;
 }
 
-/** Keeps a page's place: `scrolled` on each scroll, `sized` at anything that may be the
- *  first sign of another window size (it is true while the page settles in it). */
-export function placeKeeper<Place>(view: AnchorView<Place>): { scrolled(): void; sized(): boolean } {
+export interface PlaceKeeper {
+  /** On each scroll: the place is the person's new one. */
+  scrolled(): void;
+  /** When the page may have changed under a view that was not scrolled (its rows drawn
+   *  anew, their box another size): the place is written down again if its row moved. */
+  changed(): void;
+  /** At anything that may be the first sign of another window size; true while the page
+   *  settles in it. */
+  sized(): boolean;
+  /** The page is left: nothing more is read, put back or told. */
+  stop(): void;
+}
+
+/** Keeps a page's place. A place is written down a frame after what asked for it, once a
+ *  frame at most: after a scroll, and after a change if the page had one. A page that was
+ *  never scrolled has none (it is where it opened), nor has one that keeps its own. */
+export function placeKeeper<Place>(view: AnchorView<Place>): PlaceKeeper {
   let seen = view.size();
   let kept: Place | null = null;
-  let reading = false;
+  /** How far the kept row was from its place when last looked at: 0 as it is written
+   *  down, more where the end of the page kept it from being put back; null: gone. */
+  let stood: number | null = 0;
+  /** A frame is asked for, to look at the place in. */
+  let looking = false;
+  /** A scroll asked for it, or the page was scrolled to a place of its own and has let go
+   *  of it: the place is read anew, wherever the old one stands. */
+  let moved = false;
+  let stopped = false;
   let settling = 0;
   /** The width is another one since the page last settled: only then do rows wrap anew.
    *  A height alone changes as a phone browser's toolbar slides away under a scroll. */
@@ -83,9 +111,13 @@ export function placeKeeper<Place>(view: AnchorView<Place>): { scrolled(): void;
     }
     view.settle?.(last);
     left = view.scrollY();
-    if (last) wrapped = false;
+    if (!last) return;
+    wrapped = false;
+    // Where the window left the row: a change is measured from here.
+    if (kept !== null) stood = view.ask(kept);
   };
   const tick = () => {
+    if (stopped) return;
     settling--;
     step(settling === 0);
     if (settling > 0) view.frame(tick);
@@ -102,20 +134,57 @@ export function placeKeeper<Place>(view: AnchorView<Place>): { scrolled(): void;
     }
     return settling > 0;
   };
-  const read = () => {
-    reading = false;
-    if (!sized()) kept = view.read();
+  const look = () => {
+    looking = false;
+    const anew = moved;
+    moved = false;
+    if (stopped || sized()) return;
+    if (!view.enabled()) {
+      kept = null;
+      moved = true;
+      return;
+    }
+    if (!anew) {
+      if (kept === null) return;
+      // Still where it was left: the change was elsewhere, and the place is the one the
+      // person scrolled to (through a fold and back, the one it began at).
+      const by = view.ask(kept);
+      if (by !== null && stood !== null && Math.abs(by - stood) < 1) return;
+    }
+    kept = view.read();
+    stood = 0;
+  };
+  const soon = () => {
+    if (looking) return;
+    looking = true;
+    view.frame(look);
   };
   return {
-    sized,
+    sized: () => !stopped && sized(),
     scrolled() {
-      if (sized() || reading) return;
+      if (stopped || sized()) return;
       if (left !== null && Math.abs(view.scrollY() - left) < 1) return;
       left = null;
-      reading = true;
-      view.frame(read);
+      moved = true;
+      soon();
+    },
+    changed() {
+      if (!stopped && !sized()) soon();
+    },
+    stop() {
+      stopped = true;
     },
   };
+}
+
+/** The window's size as its layout has it. A page pinched larger in a phone's browser
+ *  keeps the size it had: innerWidth and innerHeight are then the part of it in view,
+ *  another one with every frame of the pinch. */
+let unpinched: readonly [number, number] | null = null;
+export function windowSize(): readonly [number, number] {
+  if (unpinched === null || Math.abs((window.visualViewport?.scale ?? 1) - 1) < 0.01)
+    unpinched = [window.innerWidth, window.innerHeight];
+  return unpinched;
 }
 
 export interface ResizeAnchorOptions {
@@ -155,10 +224,16 @@ interface Mark {
 export const pageBarBottom = (inside: () => Element | null) => (): number =>
   inside()?.closest(".page")?.querySelector(":scope > .bar")?.getBoundingClientRect().bottom ?? 0;
 
-/** An element's top in the window, or null when it has no box (a row in a folded group). */
-function topOf(el: Element): number | null {
+/** An element's top in the window where it is laid out, or null when it has no box (a row
+ *  in a folded group). A row a list is moving to its new place (lib/motion.ts useFlip) is
+ *  drawn on its way there, and what is in it with it: the move (`drawn`) is taken off. */
+export function topOf(el: Element, drawn: (moving: HTMLElement) => number = drawnY): number | null {
   const r = el.getBoundingClientRect();
-  return r.width || r.height ? r.top : null;
+  if (!r.width && !r.height) return null;
+  let top = r.top;
+  const outer = (of: Element | null | undefined) => of?.closest<HTMLElement>("[data-flip-moving]") ?? null;
+  for (let m = outer(el); m; m = outer(m.parentElement)) top -= drawn(m);
+  return top;
 }
 
 /** The index of the first of `els` whose top is at or under `line`, or their count. They
@@ -198,6 +273,8 @@ export function useResizeAnchor(o: ResizeAnchorOptions): void {
   const opts = useRef(o);
   opts.current = o;
   const { scroller } = o;
+  /** Told after each commit of the page: its rows may be others, or in another place. */
+  const committed = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const box = scroller?.() ?? null;
@@ -207,7 +284,7 @@ export function useResizeAnchor(o: ResizeAnchorOptions): void {
     let blockHint = 0;
     let readOf: string | undefined;
     const keeper = placeKeeper<Mark[]>({
-      size: () => [window.innerWidth, window.innerHeight],
+      size: windowSize,
       scrollY: () => box?.scrollTop ?? window.scrollY,
       scrollBy: (px) => {
         if (box) box.scrollTop += px;
@@ -219,7 +296,7 @@ export function useResizeAnchor(o: ResizeAnchorOptions): void {
       read() {
         const { key, blocks } = opts.current;
         const bar = opts.current.barBottom();
-        const bottom = box?.getBoundingClientRect().bottom ?? window.innerHeight;
+        const bottom = box?.getBoundingClientRect().bottom ?? windowSize()[1];
         const line = bar + (bottom - bar) / 3;
         const rows = root()?.querySelectorAll<HTMLElement>(opts.current.rows) ?? [];
         const marks: Mark[] = [];
@@ -267,13 +344,31 @@ export function useResizeAnchor(o: ResizeAnchorOptions): void {
     const onSized = () => void keeper.sized();
     target.addEventListener("scroll", keeper.scrolled, { passive: true });
     window.addEventListener("resize", onSized);
-    // Before the frame is painted, where the "resize" itself comes late (WebKit).
-    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(onSized) : null;
+    // The document's box, before the frame is painted: another width, where the "resize"
+    // itself comes late (WebKit), or another height, as the page grows or shrinks. And
+    // the rows' own box, where they scroll in one of their own.
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(keeper.changed) : null;
     ro?.observe(document.documentElement);
+    let watched: Element | null = null;
+    committed.current = () => {
+      const now = root();
+      const el = now instanceof Element ? now : null;
+      if (el !== watched) {
+        if (watched) ro?.unobserve(watched);
+        if (el) ro?.observe(el);
+        watched = el;
+      }
+      keeper.changed();
+    };
     return () => {
+      committed.current = null;
+      keeper.stop();
       target.removeEventListener("scroll", keeper.scrolled);
       window.removeEventListener("resize", onSized);
       ro?.disconnect();
     };
   }, [scroller]);
+  // After every commit of the page that draws the rows: one that moves them leaves their
+  // box the size it was (a list sorted anew).
+  useEffect(() => committed.current?.());
 }

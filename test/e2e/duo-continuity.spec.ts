@@ -5,7 +5,8 @@
 // in Chromium (the `duo` project) and in WebKit (`duo-webkit`), WKWebView's engine, since
 // what a page holds on to through a resize is the engine's doing as much as the app's.
 // A message being written; the reply being read and the board's row, where they were under
-// the bar (lib/resizeAnchor.ts); the end of a session that is followed; an open list.
+// the bar (lib/resizeAnchor.ts), also where the page changed since it was last scrolled;
+// the end of a session that is followed; an open list.
 // So is what duo.ts itself promises a test, which is held here too: the system's bands in
 // a page from its first script, and a measure that tells a control held under a band from
 // one passing.
@@ -84,6 +85,50 @@ function manyRows(n: number): unknown[] {
   return events;
 }
 
+/** A session that starts now, "`name`: …": its card arrives at the top of the board. */
+function starts(b: DuoBed, name: string): void {
+  const s = new Session(`s-${name.toLowerCase()}`, "claude-code", Date.now() - 30_000);
+  const fresh = on(`${name}: a session that just started`);
+  b.ss.push([
+    s.ev("session.started", { source: "startup" }, fresh),
+    s.ev("turn.started", { turn_id: "t1" }, fresh),
+    s.ev("turn.progress", { turn_id: "t1", user: "Start.", assistant: "Starting." }, fresh),
+  ]);
+}
+
+const PLAN = { first: "Here is the plan the team agreed on", last: "Ship it behind the export_resume flag first." };
+const PLAN_REPLY_LAST = "Everything is on fix/export-resume, ready for review.";
+/** A session (/s/claude-code/s-plan) whose second message is some forty lines, so it shows
+ *  its first eight and "Show all", with a reply longer than a screen on each side of it. */
+function planSession(): unknown[] {
+  const s = new Session("s-plan", "claude-code", Date.now() - 50 * 60_000);
+  const steps = [
+    "Record the last batch that finished in the export_state table, keyed by run id.",
+    "On start, read it and skip every batch up to and including that one.",
+    "Retry a failed batch three times with backoff, then stop and keep the state.",
+    "Open a new connection for each batch instead of holding one for the whole run.",
+  ];
+  const plan = Array.from({ length: 36 }, (_, i) => `${i + 1}. ${steps[i % steps.length]}`).join("\n");
+  const reply = (n: number) => Array.from({ length: n }, (_, i) => PARAGRAPHS[i % PARAGRAPHS.length]).join("\n\n");
+  return [
+    s.ev("session.started", { source: "startup" }, LONG),
+    s.ev("turn.started", { turn_id: "t1" }, LONG),
+    s.ev("turn.transcript", { turn: 1, user: "What changed?", assistant: reply(8) }, LONG),
+    s.ev("turn.ended", { turn_id: "t1" }, LONG),
+    s.ev("turn.started", { turn_id: "t2" }, LONG),
+    s.ev(
+      "turn.transcript",
+      {
+        turn: 2,
+        user: `${PLAN.first} for the export:\n\n${plan}\n\n${PLAN.last}`,
+        assistant: `${reply(16)}\n\n${PLAN_REPLY_LAST}`,
+      },
+      LONG,
+    ),
+    s.ev("turn.ended", { turn_id: "t2" }, LONG),
+  ];
+}
+
 /** `n` sessions that each wait for an answer, "Ask 01: …" on: an Inbox longer than a screen. */
 function manyPrompts(n: number): unknown[] {
   const events: unknown[] = [];
@@ -154,6 +199,19 @@ const staysUnderBar = (el: Locator, pt: number, slack: number, at: string) =>
   expect
     .poll(async () => Math.abs((await underBar(el)) - pt), { message: `${at}: pt from its place` })
     .toBeLessThanOrEqual(slack);
+/** How far `el` is under the bar once the page has stopped moving: no row of a list is on
+ *  its way to a new place, and two looks fifteen frames apart agree. */
+async function atRest(page: Page, el: Locator): Promise<number> {
+  await expect(page.locator("[data-flip-moving]")).toHaveCount(0);
+  let at = await underBar(el);
+  await expect(async () => {
+    const was = at;
+    await frames(page, 15);
+    at = await underBar(el);
+    expect(at).toBe(was);
+  }, "the page has stopped moving").toPass({ timeout: 10_000 });
+  return at;
+}
 /** What is left of the page under the screen, in pt: 0 at its end. */
 const gapToEnd = (page: Page) =>
   page.evaluate(() => Math.round(document.documentElement.scrollHeight - (scrollY + innerHeight)));
@@ -492,14 +550,85 @@ test("a board scrolled to a row keeps that row in place as the phone is unfolded
   const b = await bedWith(browser, "466x678", manyRows(24));
   const { page } = b;
   try {
-    // 231 pt from the top of the outer display, under its 45 pt bar. Turned, the board's
-    // rows are a wide window's two lines, not a phone's three: those above it take less room.
+    // 231 pt from the top of the outer display, under its 45 pt bar. On the inner display
+    // the bar is under the status bar, and a card's lines run further before they wrap.
     const row = page.locator("article.card").filter({ hasText: "Row 09:" });
     await expect(page.locator("article.card").filter({ hasText: "Row 20:" })).toBeAttached();
     await putUnderBar(page, row, 186);
-    for (const [width, height] of ROUND.slice(0, 3)) {
+    for (const [width, height] of ROUND) {
       await pose(page, width, height);
       await staysUnderBar(row, 186, 24, `${width}x${height}`);
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+test("a board keeps the row being read where a card that came in above left it, as the phone is unfolded, turned and folded", async ({
+  browser,
+}) => {
+  const b = await bedWith(browser, "466x678", manyRows(24));
+  const { page } = b;
+  try {
+    const row = page.locator("article.card").filter({ hasText: "Row 09:" });
+    await expect(page.locator("article.card").filter({ hasText: "Row 20:" })).toBeAttached();
+    // A session starts, and its card comes in above. The list moves its rows down to make
+    // room (lib/motion.ts useFlip); an engine may scroll the page to hold them still, at
+    // once or as they move, and may not. So the place is tried as the engine leaves it,
+    // then read while the rows are on their way (a scroll of the person's just then), then
+    // with the page not scrolled at all.
+    for (const [name, how] of [
+      ["First", "as the engine has it"],
+      ["Second", "scrolled as the rows move"],
+      ["Third", "not scrolled"],
+    ] as const) {
+      await putUnderBar(page, row, 186);
+      if (how === "scrolled as the rows move")
+        await page.evaluate((title) => {
+          const seen = new MutationObserver(() => {
+            const cards = Array.from(document.querySelectorAll("article.card"));
+            if (!cards.some((card) => card.textContent?.includes(title))) return;
+            seen.disconnect();
+            requestAnimationFrame(() => window.scrollBy(0, 1));
+          });
+          seen.observe(document.querySelector(".board-list")!, { childList: true, subtree: true });
+        }, `${name}:`);
+      if (how === "not scrolled") await page.addStyleTag({ content: "* { overflow-anchor: none !important; }" });
+      starts(b, name);
+      await expect(page.locator("article.card").filter({ hasText: `${name}:` })).toBeAttached({ timeout: 30_000 });
+      const left = await atRest(page, row);
+      for (const [width, height] of ROUND) {
+        await pose(page, width, height);
+        await staysUnderBar(row, left, 24, `${how}, ${width}x${height}`);
+      }
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+test("a message opened in place and not scrolled since keeps its top as the phone is unfolded, turned and folded", async ({
+  browser,
+}) => {
+  const b = await bedWith(browser, "466x678", planSession());
+  const { page } = b;
+  try {
+    await page.goto(`${b.server.url}/s/claude-code/s-plan`);
+    await expect(page.getByText(PLAN_REPLY_LAST).first()).toBeVisible();
+    const message = page.locator(".chat-bubble").filter({ hasText: PLAN.first });
+    const all = message.getByRole("button", { name: "Show all" });
+    // Up from the end, to "Show all" 60 pt under the bar: the reply under the message is
+    // what is at the reading line, and the place written down.
+    await page.evaluate(() => window.scrollBy(0, -400));
+    await putUnderBar(page, all, 60);
+    await all.tap();
+    await expect(message).toContainText(PLAN.last);
+    // It opened downwards and fills the screen; that reply is a screen and more further
+    // down, and nothing was scrolled.
+    const top = await atRest(page, message);
+    for (const [width, height] of ROUND) {
+      await pose(page, width, height);
+      await staysUnderBar(message, top, 24, `${width}x${height}`);
     }
   } finally {
     await b.close();
@@ -582,7 +711,7 @@ test("twelve folds and turns faster than the page settles keep the draft, the ca
   }
 });
 
-test("New session's machine list stays open through an unfold and a fold, with its filter's text, the focus and the row it was on", async ({
+test("New session's machine list stays open through an unfold, a turn and a fold, with its filter's text, the focus and the row it was on", async ({
   browser,
 }) => {
   const b = await duoBed(browser, "466x678");
@@ -610,9 +739,11 @@ test("New session's machine list stays open through an unfold and a fold, with i
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("ArrowDown");
     await expect(active).toHaveText(/build-03/);
-    // A sheet on the outer display, a pop-up under its button on the inner one: one list.
+    // A sheet on the outer display, a pop-up under its button on the inner one, upright
+    // and turned: one list.
     for (const [width, height, form] of [
       [669, 951, ".sel-pop"],
+      [951, 669, ".sel-pop"],
       [466, 678, ".sel-sheet"],
     ] as const) {
       await pose(page, width, height);

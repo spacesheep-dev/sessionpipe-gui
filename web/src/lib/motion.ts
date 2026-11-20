@@ -6,6 +6,7 @@
 // turns into an instant state change under `prefers-reduced-motion`.
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMenuOpen } from "../components/ContextMenu";
+import { drawnY } from "./drawn";
 
 /** Whether the person asked for less motion, read live. */
 export const reducedMotion = (): boolean =>
@@ -189,16 +190,6 @@ export function useHeldOrder<T>(
 }
 
 // ----- FLIP: rows slide to their new place -----
-
-/** The vertical translate an element is drawn with right now (a running animation's). */
-function drawnY(el: HTMLElement): number {
-  const t = getComputedStyle(el).transform;
-  if (!t || t === "none") return 0;
-  const m = t.match(/^matrix(3d)?\((.+)\)$/);
-  if (!m) return 0;
-  const v = m[2]!.split(",").map(Number);
-  return (m[1] ? v[13] : v[5]) ?? 0;
-}
 
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 

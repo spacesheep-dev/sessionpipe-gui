@@ -101,7 +101,7 @@ import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
 import { lastHeard } from "../lib/offline";
 import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
 import { cutReply, cutReplyStart, cutWords, said, stoppedWords, turnWords } from "../lib/replies";
-import { useResizeAnchor } from "../lib/resizeAnchor";
+import { useResizeAnchor, windowSize } from "../lib/resizeAnchor";
 import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, setSearchParam, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
@@ -361,7 +361,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   /** Events that arrived while the person was scrolled up (the "n new" pill). */
   const [unseen, setUnseen] = useState(0);
   /** The window's size when a scroll or a growth was last looked at. */
-  const sizeSeen = useRef<[number, number] | null>(null);
+  const sizeSeen = useRef<readonly [number, number] | null>(null);
   /** Following at the end when the window began to change size: the end is kept until
    *  the page has settled in the new one, whatever the scrolls in between say. */
   const pinnedAtResize = useRef(false);
@@ -370,7 +370,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
    *  say otherwise. */
   const resized = useCallback((): boolean => {
     const was = sizeSeen.current;
-    const now: [number, number] = [window.innerWidth, window.innerHeight];
+    const now = windowSize();
     sizeSeen.current = now;
     if (!was || (was[0] === now[0] && was[1] === now[1])) return false;
     if (followRef.current && pinned.current) pinnedAtResize.current = true;

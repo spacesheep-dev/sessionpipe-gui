@@ -69,7 +69,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   wrapped anew: the reply being read, or the row on the Board, in the Inbox or in Search,
   ended up as much as a screen away. The row a third of the way down the view now stays
   where it was under the bar, and inside a reply longer than the screen the paragraph does.
-  Folded back, the page is where it began.
+  Folded back, the page is where it began. A page that changed with nothing scrolled since
+  keeps its place too: a long message opened in place, a card that came in above, a list
+  still moving its rows.
 - **A session followed at its end is still followed after the phone is turned.** In the
   iPhone app, turning the phone upright again left the session short of its end and no
   longer following: the next reply came in below, behind a "new" pill. A scroll the
