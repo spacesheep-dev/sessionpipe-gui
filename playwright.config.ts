@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // End-to-end suite: a built server (node scripts/build.mjs + vite build) started with
-// demo mode on a fresh state dir, driven through Chromium on a desktop and a phone.
+// demo mode on a fresh state dir, driven through Chromium on a desktop and a phone, and at
+// the iPhone Duo's shapes through Chromium and WebKit (WKWebView's engine).
 // Port 7311 is ours alone; 7373 may be a person's running instance and is never used.
 import os from "node:os";
 import path from "node:path";
@@ -29,6 +30,15 @@ export const seenSetup = (origin: string) => ({
     { name: SETTINGS_KEY, value: JSON.stringify(SUITE_SETTINGS) },
   ],
 });
+
+/** The iPhone Duo's outer display, for the `duo` projects: a finger, 3 px to the pt. */
+const DUO = {
+  ...devices["iPhone 13"],
+  viewport: { width: 466, height: 678 },
+  isMobile: true,
+  hasTouch: true,
+  deviceScaleFactor: 3,
+};
 
 const stateDir = path.join(os.tmpdir(), `spgui-e2e-${Date.now()}-${process.pid}`);
 process.env.SPGUI_E2E_STATE = stateDir;
@@ -65,7 +75,7 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(mobile|onboarding)\.spec\.ts/,
+      testIgnore: /(mobile|onboarding|duo(-[a-z]+)?)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
     {
@@ -77,6 +87,20 @@ export default defineConfig({
         defaultBrowserType: "chromium",
         viewport: { width: 390, height: 844 },
       },
+    },
+    {
+      // The iPhone Duo (test/e2e/duo.ts has its shapes): a touch screen that starts as the
+      // outer display. A spec moves it through the others.
+      name: "duo",
+      testMatch: /duo(-[a-z]+)?\.spec\.ts/,
+      use: { ...DUO, browserName: "chromium", defaultBrowserType: "chromium" },
+    },
+    {
+      // The same in WebKit, WKWebView's engine, for what the engine has a say in: what a
+      // page keeps when its window changes size. `npx playwright install webkit` once.
+      name: "duo-webkit",
+      testMatch: /duo-continuity\.spec\.ts/,
+      use: { ...DUO, browserName: "webkit", defaultBrowserType: "webkit" },
     },
   ],
   webServer: [

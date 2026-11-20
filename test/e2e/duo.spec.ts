@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: Apache-2.0
+/// <reference lib="dom" />
+// The iPhone app at the iPhone Duo's shapes (the `duo` project: a touch screen, 3x): the
+// outer display 466×678, the inner one upright 669×951 and turned 951×669, a Split View
+// half 470×669, each with the bands the system keeps (duo.ts). What holds at a shape is
+// said here. What a page keeps as it moves from one to another is in
+// duo-continuity.spec.ts, which runs in WebKit too.
+import { expect, type Page, test } from "@playwright/test";
+import {
+  bandOffenders,
+  coarsePointer,
+  DUO,
+  DUO_REPLY,
+  DUO_SESSIONS,
+  duoBed,
+  fakeKeyboard,
+  firstLineChars,
+  type Insets,
+  insetsInit,
+  pose,
+  shapeOf,
+} from "./duo.js";
+
+const composer = (page: Page) => page.locator("textarea").first();
+
+test.beforeAll(async ({ browser }) => {
+  // A finger, at every width: what makes the inner display the touch app's and not a Mac's.
+  expect(await coarsePointer(browser)).toBe(true);
+});
+
+test("insets given for one size are that size's alone: a page walked to another width leaves them behind, and has them back", async ({
+  browser,
+}) => {
+  // account-screens.spec.ts is given the Duo's band for its own size and walks from 320 to
+  // 1180 wide inside one test: a smaller iPhone has no such band.
+  const outer = { width: 466, height: 678 };
+  const band = DUO["466x678"]!.insets;
+  const context = await browser.newContext({ viewport: outer });
+  try {
+    await insetsInit(context, band, outer);
+    const page = await context.newPage();
+    await page.goto("/");
+    await expect.poll(() => shapeOf(page)).toEqual({ size: "466x678", insets: band });
+    await page.setViewportSize({ width: 320, height: 568 });
+    await expect.poll(() => shapeOf(page)).toEqual({ size: "320x568", insets: [0, 0, 0, 0] });
+    await page.reload();
+    await expect.poll(() => shapeOf(page)).toEqual({ size: "320x568", insets: [0, 0, 0, 0] });
+    await page.setViewportSize(outer);
+    await expect.poll(() => shapeOf(page)).toEqual({ size: "466x678", insets: band });
+  } finally {
+    await context.close();
+  }
+});
+
+test("the first run keeps every control out from under the system's bands, on the outer display and on the inner one turned", async ({
+  browser,
+}) => {
+  const step = (page: Page, name: string) => page.locator(`.onb[data-step='${name}']`);
+  const button = (page: Page, name: string) => page.getByRole("button", { name });
+  for (const [size, insets] of [
+    ["466x678", DUO["466x678"]!.insets],
+    // The outer display held the other way up: the band is on the left.
+    ["466x678", [0, 0, 20, 84]],
+    ["951x669", DUO["951x669"]!.insets],
+  ] as [string, Insets][]) {
+    const at = `${size} ${insets}`;
+    const b = await duoBed(browser, size, { fresh: true, insets });
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(step(page, "welcome")).toBeVisible();
+      expect(await shapeOf(page), at).toEqual({ size, insets });
+      expect(await bandOffenders(page), `welcome ${at}`).toEqual([]);
+      // Its disclosure, open: the welcome is then longer than the screen. What passes under
+      // the home indicator on the way down is not held there, and the end stops above it.
+      await button(page, "No sessionpipe on your computer yet?").click();
+      const end = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+      for (let y = 0; y < end + 12; y += 12) {
+        await page.evaluate((top) => scrollTo(0, top), Math.min(y, end));
+        expect(await bandOffenders(page), `welcome, opened and scrolled to ${Math.min(y, end)}, ${at}`).toEqual([]);
+      }
+      // An address to type, with Back in the bar.
+      await button(page, "Enter an address").click();
+      await expect(step(page, "address")).toBeVisible();
+      expect(await bandOffenders(page), `address ${at}`).toEqual([]);
+      await button(page, "Back").click();
+      // The account's way in: what it is, then the number with Cancel in the bar.
+      await button(page, "Use a spacesheep account").click();
+      await expect(step(page, "account-intro")).toBeVisible();
+      expect(await bandOffenders(page), `account-intro ${at}`).toEqual([]);
+      await button(page, "Continue").click();
+      await expect(step(page, "account-number")).toBeVisible();
+      expect(await bandOffenders(page), `account-number ${at}`).toEqual([]);
+      await button(page, "Cancel").click();
+      await expect(step(page, "welcome")).toBeVisible();
+      if (size === "466x678") {
+        // The measure sees a control under a band when one is there: with the step's own
+        // padding taken away, the welcome's buttons reach under the side band.
+        await page.addStyleTag({ content: ".onb { padding: 0 !important; }" });
+        expect(await bandOffenders(page), `unpadded ${at}`).toContain("Scan the code on your computer");
+      }
+    } finally {
+      await b.close();
+    }
+  }
+});
+
+test("the keyboard up on the outer display: the page hears of it as WKWebView tells it, and the message field rides on the keys", async ({
+  browser,
+}) => {
+  const b = await duoBed(browser, "466x678");
+  const { page } = b;
+  const kb = DUO["466x678"]!.kb;
+  const said = () => page.evaluate(() => document.documentElement.style.getPropertyValue("--kb"));
+  /** The docked strip's bottom edge, in the window. */
+  const dock = () => page.locator(".sess-ctl").evaluate((el) => Math.round(el.getBoundingClientRect().bottom));
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await b.approve();
+    await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+    await expect(composer(page)).toBeEnabled();
+    expect(await said()).toBe("");
+    const down = await dock();
+    await composer(page).focus();
+    await fakeKeyboard(page, kb);
+    // The window is as tall as it was; only what is left above the keys got shorter.
+    expect(await page.evaluate(() => [innerHeight, Math.round(visualViewport!.height)])).toEqual([678, 678 - kb]);
+    await expect.poll(said).toBe(`${kb}px`);
+    await expect.poll(dock).toBe(678 - kb);
+    await fakeKeyboard(page, 0);
+    await expect.poll(said).toBe("");
+    await expect.poll(dock).toBe(down);
+  } finally {
+    await b.close();
+  }
+});
+
+test("a reply on the outer display and in Split View reads in lines of at most 75 characters", async ({ browser }) => {
+  const b = await duoBed(browser, "466x678");
+  const { page } = b;
+  try {
+    await page.goto(`${b.server.url}${DUO_SESSIONS.prompt}`);
+    const reply = page.getByText(DUO_REPLY, { exact: true });
+    await expect(reply).toBeVisible();
+    for (const [width, height] of [
+      [466, 678],
+      [470, 669],
+    ] as const) {
+      await pose(page, width, height);
+      const chars = await firstLineChars(reply);
+      // It wraps (the reply is some 190 characters), into lines the eye can follow back.
+      expect(chars, `${width}x${height}`).toBeGreaterThan(20);
+      expect(chars, `${width}x${height}`).toBeLessThanOrEqual(75);
+    }
+  } finally {
+    await b.close();
+  }
+});

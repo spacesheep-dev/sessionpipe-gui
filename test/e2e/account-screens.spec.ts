@@ -9,7 +9,9 @@
 //
 // With ACCOUNT_SCREENS=<folder> every state is also saved as a picture there, at the size
 // and scheme ACCOUNT_SCREENS_SIZE (WxH) and ACCOUNT_SCREENS_SCHEME name: the pages the
-// owner approves the screens from.
+// owner approves the screens from. ACCOUNT_SCREENS_INSETS (t,r,b,l in pt) is what the
+// system keeps for itself on each side at that size, as on the iPhone Duo (duo.ts):
+// 0,84,20,0 at 466x678.
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,12 +21,16 @@ import { HubRefused, HubStandIn, UNUSED_KEY_NOTE } from "../account/hub.js";
 import { type AccountServer, startAccountServer } from "../account/serve.js";
 import { fakeShell, type ShellInitOptions } from "../account/shell-init.js";
 import { Session } from "../events.js";
+import { type Insets, insetsInit } from "./duo.js";
 import { strandedMarks } from "./helpers.js";
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/web");
 const SHOTS = process.env.ACCOUNT_SCREENS ?? "";
 const [W, H] = (process.env.ACCOUNT_SCREENS_SIZE ?? "390x844").split("x").map(Number) as [number, number];
 const SCHEME = process.env.ACCOUNT_SCREENS_SCHEME === "dark" ? "dark" : "light";
+const INSETS = process.env.ACCOUNT_SCREENS_INSETS
+  ? (process.env.ACCOUNT_SCREENS_INSETS.split(",").map(Number) as Insets)
+  : null;
 /** The hour on a prompt's card, with the way to answer it on spacesheep: the hour's own
  *  sentence, then on a phone the link on a line of its own, and wider after a "·". */
 const hourOnCard = (width: number) =>
@@ -107,6 +113,8 @@ async function bed(browser: Browser, o: { platform?: string; shell?: ShellInitOp
     (r) => r.abort(),
   );
   await context.addInitScript(fakeShell, o.shell ?? {});
+  // That size's insets: a test that walks to another width leaves them behind.
+  if (INSETS) await insetsInit(context, INSETS, { width: W, height: H });
   const page = await context.newPage();
   const b: Bed = {
     ss,
@@ -142,6 +150,8 @@ async function shot(page: Page, name: string, o: { own?: boolean } = {}): Promis
 
 const step = (page: Page, name: string) => page.locator(`.onb[data-step='${name}']`);
 const button = (page: Page, name: string | RegExp) => page.getByRole("button", { name });
+/** New session, wherever this width has it: the Board's bar on a phone, the sidebar's head. */
+const compose = (page: Page) => page.getByRole("button", { name: "New session", exact: true });
 /** The app comes back to the front (from the browser). */
 const foreground = (page: Page) =>
   page.evaluate(() => {
@@ -293,7 +303,7 @@ test.describe("the first run with a spacesheep account", () => {
     await expect(page.getByText(/Approve this iPhone/)).toHaveCount(0);
     // New session, from the Board's bar: nothing says the computer does not trust the phone.
     await page.locator("a[data-nav='board']:visible").click();
-    await page.locator(".page.board .compose-btn--phone").click();
+    await compose(page).click();
     const sheet = page.locator("[data-new-session]");
     await expect(sheet.locator(".ns-status")).toBeVisible();
     await expect(sheet).not.toContainText(/doesn't trust|can't send yet/);
@@ -725,7 +735,7 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
     try {
       await page.goto(b.server.url);
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       const sheet = page.locator("[data-new-session]");
       await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
       const start = sheet.locator("[data-ns-start]");
@@ -783,7 +793,7 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(page.getByText(/can send (by|from)/)).toHaveCount(0);
     // New session the same: Start goes, and a refusal for the hour would make the time known.
     await page.goto(b.server.url);
-    await page.locator(".page.board .compose-btn--phone").click();
+    await compose(page).click();
     const sheet = page.locator("[data-new-session]");
     await sheet.locator("[data-ns-text]").fill("Look around.");
     await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
@@ -1200,7 +1210,7 @@ test.describe("what else an account shows", () => {
       // New session: all is well, so its foot says nothing (its line is there for what comes),
       // and the level the machine sets is a value on one line.
       await page.goto(b.server.url);
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       const sheet = page.locator("[data-new-session]");
       await sheet.locator("[data-ns-text]").fill("Look around.");
       await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
@@ -1416,7 +1426,7 @@ test.describe("what else an account shows", () => {
         [820, 1180],
       ] as const) {
         await page.setViewportSize({ width, height });
-        await page.locator(".page.board .compose-btn--phone").click();
+        await compose(page).click();
         await expect(sheet.locator(".state-title")).toHaveText("This iPhone isn't approved yet");
         await expect(sheet.locator(".state-text")).toHaveCount(0);
         await expect(sheet.locator("[data-ns-start], textarea, [data-ns-row]")).toHaveCount(0);
@@ -1434,14 +1444,14 @@ test.describe("what else an account shows", () => {
         await expect(sheet).toHaveCount(0);
       }
       await page.setViewportSize({ width: W, height: H });
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       await sheet.locator("[data-ns-approve]").click();
       await expect(page.locator("[data-approve='idle']")).toBeVisible();
       await expect(sheet).toHaveCount(0);
       // Approved (long ago, as far as this page knows): the form, with the message as it was.
       await trusted(b);
       await page.goto(b.server.url);
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       await expect(sheet.locator("[data-ns-text]")).toHaveValue("Check the refund rounding.");
       await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
     } finally {
@@ -1684,7 +1694,7 @@ test.describe("what else an account shows", () => {
       // New session: on its own it opens on attic-mini, which can take a start, though the
       // newest session is studio-mac's; studio-mac is listed, off, with why in two words.
       await page.goto(b.server.url);
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       const sheet = page.locator("[data-new-session]");
       const machine = sheet.locator("[data-ns-row=machine] button.sel");
       await expect(machine).toHaveAttribute("data-value", "attic-mini");
@@ -2561,7 +2571,9 @@ test.describe("what else an account shows", () => {
     };
     return g;
   };
-  const tab = (page: Page, name: string) => page.locator(".tabbar").getByRole("link", { name: new RegExp(`^${name}`) });
+  /** A page by its name in the navigation this width shows: the tab bar, or the sidebar. */
+  const tab = (page: Page, name: string) =>
+    page.getByRole("navigation", { name: "Pages" }).getByRole("link", { name: new RegExp(`^${name}`) });
 
   test("a first connect with a long history: loading rows under 'Catching up…' and no badge, then the whole board once", async ({
     browser,
@@ -2787,7 +2799,7 @@ test.describe("what else an account shows", () => {
       );
       b.ss.approveDevice(asked.keyId);
       await page.reload();
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       const sheet = page.locator("[data-new-session]");
       await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
       const start = sheet.locator("[data-ns-start]");
