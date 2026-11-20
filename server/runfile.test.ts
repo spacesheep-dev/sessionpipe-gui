@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // run.json: written atomically, read back only while its pid lives, removed only by its
 // owner; and the real thing: a receiver started from the CLI writes it on listen and
-// removes it on SIGTERM and SIGINT.
+// removes it on SIGTERM, SIGINT and SIGHUP.
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -91,11 +91,22 @@ describe("the receiver's run.json lifecycle", () => {
   }, 60_000);
   afterAll(() => rmSync(out, { recursive: true, force: true }));
 
-  const start = (state: string): ChildProcess =>
+  const start = (state: string, { quiet = true } = {}): ChildProcess =>
     spawn(
       process.execPath,
-      [cli, "--demo", "--no-outbox", "--quiet", "--host", "127.0.0.1", "--port", "0", "--state", state],
-      { stdio: "ignore" },
+      [
+        cli,
+        "--demo",
+        "--no-outbox",
+        ...(quiet ? ["--quiet"] : []),
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+        "--state",
+        state,
+      ],
+      { stdio: quiet ? "ignore" : ["ignore", "pipe", "ignore"] },
     );
   const waitFor = async (cond: () => boolean, ms = 10_000) => {
     const until = Date.now() + ms;
@@ -105,26 +116,55 @@ describe("the receiver's run.json lifecycle", () => {
     }
   };
 
-  for (const signal of ["SIGTERM", "SIGINT"] as const) {
-    it(`is written on listen and removed on ${signal}`, async () => {
-      const state = path.join(dir, "state");
-      const child = start(state);
-      try {
-        await waitFor(() => readRunFile(state) !== null);
-        const r = readRunFile(state)!;
-        expect(r.pid).toBe(child.pid);
-        expect(r.port).toBeGreaterThan(0);
-        expect(r.url).toBe(`http://127.0.0.1:${r.port}`);
-        const res = await fetch(`${r.url}/api/ui/info`);
-        expect(((await res.json()) as { name: string }).name).toBe("sessionpipe-gui");
-        const exited = new Promise((resolve) => child.on("exit", resolve));
-        child.kill(signal);
-        await exited;
-        expect(existsSync(runFilePath(state))).toBe(false);
-      } finally {
-        child.kill("SIGKILL");
-      }
-    }, 20_000);
+  // Node cannot send SIGHUP on Windows: child.kill("SIGHUP") there ends the child abruptly.
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    it.skipIf(signal === "SIGHUP" && process.platform === "win32")(
+      `is written on listen and removed on ${signal}`,
+      async () => {
+        const state = path.join(dir, "state");
+        const child = start(state);
+        try {
+          await waitFor(() => readRunFile(state) !== null);
+          const r = readRunFile(state)!;
+          expect(r.pid).toBe(child.pid);
+          expect(r.port).toBeGreaterThan(0);
+          expect(r.url).toBe(`http://127.0.0.1:${r.port}`);
+          const res = await fetch(`${r.url}/api/ui/info`);
+          expect(((await res.json()) as { name: string }).name).toBe("sessionpipe-gui");
+          const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
+          child.kill(signal);
+          expect(await exited).toBe(0);
+          expect(existsSync(runFilePath(state))).toBe(false);
+        } finally {
+          child.kill("SIGKILL");
+        }
+      },
+      20_000,
+    );
+  }
+
+  // A closed terminal (SIGHUP), or a pipe whose reader the same Ctrl-C stopped: the output
+  // is gone when the signal arrives, and the receiver still stops cleanly instead of dying
+  // on a failed "stopping" write.
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    it.skipIf(signal === "SIGHUP" && process.platform === "win32")(
+      `stops cleanly on ${signal} after its output has gone away`,
+      async () => {
+        const state = path.join(dir, "state");
+        const child = start(state, { quiet: false });
+        try {
+          await waitFor(() => readRunFile(state) !== null);
+          child.stdout!.destroy();
+          const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
+          child.kill(signal);
+          expect(await exited).toBe(0);
+          expect(existsSync(runFilePath(state))).toBe(false);
+        } finally {
+          child.kill("SIGKILL");
+        }
+      },
+      20_000,
+    );
   }
 
   it("a killed receiver leaves a stale file that readers ignore", async () => {

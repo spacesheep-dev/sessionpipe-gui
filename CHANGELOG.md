@@ -49,6 +49,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   another account is older than its newest page, the chat and the timeline drew the note
   under the first turn the page had loaded; it now appears, under its own turn, once Older
   turns brings that turn in.
+- **Closing the terminal stops the receiver cleanly.** Closing the window or tab a
+  receiver runs in (SIGHUP) ended it at once and left its `run.json` behind; it now stops
+  as Ctrl-C does. A receiver whose output was already gone when it was stopped (a `| tee`
+  ended by the same Ctrl-C) no longer exits with an error before it has closed.
 
 ## [0.8.6] - 2026-11-19
 

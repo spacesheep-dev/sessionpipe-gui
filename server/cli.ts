@@ -834,6 +834,10 @@ async function main(): Promise<void> {
   const shutdown = (signal: string): void => {
     if (closing) return;
     closing = true;
+    // The output may be gone by now (a closed terminal, or a `| tee` stopped by the same
+    // Ctrl-C): a failed write (EIO, EPIPE) here or in app.close()'s logging must not end
+    // the process before app.close() has run.
+    for (const stream of [process.stdout, process.stderr]) stream.on("error", () => {});
     if (!parsed.quiet) process.stdout.write(`\n${signal}: stopping\n`);
     removeRunFile(app.stateDir);
     const force = setTimeout(() => process.exit(0), 3000);
@@ -842,6 +846,9 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+  // Closing the terminal the receiver runs in sends SIGHUP, which would otherwise end it
+  // at once, leaving run.json behind and skipping app.close().
+  process.on("SIGHUP", () => shutdown("SIGHUP"));
 }
 
 main().catch((e: unknown) => {
