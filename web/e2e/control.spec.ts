@@ -1032,12 +1032,14 @@ test("a row's menu leads with Allow and Deny and their keys, on the Board and in
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
 
-  // The Board's row: the pair, a rule, then Open; C is not beside New session here (it
-  // opens the sheet for the board's machine), and this machine's agents cannot be asked.
+  // The Board's row: the pair, a rule, then the two Opens, the one ↵ does first (beside,
+  // on a computer that has not chosen); C is not beside New session here (it opens the
+  // sheet for the board's machine), and this machine's agents cannot be asked.
   await board();
   await card(p).locator(".card-title").click({ button: "right" });
   await leads();
-  await expect(items.nth(2)).toHaveText(/^Open as page/);
+  await expect(items.nth(2)).toHaveText(/^Open beside/);
+  await expect(items.nth(3)).toHaveText(/^Open as page/);
   await expect(page.getByRole("menuitem", { name: "New session here" })).toBeVisible();
   await expect(keys("New session here")).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Ask another agent…" })).toHaveCount(0);
@@ -1046,8 +1048,7 @@ test("a row's menu leads with Allow and Deny and their keys, on the Board and in
   const msg = await daemon.next();
   expect(msg.cmd).toMatchObject({ kind: "permission.answer", session: p.key, for: p.id, decision: "deny" });
   await expect(card(p).locator(".card-attn")).toHaveText(`Denied · waiting for ${MACHINE}`);
-  // With an answer out the menu offers none. (A menu opens no sooner than 400 ms after the
-  // last one did.)
+  // With an answer out the menu offers none.
   await expect(async () => {
     await card(p).locator(".card-title").click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: "Open as page" })).toBeVisible({ timeout: 2_000 });
