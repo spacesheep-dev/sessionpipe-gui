@@ -304,6 +304,12 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         break;
       case "--rp-id":
         a.rpId = next();
+        // A passkey is made for a host name alone. "https://host", "host:7373" or "host/x"
+        // would start a server whose origins (https://<rp id>:<port>) no browser makes a
+        // passkey for. Two colons or more is an IPv6 literal, taken as given.
+        if (!a.rpId.trim()) fail("--rp-id needs a host name");
+        if (a.rpId.includes("/") || a.rpId.split(":").length === 2 || a.rpId.includes("]:"))
+          fail(`--rp-id is a host name, no scheme, port or path: ${a.rpId}`);
         break;
       case "--allow-host":
         a.allowHosts = [...(a.allowHosts ?? []), next()];

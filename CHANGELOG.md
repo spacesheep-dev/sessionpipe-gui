@@ -45,6 +45,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **`--rp-id` takes a host name alone.** `--rp-id https://foo.example`,
+  `--rp-id foo.example:7373`, a path or an empty value started a receiver whose passkey
+  origin (`https://https://foo.example:<port>`, `https://:<port>`) no browser makes a
+  passkey for, without a word. Each now stops with an `--rp-id` message.
 - **`--port` and `--keep-days` take digits only, and a flag is never another flag's
   value.** `--port ""` (a script's unset `$PORT`) started on a random port and
   `--keep-days ""` kept every event whole, both without a word; `--port 0x1F90` listened on
