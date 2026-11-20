@@ -5,6 +5,12 @@
    the composer (components/ControlStrip.tsx). Nothing else is new: no colour, no row
    height, no type size. */
 
+/* The sheet's own element in the body (HandoffHost.tsx): no box, so the scrim and the
+   sheet lie as the body's own children would. */
+.hs-host {
+  display: contents;
+}
+
 /* From: fixed text in the value tier, cut at the row's width, never a control. */
 .hs-from {
   display: block;

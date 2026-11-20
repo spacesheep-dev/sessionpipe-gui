@@ -11,30 +11,29 @@ import { LabelDot } from "../components/LabelDot";
 import { PageBar } from "../components/PageBar";
 import { useBackgroundMenu, useStickyTop } from "../components/SessionCard";
 import { useStore } from "../data/hooks";
+import { wideLayout } from "../lib/device";
 import { focusTab, tablistKey } from "../lib/focus";
-import { cleanTitle, repoShort } from "../lib/format";
+import { cleanTitle, plainTitle, repoShort } from "../lib/format";
 import { copyItem, openOutside } from "../lib/menus";
 import { navigate, sessionPath } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit } from "../lib/split";
+import { howOf, type OpenHow, openSession, openSplit, type Rect } from "../lib/split";
 import { ago, clock, durCoarse, useNow } from "../lib/time";
 
 const DAY_MS = 86_400_000;
 
-/** Opens a session beside the page at one of its rows: the panel reads `#seq-N` once
- *  (components/SessionView.tsx) and scrolls there instead of to the latest turn. */
-function openAt(key: string, seq: number | undefined, from?: DOMRect) {
-  openSplit(key, { from });
-  if (seq === undefined) return;
-  history.replaceState(null, "", `${location.pathname}${location.search}#seq-${seq}`);
-  window.dispatchEvent(new HashChangeEvent("hashchange"));
+/** Opens a session by the one rule (lib/split.ts openSession), at one of its rows when
+ *  `seq` is given: the page and the panel read `#seq-N` once (components/SessionView.tsx)
+ *  and scroll there instead of to the latest turn. A row's click is a plain open, a preview
+ *  tab beside; a menu's open keeps its tab. */
+function openAt(key: string, seq: number | undefined, how: OpenHow, opts: { from?: Rect; keep?: boolean } = {}) {
+  openSession(key, how, { ...opts, ...(seq === undefined ? {} : { hash: `#seq-${seq}` }) });
 }
 
 /** The browser's local day as YYYY-MM-DD, and its UTC offset in minutes (getTimezoneOffset's sign). */
 const tzOffset = () => new Date().getTimezoneOffset();
 const localDay = (ms: number) => new Date(ms - tzOffset() * 60_000).toISOString().slice(0, 10);
 const shiftDay = (day: string, days: number) => localDay(Date.parse(`${day}T12:00:00Z`) + days * DAY_MS);
-const desktop = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
 
 type Range = "today" | "7d" | "30d";
 const RANGES: { value: Range; label: string }[] = [
@@ -228,6 +227,9 @@ function FilesView({ range, setRange }: { range: Range; setRange: (r: Range) => 
 /** The sessions a path row names before "+n" (the row's menu has them all). */
 const TOUCHED = 2;
 
+/** A session's title as every other page shows it: plain words, a cut marked once. */
+const titleOf = (t: string) => plainTitle(cleanTitle(t));
+
 function PathRow({ p, repo, now }: { p: FilesPage["repos"][number]["paths"][number]; repo: string; now: number }) {
   const menu = useContextMenu(
     () => [
@@ -237,8 +239,8 @@ function PathRow({ p, repo, now }: { p: FilesPage["repos"][number]["paths"][numb
       {
         label: "Open session",
         items: p.sessions.map((s) => ({
-          label: s.count > 1 ? `${cleanTitle(s.title)} ×${s.count}` : cleanTitle(s.title),
-          run: () => openAt(s.key, undefined),
+          label: s.count > 1 ? `${titleOf(s.title)} ×${s.count}` : titleOf(s.title),
+          run: () => openAt(s.key, undefined, "primary", { keep: true }),
         })),
       },
     ],
@@ -257,11 +259,11 @@ function PathRow({ p, repo, now }: { p: FilesPage["repos"][number]["paths"][numb
             key={s.key}
             type="button"
             className="rv-sess"
-            title={`Open ${cleanTitle(s.title)} beside`}
-            onClick={() => openAt(s.key, undefined)}
+            title={`Open ${titleOf(s.title)}`}
+            onClick={(e) => openAt(s.key, undefined, howOf(e), { from: e.currentTarget.getBoundingClientRect() })}
           >
             <LabelDot session={s.key} />
-            {cleanTitle(s.title)}
+            {titleOf(s.title)}
             {s.count > 1 && <span className="num"> ×{s.count}</span>}
           </button>
         ))}
@@ -423,13 +425,13 @@ function DayView({ day, setDay }: { day: string; setDay: Dispatch<SetStateAction
 
 function DayRow({ s }: { s: Digest["sessions"][number] }) {
   const { harness, id } = splitKey(s.key);
-  const title = cleanTitle(s.title);
+  const title = titleOf(s.title);
   const path = sessionPath(harness, id);
   const menu = useContextMenu(
     () => [
-      { label: "Open beside", run: () => openAt(s.key, undefined) },
+      { label: "Open beside", run: () => openSplit(s.key) },
       { label: "Open as page", run: () => navigate(path) },
-      desktop() && {
+      wideLayout() && {
         label: "Open in new window",
         run: () => openOutside(path),
       },
@@ -454,8 +456,8 @@ function DayRow({ s }: { s: Digest["sessions"][number] }) {
           <button
             type="button"
             className="rv-link"
-            title={`Open ${title} beside`}
-            onClick={() => openAt(s.key, undefined)}
+            title={`Open ${title}`}
+            onClick={(e) => openAt(s.key, undefined, howOf(e), { from: e.currentTarget.getBoundingClientRect() })}
           >
             {title}
           </button>

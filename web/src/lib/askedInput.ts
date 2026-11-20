@@ -39,22 +39,28 @@ export function pickAskedInput(events: readonly StoredEvent[], tool: string, cal
 }
 
 /** The input an open, answerable permission asks about, or an open question's (its
- *  options, read here and answered on its computer), once read. */
-export function useAskedInput(session: SessionSummary, attention: Attention | undefined): { input?: Input } {
+ *  options, read here and answered on its computer), once read. `read`: the read is over,
+ *  found or not (or there is none to make), so an empty `input` means there is none. */
+export function useAskedInput(
+  session: SessionSummary | undefined,
+  attention: Attention | undefined,
+): { input?: Input; read: boolean } {
   const store = useStore();
   const id =
-    attention?.kind === "permission" && attention.tool && (answerable(attention) || isQuestion(attention))
+    session && attention?.kind === "permission" && attention.tool && (answerable(attention) || isQuestion(attention))
       ? attention.attentionId
       : undefined;
   const tool = attention?.tool;
   const [, setRead] = useState(0);
+  const harness = session?.harness ?? "";
+  const sid = session?.id ?? "";
   useEffect(() => {
     if (!id || !tool || asked.has(id)) return;
     let live = true;
     let p = reading.get(id);
     if (!p) {
       p = store.transport
-        .session(session.harness, session.id, { tail: true, limit: 50 })
+        .session(harness, sid, { tail: true, limit: 50 })
         .then(
           (d) => void asked.set(id, pickAskedInput(d.events, tool, id) ?? null),
           () => void asked.set(id, null),
@@ -66,7 +72,8 @@ export function useAskedInput(session: SessionSummary, attention: Attention | un
     return () => {
       live = false;
     };
-  }, [store, session.harness, session.id, id, tool]);
+  }, [store, harness, sid, id, tool]);
   const input = id ? asked.get(id) : undefined;
-  return input ? { input } : {};
+  const read = !id || asked.has(id);
+  return input ? { input, read } : { read };
 }

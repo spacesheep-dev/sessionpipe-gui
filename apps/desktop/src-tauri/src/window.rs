@@ -9,6 +9,14 @@ use tauri::{LogicalPosition, TitleBarStyle};
 
 pub const MAIN: &str = "main";
 
+/// The narrowest a window goes, the main one and a view's. 720 is the width the page keeps
+/// its desktop layout from in a window with a mouse (web/src/lib/device.ts, DESKTOP_QUERY;
+/// web/src/lib/breakpoints.test.ts holds the two to one number): a pixel under it the page
+/// would be the phone's, tab bar and sheets. It is also half the screen of a 13-inch
+/// MacBook (1440 pt), so a window tiled to one side stays a Mac app.
+const MIN_WIDTH: f64 = 720.0;
+const MIN_HEIGHT: f64 = 480.0;
+
 /// Light and dark `--bg` of the sessionpipe skin (white #FFFFFF, ink #141414), painted before the page.
 pub const BG_LIGHT: (u8, u8, u8) = (255, 255, 255);
 pub const BG_DARK: (u8, u8, u8) = (20, 20, 20);
@@ -55,9 +63,12 @@ pub fn rx_base(id: &str) -> String {
 }
 
 pub fn features() -> Vec<&'static str> {
-    let mut f = vec!["tray", "notifications", "hotkey", "deeplink", "updater"];
+    let mut f = vec!["tray", "hotkey", "deeplink", "updater"];
     if cfg!(target_os = "macos") {
         f.push("autostart");
+        // Only macOS has a notifier (macos/notify.rs). Elsewhere app_notify_* answer
+        // "denied", so the page would show a switch that can only be refused.
+        f.push("notifications");
     }
     if cfg!(feature = "identity") {
         f.push("signer");
@@ -92,7 +103,11 @@ pub fn contract<R: Runtime>(app: &AppHandle<R>) -> ShellContract {
     }
 }
 
-/// The initialization script: runs before any page script, in the main frame only.
+/// The initialization script: runs before any page script, in the main frame only. A
+/// window opened on a page (`initial_path`: a menu's Go item, a notification) says in the
+/// history entry's state that the page was asked for, so the page does not leave it for
+/// the one Settings › General › Open on names: Go › Board with the window closed opens
+/// the Board (web/src/lib/landing.ts, landingFor).
 pub fn init_script(c: &ShellContract, initial_path: Option<&str>) -> String {
     let json = serde_json::to_string(c).expect("json");
     let path = initial_path
@@ -105,7 +120,7 @@ pub fn init_script(c: &ShellContract, initial_path: Option<&str>) -> String {
   Object.defineProperty(window, "sessionpipeShell", {{ value: Object.freeze(s), configurable: false, writable: false }});
   document.documentElement.dataset.shell = s.platform;
   var p = {path};
-  if (p && (location.pathname === "/" || location.pathname === "/index.html")) {{ try {{ history.replaceState(null, "", p); }} catch (e) {{}} }}
+  if (p && (location.pathname === "/" || location.pathname === "/index.html")) {{ try {{ history.replaceState({{ asked: 1 }}, "", p); }} catch (e) {{}} }}
   try {{
     new PerformanceObserver(function (l) {{
       l.getEntries().forEach(function (e) {{
@@ -200,7 +215,7 @@ fn build_main<R: Runtime>(app: &AppHandle<R>, initial_path: Option<&str>) -> tau
     let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
         .title("sessionpipe")
         .inner_size(1200.0, 800.0)
-        .min_inner_size(720.0, 480.0)
+        .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .center()
         .background_color(tauri::window::Color(r, g, b, 255))
         .initialization_script(init_script(&c, initial_path))
@@ -317,6 +332,7 @@ pub fn open_view<R: Runtime>(app: &AppHandle<R>, receiver: &str, path: &str) -> 
     WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url.clone()))
         .title("sessionpipe")
         .inner_size(1100.0, 760.0)
+        .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .on_navigation(move |u| {
             let same = u.origin() == origin;
             if !same && matches!(u.scheme(), "http" | "https") {
@@ -338,6 +354,15 @@ pub fn open_view<R: Runtime>(app: &AppHandle<R>, receiver: &str, path: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notifications_are_offered_only_where_there_is_a_notifier() {
+        assert_eq!(
+            features().contains(&"notifications"),
+            cfg!(target_os = "macos")
+        );
+        assert!(features().contains(&"tray"));
+    }
 
     #[test]
     fn navigation_guard() {
@@ -388,6 +413,8 @@ mod tests {
         assert!(s.contains(r#""appVersion":"0.2.0""#));
         assert!(s.contains("dataset.shell = s.platform"));
         assert!(s.contains(r#"var p = "/inbox";"#));
+        // The page it opens on is marked as asked for: Open on does not move it.
+        assert!(s.contains(r#"history.replaceState({ asked: 1 }, "", p);"#));
         assert!(init_script(&c, None).contains("var p = null;"));
         // A path can't break out of the string.
         assert!(init_script(&c, Some("\"</script>")).contains(r#""\"</script>""#));

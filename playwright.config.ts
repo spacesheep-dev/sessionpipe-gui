@@ -17,13 +17,16 @@ export const E2E_TLS_BASE = `https://localhost:${E2E_TLS_PORT}`;
  *  first-run redirect to /setup never meets a board test. */
 export const SETUP_SEEN_KEY = "sessionpipe-gui.setup.seen";
 /** The suite describes the full interface; Simple mode (the default for a device that has not
- *  chosen) is exercised by settings.spec.ts on purpose. */
+ *  chosen) is exercised by settings.spec.ts on purpose. Sessions open as pages, as chosen
+ *  (`v` is the stored form's, web/src/lib/settings.ts); a computer that has not chosen opens
+ *  them beside, which split.spec.ts and search.spec.ts exercise on purpose. */
 export const SETTINGS_KEY = "sessionpipe-gui.settings";
+export const SUITE_SETTINGS = { mode: "advanced", openSessions: "page", v: 2 } as const;
 export const seenSetup = (origin: string) => ({
   origin,
   localStorage: [
     { name: SETUP_SEEN_KEY, value: "1" },
-    { name: SETTINGS_KEY, value: JSON.stringify({ mode: "advanced" }) },
+    { name: SETTINGS_KEY, value: JSON.stringify(SUITE_SETTINGS) },
   ],
 });
 

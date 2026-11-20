@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { EmptyState, Toggle } from "../components/bits";
 import { confirmAction } from "../components/ContextMenu";
 import { accountMode } from "../lib/net";
-import { Link, navigate } from "../lib/router";
+import { Link, navigate, openSettings, settingsHref, usePath } from "../lib/router";
 import { useNow } from "../lib/time";
 import { forgetAnswers, noteStatus } from "./client";
 import type { SearchClient } from "./types";
@@ -40,6 +40,7 @@ export function StatusLine({
 }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
+  const path = usePath();
   if (!status) return <div className={`sx-status ${className}`} aria-hidden="true" />;
   const words = statusWords(status, withResults);
   const err = status.state === "error";
@@ -56,7 +57,7 @@ export function StatusLine({
         {words}
       </button>
       {status.state === "off" && (
-        <Link to="/settings?section=data" className="sx-status-link">
+        <Link to={settingsHref("data", path)} plainClick={() => openSettings("data")} className="sx-status-link">
           off
         </Link>
       )}

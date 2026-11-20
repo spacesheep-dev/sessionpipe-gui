@@ -2,6 +2,7 @@
 // The decisions behind the welcome, the first-run sheet and Settings › App, apart from
 // their React so they are tested on their own (logic.test.ts).
 import type { AppSettings, NotifyStatus } from "./appState";
+import type { UpdateFailure } from "./receiverUpdate";
 
 // ----- the welcome: Start sessionpipe on this Mac -----
 
@@ -9,12 +10,19 @@ export type StartState =
   | { kind: "idle" }
   | { kind: "starting"; message: string }
   | { kind: "needsNode" }
-  | { kind: "failed"; message: string };
+  /** Another install or update is at work from this app: its receiver is waited for
+   *  (StartHere.tsx). `line`: the shell's words for it, shown should nothing answer. */
+  | { kind: "busy"; line: string }
+  /** It ended with no receiver: one sentence. A start that failed has a `detail`, the
+   *  shell's raw line (and the log it names), kept folded away; one still loading has none. */
+  | { kind: "failed"; sentence: string; detail?: string };
 
 export type StartEvent =
   | { type: "begin" }
   | { type: "progress"; step?: string; message?: string }
-  | { type: "error"; error: unknown };
+  | { type: "error"; error: unknown }
+  /** The receiver another install was to bring never answered. */
+  | { type: "noAnswer" };
 
 const text = (e: unknown): string =>
   e instanceof Error
@@ -23,14 +31,26 @@ const text = (e: unknown): string =>
       ? e
       : e && typeof e === "object" && "message" in e
         ? String((e as { message: unknown }).message)
-        : "It did not start.";
+        : "";
 
-/** The start's failure for want of Node (no `node` or `npx` on this Mac). */
+/** The start's failure for want of Node (no `node` or `npx` on this Mac), by its words:
+ *  the shell says it by kind ("noNode"), and this reads what has no kind. */
 export const isNoNode = (e: unknown): boolean => {
   if (e && typeof e === "object" && (e as { code?: unknown }).code === "no-node") return true;
   const m = text(e);
-  return /\bno-node\b/.test(m) || /\bnode\b.*\b(not found|missing|required|needed)\b/i.test(m);
+  return (
+    /\bno-node\b/.test(m) || /\bneeds node\b/i.test(m) || /\bnode\b.*\b(not found|missing|required|needed)\b/i.test(m)
+  );
 };
+
+/** What `rx_start_local` rejected with: the shell's UpdateFailure (lifecycle/supervisor.rs:
+ *  a kind, its line, the log a line names), or words alone (a thrown Error, a string). */
+function startFailure(e: unknown): { kind?: UpdateFailure["kind"]; line: string; log?: string } {
+  if (e && typeof e === "object" && "kind" in e && "line" in e) return e as UpdateFailure;
+  return { line: text(e) };
+}
+
+const DID_NOT_START = "It didn't start.";
 
 export function startStep(prev: StartState, ev: StartEvent): StartState {
   switch (ev.type) {
@@ -40,13 +60,20 @@ export function startStep(prev: StartState, ev: StartEvent): StartState {
       if (prev.kind !== "starting") return prev;
       if (ev.step === "no-node") return { kind: "needsNode" };
       return { kind: "starting", message: ev.message?.trim() || prev.message };
-    case "error":
-      return isNoNode(ev.error) ? { kind: "needsNode" } : { kind: "failed", message: text(ev.error) };
+    case "error": {
+      const f = startFailure(ev.error);
+      if (f.kind === "noNode" || isNoNode(ev.error)) return { kind: "needsNode" };
+      // It did start, and its board is still loading: not a failure, and nothing to unfold.
+      if (f.kind === "timeout") return { kind: "failed", sentence: "Give it a minute to load, then try again." };
+      // Starting it again would only be refused.
+      if (f.kind === "busy" || f.kind === "stillRunning") return { kind: "busy", line: f.line };
+      const log = f.log && !f.line.includes(f.log) ? `\n${f.log}` : "";
+      return { kind: "failed", sentence: DID_NOT_START, detail: f.line + log };
+    }
+    case "noAnswer":
+      return prev.kind === "busy" ? { kind: "failed", sentence: DID_NOT_START, detail: prev.line } : prev;
   }
 }
-
-/** What to run once Node is there; shown with Copy. */
-export const INSTALL_COMMAND = "npx -y sessionpipe-gui service install";
 
 /** A pasted address or phone link, as `rx_add` takes it; null when it is not one. The
  *  link's `?k=` stays (it is the UI key the shell keeps in the Keychain). */
@@ -95,6 +122,29 @@ export async function notifyToggle(
   if (status === "granted") return { enabled: true, note: null };
   if (status === "denied") return { enabled: false, note: `Notifications are off for sessionpipe in ${where}.` };
   return { enabled: false, note: null };
+}
+
+// ----- one sound per prompt -----
+
+/** Whether the Mac's own notification plays the sound for a new prompt of this kind (an
+ *  attention's `kind`), so the page's toast for it plays none. The shell's rule, kept
+ *  alike (apps/desktop macos/notify.rs on_needs_you, notifications.rs kind_on and content):
+ *  the switch on, allowed by macOS, not paused, the window not in front, that kind on,
+ *  and a kind macOS sounds for: a permission request or a question. An error and
+ *  "Finished" are posted silently, so their toast keeps its sound. */
+export function systemSounds(
+  settings: AppSettings | null,
+  status: NotifyStatus | null,
+  kind: string,
+  focused: boolean,
+  now = Date.now(),
+): boolean {
+  const n = settings?.notifications;
+  if (!n?.enabled || status !== "granted" || focused) return false;
+  if (n.pausedUntil && Date.parse(n.pausedUntil) > now) return false;
+  if (kind === "permission") return n.kinds?.permission ?? true;
+  if (kind === "question" || kind === "elicitation") return n.kinds?.question ?? true;
+  return false;
 }
 
 /** The suggested New session shortcut (NATIVE-SPEC §3.5). */
@@ -181,7 +231,7 @@ export function hotkeyLabel(h: string | null, platform: string | null = "macos")
 /** A rejection the person caused (Cancel in the shell's own sheet): not an error to show. */
 export const isCancel = (e: unknown): boolean => (e instanceof Error ? e.message : String(e)) === "cancelled";
 
-// ----- Settings › App: updates -----
+// ----- Settings › About: the app's own update -----
 
 export interface UpdateWords {
   state: string;
@@ -191,10 +241,13 @@ export interface UpdateWords {
   progress?: number;
 }
 
+/** The update row's one sentence. `appVersion` is said only where nothing beside the row
+ *  says it (About's head does, and passes ""). A failure that kept its version was a
+ *  download or an install; a check that failed has none. */
 export function updateLine(appVersion: string, u: UpdateWords): string {
   switch (u.state) {
     case "checking":
-      return "Checking for updates…";
+      return "Checking…";
     case "downloading": {
       const pct = typeof u.progress === "number" ? ` ${Math.round(u.progress)}%` : "";
       return u.version ? `Downloading ${u.version}…${pct}` : `Downloading the update…${pct}`;
@@ -202,32 +255,63 @@ export function updateLine(appVersion: string, u: UpdateWords): string {
     case "ready":
       return u.version ? `${u.version} is ready` : "An update is ready";
     case "error":
-      return "Couldn't check for updates";
+      return u.version ? `Couldn't update to ${u.version}` : "Couldn't check for updates";
     default:
-      return appVersion ? `sessionpipe ${appVersion} is up to date` : "sessionpipe is up to date";
+      // Nothing has looked yet (the first seconds of a launch, or the automatic check off).
+      if (!u.lastChecked) return "Not checked yet";
+      return appVersion ? `Up to date · ${appVersion}` : "Up to date";
   }
 }
 
-/** "Last checked just now" … "Last checked 3 days ago", or "" before the first check. */
+/** "Checked just now" … "Checked 3 days ago", or "" before the first check. */
 export function lastCheckedLine(iso: string | undefined, now = Date.now()): string {
   const t = iso ? Date.parse(iso) : Number.NaN;
   if (Number.isNaN(t)) return "";
   const m = Math.max(0, Math.floor((now - t) / 60_000));
-  if (m < 1) return "Last checked just now";
-  if (m < 60) return `Last checked ${m} min ago`;
+  if (m < 1) return "Checked just now";
+  if (m < 60) return `Checked ${m} min ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `Last checked ${h} ${h === 1 ? "hour" : "hours"} ago`;
+  if (h < 24) return `Checked ${h} ${h === 1 ? "hour" : "hours"} ago`;
   const d = Math.floor(h / 24);
-  return `Last checked ${d === 1 ? "yesterday" : `${d} days ago`}`;
+  return `Checked ${d === 1 ? "yesterday" : `${d} days ago`}`;
 }
 
-/** The caption under the update row: the reason it failed, the version you have while
- *  another is on its way, and when it last looked. */
-export function updateHint(appVersion: string, u: UpdateWords, now = Date.now()): string {
-  const parts: string[] = [];
-  if (u.state === "error" && u.error) parts.push(u.error);
-  if (appVersion && (u.state === "ready" || u.state === "downloading")) parts.push(`You have ${appVersion}.`);
-  const last = lastCheckedLine(u.lastChecked, now);
-  if (last) parts.push(`${last}.`);
-  return parts.join(" ");
+/** The caption under the update row: when it last looked, what the downloaded version
+ *  brings (the words of a link, `updateNotes`), or why it failed. None while it works. */
+export function updateHint(u: UpdateWords, now = Date.now()): string {
+  switch (u.state) {
+    case "checking":
+    case "downloading":
+      return "";
+    case "ready":
+      return u.version ? `What's new in ${u.version}` : "";
+    case "error":
+      return u.error ?? "";
+    default: {
+      const last = lastCheckedLine(u.lastChecked, now);
+      return last ? `${last}.` : "";
+    }
+  }
+}
+
+/** The downloaded version's release notes, which the ready row's caption links to. */
+export const updateNotes = (u: UpdateWords): string | null =>
+  u.state === "ready" && u.version
+    ? `https://github.com/spacesheep-dev/sessionpipe-gui/releases/tag/v${encodeURIComponent(u.version)}`
+    : null;
+
+/** The row's one button, or null while there is nothing to press: a check and a download
+ *  end by themselves. Try again checks again (a failed download left nothing to install). */
+export function updateButton(u: UpdateWords): "Check now" | "Try again" | "Install and relaunch" | null {
+  switch (u.state) {
+    case "checking":
+    case "downloading":
+      return null;
+    case "ready":
+      return "Install and relaunch";
+    case "error":
+      return "Try again";
+    default:
+      return "Check now";
+  }
 }

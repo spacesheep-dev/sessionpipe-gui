@@ -90,7 +90,7 @@ const openSection = async (page: Page) => {
   await openPage(page, "/inbox");
   await page.locator(".inbox-head").getByRole("button", { name: "Notifications" }).click();
   await page.getByRole("link", { name: "Sounds" }).click();
-  await expect(page).toHaveURL(/\/settings\?section=notifications$/);
+  await expect(page).toHaveURL(/\/inbox\?settings=notifications$/);
   const section = page.locator(".ntf");
   await expect(section).toBeVisible();
   return section;
@@ -132,6 +132,16 @@ test.describe("sounds", () => {
       ["done", "tick"],
     ])
       await expect(row(section, kind!).getByRole("combobox")).toHaveAttribute("data-value", sound!);
+    // Named as the app's notification kinds are, each with at most one caption. The keys
+    // they are saved under stay: a choice saved for `done` is Delivered's.
+    await expect(section.locator(".ntf-row[data-kind] .settings-label")).toHaveText([
+      "Permission requests",
+      "Questions",
+      "Errors",
+      "Delivered",
+    ]);
+    await expect(row(section, "done").locator(".settings-hint")).toHaveText("A message you sent was delivered.");
+    await expect(row(section, "needsYou").locator(".settings-hint")).toHaveCount(0);
 
     await row(section, "needsYou").getByRole("button", { name: "Test" }).click();
     await expect.poll(() => started(page)).toBe(2); // the two-note chime
@@ -162,6 +172,7 @@ test.describe("sounds", () => {
     await expect(again.getByRole("slider", { name: "Volume" })).toHaveValue("0.25");
     await expect(row(again, "question").getByRole("combobox")).toHaveAttribute("data-value", "marimba");
     await expect(row(again, "done").getByRole("combobox")).toHaveAttribute("data-value", "blip");
+    await expect(row(again, "done").locator(".settings-label")).toHaveText("Delivered");
   });
 
   test("the appearance popover stays appearance only", async ({ page }) => {

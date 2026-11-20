@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: search-ui. The search's words, in one place (ux-search.md §15): the result
 // line, a row's date and meta, the status line, the footers. Pure, tested.
-import type { SearchIndexStatus, SessionMatch } from "@shared/api";
-import { harnessMark } from "../lib/format";
+import type { SearchIndexStatus, SearchMark, SessionMatch, SessionSearchHit } from "@shared/api";
+import { harnessMark, toolLabel } from "../lib/format";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -49,6 +49,33 @@ export function spanCoarse(first: string, last: string): string {
   if (d < HOUR) return `${Math.floor(d / MIN)} m`;
   if (d < DAY) return `${Math.floor(d / HOUR)} h`;
   return `${Math.floor(d / DAY)} d`;
+}
+
+/** How much of a tool line's start is its tool's name and the space after it: the raw
+ *  name (`Edit ~/code/…`), or the word the line is drawn under (`Changed src/…` of a
+ *  files.changed). 0 where the line starts with neither. */
+export function toolLead(text: string, tool: string | undefined): number {
+  if (!tool) return 0;
+  for (const name of [tool, toolLabel(tool)]) if (text.startsWith(`${name} `)) return name.length + 1;
+  return 0;
+}
+
+/** A tool line's text without its leading tool name (the verb is drawn on its own), the
+ *  marks moved with it. */
+export function toolText(hit: Pick<SessionSearchHit, "text" | "marks" | "tool">): {
+  text: string;
+  marks: SearchMark[];
+} {
+  let text = hit.text;
+  const lead = text.startsWith("…") ? 1 : 0;
+  const cut = toolLead(text.slice(lead), hit.tool);
+  if (cut) text = text.slice(0, lead) + text.slice(lead + cut);
+  const marks = cut
+    ? hit.marks
+        .filter(([a]) => a >= lead + cut || a < lead)
+        .map(([a, b]) => (a >= lead + cut ? ([a - cut, b - cut] as SearchMark) : ([a, b] as SearchMark)))
+    : hit.marks;
+  return { text, marks };
 }
 
 /** `/Users/demo/code/billing` → `~/code/billing`. */

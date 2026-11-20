@@ -24,7 +24,7 @@ import { searchClient } from "./client";
 import { Marked } from "./Marked";
 import { copyAs, historyLink } from "./menu";
 import type { SearchClient } from "./types";
-import { footerWords, harnessName, idWord, metaFacts } from "./words";
+import { footerWords, harnessName, idWord, metaFacts, toolLead } from "./words";
 import "../styles/search.css";
 
 const WINDOW = 60;
@@ -370,11 +370,13 @@ function Turn({
   );
 }
 
-const stripTool = (m: SearchTranscriptMessage): SearchTranscriptMessage =>
-  m.tool && m.text.startsWith(`${m.tool} `) ? { ...m, text: m.text.slice(m.tool.length + 1) } : m;
+const stripTool = (m: SearchTranscriptMessage): SearchTranscriptMessage => {
+  const n = toolLead(m.text, m.tool);
+  return n ? { ...m, text: m.text.slice(n) } : m;
+};
 const shift = (m: SearchTranscriptMessage, marks: SearchMark[] | undefined): SearchMark[] | undefined => {
-  if (!marks || !m.tool || !m.text.startsWith(`${m.tool} `)) return marks;
-  const n = m.tool.length + 1;
+  const n = toolLead(m.text, m.tool);
+  if (!marks || !n) return marks;
   return marks.filter(([a]) => a >= n).map(([a, b]) => [a - n, b - n] as SearchMark);
 };
 

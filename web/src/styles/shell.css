@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* ---------- shell ---------- */
 /* The window: a sidebar on the chrome ground (a labelled source list from 1200 px, a
-   compact icon rail from 840 px), the page beside it, a bottom tab bar on phones. One
+   compact icon rail under that), the page beside it, a bottom tab bar on phones. One
    title band runs across the window: the sidebar's top, every page bar and the panel
    head are --bar tall, so their hairlines make one rule. The chrome never scrolls with
    the page and is not text. Mobile first. */
@@ -159,10 +159,24 @@
   border-radius: 50%;
   background: var(--fg-3);
 }
+/* The same dot on the sidebar foot's Settings button, at its top right: an update of the
+   app is downloaded and waits to be installed (Settings › About). Quiet for the same
+   reason: it can wait. */
+.rail-foot .theme-btn {
+  position: relative;
+}
+.rail .rail-foot .theme-btn > .nav-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  left: auto;
+  margin: 0;
+}
 
-/* The stream (Shell.tsx ConnectionPill): while live, only a small green dot; its word
-   is kept for assistive tech and the tests, not drawn. A drop shows its words (and
-   Retry now) in the meta tier, the dot hollow while reconnecting, red when offline. */
+/* The stream (Shell.tsx ConnectionPill): a small dot in every state, named by its
+   tooltip. While live its word is kept for assistive tech and the tests, not drawn. A
+   drop turns the dot hollow while reconnecting and red when offline; its words and Retry
+   are the page bar's (.bar-conn below), so the foot never grows a line. */
 .conn {
   display: inline-flex;
   align-items: center;
@@ -185,9 +199,6 @@
   background: var(--fg-3);
 }
 .conn-label {
-  font-variant-numeric: tabular-nums;
-}
-.conn--live .conn-label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -203,27 +214,12 @@
 .conn--offline .conn-dot {
   background: var(--err);
 }
-.conn-retry {
-  padding: 0 4px;
-  border-radius: var(--radius-inner);
-  color: var(--fg-2);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  text-decoration: underline;
-  text-decoration-color: var(--line-2);
-  text-underline-offset: 2px;
-}
-@media (hover: hover) {
-  .conn-retry:hover {
-    color: var(--fg);
-  }
-}
 
 /* ----- the phone: safe areas, the dropped stream ----- */
 
 /* The page and its bars keep clear of a notch or the rounded corners in landscape; the
    tab bar's tabs too, its ground still running edge to edge. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .main {
     padding-left: max(var(--gutter), var(--safe-left, env(safe-area-inset-left)));
     padding-right: max(var(--gutter), var(--safe-right, env(safe-area-inset-right)));
@@ -297,8 +293,8 @@
   display: none;
 }
 /* The subtitle line itself: the meta's own place and type, the dot and the words of
-   the pill, and Retry as a link in the tint. The words are the live region; the link
-   is 44 px to a finger on a 20 px line. */
+   the pill, and Retry as a link in the tint. Not a live region (what is spoken is
+   Shell.tsx ConnAnnouncer's); the link is 44 px to a finger on a 20 px line. */
 .phone-conn-sub {
   display: flex;
   align-items: center;
@@ -354,10 +350,7 @@
 .boot[data-mode="advanced"] [data-boot-simple] {
   display: none;
 }
-@media (min-width: 840px) {
-  .boot .rail-nav > :is([data-boot="feed"], [data-boot="machines"]) {
-    margin-top: 12px;
-  }
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .boot .bar-below {
     display: none;
   }
@@ -365,7 +358,7 @@
 
 /* ----- the sidebar (desktop) ----- */
 
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .shell {
     grid-template-rows: none;
     grid-template-columns: var(--rail) minmax(0, 1fr);
@@ -439,10 +432,9 @@
     gap: 2px;
     padding: 8px 6px;
   }
-  /* Groups are spacing, not lines: Board and Inbox, Feed and Review, then the rest. */
-  .rail-nav > [data-nav="feed"],
-  .rail-nav > [data-nav="machines"] {
-    margin-top: 12px;
+  /* Finish setup sits at the foot of the list, so the rows above never move for it. */
+  .rail-nav > .nav-link--pinned {
+    margin-top: auto;
   }
   /* The rail's links and the sidebar's rows show their fill at once under a press and
      let it go over --dur-release. */
@@ -485,10 +477,10 @@
     top: 8px;
     left: calc(50% + 7px);
   }
-  /* The views: a hairline in the rail; in the sidebar a section label instead. */
+  /* A hairline between groups; in the sidebar the views' groups carry a label under it. */
   .rail-group {
     width: 32px;
-    margin: 10px auto;
+    margin: 6px auto;
     border: 0;
     border-top: var(--hairline) solid var(--line);
   }
@@ -548,13 +540,17 @@
     gap: 8px;
     min-height: var(--side-row);
     padding: 0 8px;
-    font-size: var(--text-md);
-    font-weight: 500;
+    font-size: var(--text-sm);
+    font-weight: 400;
   }
   .shell--side .rail .nav-glyph {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     color: var(--fg-3);
+  }
+  .shell--side .rail .nav-glyph--svg svg {
+    width: 16px;
+    height: 16px;
   }
   .shell--side .rail .nav-link--on .nav-glyph {
     color: var(--fg);
@@ -567,12 +563,18 @@
     position: static;
     margin-left: auto;
   }
-  .shell--side .rail-group {
+  /* "Finish setup" says it: the dot is the icon rail's. */
+  .shell--side .rail [data-nav="setup"] .nav-dot {
     display: none;
+  }
+  .shell--side .rail-group {
+    display: block;
+    width: auto;
+    margin: 6px 8px;
   }
   .shell--side .rail-section {
     display: block;
-    margin: 16px 0 4px;
+    margin: 2px 0 4px;
     padding: 0 8px;
     color: var(--fg-3);
     font-size: var(--text-xs);
@@ -588,16 +590,6 @@
   .shell--side .rail .conn {
     flex-direction: row;
     margin: 0 auto 0 0;
-  }
-  /* A drop's words ("Reconnecting · 8 s  Retry now") take the footer's first line, so
-     they never push its buttons past the sidebar's edge. */
-  .shell--side .rail-foot {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    row-gap: 4px;
-  }
-  .shell--side .rail .conn:not(.conn--live) {
-    flex-basis: 100%;
   }
   /* Usage (UsageGlance.tsx), the sidebar's last block, above the footer's hairline: a
      heading in the section labels' tier, then a line per account, its name and what is
@@ -726,9 +718,11 @@
   }
 }
 
-/* The compact rail (840–1200 px): icons only, each named by its tooltip; the labels stay
-   for assistive tech. The stream's words too: the dot says it, the tooltip names it. */
-@media (min-width: 840px) {
+/* The compact rail (under 1200 px, down to where the phone layout begins: 840 px, or 720
+   in a window with a mouse; lib/device.ts): icons only, each named by its tooltip; the
+   labels stay for assistive tech. The stream's words too: the dot says it, the tooltip
+   names it. */
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .shell:not(.shell--side) .rail .nav-label {
     position: absolute;
     width: 1px;
@@ -740,18 +734,6 @@
   .shell:not(.shell--side) .rail .nav-glyph {
     width: 20px;
     height: 20px;
-  }
-  /* The compact rail has no room for words: the dot says it and the tooltip names it. */
-  .shell:not(.shell--side) .rail .conn-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-  .shell:not(.shell--side) .rail .conn-retry {
-    font-size: calc(var(--text-xs) - 1px);
   }
 }
 
@@ -784,7 +766,7 @@
 
 /* The page's title band: sticky, opaque, a hairline below that lines up with the
    sidebar's and the panel's. Title and meta at the left, the tools and actions at the
-   right; in a narrow column (the split open) the tools take a second row of their own. */
+   right; in a very narrow column the tools take a second row of their own. */
 .bar {
   position: sticky;
   top: 0;
@@ -821,14 +803,62 @@
   font-weight: 600;
   line-height: var(--lh-tight);
 }
+/* Cut before the title is ("2 need an answer · 1 waiting in a terminal" beside a panel). */
 .bar-meta {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--fg-3);
   font-size: var(--text-sm);
   white-space: nowrap;
 }
+/* A dropped stream in the meta's place (PageBar.tsx ConnStatus), the one place a window
+   says it: 12 px after the title, the dot (a ring while reconnecting, red when offline),
+   its words in the meta's tone, and the one Retry, a ghost button at the chips' height.
+   In a column too narrow for all of it (a session beside, the Files drawer) the title
+   gives way first, down to nothing, then the words, with an ellipsis. What is left over
+   is cut off at the status's own edge, never drawn over the bar's buttons; the padding is
+   the room Retry's focus ring takes inside that edge. */
+.bar-conn {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0 -5px 0 4px;
+  padding: 5px 5px 5px 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.bar-conn .conn-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fg-3);
+}
+.bar-conn--offline .conn-dot {
+  background: var(--err);
+  box-shadow: none;
+}
+.bar-conn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-conn .btn {
+  flex: none;
+}
+/* The factor is the order: beside it the status's own 1 gives up no part of a pixel, so
+   its words stay whole until the title has gone. It outranks a bar that holds its title
+   (session.css `.sess-bar .bar-title`). */
+.bar-lead:has(> .bar-conn) .bar-title {
+  flex-shrink: 1000000;
+}
+/* The tools take what the title leaves and shrink before they wrap: the search to its
+   140 px floor, a filter's words to an ellipsis. */
 .bar-tools {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -848,7 +878,23 @@
 .bar-back {
   margin-left: -6px;
 }
-@container bar (max-width: 720px) {
+/* The status takes its room from the search, never a row from the tools: where a window
+   is too tight for both, the field narrows while the stream is down (at its least, to its
+   glyph and its key), so the bar stays as tall as it was and the rows under it hold still.
+   Its width of 0 is what the bar counts when it decides whether the tools fit; it grows
+   from there into the room there is, up to the 240 px it has otherwise. */
+@container bar (min-width: 481px) {
+  .bar:has(.bar-conn) .bar-tools > .search {
+    flex: 1 1 54px;
+    width: 0;
+    min-width: 54px;
+    max-width: 240px;
+  }
+  .bar:has(.bar-conn) .bar-tools > .search input {
+    text-overflow: ellipsis;
+  }
+}
+@container bar (max-width: 480px) {
   .bar-tools {
     order: 3;
     flex: 1 0 100%;
@@ -867,7 +913,7 @@
 /* The phone: a 44 px navigation bar whose title fades in once the large title under it
    has scrolled away (PageBar watches it); the tools sit under the large title and
    scroll with the page. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .bar {
     padding-top: var(--safe-top, env(safe-area-inset-top));
     justify-content: space-between;

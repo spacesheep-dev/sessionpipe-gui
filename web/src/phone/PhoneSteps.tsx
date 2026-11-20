@@ -21,6 +21,7 @@ import { useDeviceRequest } from "../control/useDeviceRequest";
 import { guessDeviceName, passkeysAvailable } from "../control/webauthn";
 import { refusalWords } from "../control/words";
 import { useAppState, useStore } from "../data/hooks";
+import { phoneLayout } from "../lib/device";
 import { copyText } from "../lib/menus";
 import { Link } from "../lib/router";
 import { type Mark, Step } from "../pages/SetupStep";
@@ -127,7 +128,7 @@ function AddressRow({ label, url }: { label: string; url: string }) {
     () => [
       { label: "Copy link", run: () => copyText(url) },
       {
-        label: matchMedia("(max-width: 839px)").matches ? "Open" : "Open in new window",
+        label: phoneLayout() ? "Open" : "Open in new window",
         run: () => void window.open(url, "_blank", "noopener"),
       },
     ],

@@ -60,8 +60,7 @@
   line-height: var(--lh-tight);
 }
 .qs-sect .seg {
-  display: flex;
-  width: 100%;
+  display: grid;
 }
 .qs-note {
   color: var(--fg-3);
@@ -203,7 +202,7 @@
 }
 
 /* ----- the phone: a bottom sheet above the tab bar ----- */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .qs-scrim {
     display: block;
     position: fixed;

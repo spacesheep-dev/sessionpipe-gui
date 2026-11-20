@@ -9,25 +9,37 @@
 // it also keeps the status bar on the page's ground (theme-color), scrolls a page to its
 // top when its tab is tapped again, mounts pull to refresh on the list pages
 // (PullRefresh), and shows a dropped stream as a pill under the bar, which that same
-// pull retries. The wide sidebar ends with what each account has left (UsageGlance.tsx),
-// which the phone reaches as More › Usage.
+// pull retries. The wide sidebar ends with what each account has left (UsageGlance.tsx);
+// where those lines are not drawn Usage is a row, and the phone reaches it as More › Usage.
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
-import { useAnswerableCount, useAppState, useStore, useStreamMark } from "../data/hooks";
+import { useAppState, useNeedsYouCount, useStore, useStreamMark } from "../data/hooks";
+import { phoneLayout, reachName, usePanelCovers, usePhoneLayout } from "../lib/device";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
 import { reducedMotion, usePresence } from "../lib/motion";
 import { accountMode } from "../lib/net";
-import { Link, navigate, type Route, usePath } from "../lib/router";
+import {
+  Link,
+  lastMove,
+  navigate,
+  openSettings,
+  type Route,
+  SETTINGS_PARAM,
+  settingsHref,
+  usePath,
+  useSearchParam,
+} from "../lib/router";
+import { useReadyUpdate } from "../lib/selfUpdate";
 import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
-import { hintFor, useShortcut, useShortcutMap } from "../lib/shortcuts";
+import { hintFor, isTyping, KeysOff, useShortcut, useShortcutMap } from "../lib/shortcuts";
 import { getSkins, isPlain } from "../lib/skins";
-import { restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
+import { closeSplit, leaveSplit, restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
 import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
-import { useNow } from "../lib/time";
+import { NEW_WORDS } from "../native/accountWords";
 import { WORKFLOWS_ICON_PATHS } from "../orchestrate/workflows/glyphs";
 import { RunnerHost } from "../orchestrate/workflows/useRunner";
 import { useSetupStatus } from "../setup/api";
@@ -40,9 +52,10 @@ import { openPalette } from "./Palette";
 import { PULL_PAGES, PullRefresh } from "./PullRefresh";
 import { QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
+import { Settings } from "./Settings";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { TipHost } from "./Tip";
-import { UsageGlance } from "./UsageGlance";
+import { UsageGlance, useGlanceShown } from "./UsageGlance";
 
 /** Whether Setup had steps to go at the last visit: the rail draws its entry from this
  *  until the status answers, so nothing below it moves ~100 ms after the first paint. A
@@ -63,8 +76,14 @@ const writeSetupHint = (on: boolean): void => {
   }
 };
 
-/** The phone layout: a tab bar, sheets, large titles (tokens.css switches at the same width). */
-export const PHONE_QUERY = "(max-width: 839px)";
+/** The phone layout: a tab bar, sheets, large titles (lib/device.ts decides it). */
+export { PHONE_QUERY } from "../lib/device";
+
+/** What is drawn over the page and is not the page (the palette, the toasts): its keys stay
+ *  live while the panel covers the page (a narrow window) and the page's own are off. */
+export function OverPage({ children }: { children: ReactNode }) {
+  return <KeysOff.Provider value={false}>{children}</KeysOff.Provider>;
+}
 
 /** Whether a media query matches, live. */
 export function useMedia(query: string): boolean {
@@ -143,13 +162,6 @@ const ICON: Record<string, ReactNode> = {
       <path d="M7 17h6" />
     </>
   ),
-  connect: (
-    <>
-      <path d="M8.5 11.5l3-3" />
-      <path d="M7 13l-1.5 1.5a2.5 2.5 0 0 1-3.5-3.5L4 9" />
-      <path d="M13 7l1.5-1.5a2.5 2.5 0 0 1 3.5 3.5L16 11" />
-    </>
-  ),
   /* A gauge: how much is left (Usage, a More row on a phone). */
   usage: (
     <>
@@ -219,17 +231,21 @@ interface NavItem {
   /** …the theme's own inline SVG from its manifest. */
   svg?: string;
   experimental?: boolean;
+  /** Its group in the sidebar, which a hairline sets off from the one before: the lists
+   *  (0), Feed and Review (1), Workflows and Machines (2), the views (3), the experimental
+   *  views (4). None: the entry sits at the foot of the list, apart from the groups. */
+  group?: number;
 }
 
+/* Connect is no entry: it is Machines' "Connect…", ⌘K's and `g c`. */
 const BUILTIN: NavItem[] = [
-  { to: "/", key: "board", label: "Board", glyph: ICON.board },
-  { to: "/inbox", key: "inbox", label: "Inbox", glyph: ICON.inbox },
-  { to: "/search", key: "search", label: "Search", glyph: ICON.search },
-  { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed },
-  { to: "/review", key: "review", label: "Review", glyph: ICON.review },
-  { to: "/workflows", key: "workflows", label: "Workflows", glyph: ICON.workflows },
-  { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines },
-  { to: "/connect", key: "connect", label: "Connect", glyph: ICON.connect },
+  { to: "/", key: "board", label: "Board", glyph: ICON.board, group: 0 },
+  { to: "/inbox", key: "inbox", label: "Inbox", glyph: ICON.inbox, group: 0 },
+  { to: "/search", key: "search", label: "Search", glyph: ICON.search, group: 0 },
+  { to: "/feed", key: "feed", label: "Feed", glyph: ICON.feed, group: 1 },
+  { to: "/review", key: "review", label: "Review", glyph: ICON.review, group: 1 },
+  { to: "/workflows", key: "workflows", label: "Workflows", glyph: ICON.workflows, group: 2 },
+  { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines, group: 2 },
 ];
 
 /** A manifest icon is inline SVG the theme author wrote; it is code of the same trust
@@ -250,37 +266,53 @@ export const themeNavItem = (t: InstalledTheme): NavItem => {
     glyph: PLUG_ICON,
     svg: svg ?? undefined,
     experimental: t.experimental,
+    group: t.experimental ? 4 : 3,
   };
 };
 
-const SETUP_ITEM: NavItem = { to: "/setup", key: "setup", label: "Setup", glyph: ICON.setup };
+/** The words say what is left to do, so the sidebar shows no dot beside them. */
+const SETUP_ITEM: NavItem = { to: "/setup", key: "setup", label: "Finish setup", glyph: ICON.setup };
 
-/** Usage is no rail item (the sidebar's Usage lines lead there): on a phone it is a More
- *  row, after Machines. */
-const USAGE_ITEM: NavItem = { to: "/usage", key: "usage", label: "Usage", glyph: ICON.usage };
+/** Usage is a sidebar row only where its lines are not drawn (the compact rail, the
+ *  setting off, nothing reported yet, a short window), so it is there exactly once; on a
+ *  phone it is a More row. After Machines, else before Finish setup, else last. */
+const USAGE_ITEM: NavItem = { to: "/usage", key: "usage", label: "Usage", glyph: ICON.usage, group: 2 };
 const withUsage = (pages: NavItem[]): NavItem[] => {
-  const at = pages.findIndex((n) => n.key === "connect");
+  const m = pages.findIndex((n) => n.key === "machines");
+  const at = m >= 0 ? m + 1 : pages.findIndex((n) => n.key === "setup");
   return at < 0 ? [...pages, USAGE_ITEM] : [...pages.slice(0, at), USAGE_ITEM, ...pages.slice(at)];
 };
 
-/** The pages Simple mode keeps off the rail (still there through ⌘K and /settings). */
+/** The pages Simple mode keeps off the rail (still there through ⌘K and Settings). */
 const ADVANCED_ONLY = new Set(["feed", "review"]);
-/** The pages that are a receiver's own doing (its workflows; its address, token and QR):
- *  not offered where the window shows a spacesheep account, which has no receiver. */
-const RECEIVER_ONLY = new Set(["workflows", "connect"]);
+/** The pages that are a receiver's own doing (its workflows): not offered where the
+ *  window shows a spacesheep account, which has no receiver. */
+const RECEIVER_ONLY = new Set(["workflows"]);
 
-/** Builtins first (Setup among them while this machine is not set up), then installed
- *  themes, the experimental ones of both after a divider. `simple` drops Feed and Review. */
+/** The page is the demo: the mock transport runs (mock/index.ts sets the mark), which is
+ *  exactly when the yellow bar shows (mock/banner.ts). */
+const inDemo = (): boolean => !!(globalThis as { __sessionpipeMock?: unknown }).__sessionpipeMock;
+
+/** Builtins first, then installed themes, the experimental ones after a divider, then
+ *  Finish setup while this machine is not set up (never in the demo, where nothing is a
+ *  real machine). `simple` drops Feed, Review and the experimental views. */
 export function navItems(
   themes: readonly InstalledTheme[],
   o: { setup?: boolean; simple?: boolean; account?: boolean } = {},
 ): NavItem[] {
-  const plugins = themes.filter((t) => !t.error && !t.disabled).map(themeNavItem);
+  const plugins = themes
+    .filter((t) => !t.error && !t.disabled)
+    .map(themeNavItem)
+    .filter((n) => !(o.simple && n.experimental));
   const builtin = BUILTIN.filter(
     (n) => !(o.simple && ADVANCED_ONLY.has(n.key)) && !(o.account && RECEIVER_ONLY.has(n.key)),
   );
-  const all = [...builtin, ...(o.setup && !o.account ? [SETUP_ITEM] : []), ...plugins];
-  return [...all.filter((n) => !n.experimental), ...all.filter((n) => n.experimental)];
+  return [
+    ...builtin,
+    ...plugins.filter((n) => !n.experimental),
+    ...plugins.filter((n) => n.experimental),
+    ...(o.setup && !o.account && !inDemo() ? [SETUP_ITEM] : []),
+  ];
 }
 
 /** A nav item's icon: the theme's own SVG when its manifest has one, else our line icon. */
@@ -368,7 +400,7 @@ function railMenu(): MenuList {
       label: "Display…",
       run: () => document.querySelector<HTMLButtonElement>("nav.rail button[aria-label='Quick settings']")?.click(),
     },
-    { label: "Settings…", run: () => navigate("/settings") },
+    { label: "Settings…", run: () => openSettings() },
     { label: "Keyboard shortcuts", action: "nav.shortcuts", run: () => navigate("/shortcuts") },
   ];
 }
@@ -384,22 +416,27 @@ function NavEntry({
   needs,
   tip,
   here,
+  covered,
 }: {
   n: NavItem;
   active: boolean;
   action: string | undefined;
   needs: number;
   tip: boolean;
-  /** The page is open at exactly this entry's address: a tap again goes to its top. */
+  /** The page is open at exactly this entry's address: a tap again goes to its top, or,
+   *  with the panel covering it (a narrow window), brings the page back. */
   here: boolean;
+  covered: boolean;
 }) {
   const menu = useContextMenu(() => navMenu(n, action), { title: () => n.label });
   const keys = action ? hintFor(action) : "";
   return (
     <Link
       to={n.to}
-      plainClick={here ? toTop : undefined}
-      className={`nav-link ${active ? "nav-link--on" : ""}`}
+      plainClick={here ? (covered ? closeSplit : toTop) : undefined}
+      className={["nav-link", active && "nav-link--on", n.group === undefined && "nav-link--pinned"]
+        .filter(Boolean)
+        .join(" ")}
       aria-current={active ? "page" : undefined}
       data-nav={n.key}
       data-tip={tip ? (keys ? `${n.label}   ${keys}` : n.label) : undefined}
@@ -408,9 +445,14 @@ function NavEntry({
       <NavGlyph n={n} />
       <span className="nav-label">{n.label}</span>
       {n.key === "inbox" && needs > 0 ? (
-        <span className="nav-badge num" role="img" aria-label={`${needs} need you`}>
-          {needs}
-        </span>
+        <>
+          <span className="nav-badge num" aria-hidden="true">
+            {needs}
+          </span>
+          <span className="sr-only">
+            , {needs} {needs === 1 ? "needs" : "need"} you
+          </span>
+        </>
       ) : null}
       {/* A quiet dot, not orange: steps to go is not a thing that needs you. */}
       {n.key === "setup" ? <span className="nav-dot" role="img" aria-label="steps to go" /> : null}
@@ -491,8 +533,7 @@ function MoreTab({ items, active, views }: { items: NavItem[]; active: string; v
 /** The More sheet is a phone's alone: its code is fetched when a phone is idle after load
  *  (so the first tap opens it at once), never on a desktop. */
 const moreSheet = lazyModule(() => import("./MoreSheet"));
-if (typeof window !== "undefined" && window.matchMedia?.(PHONE_QUERY).matches)
-  whenIdle(() => void moreSheet.preload().catch(() => {}));
+if (typeof window !== "undefined" && phoneLayout()) whenIdle(() => void moreSheet.preload().catch(() => {}));
 function MoreSheetHost(p: MoreSheetProps) {
   const m = moreSheet.use();
   return m ? <m.MoreSheet {...p} /> : null;
@@ -524,7 +565,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         : route.name === "workflow" || route.name === "workflowRun"
           ? "workflows"
           : route.name;
-  const needs = useAnswerableCount();
+  const needs = useNeedsYouCount();
   // The Setup entry, with its orange dot, while this machine (and only from this machine:
   // elsewhere the status is 403) still has steps to go.
   const setup = useSetupStatus();
@@ -535,8 +576,12 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   }, [known, showSetup]);
   const simple = useSimple();
   const account = accountMode();
-  const nav = navItems(useThemes().themes, { setup: showSetup, simple, account });
-  const phone = useMedia(PHONE_QUERY);
+  const themes = useThemes().themes;
+  const nav = navItems(themes, { setup: showSetup, simple, account });
+  // Every installed view, whichever the mode: `g 1` … `g 9` number them, and the phone's
+  // More lists them.
+  const views = navItems(themes, { setup: showSetup, account }).filter((n) => n.key.startsWith("t:"));
+  const phone = usePhoneLayout();
   useResize();
   useThemeColor();
   useStreamMark();
@@ -549,16 +594,24 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const side = useSideForm(splitOpen && !phone);
   const railMenuProps = useContextMenu(railMenu, { title: () => "sessionpipe gui" });
   // A route change moves focus to the page (not on the first paint, where Tab must start
-  // at the skip link) and says the page's name through the live region.
+  // at the skip link), unless the new page put the caret in a field of its own (Search's),
+  // and says the page's name through the live region.
   const mainRef = useRef<HTMLElement>(null);
   const [announce, setAnnounce] = useState("");
-  const path = usePath().split("?")[0] ?? "/";
+  const fullPath = usePath();
+  const path = fullPath.split("?")[0] ?? "/";
+  const settingsShown = useSearchParam(SETTINGS_PARAM) !== null;
   // The path last seen, not a first-run flag: StrictMode runs the effect twice on mount.
   const lastPath = useRef(path);
   useEffect(() => {
     if (lastPath.current === path) return;
     lastPath.current = path;
-    mainRef.current?.focus({ preventScroll: true });
+    const main = mainRef.current;
+    const at = document.activeElement;
+    // Only a field inside the page's own root: focus still moves on from the palette and
+    // the toasts (in <main> too), and from the row a list put it on after Back.
+    const placed = isTyping(at) && !!main?.contains(at) && !!at?.closest(".page");
+    if (!placed) main?.focus({ preventScroll: true });
     const t = setTimeout(
       () => setAnnounce(document.title.replace(/ · sessionpipe gui$/, "").replace(/^\(\d+\) /, "")),
       60,
@@ -572,8 +625,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   });
   useNewFromUrl(usePath());
   useStandaloneNewKey();
-  // `g 1` … `g 9`: the n-th installed view, in rail order.
-  const views = nav.filter((n) => n.key.startsWith("t:"));
+  // `g 1` … `g 9`: the n-th installed view, in Advanced's rail order.
   for (let i = 1; i <= 9; i++) {
     useShortcut(`nav.view${i}`, () => {
       const v = views[i - 1];
@@ -581,7 +633,49 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       navigate(v.to);
     });
   }
-  const shellStyle = { "--split-width": `${splitOpen && !phone ? splitWidth : 0}px` } as CSSProperties;
+  // A window with a mouse under 840 px has no room for a session beside its page: the
+  // panel covers the page (split.css), from the rail to the window's edge. The page under
+  // it leaves the tab order and the accessibility tree until the panel closes or the
+  // window widens, and its keys are off (KeysOff, below): the palette, the toasts and
+  // Settings are in <main> too, and stay live. The focus goes from the page to the panel,
+  // and back to the row it was on unless it has been put somewhere since.
+  const covers = usePanelCovers() && splitOpen;
+  const stillOpen = useRef(splitOpen);
+  stillOpen.current = splitOpen;
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main || !covers) return;
+    const pages = () => main.querySelectorAll<HTMLElement>(":scope > :is(.page, .theme-page)");
+    const at = document.activeElement as HTMLElement | null;
+    const held = at && [...pages()].some((page) => page.contains(at)) ? at : null;
+    const cover = () => {
+      for (const el of pages()) el.setAttribute("inert", "");
+    };
+    cover();
+    // From the page, or from nowhere in particular: not from the rail or something open.
+    if (held || !at || at === document.body || at === main)
+      document.querySelector<HTMLElement>("aside.panel")?.focus({ preventScroll: true });
+    // A page that arrives under the panel (a lazy page's code).
+    const arrivals = new MutationObserver(cover);
+    arrivals.observe(main, { childList: true });
+    return () => {
+      arrivals.disconnect();
+      for (const el of pages()) el.removeAttribute("inert");
+      const now = document.activeElement;
+      const free = !now || now === document.body || (!stillOpen.current && !!now.closest("aside.panel"));
+      if (held?.isConnected && free) held.focus({ preventScroll: true });
+    };
+  }, [covers]);
+  // A move away from a page the panel covered leaves the panel behind: the page asked for
+  // is the one to see, not what was over the last. Not a redirect, nor Back and Forward,
+  // which show what was there; and Settings is a window over the page, which moves no path.
+  const under = useRef<{ path: string; covered: boolean } | null>(null);
+  useEffect(() => {
+    const was = under.current;
+    under.current = { path, covered: covers };
+    if (was?.covered && was.path !== path && lastMove() === "navigate") leaveSplit();
+  }, [path, covers]);
+  const shellStyle = { "--split-width": `${splitOpen && !phone && !covers ? splitWidth : 0}px` } as CSSProperties;
   const entry = (n: NavItem, tip: boolean) => (
     <NavEntry
       key={n.key}
@@ -591,11 +685,19 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       needs={needs}
       tip={tip}
       here={path === n.to || (n.key === "search" && active === "search")}
+      covered={covers}
     />
   );
-  const firstView = nav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
-  // The tab bar keeps its four; Workflows is a page for the More sheet on a phone.
+  // Usage is in the sidebar once: its lines where they are drawn, a row otherwise.
+  const glance = useGlanceShown() && side && !phone;
+  const railNav = glance ? nav : withUsage(nav);
+  const firstView = railNav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
+  // The tab bar keeps its four; Workflows is a page for the More sheet on a phone. More
+  // lists every view: a phone has no ⌘K or `g` keys to reach the ones Simple leaves off.
   const tabs = nav.filter((n) => n.key !== "workflows").slice(0, TABS);
+  const more = [...nav.filter((n) => !tabs.includes(n) && !n.key.startsWith("t:")), ...views];
+  // The app's update, downloaded and waiting ("0.8.5 is ready"): the foot's Settings button marks it.
+  const update = useReadyUpdate();
   return (
     <div
       className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${side && !phone ? "shell--side" : ""}`}
@@ -615,6 +717,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <div className="sr-only" aria-live="polite" aria-atomic="true" data-announcer>
         {announce}
       </div>
+      <ConnAnnouncer owned={route.name === "board" || route.name === "inbox"} />
       <nav className="rail" aria-label="Pages" {...railMenuProps}>
         <div className="rail-head">
           <Link to="/" className="rail-brand" title="sessionpipe gui">
@@ -625,32 +728,42 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           <ComposeButton className="rail-compose" />
         </div>
         <div className="rail-nav">
-          {nav.map((n, i) => (
-            <Fragment key={n.key}>
-              {i === firstView ? (
-                <div className="rail-section" aria-hidden="true">
-                  Views
-                </div>
-              ) : null}
-              {n.experimental && !nav[i - 1]?.experimental ? (
-                <>
-                  {/* A hairline in the rail; in the sidebar the label below. data-nav keeps the divider's name for the tests. */}
-                  <hr
-                    className="rail-group"
-                    data-nav="experimental"
-                    title="Experimental views"
-                    aria-label="Experimental views"
-                  />
+          {railNav.map((n, i) => {
+            // A hairline where the group changes; Finish setup sits apart, at the foot.
+            const prev = railNav[i - 1];
+            const split = !!prev && n.group !== undefined && n.group !== prev.group;
+            const experimental = n.group === 4 && prev?.group !== 4;
+            return (
+              <Fragment key={n.key}>
+                {split ? (
+                  experimental ? (
+                    /* Named for the rail, where the label below is not shown; data-nav keeps the divider's name for the tests. */
+                    <hr
+                      className="rail-group"
+                      data-nav="experimental"
+                      title="Experimental views"
+                      aria-label="Experimental views"
+                    />
+                  ) : (
+                    <hr className="rail-group" />
+                  )
+                ) : null}
+                {i === firstView ? (
+                  <div className="rail-section" aria-hidden="true">
+                    Views
+                  </div>
+                ) : null}
+                {experimental ? (
                   <div className="rail-section" aria-hidden="true">
                     Experimental
                   </div>
-                </>
-              ) : null}
-              {entry(n, !side)}
-            </Fragment>
-          ))}
+                ) : null}
+                {entry(n, !side)}
+              </Fragment>
+            );
+          })}
         </div>
-        {side && !phone && <UsageGlance here={route.name === "usage"} />}
+        {glance && <UsageGlance here={route.name === "usage"} />}
         <div className="rail-foot">
           <ConnectionPill />
           {!account && (
@@ -679,25 +792,34 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
             </Link>
           )}
           <QuickSettings placement="rail" />
+          {/* An update that is downloaded and waits: the quiet dot, and the way to its row. */}
           <Link
-            to="/settings"
-            className={`theme-btn ${route.name === "settings" ? "nav-link--on" : ""}`}
-            data-tip="Settings"
+            to={settingsHref(update ? "about" : null, fullPath)}
+            plainClick={() => openSettings(update ? "about" : null)}
+            className={`theme-btn ${settingsShown ? "nav-link--on" : ""}`}
+            data-tip={update ? `Settings · ${update}` : "Settings"}
             data-tip-side="top"
-            aria-label="Settings"
-            aria-current={route.name === "settings" ? "page" : undefined}
+            aria-label={update ? `Settings, ${update}` : "Settings"}
+            aria-haspopup="dialog"
+            aria-expanded={settingsShown}
             data-nav="settings"
           >
             <SlidersIcon />
+            {update ? <span className="nav-dot" aria-hidden="true" /> : null}
           </Link>
         </div>
       </nav>
+      {/* Ahead of the page in the DOM: Esc closes the first drawn [data-dismiss]
+          (lib/keys.ts), and Settings is over whatever the page has open (a file, the panel). */}
+      <SettingsHost />
       <main className={`main ${route.name === "theme" ? "main--bleed" : ""}`} id="main" ref={mainRef} tabIndex={-1}>
-        {children}
+        {/* Off under Settings too: the page stays mounted under it, and no a, d or Enter
+            may act on a row nobody can see. */}
+        <KeysOff.Provider value={covers || settingsShown}>{children}</KeysOff.Provider>
       </main>
       <nav className="tabbar" aria-label="Pages">
         {tabs.map((n) => entry(n, false))}
-        <MoreTab items={nav.filter((n) => !tabs.includes(n))} active={active} views={views} />
+        <MoreTab items={more} active={active} views={views} />
       </nav>
       {phone && <PhoneConn />}
       {phone && PULL_PAGES.has(route.name) && <PullRefresh main={mainRef} />}
@@ -713,32 +835,40 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   );
 }
 
-/** How long a drop must last before it is shown: a blip never flickers the footer. */
+/** Settings, over the page you are on while the address says `?settings=` (the page stays
+ *  mounted under it, its scroll, its title and its lit row with it). */
+function SettingsHost() {
+  return useSearchParam(SETTINGS_PARAM) === null ? null : <Settings />;
+}
+
+/** How long a drop must last before it is shown: a blip is never drawn, nor said. */
 const RECONNECT_GRACE_MS = 400;
 
-/** The stream's state as the footer says it: what to draw ("live" inside the grace) and
- *  its words. "Reconnecting · 4 s" once a drop has lasted 400 ms, "Offline" when the
- *  device is. */
 /** The stream's state in words, after a short grace (a reconnect that lands within it is
- *  never shown). The phone's bar reads it too (PageBar.tsx PhoneSub). */
-export function useConnection(): { as: string; label: string; down: boolean } {
-  const { connection, retryAt } = useAppState();
+ *  never shown): what to draw ("live" inside the grace) and its words, "Reconnecting…" or
+ *  "Offline" when the device is. No seconds: the words change only when the state does.
+ *  Before the first snapshot (`first`) there is nothing to reconnect to: a failure is
+ *  "Can't reach studio-mac" (lib/device.ts reachName), the board's own words for it.
+ *  One reading for the sidebar's dot, the page bar (PageBar.tsx ConnStatus), the phone's
+ *  pill and what is spoken. A reader that mounts while the stream is already down (a page
+ *  opened during a drop) says so at once: the grace is for a drop it watched begin. */
+export function useConnection(): { as: string; label: string; down: boolean; first: boolean } {
+  const { connection, snapshotAt } = useAppState();
+  const first = !snapshotAt;
   const down = connection === "reconnecting" || connection === "offline";
-  const [shown, setShown] = useState(!down);
+  const [shown, setShown] = useState(down);
   useEffect(() => {
     if (!down) {
-      setShown(true);
+      setShown(false);
       return;
     }
-    setShown(false);
     const t = window.setTimeout(() => setShown(true), RECONNECT_GRACE_MS);
     return () => window.clearTimeout(t);
   }, [down]);
-  // The countdown ticks only while there is one.
-  const now = useNow(retryAt && shown ? "fine" : "off");
-  const wait = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
-  // Inside the grace, the footer still reads as it did.
-  const as = down && !shown ? "live" : connection;
+  // Inside the grace, every reader still reads as it did: live, or still connecting.
+  const was = useRef(connection);
+  if (!down) was.current = connection;
+  const as = down && !shown ? was.current : connection;
   const label =
     as === "live"
       ? "live"
@@ -746,34 +876,64 @@ export function useConnection(): { as: string; label: string; down: boolean } {
         ? "Connecting…"
         : as === "offline"
           ? "Offline"
-          : wait > 0
-            ? `Reconnecting · ${wait} s`
+          : first
+            ? NEW_WORDS.reachFailed(reachName())
             : "Reconnecting…";
-  return { as, label, down: as === "reconnecting" || as === "offline" };
+  return { as, label, down: as === "reconnecting" || as === "offline", first };
 }
 
-/** The stream, honestly: nothing to read while live (a quiet dot; the word stays for
- *  assistive tech), its words and Retry now once it drops. The board keeps its rows
- *  through a drop. */
+/** The stream in the sidebar's foot: a dot in every state (solid while live, a ring while
+ *  connecting or reconnecting, red when offline), named by its tooltip. The word "live"
+ *  stays for assistive tech; a drop's words and its Retry are the page bar's
+ *  (PageBar.tsx ConnStatus), so they are said once, and the foot never grows a line. */
 export function ConnectionPill() {
-  const { as, label, down } = useConnection();
-  const store = useStore();
+  const { as, label } = useConnection();
   return (
     <span
       className={`conn conn--${as}`}
-      role="status"
-      aria-live="polite"
       data-tip={as === "live" ? "Live: updates arrive as they happen" : label}
       data-tip-side="top"
     >
       <span className="conn-dot" aria-hidden="true" />
-      <span className="conn-label">{label}</span>
-      {down ? (
-        <button type="button" className="conn-retry" onClick={() => store.reconnect()}>
-          Retry now
-        </button>
-      ) : null}
+      {as === "live" ? <span className="conn-label">{label}</span> : null}
     </span>
+  );
+}
+
+/** What a screen reader hears of the stream, once per change: "Reconnecting." or
+ *  "Offline." when a drop has outlasted the grace, and "Reconnected." when a drop it
+ *  spoke of is over. A first connect says nothing; one that fails says "Can't reach
+ *  studio-mac." and then "Connected.", except on a page whose own first load says it
+ *  (`owned`: the Board's and the Inbox's, a live region of their own,
+ *  components/NoConnection.tsx). Always mounted,
+ *  beside the route announcer, so it speaks with the sidebar hidden and on a page with no
+ *  bar; it is the only live region the stream has (the bar's words and the dot are not). */
+function ConnAnnouncer({ owned }: { owned: boolean }) {
+  const { as, first } = useConnection();
+  const [said, setSaid] = useState("");
+  // What it said of a failure: one before the first snapshot ("first") or a drop.
+  const spoke = useRef<"first" | "drop" | null>(null);
+  const quiet = first && owned;
+  useEffect(() => {
+    if (as === "reconnecting" || as === "offline") {
+      if (quiet) return;
+      spoke.current = first ? "first" : "drop";
+      setSaid(
+        as === "offline"
+          ? NEW_WORDS.streamOfflineSpoken
+          : first
+            ? NEW_WORDS.reachFailedSpoken(reachName())
+            : NEW_WORDS.streamReconnectingSpoken,
+      );
+    } else if (as === "live" && spoke.current) {
+      setSaid(spoke.current === "first" ? NEW_WORDS.streamConnectedSpoken : NEW_WORDS.streamBackSpoken);
+      spoke.current = null;
+    }
+  }, [as, first, quiet]);
+  return (
+    <div className="sr-only" role="status" aria-atomic="true" data-conn-announcer>
+      {said}
+    </div>
   );
 }
 
@@ -785,7 +945,7 @@ export function ConnectionPill() {
  *  is on the page. The pull down a list that refreshes it (PullRefresh) is the other way
  *  to retry: the pill rides with the content (pull.css) and the reconnect is the same one. */
 function PhoneConn() {
-  const { as, label, down } = useConnection();
+  const { as, label, down, first } = useConnection();
   const store = useStore();
   if (!down) return null;
   return (
@@ -793,7 +953,7 @@ function PhoneConn() {
       type="button"
       className={`phone-conn phone-conn--${as}`}
       onClick={() => store.reconnect()}
-      aria-label={`${label}. Retry now`}
+      aria-label={`${as === "offline" ? NEW_WORDS.streamOfflineSpoken : first ? NEW_WORDS.reachFailedSpoken(reachName()) : NEW_WORDS.streamReconnectingSpoken} Retry`}
     >
       <span className="conn-dot" aria-hidden="true" />
       <span className="phone-conn-label">{label}</span>

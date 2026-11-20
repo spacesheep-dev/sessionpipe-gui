@@ -9,12 +9,10 @@ import { isEmptySearch, parseSearch } from "@shared/searchQuery";
 import { useEffect, useRef, useState } from "react";
 import { HarnessGlyph } from "../components/bits";
 import type { Store } from "../data/store";
-import { navigate } from "../lib/router";
 import { searchClient } from "./client";
 import { Marked } from "./Marked";
-import { openResult } from "./open";
-import { toolText } from "./Row";
-import { metaFacts } from "./words";
+import { openResultAs } from "./open";
+import { metaFacts, toolText } from "./words";
 import "../styles/search.css";
 
 export const PALETTE_MIN = 2;
@@ -71,11 +69,9 @@ export function TxDetail({ m }: { m: SessionMatch }) {
   return <Marked className="pal-tx-snip" text={t.text} marks={t.marks} />;
 }
 
-export function openTranscriptRow(m: SessionMatch, q: string, beside: boolean): void {
-  openResult(m, m.hits[0], q, beside ? "beside" : "page");
-}
-export function searchAll(q: string): void {
-  navigate(`/search?q=${encodeURIComponent(q.trim())}`);
+/** ↵ opens the way Settings says, ⇧↵ (`other`) the other way (lib/split.ts openWay). */
+export function openTranscriptRow(m: SessionMatch, q: string, other: boolean): void {
+  openResultAs(m, m.hits[0], q, other ? "other" : "primary");
 }
 
 const LABEL = { prompt: "Prompt", reply: "Reply", tool: "Tool call" } as const;

@@ -160,6 +160,9 @@ function Picker<T>({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [cursor, setCursor] = useState(-1);
+  /** The keys opened the list or moved its cursor last: the row gets the cursor edge. The
+   *  pointer's row is the plain fill. */
+  const [byKeys, setByKeys] = useState(false);
   const [place, setPlace] = useState<Place | null>(null);
   const typed = useRef({ text: "", at: 0 });
 
@@ -188,11 +191,12 @@ function Picker<T>({
     if (refocus) trigger.current?.focus({ preventScroll: true });
   }, []);
 
-  const show = (at?: number) => {
+  const show = (at: number | undefined, keys: boolean) => {
     if (disabled || open) return;
     const first = options.findIndex((o) => isChosen(o));
     const start = at ?? (first >= 0 ? first : options.findIndex((o) => !o.disabled));
     setCursor(start);
+    setByKeys(keys);
     setOpen(true);
   };
 
@@ -208,6 +212,7 @@ function Picker<T>({
   // every second.)
   const filter = (text: string) => {
     setQ(text);
+    setByKeys(true);
     setCursor(visible(text).findIndex((o) => !o.disabled));
   };
 
@@ -331,12 +336,12 @@ function Picker<T>({
       ) {
         e.preventDefault();
         e.stopPropagation();
-        show(e.key === "End" ? edge(true) : e.key === "Home" ? edge(false) : undefined);
+        show(e.key === "End" ? edge(true) : e.key === "Home" ? edge(false) : undefined, true);
       } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
         const i = typeAhead(e.key, -1);
-        show(i >= 0 ? i : undefined);
+        show(i >= 0 ? i : undefined, true);
       }
       return;
     }
@@ -353,20 +358,24 @@ function Picker<T>({
         return;
       case "ArrowDown":
         e.preventDefault();
+        setByKeys(true);
         setCursor((c) => move(c, 1));
         return;
       case "ArrowUp":
         e.preventDefault();
+        setByKeys(true);
         setCursor((c) => move(c, -1));
         return;
       case "Home":
         if (inSearch && q) return;
         e.preventDefault();
+        setByKeys(true);
         setCursor(edge(false));
         return;
       case "End":
         if (inSearch && q) return;
         e.preventDefault();
+        setByKeys(true);
         setCursor(edge(true));
         return;
       case "Enter":
@@ -383,7 +392,10 @@ function Picker<T>({
         if (!inSearch && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
           e.preventDefault();
           const i = typeAhead(e.key, cursor);
-          if (i >= 0) setCursor(i);
+          if (i >= 0) {
+            setByKeys(true);
+            setCursor(i);
+          }
         }
     }
   };
@@ -405,6 +417,7 @@ function Picker<T>({
       role="listbox"
       id={listId}
       ref={list}
+      data-keys={byKeys || undefined}
       aria-multiselectable={multiple || undefined}
       aria-label={ariaLabel}
       aria-labelledby={labelledBy}
@@ -423,7 +436,11 @@ function Picker<T>({
             aria-selected={on}
             aria-disabled={o.disabled || undefined}
             data-value={keyOf(o.value)}
-            onMouseMove={() => i !== cursor && !o.disabled && setCursor(i)}
+            onMouseMove={() => {
+              if (i === cursor || o.disabled) return;
+              setByKeys(false);
+              setCursor(i);
+            }}
             onClick={() => pick(i)}
           >
             <span className="sel-opt-check" aria-hidden="true">
@@ -519,7 +536,8 @@ function Picker<T>({
         aria-labelledby={labelledBy}
         data-value={dataValue}
         disabled={disabled}
-        onClick={() => (open ? close() : show())}
+        // A click the keys made (Space or ↩ reach onKey first; this is a screen reader's) is theirs.
+        onClick={(e) => (open ? close() : show(undefined, e.detail === 0))}
         onKeyDown={onKey}
       >
         {!multiple && chosenOptions[0]?.icon ? (

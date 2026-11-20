@@ -97,7 +97,7 @@ body {
 }
 
 /* A desktop window never rubber-bands. */
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   html {
     overscroll-behavior: none;
   }
@@ -109,6 +109,17 @@ h3,
 p {
   margin: 0;
   font-weight: inherit;
+}
+
+/* A fieldset groups controls for a screen reader; it draws nothing. */
+fieldset {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+legend {
+  padding: 0;
 }
 
 a {
@@ -183,10 +194,6 @@ textarea,
     -webkit-user-select: none;
     user-select: none;
   }
-}
-
-::selection {
-  background: color-mix(in oklch, var(--focus) 28%, transparent);
 }
 
 /* The browser's own checkboxes, radios and ranges take the ink, not the browser's blue:

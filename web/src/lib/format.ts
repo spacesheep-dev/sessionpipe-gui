@@ -2,7 +2,7 @@
 // Readings of the wire shapes for display: titles, monograms, one-line event summaries.
 import type { ProtocolEvent, SessionState, SessionSummary, StoredEvent } from "@shared/api";
 import { NEW_WORDS } from "../native/accountWords.new";
-import { durShort } from "./time";
+import { durShort, heard } from "./time";
 
 export const STATE_LABEL: Record<SessionState, string> = {
   needs_you: "needs you",
@@ -30,6 +30,27 @@ export const STATE_HINT: Record<SessionState, string> = {
   done: "Ended, or silent for a day, or only known from backfill.",
 };
 
+/** A row's one time and what it measures: how long the row has been in the group it sits
+ *  in. Needs you counts from the prompt; working from the server's own since (the turn, an
+ *  agent, background work or an ask, whichever began first), never a tool's, so the number
+ *  holds as tools come and go; stale, idle and done from the last word, since stale's own
+ *  since is ten minutes after it and done's by silence a day after it. */
+export function rowTime(
+  s: Pick<SessionSummary, "state" | "stateSince" | "lastAt" | "endedAt" | "openAttentions">,
+  now = Date.now(),
+): { iso: string; tip: string } {
+  const a = s.openAttentions[0];
+  if (a || s.state === "needs_you") {
+    const iso = a?.at ?? s.stateSince;
+    return { iso, tip: `Needs you since ${heard(iso, now)}` };
+  }
+  if (s.state === "working") return { iso: s.stateSince, tip: `Working since ${heard(s.stateSince, now)}` };
+  if (s.state === "stale") return { iso: s.lastAt, tip: `No word since ${heard(s.lastAt, now)}` };
+  if (s.state === "idle") return { iso: s.lastAt, tip: `Idle since ${heard(s.lastAt, now)}` };
+  const iso = s.endedAt ?? s.lastAt;
+  return { iso, tip: `${s.endedAt ? "Ended" : "Last heard"} ${heard(iso, now)}` };
+}
+
 /** A title cut upstream ("Why does the staging deploy take 14 minutes?...") keeps its
  *  honest mark of a cut, as the one ellipsis glyph after the last whole word; CSS cuts
  *  the rest at the real column width. */
@@ -40,6 +61,45 @@ export function cleanTitle(t: string): string {
   // A cut right after a whole sentence ("…take 14 minutes?...") lost nothing it says.
   if (/[?!.]$/.test(cut)) return cut;
   return `${cut.replace(/[\s,;:–—-]+$/, "")}…`;
+}
+
+/** A leading heading, quote or list mark ("# ", "> ", "- "), dropped once from the whole
+ *  text and not from each piece between code spans, so "`a` - then" keeps its " - ". */
+export function plainLead(t: string): string {
+  return t.replace(/^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+(?=\S))/, "");
+}
+
+/** Inline Markdown emphasis down to its words: `**b**`, `*i*`, `__b__`, `_i_`, `~~s~~`,
+ *  `[text](url)`. Underscores and brackets inside a word are code, not marks, so
+ *  snake_case, __init__.py and a[0](x) stay as they are. */
+export function plainEmphasis(t: string): string {
+  return t
+    .replace(/(^|[^\w\]])!?\[([^\]]*)\]\([^)]*\)/g, "$1$2")
+    .replace(/\*\*(?=\S)([^*]*?\S)\*\*/g, "$1")
+    .replace(/(^|[^\w*])\*(?=\S)([^*]*?\S)\*(?!\w)/g, "$1$2")
+    .replace(/(^|[^\w])(__?)(?=\S)([^_]*?\s[^_]*?\S)\2(?!\w)/g, "$1$3")
+    .replace(/~~(?=\S)([^~]*?\S)~~/g, "$1");
+}
+
+/** Text split at its `code` spans: [plain, code, plain, …], a code piece with its ticks. */
+export const codeSpans = (t: string): string[] => t.split(/(`[^`\n]+`)/g);
+export const isCodeSpan = (p: string): boolean => p.length > 2 && p.startsWith("`") && p.endsWith("`");
+
+/** A session's title as plain words, wherever it is shown: a `code` span keeps its text
+ *  and loses its ticks, the rest loses inline Markdown (as the preview line does), and a
+ *  tick a cut left open goes. Each code span stands in as one private-use character while
+ *  the marks go, so marks around or across one go too ("**`npm ci`** now") and its own
+ *  text is never read as marks. Text that is nothing but marks stays as it came. */
+export function plainTitle(t: string): string {
+  const code: string[] = [];
+  const held = codeSpans(plainLead(t.replace(/[\uE000-\uF8FF]/g, "")))
+    .map((p) => (isCodeSpan(p) ? String.fromCharCode(0xe000 + code.push(p.slice(1, -1)) - 1) : p))
+    .join("");
+  const out = plainEmphasis(held)
+    .replace(/`/g, "")
+    .replace(/[\uE000-\uF8FF]/g, (c) => code[c.charCodeAt(0) - 0xe000] ?? "")
+    .trim();
+  return out || t.trim();
 }
 
 /** A title the summariser cut ("Before I merge the BM25 cache, review it from...") is the
@@ -84,7 +144,7 @@ function keptUncut(s: Pick<SessionSummary, "title" | "lastUser" | "progress"> & 
 export function sessionTitle(
   s: Pick<SessionSummary, "title" | "cwd" | "id" | "lastUser" | "progress"> & { key?: string },
 ): string {
-  if (s.title?.trim()) return keptUncut(s) ?? cleanTitle(s.title);
+  if (s.title?.trim()) return plainTitle(keptUncut(s) ?? cleanTitle(s.title));
   const started = s.key ? startTitles.get(s.key) : undefined;
   if (started) return started;
   if (s.cwd) return basename(s.cwd);
@@ -311,6 +371,8 @@ const SNAKE_TOOLS: Record<string, string> = {
   exit_plan_mode: "Plan",
   // Claude Code's question to the person, asked as a permission (isQuestion).
   AskUserQuestion: NEW_WORDS.questionChip,
+  // Not a tool: the event naming the files a write changed, as Search lists it.
+  "files.changed": "Changed",
 };
 
 /** A plan review: Claude Code asks to leave plan mode as an ordinary permission, so

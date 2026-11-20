@@ -8,7 +8,7 @@
 import "./chrome.css";
 import type { Store } from "../data/store";
 import { shellStreams } from "../lib/net";
-import { navigate } from "../lib/router";
+import { openAsked } from "../lib/split";
 import { invoke, listen } from "./bridge";
 import { installKeyFilter, type MenuPayload, restoreSidebar, runMenu } from "./menu";
 import { openStream, resyncAll } from "./stream";
@@ -199,16 +199,20 @@ export async function start(): Promise<boolean> {
   } catch {}
   shellStreams.open = openStream;
   restoreSidebar();
-  installKeyFilter();
+  // Only where a native menu answers the keys the filter lets pass: a phone or a tablet
+  // with a keyboard has none, and ⌘K, ⌘F and ⌘[ stay the page's.
+  if (info.platform === "macos" || info.platform === "windows" || info.platform === "linux")
+    installKeyFilter(window, info.platform === "linux");
   installDrag();
   const on = <T>(event: string, fn: (p: T) => void) => listen<T>(event, fn).catch(() => {});
   void on<MenuPayload>("menu", (p) => p?.action && runMenu(p.action, p));
   void on<{ to?: string }>("navigate", (p) => {
+    // A session's page opens the way a click does (lib/split.ts openAsked), keeping the page.
     const to = safePath(p?.to);
-    if (to) navigate(to);
+    if (to) openAsked(to);
   });
   void on("wake", () => resyncAll());
-  void import("./appState").then((m) => m.wire(on));
+  void import("./appState").then((m) => m.wire(on, info.features.includes("updater")));
   if (info.receiver) void import("./FirstRun").then((m) => m.maybeShowFirstRun());
   return false;
 }
@@ -223,12 +227,13 @@ export function markFirstSnapshot(store: Store): void {
   });
 }
 
-/** The window's drag regions: the page bar's ground, the top band of the rail and the
- *  welcome's bar. Tauri drags from an element marked `data-tauri-drag-region`;
- *  "deep" lets a title or an empty stretch inside it drag too, while its own check keeps
- *  every control a control. The mark goes on just before its listener reads it, so the
- *  page's markup stays the browser's. */
-export const DRAG_REGIONS = ".bar, .rail-head, .welcome-bar";
+/** The window's drag regions: the page bar's ground, the top band of the rail, the panel's
+ *  head (all there is of the band past the rail where the panel covers the page,
+ *  styles/split.css) and the welcome's bar. Tauri drags from an element marked
+ *  `data-tauri-drag-region`; "deep" lets a title or an empty stretch inside it drag too,
+ *  while its own check keeps every control a control. The mark goes on just before its
+ *  listener reads it, so the page's markup stays the browser's. */
+export const DRAG_REGIONS = ".bar, .rail-head, .panel-head, .welcome-bar";
 export function dragRegion(t: EventTarget | null): HTMLElement | null {
   const el = t as HTMLElement | null;
   return el?.closest ? el.closest<HTMLElement>(DRAG_REGIONS) : null;

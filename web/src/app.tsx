@@ -11,17 +11,18 @@ import { KeyRefused } from "./components/KeyRefused";
 import { PageBar } from "./components/PageBar";
 import { Palette } from "./components/Palette";
 import { Settings } from "./components/Settings";
-import { Shell } from "./components/Shell";
+import { OverPage, Shell } from "./components/Shell";
 import { Toasts } from "./components/Toasts";
 import { AddDevicePage } from "./control/AddDevice";
 import { resetInfoCache } from "./control/api";
 import { PairPage } from "./control/Pair";
 import { useStartTitles } from "./control/Starting";
-import { useAnswerableCount, useAppState } from "./data/hooks";
+import { useAppState, useNeedsYouCount } from "./data/hooks";
 import { markRestoring } from "./lib/keys";
+import { landingFor, type Opened } from "./lib/landing";
 import { accountMode } from "./lib/net";
 import { titlePrefix, useAttentionEffects } from "./lib/notify";
-import { Link, navigate, parseRoute, usePath, useRoute } from "./lib/router";
+import { Link, navigate, parseRoute, SETTINGS_PARAM, usePath, useRoute, useSearchParam } from "./lib/router";
 import { getSettings } from "./lib/settings";
 import { NEW_WORDS, thisPhone } from "./native/accountWords";
 import { isShell } from "./native/shell";
@@ -62,20 +63,27 @@ const TITLES: Record<string, string> = {
   "add-device": "Add this device",
   phone: "Your phone",
   themes: "Views",
-  settings: "Settings",
   shortcuts: "Keyboard shortcuts",
   missing: "Not found",
 };
 
-/** Once per page load: the app opened at its root lands on the page the device chose
- *  (Settings › General), unless the URL carries anything (a key, the mock, a split). */
+/** The address the app was opened at, read as the page loads: before the side panel puts
+ *  the last visit's tabs back into it (Shell's boot effect runs before App's). */
+const opened: Opened = {
+  at: location.pathname + location.search,
+  asked: !!(history.state as { asked?: unknown } | null)?.asked,
+};
+
+/** Once per page load: the app lands on the page the device chose (Settings › General ›
+ *  Open on), where the rule says so (lib/landing.ts). The tabs put back come along
+ *  (navigate keeps `?s=` and `&t=`), and a page the app has moved to since it opened (a
+ *  first run's Setup) is left alone. */
 let landed = false;
 function landOnDefaultPage(): void {
   if (landed) return;
   landed = true;
-  const page = getSettings().defaultPage;
-  if (page === "/" || location.pathname !== "/" || location.search) return;
-  navigate(page, { replace: true });
+  const page = landingFor(opened, getSettings().defaultPage);
+  if (page && location.pathname === "/") navigate(page, { replace: true });
 }
 
 export function App() {
@@ -89,8 +97,8 @@ export function App() {
   }, [infoRev]);
   const { themes } = useThemes();
   const themeName = route.name === "theme" ? themes.find((t) => t.id === route.id)?.name : undefined;
-  // "(n) " ahead of every title while n answerable prompts are open (lib/notify.ts).
-  const open = useAnswerableCount();
+  // "(n) " ahead of every title while n sessions need you (lib/notify.ts).
+  const open = useNeedsYouCount();
   useAttentionEffects();
   useEffect(() => {
     // On a spacesheep account that address is the page that approves this phone, and is
@@ -121,14 +129,18 @@ export function App() {
   // Every list names a session started here by its first message (lib/format.ts sessionTitle).
   useStartTitles();
   useEffect(() => landOnDefaultPage(), []);
-  const [deciding, setDeciding] = useState(() => route.name === "board" && !setupSeen());
+  // The board, and no Settings over it: Settings asked for by its address shows at once,
+  // and Setup waits.
+  const settingsAsked = useSearchParam(SETTINGS_PARAM) !== null;
+  const bareBoard = route.name === "board" && !settingsAsked;
+  const [deciding, setDeciding] = useState(() => bareBoard && !setupSeen());
   useEffect(() => {
     if (!deciding) return;
     const t = window.setTimeout(() => setDeciding(false), FIRST_RUN_WAIT_MS);
     return () => window.clearTimeout(t);
   }, [deciding]);
   useLayoutEffect(() => {
-    if (route.name !== "board") {
+    if (!bareBoard) {
       if (deciding) setDeciding(false);
       return;
     }
@@ -142,11 +154,11 @@ export function App() {
       navigate("/setup", { replace: true });
     }
     setDeciding(false);
-  }, [route.name, setup.local, setup.status, setup.error, deciding]);
+  }, [bareBoard, setup.local, setup.status, setup.error, deciding]);
   // The receiver refused this page's key: the link is asked for again. In the native app
-  // Settings (where its receivers are) opens over that page; no other page does.
+  // Settings (where its receivers are) opens over that page; nothing else does.
   if (keyRefused)
-    return route.name === "settings" && isShell() ? (
+    return settingsAsked && isShell() ? (
       <>
         <KeyRefused />
         <Settings />
@@ -159,8 +171,10 @@ export function App() {
     return (
       <Shell route={route}>
         <NoReceiver />
-        <Palette />
-        <Toasts />
+        <OverPage>
+          <Palette />
+          <Toasts />
+        </OverPage>
       </Shell>
     );
   return (
@@ -182,12 +196,6 @@ export function App() {
       {route.name === "setup" && <Setup />}
       {route.name === "themes" && <Themes />}
       {route.name === "shortcuts" && <Shortcuts />}
-      {route.name === "settings" && (
-        <>
-          <Board />
-          <Settings />
-        </>
-      )}
       {route.name === "theme" && <ThemeRoute key={route.id} id={route.id} />}
       {route.name === "pair" && <PairPage key={route.code} code={route.code} />}
       {route.name === "add-device" &&
@@ -196,8 +204,10 @@ export function App() {
         (account ? <ApprovePhonePage /> : <AddDevicePage />)}
       {route.name === "phone" && <PhonePage />}
       {route.name === "missing" && <Missing path={route.path} />}
-      <Palette />
-      <Toasts />
+      <OverPage>
+        <Palette />
+        <Toasts />
+      </OverPage>
     </Shell>
   );
 }

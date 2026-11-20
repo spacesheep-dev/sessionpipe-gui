@@ -148,13 +148,24 @@ struct Progress {
     message: String,
 }
 
+/// A refusal that is the app's own, in the shape the page reads a start or an update's by.
+fn failed(line: String) -> crate::lifecycle::supervisor::UpdateFailure {
+    crate::lifecycle::supervisor::UpdateFailure {
+        kind: "failed",
+        line,
+        log: None,
+    }
+}
+
+/// The welcome's "Start sessionpipe". It rejects as "Update sessionpipe" does, with the
+/// kind the page picks its one sentence by ("noNode", "timeout", "busy"…) and the raw line.
 #[tauri::command]
 async fn rx_start_local<R: Runtime>(
     window: WebviewWindow<R>,
     app: AppHandle<R>,
     on_progress: Channel<Progress>,
-) -> Result<ReceiverOut, String> {
-    main_only(&window)?;
+) -> Result<ReceiverOut, crate::lifecycle::supervisor::UpdateFailure> {
+    main_only(&window).map_err(failed)?;
     let r = crate::lifecycle::start_local_receiver(|step, message| {
         let _ = on_progress.send(Progress {
             step: step.into(),
@@ -162,10 +173,10 @@ async fn rx_start_local<R: Runtime>(
         });
     })
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| crate::lifecycle::supervisor::UpdateFailure::from(&e))?;
     let shell = app.state::<Shell>();
     shell.hub.add_transient(&r.origin);
-    out(&shell.hub, &r.id).ok_or_else(|| "gone".into())
+    out(&shell.hub, &r.id).ok_or_else(|| failed("gone".into()))
 }
 
 /// What the launch check found about this computer's receiver: its origin, the version it
@@ -178,7 +189,7 @@ fn rx_local_update<R: Runtime>(
     Ok(crate::lifecycle::local_update())
 }
 
-/// The page's "Update sessionpipe" (Settings › Data): runs what "Start sessionpipe" runs,
+/// The page's Update (Settings › About, Settings › Data): runs what "Start sessionpipe" runs,
 /// with its progress lines, and says what the receiver runs after.
 #[tauri::command]
 async fn rx_update_local<R: Runtime>(
@@ -188,19 +199,17 @@ async fn rx_update_local<R: Runtime>(
     Option<crate::lifecycle::supervisor::LocalUpdate>,
     crate::lifecycle::supervisor::UpdateFailure,
 > {
-    main_only(&window).map_err(|line| crate::lifecycle::supervisor::UpdateFailure {
-        kind: "failed",
-        line,
-        log: None,
-    })?;
-    crate::lifecycle::update_local_receiver(|step, message| {
+    main_only(&window).map_err(failed)?;
+    let r = crate::lifecycle::update_local_receiver(|step, message| {
         let _ = on_progress.send(Progress {
             step: step.into(),
             message: message.into(),
         });
     })
-    .await
-    .map_err(|e| (&e).into())
+    .await;
+    // The menu bar item offers the update only while it is still to do.
+    crate::tray::refresh(window.app_handle());
+    r.map_err(|e| (&e).into())
 }
 
 #[tauri::command]
@@ -255,9 +264,13 @@ pub fn apply_settings<R: Runtime>(
 ) -> Result<AppSettings, String> {
     let shell = app.state::<Shell>();
     let prev = shell.settings();
-    // The shortcut goes through its own command (it can fail to register).
+    // The shortcut goes through its own command (it can fail to register), and the version
+    // that last checked the background service is the shell's to note.
     next.hotkey = prev.hotkey.clone();
+    next.last_version = prev.last_version.clone();
     next.first_run_done = next.first_run_done || prev.first_run_done;
+    // Before the menu bar and Dock below: the item going also brings the Dock icon back.
+    next = next.normalized();
     if next.launch_at_login != prev.launch_at_login {
         #[cfg(target_os = "macos")]
         crate::macos::login_item::set(next.launch_at_login)?;
@@ -277,8 +290,15 @@ pub fn apply_settings<R: Runtime>(
             tauri::ActivationPolicy::Regular
         });
     }
-    *shell.settings.lock().unwrap() = next.clone();
-    crate::settings::save(&shell.home, &next).map_err(|e| e.to_string())?;
+    {
+        // The shell's own fields are read again under the lock that writes: the launch's
+        // service check may have noted a version since `prev` was read.
+        let mut cur = shell.settings.lock().unwrap();
+        next.hotkey = cur.hotkey.clone();
+        next.last_version = cur.last_version.clone();
+        *cur = next.clone();
+        crate::settings::save(&shell.home, &cur).map_err(|e| e.to_string())?;
+    }
     crate::tray::refresh(app);
     crate::tray::update_badge(app, false);
     // Turned on: check now rather than at the schedule's next six-hour mark.

@@ -362,6 +362,48 @@ test("the picker, a paste and a drop each add a picture; they go as the message'
   await shots(page, "2-sent-with-three-pictures");
 });
 
+test("a picture in a preview tab's composer keeps the tab: the next plain open adds its own", async ({
+  context,
+  page,
+  isMobile,
+}) => {
+  test.skip(!!isMobile, "a computer's panel: the phone has no tabs");
+  // A plain click opens beside, where nothing is chosen.
+  await seenSetupHere(context, { mode: "advanced" });
+  const key = await passkeyPage(context, page);
+  const d = await fakeDaemon(key, {
+    name: `pictures-${tag()}`,
+    harnesses: ["claude-code"],
+    folders: [CWD],
+    mode: "auto",
+    files: true,
+    prompt_files: true,
+    version: "0.17.0",
+  });
+  daemons.push(d);
+  const token = await sinkToken();
+  const t = tag();
+  const one = await postSession(token, { machine: d.name, cwd: CWD, title: `Kept by a picture ${t}` });
+  const two = await postSession(token, { machine: d.name, cwd: CWD, title: `Opened after it ${t}` });
+  const card = (s: { harness: string; id: string }) =>
+    page.locator(`article.card a.card-link[href^="${sessionUrl(s.harness, s.id)}"]`);
+  const panel = page.locator("aside.panel");
+  const tabs = panel.locator("[role='tablist'] [role='tab']");
+  await page.goto(`${CONTROL_BASE}/`);
+  await card(one).click();
+  await expect(panel).toHaveClass(/panel--open/);
+  await expect(composer(page)).toBeEnabled();
+  await expect(panel.locator(".panel-title")).toHaveText(`Kept by a picture ${t}`);
+  expect(await paste(page, [given("image.png", BIRCH)])).toBe(true);
+  await expect(tray(page)).toHaveCount(1);
+  await card(two).click();
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.nth(0)).not.toHaveClass(/tab--preview/);
+  // The kept tab still holds its picture.
+  await tabs.nth(0).click();
+  await expect(panel.locator(".panel-body:not(.panel-body--off) .att-item")).toHaveCount(1);
+});
+
 test("three at once, then seven: six are kept and the cap is said; two upload at a time; pictures alone are signed with words", async ({
   context,
   page,

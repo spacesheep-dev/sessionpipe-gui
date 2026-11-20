@@ -18,7 +18,7 @@ export type NavKind = "navigate" | "replace" | "back" | "popstate";
 export type NavDirection = "push" | "pop";
 
 export interface NavEnv {
-  /** The phone layout (Shell.tsx PHONE_QUERY). */
+  /** The phone layout (lib/device.ts). */
   phone: boolean;
   /** The person asked for less motion. */
   reduced: boolean;

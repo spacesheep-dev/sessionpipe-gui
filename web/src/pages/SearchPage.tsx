@@ -5,8 +5,8 @@
 // pushed when a result opens, so Back returns to the same results with the cursor where it
 // was. The field leads; under it the filter chips (which edit the query text: one state) and
 // the result line; then the rows. Keys: ↑↓ in the field and j/k in the list walk the results,
-// ⏎ opens, ⇧⏎ beside, ⌘⏎ beside keeping focus here, Space peeks, `.` the menu, ⌘C the
-// resume line, `/` the field, Esc steps back.
+// Tab from the field to the results, ⏎ opens, ⇧⏎ beside, ⌘⏎ beside keeping focus here, Space
+// peeks, `.` the menu, ⌘C the resume line, `/` the field, Esc steps back.
 import type { SearchFilterKey, SearchSort, SessionMatch } from "@shared/api";
 import {
   filterValue,
@@ -22,16 +22,17 @@ import { LabelSwatch } from "../components/LabelDot";
 import { PageBar } from "../components/PageBar";
 import { useBackgroundMenu } from "../components/SessionCard";
 import { useStore } from "../data/hooks";
+import { usePhoneLayout } from "../lib/device";
 import { focusSearch } from "../lib/keys";
 import { parseRoute, SPLIT_ACTIVE_PARAM, SPLIT_PARAM } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
-import { closeTab, parseSplit } from "../lib/split";
+import { closeTab, type OpenHow, openWay, parseSplit } from "../lib/split";
 import { useNow } from "../lib/time";
 import { markTyped, PAGE_SIZE, useFacets, useSearchClient, useSearchStatus, useSessionSearch } from "../search/client";
 import { DateRange, rangeLabel } from "../search/DateRange";
 import { type FieldHandle, SearchField } from "../search/Field";
 import { copyResume, type RowMenuContext } from "../search/menu";
-import { type OpenMode, openResult } from "../search/open";
+import { openResult, openResultAs } from "../search/open";
 import { Row } from "../search/Row";
 import {
   forgetSearch,
@@ -45,7 +46,6 @@ import {
 import { macWord, resultLine } from "../search/words";
 import "../styles/search.css";
 
-const PHONE = "(max-width: 839px)";
 function useMedia(q: string): boolean {
   const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(q).matches);
   useEffect(() => {
@@ -103,7 +103,7 @@ export function Search() {
   const store = useStore();
   const client = useSearchClient();
   const status = useSearchStatus(client);
-  const phone = useMedia(PHONE);
+  const phone = usePhoneLayout();
   const narrow = useMedia("(max-width: 759px)");
   const [{ q, sort }, setState] = useState(readUrl);
   const setQuery = useCallback((next: string) => {
@@ -153,15 +153,22 @@ export function Search() {
     if (next !== cursor) setCursor(next);
   }
   onRow.current = cursor >= 0 ? (keyList[cursor] ?? null) : null;
-  const focusRow = useCallback((i: number) => {
+  /** Focus row `i` and bring it into view; false when it is not there. */
+  const focusRow = useCallback((i: number): boolean => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-cursor="${i}"] .sx-row`);
-    el?.focus({ preventScroll: true });
-    el?.scrollIntoView({ block: "nearest" });
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ block: "nearest" });
+    return true;
   }, []);
   const inField = () => document.activeElement === field.current?.input();
+  const inList = () => !!listRef.current?.contains(document.activeElement);
   const move = useCallback(
     (d: 1 | -1) => {
       if (!keyList.length) return false;
+      // From anywhere else on the page (Sort), the first j lands on the cursor's row, not
+      // the one after it.
+      if (!inField() && !inList()) return focusRow(Math.max(0, cursor));
       const next = cursor < 0 ? 0 : Math.max(0, Math.min(keyList.length - 1, cursor + d));
       setCursor(next);
       if (inField()) listRef.current?.querySelector(`[data-cursor="${next}"]`)?.scrollIntoView({ block: "nearest" });
@@ -172,14 +179,16 @@ export function Search() {
     },
     [cursor, keyList, focusRow, sessions, res.loadMore],
   );
+  // ↵ opens the way Settings says, ⇧↵ the other way, ⌘↵ a background tab (lib/split.ts
+  // openWay), as a click on the row does.
   const open = useCallback(
-    (mode: OpenMode, i = cursor) => {
+    (how: OpenHow, i = cursor) => {
       const m = sessions[i < 0 ? 0 : i];
       if (!m) return false;
       rememberSearch(q);
       const rect = listRef.current?.querySelector(`[data-cursor="${i}"]`)?.getBoundingClientRect();
-      if (mode !== "page") peeked = null;
-      openResult(m, m.hits[0], q, mode, rect);
+      if (openWay(how) !== "page") peeked = null;
+      openResultAs(m, m.hits[0], q, how, rect);
       return true;
     },
     [cursor, sessions, q],
@@ -233,8 +242,8 @@ export function Search() {
   const listOn = sessions.length > 0;
   useShortcut("list.down", () => move(1), { enabled: listOn });
   useShortcut("list.up", () => move(-1), { enabled: listOn });
-  useShortcut("list.open", () => open("page"), { enabled: listOn });
-  useShortcut("list.beside", () => open("beside"), { enabled: listOn });
+  useShortcut("list.open", () => open("primary"), { enabled: listOn });
+  useShortcut("list.beside", () => open("other"), { enabled: listOn });
   useShortcut("list.background", () => open("background"), { enabled: listOn });
   useShortcut("search.peek", () => peek(sessions[cursor < 0 ? 0 : cursor]), { enabled: listOn });
   useShortcut(
@@ -272,7 +281,15 @@ export function Search() {
       if (inField()) return false;
       if (closePeek()) return;
       if ((e.target as HTMLElement | null)?.closest?.("aside.panel")) return false;
-      if (document.querySelector("[data-dismiss]:not([data-closing])")?.checkVisibility?.()) return false;
+      // Something open that Esc closes first: one that is drawn, as lib/keys.ts asks it.
+      // The shut panel keeps its Close in the DOM, hidden by `visibility`, and is not. An
+      // engine with no checkVisibility (WebKit before 17.4) is asked for its box and that.
+      const drawn = (el: HTMLElement) =>
+        !el.closest("[data-closing]") &&
+        (typeof el.checkVisibility === "function"
+          ? el.checkVisibility({ visibilityProperty: true })
+          : el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden");
+      if ([...document.querySelectorAll<HTMLElement>("[data-dismiss]")].some(drawn)) return false;
       field.current?.focus(true);
     },
     { priority: 2 },
@@ -445,16 +462,10 @@ export function Search() {
   const keys = useMemo(
     () => ({
       move: (d: 1 | -1) => void move(d),
-      open: (mode: OpenMode) => void open(mode),
-      leave: () => {
-        if (sessions.length) {
-          const i = cursor < 0 ? 0 : cursor;
-          setCursor(i);
-          focusRow(i);
-        } else field.current?.input()?.blur();
-      },
+      open: (how: OpenHow) => void open(how),
+      leave: () => focusRow(cursor < 0 ? 0 : cursor),
     }),
-    [move, open, sessions.length, cursor, focusRow],
+    [move, open, cursor, focusRow],
   );
 
   const showRows = !empty && sessions.length > 0;
@@ -560,7 +571,15 @@ export function Search() {
               <Fragment key={m.key}>
                 {head && <li className="sx-day">{day}</li>}
                 <li className="sx-item" data-cursor={String(i)}>
-                  <Row m={m} index={i} active={i === cursor && !phone} now={now} ctx={ctx} onCursor={onCursor} />
+                  <Row
+                    m={m}
+                    index={i}
+                    active={i === cursor && !phone}
+                    stop={i === Math.max(cursor, 0)}
+                    now={now}
+                    ctx={ctx}
+                    onCursor={onCursor}
+                  />
                 </li>
               </Fragment>
             );

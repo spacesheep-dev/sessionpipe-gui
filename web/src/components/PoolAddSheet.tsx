@@ -26,6 +26,7 @@ import { signerLabel } from "../control/signer";
 import { usePoolSend } from "../control/usePoolSend";
 import { refusalWords } from "../control/words";
 import { useMachines } from "../data/hooks";
+import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import { usePresence } from "../lib/motion";
 import {
@@ -40,7 +41,6 @@ import {
 } from "../lib/pool";
 import { useShortcut } from "../lib/shortcuts";
 import { ActionButton, CommandWell } from "./bits";
-import { useMedia } from "./Shell";
 import "../control/newSessionSheet.css";
 
 export function PoolAddHost() {
@@ -55,7 +55,7 @@ type Link = { url: string; pendingId: string };
 const settled = (outcome: string | undefined): boolean => !!outcome && outcome !== "taken" && outcome !== "progress";
 
 export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closing: boolean }) {
-  const phone = useMedia("(max-width: 839px)");
+  const phone = usePhoneLayout();
   const machines = useMachines();
   const m =
     machines.find((x) => x.name === target.machine) ??

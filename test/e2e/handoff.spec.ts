@@ -6,7 +6,13 @@
 // own harness, the session's folder), the switch that brings the answer back, and Ask: a
 // signed `start` the fake daemon takes with `reply_to` naming the asking session, `from`
 // and `replyTo` on the activity, and the row the asking session shows at once.
-// An older machine's session gets the disabled item with its reason and no strip button.
+// A row's menu has the item with no key beside it (⇧A is the session view's own, and shows
+// in its "⋯"). An older machine's session, or one on a machine that is not paired, gets
+// neither the strip's button nor the menu's item: an ask from there would only be refused.
+// The open sheet has the whole window, as New session's has: its scrim over the sidebar and
+// the page bar at each desktop size, and on a phone the sheet over the tab bar. A
+// right-click on the dimmed window opens no menu, and a phone's sheet dragged down takes
+// its drag's mark with it, so the next sheet has its dim.
 // Against the second e2e instance (test door on, rp id localhost) through fake daemons.
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
@@ -148,6 +154,157 @@ test("the strip's Ask another agent…: the sheet, its rows, and a start the mac
   await expect(page.locator(".ask").first()).toContainText("You asked Codex");
 });
 
+/** What is under a point of the window: the sheet's scrim, the sheet, or the page. */
+const under = (page: Page, at: { x: number; y: number }) =>
+  page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.closest(".ns-scrim") ? "scrim" : el?.closest("[data-handoff]") ? "sheet" : "page";
+  }, at);
+const centre = async (page: Page, selector: string) => {
+  const box = (await page.locator(selector).first().boundingBox())!;
+  return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
+};
+
+test("the sheet dims the whole window, as New session's does: a click on the sidebar closes it and goes nowhere", async ({
+  page,
+}) => {
+  const name = `ho-dim-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Ledger ${name}` });
+  await postTurn(sink, { ...s, machine: name }, "The ledger balances to the cent.");
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+  const url = page.url();
+
+  for (const size of [
+    { width: 1280, height: 800 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.locator("[data-ctl-ask]").click();
+    await expect(sheet(page)).toBeVisible();
+    // Out of the docked bar: neither its measure nor its layer under the sidebar holds it.
+    expect(await sheet(page).evaluate((el) => el.closest(".sess-ctl") === null)).toBe(true);
+    expect(await page.locator(".ns-scrim").boundingBox()).toEqual({ x: 0, y: 0, ...size });
+    // The sheet keeps its place: its own width, centred, dropped from under the title band.
+    const band = await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar")),
+    );
+    await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(band);
+    const box = (await sheet(page).boundingBox())!;
+    expect(box.width).toBe(640);
+    expect(box.x).toBe((size.width - 640) / 2);
+    // Everything around it is under the scrim: the sidebar, a link in it, the bar's back
+    // and ⋯ at either end of the window, and the composer.
+    const board = await centre(page, ".rail [data-nav=board]");
+    const points = [
+      { x: 100, y: 400 },
+      board,
+      await centre(page, ".main .bar-back"),
+      await centre(page, ".main .bar [aria-label='More actions']"),
+      await centre(page, ".ctl textarea"),
+    ];
+    for (const at of points) expect(await under(page, at), `${at.x},${at.y} at ${size.width}`).toBe("scrim");
+    // A right-click there is the sheet's as well, and the sheet has no menu: the bar's
+    // own (Send a message…) does not open over the dimmed window.
+    await page.mouse.click(100, 400, { button: "right" });
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(sheet(page)).toBeVisible();
+
+    // A click on the sidebar's Board is the scrim's: the sheet closes, the page stays.
+    await page.mouse.click(board.x, board.y);
+    await expect(sheet(page)).toHaveCount(0);
+    expect(page.url()).toBe(url);
+    await expect(page.locator(".ns-scrim")).toHaveCount(0);
+  }
+
+  // Esc closes it too, and the focus is back on the button that opened it. (The sheet
+  // takes the focus once more 120 ms after it opens, for a menu that gives its own back
+  // late: a timer set after that one runs after it, so Esc is pressed once it has.)
+  const ask = page.locator("[data-ctl-ask]");
+  await ask.click();
+  await expect(sheet(page).locator("[data-hs-text]")).toBeFocused();
+  await page.evaluate(() => new Promise((done) => setTimeout(done, 150)));
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  await expect(ask).toBeFocused();
+  expect(page.url()).toBe(url);
+});
+
+// A phone and a tablet are touch screens: under 840 px a window with a mouse keeps the
+// desktop's layout down to 720 (lib/device.ts), so the tablet here has a finger.
+test.describe("on a touch screen", () => {
+  test.use({ hasTouch: true });
+
+  test("a phone's sheet covers the tab bar, and a tablet's fills the width", async ({ page }) => {
+    const name = `ho-full-${tag()}`;
+    const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+    daemons.push(m);
+    const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Totals ${name}` });
+    await postTurn(sink, { ...s, machine: name }, "The totals are summed once.");
+
+    for (const size of [
+      { width: 390, height: 844 },
+      { width: 834, height: 1194 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+      await expect(page.locator(".ctl textarea")).toBeVisible();
+      const tabbar = await centre(page, ".tabbar");
+      expect(await under(page, tabbar)).toBe("page");
+      await page.locator("[data-ctl-ask]").click();
+      await expect(sheet(page)).toBeVisible();
+      expect(await sheet(page).evaluate((el) => el.closest(".sess-ctl") === null)).toBe(true);
+      // The whole screen is the sheet's, edge to edge: nothing of the page beside it (the
+      // bar's ⋯, the composer), and the tab bar under it.
+      await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(0);
+      expect(await sheet(page).boundingBox()).toEqual({ x: 0, y: 0, ...size });
+      for (const at of [tabbar, { x: size.width - 4, y: 24 }, { x: size.width - 4, y: size.height - 120 }])
+        expect(await under(page, at), `${at.x},${at.y} at ${size.width}`).toBe("sheet");
+      await sheet(page).locator("[data-hs-cancel]").click();
+      await expect(sheet(page)).toHaveCount(0);
+    }
+  });
+});
+
+test("a phone's sheet dragged down takes its mark with it: the next sheet has its dim", async ({ page }) => {
+  const name = `ho-drag-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Sums ${name}` });
+  await postTurn(sink, { ...s, machine: name }, "The sums carry over.");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  await expect(page.locator(".ctl textarea")).toBeVisible();
+  /** Every element that carries the drag's mark (lib/motion.ts useSheetDrag), by class. */
+  const marked = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("*"))
+        .filter((el) => el.style.getPropertyValue("--sheet-drag") !== "")
+        .map((el) => el.className || el.localName),
+    );
+
+  await page.locator("[data-ctl-ask]").click();
+  await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(0);
+  // By its title, past the two fifths of its height that let it go. While it is held the
+  // mark is on the sheet's own element in the body, never on the body.
+  const from = await centre(page, "[data-handoff] .ns-bar-title");
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 13; i++) await page.mouse.move(from.x, from.y + 40 * i);
+  expect(await marked()).toEqual(["hs-host"]);
+  await page.mouse.up();
+  await expect(sheet(page)).toHaveCount(0);
+  expect(await marked()).toEqual([]);
+
+  // The page's ⋯ sheet reads the mark from wherever it is set above it: its dim is whole.
+  await page.locator(".main .bar [aria-label='More actions']").click();
+  await expect(page.locator(".menu-sheet")).toBeVisible();
+  await expect(page.locator(".menu-sheet-host .menu-scrim")).toHaveCSS("opacity", "1");
+});
+
 test("a reply's menu asks about that turn; ⌘K has the verb; Esc keeps the draft", async ({ page }) => {
   const name = `ho-reply-${tag()}`;
   const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
@@ -174,20 +331,79 @@ test("a reply's menu asks about that turn; ⌘K has the verb; Esc keeps the draf
   await expect(sheet(page).locator("[data-hs-text]")).toHaveValue("Is five enough?");
 });
 
-test("an older machine: the strip offers no ask, and the menu item says what it needs", async ({ page }) => {
+test("a row's menu asks with no key beside it; the session's own \"⋯\" shows ⇧A, the key that asks there", async ({
+  page,
+}) => {
+  const name = `ho-keys-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Keys ${name}` });
+  const ask = page.getByRole("menuitem", { name: "Ask another agent…" });
+  // The board's row: ⇧A does nothing there, so the item shows no key, and it opens the sheet.
+  await page.goto(`${CONTROL_BASE}/`);
+  await page
+    .locator("article.card", { hasText: `Keys ${name}` })
+    .locator(".card-title")
+    .click({ button: "right" });
+  await expect(ask).toBeVisible();
+  await expect(ask).not.toHaveAttribute("aria-disabled");
+  await expect(ask.locator(".menu-keys")).toHaveCount(0);
+  await ask.click();
+  await expect(sheet(page)).toBeVisible();
+  await expect(sheet(page).locator("[data-hs-row=from]")).toContainText(`Keys ${name}`);
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  // Its own page: the key presses the strip's button, and the menu says so.
+  await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+  await expect(page.locator("[data-ctl-ask]")).toBeVisible();
+  await page.getByRole("button", { name: "More actions" }).click();
+  await expect(ask).toBeVisible();
+  await expect(ask.locator(".menu-keys")).toHaveText(/a$/i);
+});
+
+test("an older machine, and one that is not paired: neither the strip nor a menu offers an ask that would be refused", async ({
+  page,
+}) => {
   const name = `ho-old-${tag()}`;
   const m = await fakeDaemon(key, older(name), { sinkToken: sink });
   daemons.push(m);
   const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Old ${name}` });
+  const lone = `ho-lone-${tag()}`;
+  await postSession(sink, { machine: lone, cwd: "/Users/e2e/code", title: `Lone ${lone}` });
+  const ask = page.getByRole("menuitem", { name: "Ask another agent…" });
+  const here = page.getByRole("menuitem", { name: "New session here" });
   await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
   await expect(page.locator(".conn").first()).toHaveText("live");
-  // The hello said neither `ask` nor `handoff`: the strip's button reads it the way the
-  // menu item does and is not shown (a capability shows only where the hello says so).
+  // The hello said neither `ask` nor `handoff`: the strip's button is not shown (a
+  // capability shows only where the hello says so), and the menu reads it the same way:
+  // no item, where it was a greyed one.
   await expect(page.locator(".ctl textarea")).toBeVisible();
   await expect(page.locator("[data-ctl-ask]")).toHaveCount(0);
   await page.getByRole("button", { name: "More actions" }).click();
-  const item = page.getByRole("menuitem", { name: "Ask another agent…" });
-  await expect(item).toBeVisible();
-  await expect(item).toHaveAttribute("aria-disabled", "true");
-  await expect(item).toHaveAttribute("aria-description", `${name} needs a newer sessionpipe for this`);
+  await expect(here).toBeVisible();
+  await expect(ask).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // Its row on the board: a session can be started there, and nothing asked.
+  await page.goto(`${CONTROL_BASE}/`);
+  await page
+    .locator("article.card", { hasText: `Old ${name}` })
+    .locator(".card-title")
+    .click({ button: "right" });
+  await expect(here).toBeVisible();
+  await expect(ask).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  // A machine that is not paired here: neither, and no rule where the two were. (A menu
+  // opens no sooner than 400 ms after the last one did.)
+  await expect(async () => {
+    await page
+      .locator("article.card", { hasText: `Lone ${lone}` })
+      .locator(".card-title")
+      .click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: "Open as page" })).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  await expect(here).toHaveCount(0);
+  await expect(ask).toHaveCount(0);
+  await expect(page.locator(".menu > .menu-sep + .menu-sep")).toHaveCount(0);
 });

@@ -16,6 +16,10 @@ html[data-shell="macos"] {
 
 /* The Mac conventions the web already keeps (base.css: the arrow on every control, no
    ring after a click, chrome not selectable) hold here unchanged; the window adds: */
+/* Focus stays the ink here too, not the system accent: the shell's WKWebView resolves
+   -apple-system-control-accent and AccentColor to a fixed blue whatever Appearance › Accent
+   says (only the private _useSystemAppearance view setting lets one follow, and it misses
+   live changes), so a rule here would paint every Mac blue, the person's choice or not. */
 /* No rubber-band of the whole window past the page's ends: the page scrolls, the window
    holds still, as an AppKit scroll view under a fixed title bar does. */
 html[data-shell="macos"],
@@ -23,7 +27,7 @@ html[data-shell="macos"] body {
   overscroll-behavior: none;
 }
 
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   /* The sidebar: the band holds the lights at its leading edge and the compose button at
      its trailing edge; the brand steps aside (the menu bar names the app). */
   html[data-shell="macos"] .shell--side .rail-head {
@@ -51,6 +55,7 @@ html[data-shell="macos"] body {
 
   /* Toggle Sidebar (⌃⌘S): the page takes the window, its bar starts after the lights. */
   html[data-shell="macos"][data-rail-hidden] .shell {
+    --rail: 0px;
     grid-template-columns: minmax(0, 1fr);
   }
   html[data-shell="macos"][data-rail-hidden] .rail {
@@ -62,8 +67,23 @@ html[data-shell="macos"] body {
   }
 }
 
+/* What covers the page with the sidebar toggled off starts at the window's edge, so its
+   head starts after the lights, as the page bar under it does: a panel in a window too
+   narrow for it beside the page (styles/split.css), the files drawer under 1000 px
+   (styles/files.css). */
+@media (min-width: 720px) and (max-width: 839px) and (pointer: fine) {
+  html[data-shell="macos"][data-rail-hidden] .panel-head {
+    padding-left: var(--lights);
+  }
+}
+@media (max-width: 999px) {
+  html[data-shell="macos"][data-rail-hidden] .files--page > .files-head {
+    padding-left: var(--lights);
+  }
+}
+
 /* A narrow window (the phone layout): no rail, so the page bar starts after the lights. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   html[data-shell="macos"] .main > .page > .bar,
   html[data-shell="macos"] .boot .bar {
     padding-left: max(var(--gutter), var(--lights));
@@ -73,7 +93,7 @@ html[data-shell="macos"] body {
 /* Sidebar vibrancy (the window's "sidebar" material behind a transparent rail), only when
    the shell turned it on; the page itself stays on its own opaque ground. With Reduce
    Transparency on, the rail is solid again. */
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   html[data-shell="macos"][data-vibrancy],
   html[data-shell="macos"][data-vibrancy] body {
     background: transparent;
@@ -84,13 +104,13 @@ html[data-shell="macos"] body {
   html[data-shell="macos"][data-vibrancy] .rail {
     background: transparent;
   }
-}
-@media (min-width: 840px) and (prefers-reduced-transparency: reduce) {
-  html[data-shell="macos"][data-vibrancy],
-  html[data-shell="macos"][data-vibrancy] body {
-    background: var(--bg);
-  }
-  html[data-shell="macos"][data-vibrancy] .rail {
-    background: var(--chrome);
+  @media (prefers-reduced-transparency: reduce) {
+    html[data-shell="macos"][data-vibrancy],
+    html[data-shell="macos"][data-vibrancy] body {
+      background: var(--bg);
+    }
+    html[data-shell="macos"][data-vibrancy] .rail {
+      background: var(--chrome);
+    }
   }
 }

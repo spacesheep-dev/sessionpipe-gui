@@ -10,7 +10,8 @@
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  /* The grouped ground, as every document page's: its choices are one inset panel. */
+  background: var(--grouped-ground);
 }
 /* The title bar's band: the lights and the window's drag, nothing else. */
 .welcome-bar {
@@ -63,6 +64,111 @@
 }
 .welcome-error {
   color: var(--err);
+}
+
+/* ----- Start sessionpipe on this computer (StartHere.tsx) ----- */
+
+/* The raw line of a start that failed opens under the row, across its whole width: the
+   sentence and the button above it stay where they are. */
+.start-row {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+/* Never the button on a line of its own: the sentence wraps instead. */
+.start-row > .form-row-text {
+  flex-basis: 0;
+}
+/* At work: the button can't be pressed (shared.css makes aria-busy inert) and is dimmed
+   as a disabled one is, and it keeps the focus, which a disabled one would drop. */
+.start-row > .btn[aria-disabled="true"] {
+  opacity: 0.45;
+}
+/* A link in the row's sentence: ink and a hairline under it, as a desktop writes one
+   (settings.css .settings-hint a); the tint is the phone's. */
+.start-row .form-caption a {
+  color: var(--fg-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .start-row .form-caption a:hover {
+    color: var(--fg);
+  }
+}
+/* "Details": the quiet disclosure of Setup's "Why isn't this done?" (pages/setup.css). */
+.start-details {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+.start-details > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  list-style: none;
+  color: var(--fg-2);
+}
+.start-details > summary::-webkit-details-marker {
+  display: none;
+}
+.start-details > summary::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--fg-3);
+  -webkit-mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.start-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+@media (hover: hover) {
+  .start-details > summary:hover {
+    color: var(--fg);
+  }
+}
+.start-details > summary:focus-visible {
+  border-radius: var(--radius-inner);
+}
+/* The line is read, selected and copied, never scrolled: it wraps, and Copy keeps to its
+   first line. */
+.start-details > .cmdwell {
+  align-items: flex-start;
+  margin: 8px 0 4px;
+  padding: 4px 4px 4px 12px;
+}
+.start-details .cmdwell-text {
+  padding: calc((var(--control) - var(--text-sm) * var(--lh)) / 2) 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--lh);
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* The board's first load on this computer's receiver (StartHere.tsx NoConnectionStart):
+   the same dimmed button while it works, the link in the title in its ink, and the raw
+   line under the buttons, across the state's width, read left to right. */
+.no-conn--start .btn[aria-disabled="true"] {
+  opacity: 0.45;
+}
+.no-conn--start .state-title a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+}
+.no-conn--start .start-details > .cmdwell {
+  text-align: left;
 }
 
 /* ----- the first-run sheet ----- */
@@ -124,6 +230,17 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ----- Settings › About: the app's update (AppSettings.tsx UpdateRow) ----- */
+
+/* The row's button, or nothing while a check or a download runs. The focus rests here
+   then, with no ring: there is nothing to press until the button is back. */
+.app-update-ctl {
+  display: flex;
+}
+.app-update-ctl:focus {
+  outline: none;
 }
 
 /* ----- the phone's first run (PhoneOnboarding.tsx) ----- */
@@ -378,16 +495,6 @@
   align-items: center;
   justify-content: center;
 }
-.onb-steps .cmdwell {
-  background: var(--bg-4);
-  padding: 8px 12px;
-}
-/* The command wraps: it is read here and typed on the computer, never scrolled. */
-.onb-steps .cmdwell-text {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  line-height: var(--lh);
-}
 /* The address step: the field sits under its title, in reach of the thumb and clear of
    the keyboard, Connect under the field. */
 .onb[data-step="address"] .onb-head {
@@ -552,7 +659,7 @@
 /* The tablet: a step keeps its title and actions in one glance, and the connected sheet
    is a centred form sheet rather than a strip along the bottom edge. The welcome keeps
    its full-height hero. */
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .onb-body--step {
     max-height: 720px;
     margin: auto;

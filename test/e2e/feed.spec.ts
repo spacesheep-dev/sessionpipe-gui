@@ -60,7 +60,7 @@ test.describe("feed", () => {
     expect(new Set(await harnessOf())).toEqual(new Set(["Claude Code"]));
 
     await filter.click();
-    await page.getByRole("menu").getByRole("menuitemradio", { name: "All harnesses" }).click();
+    await page.getByRole("menu").getByRole("menuitemradio", { name: "All agents" }).click();
     await expect(filter).toHaveAccessibleName("Filter");
     await page.getByRole("searchbox", { name: "Search events" }).fill("session.started");
     await expect(page.locator("ol.rows")).toHaveAttribute("aria-busy", "false");

@@ -8,46 +8,6 @@
 .feed-pause {
   gap: 8px;
 }
-/* The one Filter pop-up: the toolbar chip's look (shared.css .chipsel); while it narrows
-   the feed it says to what, on the selection fill. */
-.feed-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--control);
-  max-width: 260px;
-  padding: 0 8px;
-  border-radius: var(--radius);
-  color: var(--fg-2);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  white-space: nowrap;
-  transition: background-color var(--dur-fast) var(--ease-out);
-}
-.feed-filter svg {
-  flex: none;
-  color: var(--fg-3);
-}
-.feed-filter-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-@media (hover: hover) {
-  .feed-filter:hover {
-    background: var(--hover);
-    color: var(--fg);
-  }
-}
-.feed-filter:active {
-  background: var(--press);
-  transition: none;
-}
-.feed-filter--on,
-.feed-filter[aria-expanded="true"] {
-  background: var(--sel);
-  color: var(--fg);
-}
 .pill-new {
   padding: 0 6px;
   border-radius: var(--radius-pill);
@@ -174,7 +134,7 @@
 }
 .ev:has(.ev-session:focus-visible) {
   background: var(--sel);
-  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--focus) 60%, transparent);
+  box-shadow: var(--cursor-edge);
 }
 .ev:is(:hover, [aria-current="true"])::before,
 .ev:is(:hover, [aria-current="true"]) + .ev::before {

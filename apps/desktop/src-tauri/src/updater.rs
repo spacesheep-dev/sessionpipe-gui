@@ -1,9 +1,10 @@
 //! Updates (NATIVE-SPEC.md §3.7): checked 10 s after launch and every 6 hours while
-//! "Check for updates automatically" is on (Settings › App › Updates, on by default),
-//! downloaded in the background, verified (minisign), then "Install and relaunch" in the
-//! menu bar menu and Settings › App. No modal while the window is up, no auto-restart.
-//! "Check for Updates…" in the app menu runs the same check; with no window open it
-//! answers in a native dialog instead.
+//! "Check for updates automatically" is on (Settings › About, on by default), downloaded
+//! in the background, verified (minisign), then "Install and relaunch" in Settings ›
+//! About, in the menu bar menu and in the app menu, whose "Check for Updates…" reads
+//! "Install 0.8.5 and Relaunch" while one is ready. No modal, no auto-restart.
+//! "Check for Updates…" opens Settings › About, which shows the check as it goes, and
+//! runs the same check, with a window open or not.
 //!
 //! A failed download leaves nothing behind: the plugin keeps the archive in memory until
 //! it is verified, and installs by unpacking into a temp dir beside the app and swapping
@@ -37,7 +38,7 @@ pub struct UpdateState {
     pub version: Option<String>,
     /// ISO time the last check finished (up to date, ready or failed).
     pub last_checked: Option<String>,
-    /// Why the last check or install failed, in plain words.
+    /// Why the last check, download or install failed, in plain words.
     pub error: Option<String>,
     /// Percent downloaded, while downloading.
     pub progress: Option<u8>,
@@ -83,9 +84,13 @@ impl UpdateState {
     }
 
     // The state machine: idle/error → checking → downloading → ready, or back to idle
-    // (up to date) or error (a reason), with the time the check finished.
+    // (up to date) or error (a reason), with the time the check finished. A check starts
+    // with no version, so one that fails has none ("Couldn't check for updates"); a
+    // download or an install that fails keeps the version it was for ("Couldn't update to
+    // 0.8.5").
     pub fn begin(&mut self) {
         self.phase = Phase::Checking;
+        self.version = None;
         self.error = None;
         self.progress = None;
     }
@@ -110,7 +115,6 @@ impl UpdateState {
     }
     pub fn failed(&mut self, reason: &str, now: &str) {
         self.phase = Phase::Error;
-        self.version = None;
         self.progress = None;
         self.error = Some(reason.to_string());
         self.last_checked = Some(now.to_string());
@@ -126,20 +130,31 @@ fn now_iso() -> String {
     sp_receivers::status::iso(SystemTime::now())
 }
 
-/// Changes the state under the lock, then tells the page and the menu bar item.
-fn publish<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce(&mut UpdateState)) {
-    let shell = app.state::<Shell>();
-    let out = {
-        let mut u = shell.update.lock().unwrap();
-        f(&mut u);
-        u.out()
-    };
-    let _ = app.emit("update", &out);
-    crate::tray::refresh(app);
+/// The app menu's update item: "Check for Updates…", or what it does while an update is
+/// ready (no ellipsis: it acts at once). The menu bar menu's item reads the same.
+pub fn menu_title(ready: Option<&str>) -> String {
+    match ready {
+        Some(v) => format!("Install {v} and Relaunch"),
+        None => "Check for Updates…".into(),
+    }
 }
 
-fn current<R: Runtime>(app: &AppHandle<R>) -> UpdateOut {
-    app.state::<Shell>().update.lock().unwrap().out()
+/// Changes the state under the lock, then tells the page, the app menu and the menu bar
+/// item. The app menu's item is retitled only as an update becomes ready or stops being:
+/// never on each percent of a download.
+fn publish<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce(&mut UpdateState)) {
+    let shell = app.state::<Shell>();
+    let (out, was, ready) = {
+        let mut u = shell.update.lock().unwrap();
+        let was = u.ready_version();
+        f(&mut u);
+        (u.out(), was, u.ready_version())
+    };
+    let _ = app.emit("update", &out);
+    if was != ready {
+        crate::menu::retitle_update(app, &menu_title(ready.as_deref()));
+    }
+    crate::tray::refresh(app);
 }
 
 /// Where to check, or None (dev without SP_UPDATE_URL).
@@ -180,68 +195,11 @@ pub fn check_now<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move { check(&app).await });
 }
 
-/// "Check for Updates…" in the app menu: the same check; Settings › App shows how it goes
-/// when the window is up, a native dialog says what came of it when it isn't.
+/// "Check for Updates…" in the app menu: Settings › About, where the check shows as it
+/// goes (a window is opened for it when there is none), and the same check.
 pub fn check_from_menu<R: Runtime>(app: AppHandle<R>) {
-    if app.get_webview_window(crate::window::MAIN).is_some() {
-        crate::actions::menu_action(&app, "settings");
-        check_now(app);
-        return;
-    }
-    tauri::async_runtime::spawn(async move {
-        check(&app).await;
-        let out = current(&app);
-        let version = app.package_info().version.to_string();
-        let (title, message, install) = dialog_words(&out, &version);
-        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-        let buttons = if install {
-            MessageDialogButtons::OkCancelCustom("Install and relaunch".into(), "Later".into())
-        } else {
-            MessageDialogButtons::Ok
-        };
-        let h = app.clone();
-        app.dialog()
-            .message(message)
-            .title(title)
-            .kind(MessageDialogKind::Info)
-            .buttons(buttons)
-            .show(move |ok| {
-                if ok && install {
-                    restart(h);
-                }
-            });
-    });
-}
-
-/// The dialog's title, text, and whether it offers Install and relaunch.
-pub fn dialog_words(u: &UpdateOut, app_version: &str) -> (String, String, bool) {
-    match u.state {
-        Phase::Ready => (
-            format!(
-                "sessionpipe {} is ready",
-                u.version.as_deref().unwrap_or("update")
-            ),
-            format!(
-                "You have {app_version}. Install it and relaunch now, or later from the menu bar."
-            ),
-            true,
-        ),
-        Phase::Error => (
-            "Couldn't check for updates".into(),
-            u.error.clone().unwrap_or_else(|| "Try again later.".into()),
-            false,
-        ),
-        Phase::Checking | Phase::Downloading => (
-            "Checking for updates…".into(),
-            "The menu bar item says when one is ready.".into(),
-            false,
-        ),
-        Phase::Idle => (
-            "You're up to date".into(),
-            format!("sessionpipe {app_version} is the newest version."),
-            false,
-        ),
-    }
+    crate::actions::navigate(&app, "/settings?section=about");
+    check_now(app);
 }
 
 #[cfg(desktop)]
@@ -336,7 +294,8 @@ pub fn restart<R: Runtime>(app: AppHandle<R>) {
                 // Not app.restart(): LaunchServices would drop SP_RECEIVER_URL and friends,
                 // and a test or dev run would come back as a release app (lifecycle/relaunch.rs).
                 Ok(()) => crate::lifecycle::relaunch(&app),
-                Err(e) => fail(&app, &format!("Couldn't install the update: {}", plain(&e))),
+                // The row names what failed ("Couldn't update to 0.8.5"): this is the reason.
+                Err(e) => fail(&app, &plain(&e)),
             }
         }
     }
@@ -367,9 +326,11 @@ mod tests {
     #[test]
     fn a_check_runs_its_course() {
         let mut s = UpdateState::default();
+        s.begin();
         s.failed("You're offline, or GitHub can't be reached.", "t0");
         assert_eq!(s.phase, Phase::Error);
         assert_eq!(s.last_checked.as_deref(), Some("t0"));
+        assert_eq!(s.version, None, "a check that failed found no version");
         s.begin();
         assert_eq!(s.phase, Phase::Checking);
         assert_eq!(s.error, None);
@@ -412,25 +373,70 @@ mod tests {
         }
     }
 
+    /// The row's words follow the version: "Couldn't update to 0.7.0" for a download or an
+    /// install that failed, "Couldn't check for updates" for a check that found none.
     #[test]
-    fn the_menu_dialog_says_what_came_of_it() {
+    fn a_failure_keeps_its_version_and_the_next_check_drops_it() {
         let mut s = UpdateState::default();
-        s.up_to_date("t");
-        let (title, msg, install) = dialog_words(&s.out(), "0.6.0");
-        assert_eq!(title, "You're up to date");
-        assert_eq!(msg, "sessionpipe 0.6.0 is the newest version.");
-        assert!(!install);
+        s.begin();
         s.found("0.7.0");
+        s.downloaded(40);
+        s.failed("The download didn't finish.", "t0");
+        assert_eq!(
+            serde_json::to_value(s.out()).unwrap(),
+            serde_json::json!({
+                "state": "error", "version": "0.7.0", "lastChecked": "t0",
+                "error": "The download didn't finish."
+            })
+        );
+        assert_eq!(s.ready_version(), None);
+        // Try again: a new check, which knows of no version until it finds one.
+        s.begin();
+        assert_eq!(
+            serde_json::to_value(s.out()).unwrap(),
+            serde_json::json!({ "state": "checking", "lastChecked": "t0" })
+        );
+        // An install that failed: the update was ready, and its version stays.
+        s.found("0.7.0");
+        s.verified("t1");
+        s.failed(
+            "The download's signature doesn't match sessionpipe's key.",
+            "t2",
+        );
+        assert_eq!(s.phase, Phase::Error);
+        assert_eq!(s.version.as_deref(), Some("0.7.0"));
+        // A check that fails after it finds none of that.
+        s.begin();
+        s.failed("You're offline, or GitHub can't be reached.", "t3");
+        assert_eq!(s.version, None);
+    }
+
+    #[test]
+    fn the_menu_item_installs_what_is_ready() {
+        assert_eq!(menu_title(None), "Check for Updates…");
+        assert_eq!(menu_title(Some("0.8.5")), "Install 0.8.5 and Relaunch");
+        // It follows the state: only a downloaded, verified update is offered.
+        let mut s = UpdateState::default();
+        assert_eq!(
+            menu_title(s.ready_version().as_deref()),
+            "Check for Updates…"
+        );
+        s.begin();
+        s.found("0.8.5");
+        assert_eq!(
+            menu_title(s.ready_version().as_deref()),
+            "Check for Updates…"
+        );
         s.verified("t");
-        let (title, msg, install) = dialog_words(&s.out(), "0.6.0");
-        assert_eq!(title, "sessionpipe 0.7.0 is ready");
-        assert!(msg.starts_with("You have 0.6.0."));
-        assert!(install);
-        s.failed("The release has no update manifest.", "t");
-        let (title, msg, install) = dialog_words(&s.out(), "0.6.0");
-        assert_eq!(title, "Couldn't check for updates");
-        assert_eq!(msg, "The release has no update manifest.");
-        assert!(!install);
+        assert_eq!(
+            menu_title(s.ready_version().as_deref()),
+            "Install 0.8.5 and Relaunch"
+        );
+        s.failed("x", "t");
+        assert_eq!(
+            menu_title(s.ready_version().as_deref()),
+            "Check for Updates…"
+        );
     }
 
     #[cfg(desktop)]
