@@ -546,6 +546,33 @@ test("a session followed at its end is still followed after a turn and a fold, a
   }
 });
 
+test("a session followed at its end and scrolled up a little stays where the reader put it when only the window's height changes", async ({
+  browser,
+}) => {
+  // A browser's toolbar shows as a swipe up begins: the window is 56 pt shorter, as wide as
+  // it was. Nothing rewraps, so nothing is the page's to put back: not even the end, which
+  // the reader is still within reach of.
+  const b = await longOpen(browser, "466x678");
+  const { page } = b;
+  const y = () => page.evaluate(() => Math.round(window.scrollY));
+  const up = async (pt: number) => {
+    await page.evaluate((d) => window.scrollBy(0, -d), pt);
+    await frames(page, 4);
+  };
+  try {
+    await up(30);
+    const put = await y();
+    await pose(page, 466, 678 - 56, DUO["466x678"]!.insets);
+    expect(await y(), "after the window's height changed").toBe(put);
+    await up(30);
+    expect(await y(), "scrolled up again").toBe(put - 30);
+    await frames(page, 10);
+    expect(await y(), "ten frames later").toBe(put - 30);
+  } finally {
+    await b.close();
+  }
+});
+
 test("a board scrolled to a row keeps that row in place as the phone is unfolded and turned", async ({ browser }) => {
   const b = await bedWith(browser, "466x678", manyRows(24));
   const { page } = b;

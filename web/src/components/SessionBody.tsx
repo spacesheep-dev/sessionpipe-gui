@@ -365,15 +365,16 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   /** Following at the end when the window began to change size: the end is kept until
    *  the page has settled in the new one, whatever the scrolls in between say. */
   const pinnedAtResize = useRef(false);
-  /** Whether the window is another size than when this was last asked. Whether the end
-   *  was being followed is written down then, before a scroll the new size causes can
-   *  say otherwise. */
+  /** Whether the window is another size than when this was last asked. For another width,
+   *  whether the end was being followed is written down then, before a scroll the new size
+   *  causes can say otherwise. A change of height alone (a browser's toolbar) rewraps
+   *  nothing, so the end is not kept through it: the reader may be scrolling away. */
   const resized = useCallback((): boolean => {
     const was = sizeSeen.current;
     const now = windowSize();
     sizeSeen.current = now;
     if (!was || (was[0] === now[0] && was[1] === now[1])) return false;
-    if (followRef.current && pinned.current) pinnedAtResize.current = true;
+    if (was[0] !== now[0] && followRef.current && pinned.current) pinnedAtResize.current = true;
     return true;
   }, []);
   /** The row a disclosure click asked to keep in place (Timeline.anchorOn). */
