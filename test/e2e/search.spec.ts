@@ -7,8 +7,9 @@
 // the row menu; the phone. The demo's own sessions answer the live parts; the history
 // transcript runs on the mock (`?mock=1`), which ships in every build, so it needs no
 // history home on the server.
-import { expect, type Page, test } from "@playwright/test";
-import { openPage, openSessionsUnchosen } from "./helpers.js";
+import { randomUUID } from "node:crypto";
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
+import { EVENTS, INFO, openPage, openSessionsUnchosen, tier1Batch, ulid } from "./helpers.js";
 
 const rows = (page: Page) => page.locator("ol.sx-list a.sx-row");
 const field = (page: Page) => page.getByRole("combobox", { name: /Search prompts, replies and tool calls/ });
@@ -29,6 +30,42 @@ async function warmSearch(page: Page, then: "board" | "review"): Promise<void> {
   await expect(field(page)).toBeFocused();
   await rail(page, then).click();
   await expect(page.locator("main#main")).toBeFocused();
+}
+
+/** A word no other session on the receiver has: letters only, so it is one token. */
+const rareWord = () =>
+  `zx${randomUUID()
+    .replace(/-/g, "")
+    .slice(0, 10)
+    .replace(/\d/g, (d) => "ghijklmnop"[Number(d)]!)}`;
+
+/** A live session of its own whose last turn's reply says `reply`, after `earlier` turns
+ *  that say nothing of it: the hit is a row of its timeline (that transcript's seq), and its
+ *  title and prompts do not say the reply's words. */
+async function postReplySession(request: APIRequestContext, title: string, reply: string, earlier = 0): Promise<void> {
+  const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  const batch = tier1Batch({ title });
+  for (const e of batch.events) e.tier = 3;
+  const last = batch.events[batch.events.length - 1]!;
+  let at = Date.parse(String(last.time));
+  let seq = batch.events.length;
+  const said = (turn: number, assistant: string) => {
+    at += 1000;
+    return {
+      ...last,
+      id: ulid(at),
+      type: "turn.transcript",
+      time: new Date(at).toISOString(),
+      session: { ...(last.session as Record<string, unknown>), seq: seq++ },
+      data: { turn, user: "Look at the retries.", assistant },
+    };
+  };
+  const turns = Array.from({ length: earlier }, (_, n) => said(n + 1, "Looking."));
+  const res = await request.post(EVENTS, {
+    headers: { "content-type": "application/json", authorization: `Bearer ${sinkToken}`, "sessionpipe-protocol": "1" },
+    data: { events: [...batch.events, ...turns, said(earlier + 1, reply)] },
+  });
+  expect(res.status(), await res.text()).toBe(202);
 }
 
 /** Types into the field the way a person does, one key at a time. */
@@ -163,12 +200,25 @@ test.describe("search", () => {
 
   test("two plain clicks one after the other: each opens beside on its own hit, the second in the first's place", async ({
     page,
+    request,
   }) => {
+    // Two live sessions of the test's own whose one hit is in a reply, a row of the timeline
+    // of its own (a history-only row names no turn), at two different seqs: a word other
+    // sessions on this receiver do not say, so theirs never crowd the list.
+    const word = rareWord();
+    await postReplySession(request, "Two clicks, first", `The retries now back off; see ${word} in the log.`);
+    await postReplySession(request, "Two clicks, second", `Checked ${word} again: the backoff holds.`, 1);
+    // The index has both before the page asks (a page shows what it found, then offers New
+    // matches; it does not change its rows under the pointer).
+    await expect
+      .poll(async () => {
+        const r = await request.get(`/api/ui/search/sessions?q=${word}&sort=best&live=1&limit=30`);
+        return ((await r.json()) as { sessions?: unknown[] }).sessions?.length ?? 0;
+      })
+      .toBe(2);
     await openSessionsUnchosen(page);
-    await openPage(page, "/search?q=backoff");
-    await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
-    // Two live sessions whose best hit is in a reply, a row of the timeline of its own (a
-    // history-only row names no turn).
+    await openPage(page, `/search?q=${word}`);
+    await expect(rows(page)).toHaveCount(2, { timeout: 30_000 });
     const hits: { i: number; seq: string }[] = [];
     for (let i = 0; i < (await rows(page).count()) && hits.length < 2; i++) {
       const row = rows(page).nth(i);
@@ -176,6 +226,7 @@ test.describe("search", () => {
       if (seq && (await row.locator('.sx-hit[data-field="reply"]').count()) > 0) hits.push({ i, seq });
     }
     expect(hits).toHaveLength(2);
+    expect(hits[0]!.seq).not.toBe(hits[1]!.seq);
     const body = page.locator("aside.panel .panel-body:not(.panel-body--off)");
     for (const { i, seq } of hits) {
       await rows(page).nth(i).click();
