@@ -6,6 +6,7 @@
 // trusts signs a `key.add` for it, CONTROL.md §2). Every route needs the UI's own auth (loopback, or the UI key cookie).
 // Documented route by route in README.md beside this file.
 import { randomBytes } from "node:crypto";
+import { createReadStream } from "node:fs";
 import {
   type Assertion,
   b64url,
@@ -31,7 +32,15 @@ import { MEDIA_TYPE_RE } from "./files.js";
 import { CODE_RE, MACHINE_RE, SESSION_REF } from "./parse.js";
 import { looksLikePool, verifyPoolCommand } from "./pool.js";
 import { filesProblem, precheck, type Refusal } from "./precheck.js";
-import { forwardRemoteSend, RELAY_FILES, type RemoteSend, SendRefused, SPACESHEEP_UNAUTHORIZED } from "./remote.js";
+import {
+  forwardRemoteSend,
+  forwardRemoteUpload,
+  RELAY_FILES,
+  type RemoteSend,
+  type RemoteUploadFor,
+  SendRefused,
+  SPACESHEEP_UNAUTHORIZED,
+} from "./remote.js";
 import { requestOrigin } from "./routes.js";
 import {
   type ControlState,
@@ -56,6 +65,9 @@ export interface UiRouteDeps {
   /** A send for a machine paired on spacesheep (docs/rfcs/08): the signed body goes to
    *  spacesheep's jobs route as this account; the answer is its job id, or why not. */
   remoteSend?: RemoteSend;
+  /** An upload for a machine paired on spacesheep: the bytes to spacesheep's files door as
+   *  this account, where the machine fetches them; nothing is kept here. */
+  remoteUpload?: RemoteUploadFor;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -482,8 +494,9 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
   // SHA-256 (files.ts); the answer is the entry the signed command names. Nothing about it
   // is in the text. A file sent as one of the four picture types is held to its own bytes
   // (the composer's pictures come this way): what the agent is told is a PNG is one, and
-  // the answer says how many pixels it has. `?machine=` (the machine it is for) is taken
-  // and not read: every file is held here, whichever machine fetches it.
+  // the answer says how many pixels it has. `?machine=` is the machine it is for: one paired
+  // on spacesheep fetches it from there, so the bytes go to spacesheep as this account and
+  // nothing is held here; every other machine fetches it from here.
   router.post(
     `${base}/files`,
     guarded(async (ctx): Promise<Reply> => {
@@ -501,6 +514,14 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       const picture = type in ATTACHMENT_TYPES ? sniffImage(bytes) : null;
       if (type in ATTACHMENT_TYPES && picture?.type !== type)
         throw new HttpError(415, { reason: "not_an_image", error: "This file isn't the picture its type says." });
+      const target = state.machine(ctx.url.searchParams.get("machine") ?? "");
+      if (target?.remote) {
+        const up = d.remoteUpload;
+        const r = await forwardRemoteUpload({ bytes, type, name }, up && ((file) => up(file, target)));
+        if (r.status !== 201) throw new HttpError(r.status, r.json);
+        if (picture) Object.assign(r.json, { width: picture.width, height: picture.height });
+        return { status: 201, json: r.json };
+      }
       let held: { sha256: string; size: number };
       try {
         held = state.files.put(bytes, type);
@@ -510,6 +531,32 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       const entry: UploadedFile = { name, type, size: held.size, sha256: held.sha256 };
       if (picture) Object.assign(entry, { width: picture.width, height: picture.height });
       return { status: 201, json: entry };
+    }),
+  );
+
+  // A picture a message sent from here carried, for the page to draw: while a machine may
+  // still fetch it, or the page keeps it (30 days, files.ts). Only the four picture types,
+  // drawn as nothing else (a page of its own is a sandbox with nothing to run); the
+  // machines' own GET {control}/files/:sha is routes.ts's.
+  router.get(
+    `${base}/files/:sha`,
+    guarded((ctx): Reply | undefined => {
+      const f = state.files.picture(ctx.params.sha ?? "");
+      if (typeof f === "string") throw new HttpError(404, { reason: f });
+      ctx.res.writeHead(200, {
+        "content-type": f.type,
+        "content-length": String(f.size),
+        "cache-control": "private, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'; sandbox",
+        "cross-origin-resource-policy": "same-origin",
+      });
+      // A file that can't be read once the answer has begun (gone meanwhile, made room
+      // from) ends that answer, and nothing else.
+      createReadStream(f.path)
+        .on("error", () => ctx.res.destroy())
+        .pipe(ctx.res);
+      return undefined;
     }),
   );
 

@@ -110,6 +110,15 @@ describe("compileFilters", () => {
     expect(f.sources).toEqual(["history", "sessionpipe"]);
   });
 
+  it("a day the month does not have does not read, so it is reported, not searched as the next month's", () => {
+    const f = compileFilters(parseSearch("since:2026-02-30 until:2026-11-31 x"), ctx);
+    expect(f.allow).toBeUndefined();
+    expect(f.badValues).toEqual([
+      { key: "since", value: "2026-02-30" },
+      { key: "until", value: "2026-11-31" },
+    ]);
+  });
+
   it("in: → fields; source: → indexes, never one that is closed", () => {
     expect(compileFilters(parseSearch("x in:prompt in:title"), { ...ctx, available: ["history"] }).fields).toEqual([
       "prompt",

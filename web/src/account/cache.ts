@@ -31,6 +31,9 @@ export const CACHE_COMPACT_PAGES = 400;
 export const CACHE_PAGE = 500;
 
 export const cacheName = (receiverId: string): string => `sessionpipe.account.${receiverId}`;
+/** The pictures the page sent from the account (control/sentPictures.ts): a database of
+ *  their own, deleted with the account's cache. */
+export const sentPicturesName = (receiverId: string): string => `sessionpipe.sent-pictures.${receiverId}`;
 
 export interface CacheLoad {
   /** Every kept event, in the order the relay gave them. */
@@ -110,17 +113,18 @@ export function pagesTooOld(
 }
 
 /** The databases of accounts that are no longer on this phone (disconnected while no window
- *  showed them) are deleted: `keep` is every account id the hub lists now. */
+ *  showed them) are deleted, its cache and its sent pictures: `keep` is every account id
+ *  the hub lists now. */
 export async function sweepCaches(
   keep: readonly string[],
   idb: IDBFactory | undefined = globalThis.indexedDB,
 ): Promise<string[]> {
   const gone: string[] = [];
   try {
-    const prefix = cacheName("");
-    const names = new Set(keep.map(cacheName));
+    const prefixes = [cacheName(""), sentPicturesName("")];
+    const names = new Set(keep.flatMap((id) => [cacheName(id), sentPicturesName(id)]));
     for (const d of (await idb?.databases?.()) ?? []) {
-      if (!d.name?.startsWith(prefix) || names.has(d.name)) continue;
+      if (!d.name || !prefixes.some((p) => d.name!.startsWith(p)) || names.has(d.name)) continue;
       idb!.deleteDatabase(d.name);
       gone.push(d.name);
     }

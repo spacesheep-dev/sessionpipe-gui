@@ -5,13 +5,14 @@
 // the same origin, disconnected from another window, a restored backup with no key), and
 // then nothing runs to clean up after it. So every window of the app that knows of
 // accounts asks the hub, as it opens, which accounts are here, and removes what belongs to
-// any other: its cached sessions (one IndexedDB database an account id) and what the
-// page's own storage keeps of those sessions and under that id (local.ts).
+// any other: its cached sessions (one IndexedDB database an account id), the pictures sent
+// from it (another), and what the page's own storage keeps of those sessions and under that
+// id (local.ts).
 //
 // One answer is not enough to remove anything by: an account is gone when two answers,
 // each a list, taken a few seconds apart, both leave it out. An answer that fails, or is
 // no list, removes nothing; neither does the account this window itself shows.
-import { cacheName, cacheSessions, sweepCaches } from "./cache";
+import { cacheName, cacheSessions, sentPicturesName, sweepCaches } from "./cache";
 import { accountsKept, sessionsSeen, wipeAccount } from "./local";
 import type { AccountStatus } from "./shell";
 
@@ -57,13 +58,13 @@ export async function sweepGone(
       return null;
     }
   };
-  const prefix = cacheName("");
+  const prefixes = [cacheName(""), sentPicturesName("")];
   /** The accounts something is kept of here that an answer leaves out. */
   const absent = async (here: readonly string[]): Promise<string[]> => {
     const ids = new Set((o.kept ?? accountsKept)());
     try {
       for (const d of (await idb?.databases?.()) ?? [])
-        if (d.name?.startsWith(prefix)) ids.add(d.name.slice(prefix.length));
+        for (const p of prefixes) if (d.name?.startsWith(p)) ids.add(d.name.slice(p.length));
     } catch {
       // A browser that will not list them: only what the storage names.
     }

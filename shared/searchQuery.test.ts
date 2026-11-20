@@ -133,6 +133,16 @@ describe("resolveSearchDate", () => {
     expect(resolveSearchDate("soon", "start", now, tz)).toBeUndefined();
     expect(resolveSearchDate("2026-13-01", "start", now, tz)).toBeUndefined();
   });
+  it("refuses a day the month does not have, rather than rolling into the next month", () => {
+    for (const v of ["2026-02-29", "2026-02-30", "2026-04-31", "2026-11-31", "2100-02-29"])
+      for (const edge of ["start", "end"] as const) expect(resolveSearchDate(v, edge, now, tz)).toBeUndefined();
+    const feb29 = Date.UTC(2028, 1, 28, 17, 0); // 2028-02-29 00:00 at UTC+7
+    expect(resolveSearchDate("2028-02-29", "start", now, tz)).toBe(feb29);
+    expect(resolveSearchDate("2028-02-29", "end", now, tz)).toBe(feb29 + 86_400_000 - 1);
+    expect(resolveSearchDate("2000-02-29", "start", now, tz)).toBe(Date.UTC(2000, 1, 28, 17, 0));
+    expect(resolveSearchDate("2026-11-30", "end", now, tz)).toBe(Date.UTC(2026, 10, 30, 17, 0) - 1);
+    expect(resolveSearchDate("2026-12-31", "start", now, tz)).toBe(Date.UTC(2026, 11, 30, 17, 0));
+  });
 });
 
 describe("searchQueryNote", () => {

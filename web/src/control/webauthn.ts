@@ -12,6 +12,20 @@ export const RS256 = -257;
 /** Why no control affordance can work here: passkeys need a secure context. */
 export const INSECURE_HINT = "passkeys need https or localhost: open this page on the machine running sessionpipe-gui";
 
+/** A phone's browser on a plain-http address of the board (its LAN or tailnet address): what
+ *  works from there. "/connect" is said as the page it is. */
+export const PHONE_HTTP_WORDS =
+  "To send from this phone, use the sessionpipe app (scan the code on /connect) or open this board over HTTPS (start it with --tls).";
+
+/** The page is on plain http at an address that is not this machine's own: no passkey can be
+ *  made or used here, and https or the app is the way on. Never in the app's web view. */
+export function plainHttpHere(): boolean {
+  if (typeof window === "undefined" || typeof location === "undefined") return false;
+  if (inShell() || window.isSecureContext !== false || location.protocol !== "http:") return false;
+  const h = location.hostname.toLowerCase();
+  return !(h === "localhost" || h.endsWith(".localhost") || h === "[::1]" || /^127\./.test(h));
+}
+
 /** The hint for this page. On the wrong address (not under the rp id, while a sending
  *  origin exists) it is the guard's one line, control/origin.ts; with TLS mode on, the one
  *  origin passkeys work on (the `.local` rp id makes http://localhost stop signing too);

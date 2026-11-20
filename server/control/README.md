@@ -110,7 +110,8 @@ age window, no nonce store) and only then queues it.
 | Route | Body → answer |
 |---|---|
 | `POST /send` | `{ machineId, cmd, csig?, grant?, confirm?, expires_in_s?, from? }` (`SendBody`) → `201 ControlActivity`; `422 { reason, code }` with the verifier's code (`unsigned`, `untrusted_key`, `bad_csig`, `too_old`, …) or the second look's (below) when it refuses; `404` unknown machine; `400` a `from` that is not a session ref |
-| `POST /files?name=<name>` | One file a `start` or a `prompt` will carry (the composer's pictures go as a prompt's files): the raw bytes, its media type as `content-type` → `201 UploadedFile { name, type, size, sha256 }` (sha256 base64url, CONTROL.md §3.1), with `width` and `height` for a PNG, JPEG, GIF or WebP; only the four fields go into a command. Held a day under `<stateDir>/control/files/<sha256>`, longer when a queued command needs it; `413` over 25 MiB, `415` no media type, or `not_an_image` for bytes that are not the picture the type says, `400` empty or a name a machine would refuse. `&machine=<id>` is taken and not read yet |
+| `POST /files?name=<name>` | One file a `start` or a `prompt` will carry (the composer's pictures go as a prompt's files): the raw bytes, its media type as `content-type` → `201 UploadedFile { name, type, size, sha256 }` (sha256 base64url, CONTROL.md §3.1), with `width` and `height` for a PNG, JPEG, GIF or WebP; only the four fields go into a command. Held a day under `<stateDir>/control/files/<sha256>`, longer when a queued command needs it; `413` over 25 MiB, `415` no media type, or `not_an_image` for bytes that are not the picture the type says, `400` empty or a name a machine would refuse. `&machine=<id>` names the machine it is for: for one paired on spacesheep the bytes go to spacesheep's files door as the account and nothing is held here (`forwardRemoteUpload`) |
+| `GET /files/:sha256` | A picture a message sent from here carried, for the page to draw: the bytes with their `content-type` (PNG, JPEG, GIF or WebP only), `cache-control: private, max-age=31536000, immutable`, `nosniff`, a `sandbox` CSP and `cross-origin-resource-policy: same-origin`. Served while a machine may fetch it or for 30 days after its message was queued; when the store is full an upload makes room among the pictures only the page still keeps, oldest first. `404 { reason: "gone" }` once it is not kept, `404 { reason: "not_a_picture" }` for any other type |
 | `GET /activity?limit=` | `{ activity: ControlActivity[] }`, newest first (default 100, at most 1000) |
 | `GET /machines` | `{ machines: (MachineControl & { name, createdAt, pairedAt? })[] }` — paired machines |
 | `POST /machines/:id/forget` | → `204`; the row, its token and its queue are gone here; its next poll is 401 and the daemon says so |
@@ -134,7 +135,9 @@ before the row stored them reads them from its signed command). The UI reads fro
 open prompts have an answer out, on every page and after a reload. For a `key.add`, `text`
 is `"trust <name>"`. A `start`'s activity also carries what was signed (`cwd`,
 `permission`, `model`, `files`) and, from its `taken` / `delivered` ack, `applied`: what
-the machine ran it with. `from` is the page's own unsigned note of which session's page
+the machine ran it with. A row with `files` (a start's or a prompt's) carries the signed
+`nonce`: the machine saves a prompt's files under `.sessionpipe/files/<session>/<nonce>/`,
+and the page finds each file of the list it adds to the message by it. `from` is the page's own unsigned note of which session's page
 sent it (`SendBody.from`, a `<harness>:<id>`): kept on the activity for the lineage the
 UI shows at once, never carried to the machine.
 
@@ -177,8 +180,10 @@ keep one named by `email`, else by `name` (an API home, `api.z.ai`), and its `si
 would fail a resume until `claude auth login` is run there, absent is unknown. No home folder: sessionpipe
 0.10's hello has none. `MachineControl.tilde` says a start may name a `~/…` folder, which
 the machine expands: set when this receiver's sessionpipe-core takes one and the hello has
-`start` (CONTROL.md §3.1: "a machine that sends `start` also takes a `~` folder"; `tilde.ts`). Each hello says them again: one without them takes them
-away. The well-known's `control.inherit: true` tells a daemon this receiver shows an
+`start` (CONTROL.md §3.1: "a machine that sends `start` also takes a `~` folder"; `tilde.ts`),
+and never for a machine reached through spacesheep, whose jobs door checks a start's folder
+against the computer's full-path folders and refuses a `~/…` one. Each hello says them
+again: one without them takes them away. The well-known's `control.inherit: true` tells a daemon this receiver shows an
 inherit machine as that, so it may pair or switch to inherit with it (CONTROL.md §2).
 Demo mode puts its machines here through `demo` (ids `m_demo-…`, server/demo/machine.ts).
 
@@ -251,6 +256,15 @@ with the code `no_job`. A job is one only as spacesheep writes it, a whole numbe
 zero (`remoteJobOf`). A row names the
 account that carried it; with none connected, or its key refused, it waits and says
 `unfollowed`; another account connecting settles it as `untracked`.
+
+A send names files only where the relay's list says the computer takes them (`files` for a
+start, `prompt_files` for a message); otherwise it is refused here as `relay_files`, with
+the version to update to. Each file is uploaded to spacesheep (`POST /files?machine=` for
+that machine), where the computer fetches it with its own token; spacesheep's hash and size
+are held against this side's own. A refusal carries a reason the page says in its words
+(web/src/control/uploadWords.ts): `spacesheep_refused` (its 401 or 403), `not_whole`,
+`spacesheep_unreachable`, `spacesheep_failed` (its 5xx), and `rate_limited` with
+spacesheep's `retry_after` passed on.
 
 All of that is `RemoteSlice` in `remote.ts`, over rows a host hands it, with the row
 shapes and their readers in `rows.ts`. Neither file imports anything of Node's. The

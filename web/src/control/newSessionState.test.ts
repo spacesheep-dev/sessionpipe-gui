@@ -2,7 +2,7 @@
 // The New session sheet's state (newSessionState.ts): which machine a plain "New session…"
 // means, a remembered choice pruned to what the machine still advertises, the alias window.
 import type { ControlActivity, LimitsEntry, MachineControl, MachinePool } from "@shared/api";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentLeft,
   aliasHidden,
@@ -15,6 +15,7 @@ import {
   pruneRemembered,
   readDraft,
   saveDraft,
+  uploadsAgain,
 } from "./newSessionState";
 
 const sessions = [
@@ -203,6 +204,23 @@ describe("storage without localStorage", () => {
   });
 });
 
+describe("a draft's files", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("come back for the day the receiver holds them, and not after", () => {
+    const m = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    });
+    const at = Date.parse("2026-11-18T09:00:00Z");
+    const files = [{ name: "kiwi.png", type: "image/png", size: 32, sha256: "A".repeat(43) }];
+    saveDraft({ text: "Look at this", files, filesAt: at });
+    expect(readDraft(at + 23 * 3600_000)).toEqual({ text: "Look at this", files, filesAt: at });
+    expect(readDraft(at + 24 * 3600_000)).toEqual({ text: "Look at this" });
+  });
+});
+
 describe("machineFacts and fixedPermission", () => {
   const base: MachineControl = {
     machineId: "m1",
@@ -317,5 +335,23 @@ describe("agentLeft", () => {
       out: true,
       aside: "None left",
     });
+  });
+});
+
+describe("uploadsAgain", () => {
+  const file = new Blob(["x"]);
+  it("a file goes again only when the machine chosen is reached another way", () => {
+    // Held here, now for a computer reached through spacesheep, and the other way round.
+    expect(uploadsAgain({ file, to: { remote: false } }, true)).toBe(true);
+    expect(uploadsAgain({ file, to: { remote: true } }, false)).toBe(true);
+    // The same way: this board, or the same spacesheep account, already holds it.
+    expect(uploadsAgain({ file, to: { remote: true } }, true)).toBe(false);
+    expect(uploadsAgain({ file, to: { remote: false } }, false)).toBe(false);
+    // Failed where trying again can mend it, yes; where it can't, it stays as it is.
+    expect(uploadsAgain({ file, to: { remote: false }, failed: { retry: true } }, true)).toBe(true);
+    expect(uploadsAgain({ file, to: { remote: false }, failed: { retry: false } }, true)).toBe(false);
+    // Brought back from the draft (no bytes here), or never sent: nothing to send again.
+    expect(uploadsAgain({ to: { remote: false } }, true)).toBe(false);
+    expect(uploadsAgain({ file }, true)).toBe(false);
   });
 });

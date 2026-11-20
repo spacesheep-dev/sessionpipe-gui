@@ -2,16 +2,19 @@
 // Owned by: search-ui. "Custom range…" under the Date chip (ux-search.md §4): two native
 // date fields, From and To, and Apply, which writes `since:` and `until:` into the query.
 // A popover on a desktop, a sheet at the bottom on a phone.
+import { resolveSearchDate } from "@shared/searchQuery";
 import { useEffect, useRef, useState } from "react";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** A `since:` / `until:` value that is a day the search reads (2026-02-30 is not). */
+const isDay = (v: string): boolean => DAY.test(v) && resolveSearchDate(v, "start") !== undefined;
 
 /** "Oct 1 – Oct 20" for the chip, when both ends are days. */
 export function rangeLabel(since: string | undefined, until: string | undefined): string | null {
   const f = (v: string) => new Date(`${v}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  if (since && DAY.test(since) && until && DAY.test(until)) return `${f(since)} – ${f(until)}`;
-  if (since && DAY.test(since)) return `Since ${f(since)}`;
-  if (until && DAY.test(until)) return `Until ${f(until)}`;
+  if (since && isDay(since) && until && isDay(until)) return `${f(since)} – ${f(until)}`;
+  if (since && isDay(since)) return `Since ${f(since)}`;
+  if (until && isDay(until)) return `Until ${f(until)}`;
   return null;
 }
 
@@ -26,8 +29,8 @@ export function DateRange({
   onApply: (since: string | null, until: string | null) => void;
   onClose: () => void;
 }) {
-  const [from, setFrom] = useState(since && DAY.test(since) ? since : "");
-  const [to, setTo] = useState(until && DAY.test(until) ? until : "");
+  const [from, setFrom] = useState(since && isDay(since) ? since : "");
+  const [to, setTo] = useState(until && isDay(until) ? until : "");
   const ref = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;

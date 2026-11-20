@@ -14,7 +14,7 @@ export interface AccountShell {
   email: string;
   /** As the window opened; `acct_status` and the `account` event say how it is now. */
   state: AccountState;
-  /** Where the five doors are asked: `${rxBase}<path>`. */
+  /** Where the six doors are asked: `${rxBase}<path>`. */
   rxBase: string;
   appVersion: string;
   platform: string;
