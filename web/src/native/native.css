@@ -609,7 +609,10 @@
   right: 0;
   width: 100%;
   max-height: calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - 24px);
-  padding: 8px 16px max(calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 8px), 16px);
+  /* Its two actions keep clear of what the system keeps at a side; its ground runs under it. */
+  padding: 8px calc(16px + var(--safe-right, env(safe-area-inset-right)))
+    max(calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 8px), 16px)
+    calc(16px + var(--safe-left, env(safe-area-inset-left)));
   gap: 10px;
   border: 0;
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;

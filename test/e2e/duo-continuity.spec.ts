@@ -324,9 +324,9 @@ test.describe("what duo.ts promises a test, in both engines", () => {
         expect(await shapeOf(page), size).toEqual({ size, insets: DUO[size]!.insets });
         const first = await chrome();
         // Under the 32 pt on top the 45 pt bar ends at 77; beside the 84 pt at the side the
-        // page ends at 382.
+        // page ends a 16 pt gutter short of the band, at 366.
         if (size === "669x951") expect(first.bar[3]).toBe(77);
-        if (size === "466x678") expect(first.page[1]).toBe(382);
+        if (size === "466x678") expect(first.page[1]).toBe(366);
         letGo();
         await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
         await expect(page.locator(".boot")).toHaveCount(0);
@@ -408,6 +408,21 @@ test.describe("what duo.ts promises a test, in both engines", () => {
       // row is under it, and nothing is left to scroll.
       await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
       await expect.poll(() => bandOffenders(page)).toEqual(["fixed at the bottom", "a head", "the last row"]);
+      // A scrim over it all, as a sheet has round it: an empty button across the window.
+      // What it covers takes no tap, and the scrim itself is the ground, not a control
+      // someone aims at under a band. With a word on it, it is a button like any other.
+      await page.evaluate(() => {
+        const scrim = document.createElement("button");
+        scrim.id = "scrim";
+        scrim.setAttribute("aria-label", "Close");
+        scrim.style.cssText = "position:fixed;inset:0;width:auto;height:auto;z-index:1";
+        document.body.append(scrim);
+      });
+      await expect.poll(() => bandOffenders(page)).toEqual([]);
+      await page.evaluate(() => {
+        document.getElementById("scrim")!.textContent = "Close";
+      });
+      await expect.poll(() => bandOffenders(page)).toEqual(["Close"]);
       // With no band at all there is nothing to measure: that is said, not passed.
       await pose(page, 669, 951, [0, 0, 0, 0]);
       await expect(bandOffenders(page)).rejects.toThrow("no inset band");

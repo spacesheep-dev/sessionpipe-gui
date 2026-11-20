@@ -22,7 +22,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { useSelectSheet } from "../lib/device";
+import { safeSides, useSelectSheet } from "../lib/device";
 import "../styles/select.css";
 
 export interface SelectOption<T> {
@@ -229,9 +229,13 @@ function Picker<T>({
     const el = pop.current;
     if (!t || !el) return;
     const r = t.getBoundingClientRect();
-    const vw = window.innerWidth;
+    // From side to side the list has what the system leaves of the window: it never opens
+    // under the band its bars stand in beside a folding phone's page.
+    const safe = safeSides();
+    const lo = safe.left + EDGE;
+    const hi = window.innerWidth - safe.right - EDGE;
     const vh = window.innerHeight;
-    const maxWidth = Math.min(Math.max(MAX_LIST_WIDTH, r.width), vw - EDGE * 2);
+    const maxWidth = Math.min(Math.max(MAX_LIST_WIDTH, r.width), hi - lo);
     const below = vh - r.bottom - GAP - EDGE;
     const aboveRoom = r.top - GAP - EDGE;
     const need = Math.min(el.scrollHeight, MAX_LIST_HEIGHT);
@@ -239,7 +243,7 @@ function Picker<T>({
     const maxHeight = Math.max(96, Math.min(MAX_LIST_HEIGHT, above ? aboveRoom : below));
     const w = Math.min(Math.max(el.offsetWidth, r.width), maxWidth);
     let left = align === "end" ? r.right - w : r.left;
-    left = Math.max(EDGE, Math.min(left, vw - w - EDGE));
+    left = Math.max(lo, Math.min(left, hi - w));
     setPlace({
       left,
       minWidth: r.width,

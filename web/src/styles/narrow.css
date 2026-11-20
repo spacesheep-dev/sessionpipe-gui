@@ -207,7 +207,7 @@
     line-height: var(--lh-tight);
   }
   .bar:has(.bar-back--labelled) .bar-title {
-    max-width: 44%;
+    max-width: calc(var(--bar-room, 100%) * 0.44);
   }
   /* An empty list page (nothing needs you, no events) centres in what is left under its
      title and its notes, in the muted tier, no card: not at a desktop's 36 % mark. */

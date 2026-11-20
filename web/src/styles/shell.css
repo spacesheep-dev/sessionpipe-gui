@@ -217,22 +217,42 @@
 
 /* ----- the phone: safe areas, the dropped stream ----- */
 
-/* The page and its bars keep clear of a notch or the rounded corners in landscape; the
-   tab bar's tabs too, its ground still running edge to edge. */
+/* The page and its bars keep clear of what the system keeps at a side: a notch, the
+   rounded corners in landscape, the band its own bars stand in beside a folding phone's
+   page. The gutter sits inside that safe area (--edge-l, --edge-r), as UIKit's layout
+   margins do, so a row's last word is a gutter from the band and never flush against it;
+   whatever in the page runs a gutter out of its column then ends where the band begins.
+   The bar's ground runs under it to the window's edge, and so does the tab bar's, its
+   tabs clear of it. */
 @media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
+  :root {
+    --edge-l: calc(var(--gutter) + var(--safe-left, env(safe-area-inset-left)));
+    --edge-r: calc(var(--gutter) + var(--safe-right, env(safe-area-inset-right)));
+  }
   .main {
-    padding-left: max(var(--gutter), var(--safe-left, env(safe-area-inset-left)));
-    padding-right: max(var(--gutter), var(--safe-right, env(safe-area-inset-right)));
+    padding-left: var(--edge-l);
+    padding-right: var(--edge-r);
   }
   .tabbar {
     padding-left: var(--safe-left, env(safe-area-inset-left));
     padding-right: var(--safe-right, env(safe-area-inset-right));
   }
   .main > .page > .bar {
-    margin-left: calc(-1 * max(var(--gutter), var(--safe-left, env(safe-area-inset-left))));
-    margin-right: calc(-1 * max(var(--gutter), var(--safe-right, env(safe-area-inset-right))));
-    padding-left: max(var(--gutter), var(--safe-left, env(safe-area-inset-left)));
-    padding-right: max(var(--gutter), var(--safe-right, env(safe-area-inset-right)));
+    margin-left: calc(-1 * var(--edge-l));
+    margin-right: calc(-1 * var(--edge-r));
+    padding-left: var(--edge-l);
+    padding-right: var(--edge-r);
+    /* What the system leaves of its width: the title's share is a share of this (below,
+       narrow.css, workflows.css), and not of a ground that runs on under the band. */
+    --bar-room: calc(
+      100% -
+      var(--safe-left, env(safe-area-inset-left)) -
+      var(--safe-right, env(safe-area-inset-right))
+    );
+  }
+  /* And the title stands in the middle of it, between the bar's buttons. */
+  .main > .page > :is(.bar--inline, .bar--large) .bar-title {
+    left: calc(50% + (var(--safe-left, env(safe-area-inset-left)) - var(--safe-right, env(safe-area-inset-right))) / 2);
   }
 }
 
@@ -246,12 +266,20 @@
   position: fixed;
   z-index: var(--z-chrome);
   top: calc(var(--safe-top, env(safe-area-inset-top)) + var(--bar) + 36px);
-  inset-inline: 0;
+  /* Centred on what the system leaves of the width, and never wider than it less 16 px a
+     side. A share of the window (%), not vw: vw can be an earlier window's after the app
+     comes back from the background. */
+  inset-inline: var(--safe-left, env(safe-area-inset-left)) var(--safe-right, env(safe-area-inset-right));
   display: flex;
   align-items: center;
   gap: 8px;
   width: max-content;
-  max-width: calc(100vw - 32px);
+  max-width: calc(
+    100% -
+    32px -
+    var(--safe-left, env(safe-area-inset-left)) -
+    var(--safe-right, env(safe-area-inset-right))
+  );
   height: 36px;
   margin-inline: auto;
   padding: 0 14px 0 12px;
@@ -931,7 +959,7 @@
     position: absolute;
     left: 50%;
     bottom: 0;
-    max-width: 56%;
+    max-width: calc(var(--bar-room, 100%) * 0.56);
     height: var(--bar);
     line-height: var(--bar);
     transform: translateX(-50%);
@@ -941,7 +969,7 @@
     position: absolute;
     left: 50%;
     bottom: 0;
-    max-width: 56%;
+    max-width: calc(var(--bar-room, 100%) * 0.56);
     height: var(--bar);
     line-height: var(--bar);
     transform: translateX(-50%);

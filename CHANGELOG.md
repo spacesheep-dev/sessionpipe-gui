@@ -26,6 +26,17 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **Nothing to tap sits under what the system keeps at the side of the screen.** Where a
+  phone's own bars stand in a band beside the page (a folding phone closed, in Split View
+  or turned on its side) or a notch does, the page kept only the wider of its margin and
+  that band: a row's time stood flush against it, a bar's last button reached under it,
+  and Start in New session, the More sheet's rows, a row's menu, Labels, Display, Settings,
+  a session's files and Search's pop-ups ran under it. The margin is now inside what the
+  system leaves, on every page and in every sheet and menu; the bars keep their ground to
+  the screen's edge. A session's title stands between its bar's buttons, the
+  "Reconnecting…" pill and the pull-to-refresh ring in the middle of what is left, and a
+  list opened from a field never opens under the band. A screen with nothing at its sides
+  is as it was.
 - **A window dragged across 720 px wide changes its layout all at once, and keeps nothing
   of the layout it left.** Each part of the page watched the width by itself, so for a
   moment a phone's bar stood over a desktop's page; on Search that put the focus back in

@@ -193,3 +193,19 @@ const onTouch = subscribeTo(TOUCH_QUERY);
 
 /** `touchKeys`, live: re-renders when the main pointer changes. */
 export const useTouchKeys = (): boolean => useSyncExternalStore(onTouch, touchKeys, () => false);
+
+/** What the system keeps at the window's two sides, in px: a notch, the rounded corners,
+ *  the band its own bars stand in beside a folding phone's page. As the stylesheets have
+ *  it: --safe-* where a shell sets them (native/shell.ts), else the engine's env(). For
+ *  code that places a box itself (a Select's list); a stylesheet reads them directly. */
+export function safeSides(): { left: number; right: number } {
+  if (typeof document === "undefined" || !document.body) return { left: 0, right: 0 };
+  const probe = document.createElement("div");
+  probe.style.cssText =
+    "position:fixed;visibility:hidden;padding:0 var(--safe-right, env(safe-area-inset-right)) 0 var(--safe-left, env(safe-area-inset-left))";
+  document.body.append(probe);
+  const style = getComputedStyle(probe);
+  const sides = { left: Number.parseFloat(style.paddingLeft) || 0, right: Number.parseFloat(style.paddingRight) || 0 };
+  probe.remove();
+  return sides;
+}

@@ -734,6 +734,15 @@ html:has(.main > .session) {
     bottom: max(calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom))), var(--kb, 0px));
     padding: 8px var(--gutter);
   }
+  /* The page's strip is a bar, as the two it stands between are (shell.css --edge-l,
+     --edge-r): its ground runs under what the system keeps at a side to the window's
+     edge, and its field and buttons keep clear of it. */
+  .main > .session > .sess-ctl {
+    margin-left: calc(-1 * var(--edge-l));
+    margin-right: calc(-1 * var(--edge-r));
+    padding-left: var(--edge-l);
+    padding-right: var(--edge-r);
+  }
 }
 
 /* ----- subagents (ORGANIZE-SPEC.md §4.3) ----- */

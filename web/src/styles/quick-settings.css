@@ -222,7 +222,9 @@
     bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
     width: auto;
     max-height: calc(85dvh - var(--tabbar));
-    padding: 0 16px 20px;
+    /* Its rows keep clear of what the system keeps at a side; its ground runs under it. */
+    padding: 0 calc(16px + var(--safe-right, env(safe-area-inset-right))) 20px
+      calc(16px + var(--safe-left, env(safe-area-inset-left)));
     gap: 20px;
     border: 0;
     border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;

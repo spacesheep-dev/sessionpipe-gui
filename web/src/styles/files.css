@@ -52,6 +52,9 @@
   .page.session.session--files > .files--page {
     left: 0;
     width: auto;
+    /* From one side of the window to the other: its head and its rows keep clear of what
+       the system keeps at the left, as of what it keeps at the right (below). */
+    padding-left: var(--safe-left, env(safe-area-inset-left));
     border-left: 0;
     z-index: var(--z-panel);
   }
@@ -70,6 +73,7 @@
   .files--page {
     bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
     padding-top: var(--safe-top, env(safe-area-inset-top));
+    padding-right: var(--safe-right, env(safe-area-inset-right));
   }
 }
 /* In the panel the drawer takes the panel body whole; the timeline under it stays

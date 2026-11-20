@@ -3,10 +3,11 @@
 // The iPhone app at the iPhone Duo's shapes (the `duo` project: a touch screen, 3x): the
 // outer display 466×678, the inner one upright 669×951 and turned 951×669, a Split View
 // half 470×669, each with the bands the system keeps (duo.ts). What holds at a shape is
-// said here: the first run, the keyboard, a reply's lines, what a finger can copy, and that
+// said here: the first run, the keyboard, a reply's lines, what a finger can copy, that
 // the inner display turned (wider than the width at which a window with a mouse takes the
-// Mac's layout) is still the touch app. What a page keeps as it moves from one to another
-// is in duo-continuity.spec.ts, which runs in WebKit too.
+// Mac's layout) is still the touch app, and that nothing a finger lands on is under a band,
+// with the band at either side. What a page keeps as it moves from one to another is in
+// duo-continuity.spec.ts, which runs in WebKit too.
 import { expect, type Page, test } from "@playwright/test";
 import {
   bandOffenders,
@@ -416,13 +417,215 @@ test("the inner display turned: the message field rides on the keyboard, as on t
   }
 });
 
-test("the inner display turned holds no control under its band that the outer display does not", async ({
+/** The windows with a band at one side: the outer display, a Split View half and the
+ *  inner display turned; and with the phone held the other way up, the band on the left.
+ *  The band is the 84 pt the system's own bars stand in beside the page (duo.ts). */
+const BANDS: [size: string, insets: Insets][] = [
+  ["466x678", DUO["466x678"]!.insets],
+  ["466x678", [0, 0, 20, 84]],
+  ["470x669", DUO["470x669"]!.insets],
+  ["951x669", DUO["951x669"]!.insets],
+  ["951x669", [0, 0, 20, 84]],
+];
+
+/** bandOffenders, once what moves has arrived: a sheet on its way up covers nothing yet.
+ *  Every animation that ends is waited for; a spinner's never does. */
+async function underBands(page: Page): Promise<string[]> {
+  await page.evaluate(async () => {
+    const moving = document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity);
+    await Promise.allSettled(moving.map((a) => a.finished));
+  });
+  return bandOffenders(page);
+}
+
+for (const [size, insets] of BANDS) {
+  const where = `${size}, the band on the ${insets[3] ? "left" : "right"}`;
+  test(`nothing a finger lands on is under the system's bands at ${where}: every page, a prompt, each sheet and menu`, async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const b = await duoBed(browser, size, { insets });
+    const { page } = b;
+    const url = b.server.url;
+    /** What is held under a band, state by state: one failure names every one of them. */
+    const held: Record<string, string[]> = {};
+    const measure = async (state: string) => {
+      held[state] = await underBands(page);
+    };
+    const board = async () => {
+      await page.goto(url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    };
+    const allow = page.getByRole("button", { name: "Allow", exact: true });
+    try {
+      // The computer's agents can be asked by one another, so a session offers it.
+      Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+      await board();
+      await b.approve();
+      expect(await shapeOf(page)).toEqual({ size, insets });
+      await measure("Board");
+      // The gutter is inside what the band leaves: the large title starts 16 pt from it and
+      // a row's age ends 16 pt from it, where they are 16 pt from the window's edge without
+      // one. (With the larger of the two for a margin, the age stood flush against the band.)
+      const [, right, , left] = insets;
+      const edges = await page.evaluate(() => {
+        const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+        return { title: box(".bar-large").left, age: box("article.card .card-time").right, width: innerWidth };
+      });
+      expect(edges.title, where).toBe(left + 16);
+      expect(edges.age, where).toBeLessThanOrEqual(edges.width - right - 16);
+      expect(edges.age, where).toBeGreaterThan(edges.width - right - 20);
+      // Where the pull-to-refresh ring turns: across what the band leaves, so in its middle.
+      const pull = await page.locator(".pull").evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return [r.left, r.right];
+      });
+      expect(pull, where).toEqual([left, edges.width - right]);
+
+      // A row held down: the phone's action sheet.
+      await page
+        .locator("article.card .card-title")
+        .first()
+        .evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          el.dispatchEvent(
+            new PointerEvent("pointerdown", {
+              bubbles: true,
+              pointerType: "touch",
+              clientX: r.left + 4,
+              clientY: r.top + 4,
+            }),
+          );
+        });
+      await expect(page.getByRole("menuitem", { name: "Preview", exact: true })).toBeVisible();
+      await measure("a row's menu");
+
+      // The board's own menu, and Labels from it.
+      await board();
+      await page.getByRole("button", { name: "View options", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Edit labels…" }).click();
+      await expect(page.getByRole("dialog", { name: "Labels" })).toBeVisible();
+      await measure("Labels");
+
+      // More, and Display from it.
+      await board();
+      const more = page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "More", exact: true });
+      await more.click();
+      await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
+      await measure("More");
+      await page.getByRole("dialog", { name: "More" }).getByRole("button", { name: "Display" }).click();
+      await expect(page.getByRole("dialog", { name: "Quick settings" })).toBeVisible();
+      await measure("Display");
+
+      // New session, then with the list of computers open over it.
+      await board();
+      await page.getByRole("button", { name: "New session" }).click();
+      const sheet = page.getByRole("dialog", { name: "New session" });
+      await expect(sheet.locator("[data-ns-start]")).toBeVisible();
+      await measure("New session");
+      await sheet.locator("[data-ns-row=machine] button").click();
+      await expect(page.getByRole("listbox").getByRole("option", { name: "studio-mac" })).toBeVisible();
+      await measure("New session, a list open");
+
+      await page.goto(`${url}/inbox`);
+      await expect(allow).toBeEnabled();
+      await measure("Inbox");
+
+      await page.goto(`${url}/search`);
+      await page.locator(".sx-search input").fill("webhook");
+      await expect(page.locator(".sx-hit").first()).toBeVisible();
+      await measure("Search");
+      // Its two pop-ups: a range of days, and what the index holds.
+      await page.locator(".sx-chips button", { hasText: "Any time" }).click();
+      await page.getByRole("option", { name: "Custom range…" }).click();
+      await expect(page.getByRole("dialog", { name: "Custom range" })).toBeVisible();
+      await measure("Search, a range of days");
+      await page.goto(`${url}/search`);
+      await page.locator(".sx-status-btn").click();
+      await expect(page.getByRole("dialog", { name: "Search index" })).toBeVisible();
+      await measure("Search, its index");
+
+      await page.goto(`${url}/machines`);
+      await expect(page.getByText("studio-mac").first()).toBeVisible();
+      await measure("Machines");
+
+      await page.goto(`${url}/settings`);
+      const settings = page.getByRole("dialog", { name: "Settings" });
+      await expect(settings.getByRole("tab", { name: "General" })).toBeVisible();
+      await measure("Settings");
+      await settings.getByRole("tab", { name: "General" }).click();
+      await expect(settings.getByRole("button", { name: /^Mode:/ })).toBeVisible();
+      await measure("Settings, General");
+
+      await page.goto(`${url}${DUO_SESSIONS.prompt}`);
+      await expect(allow).toBeEnabled();
+      await measure("a session with a prompt");
+      // Its bars are grounds from one edge of the window to the other, under the band: the
+      // page's bar, the strip the prompt and the message field stand in, the tab bar. And
+      // its title, too long to show whole, is in the middle of what the band leaves, cut
+      // short of the way back before it and of the buttons after it.
+      const sides = (sel: string) =>
+        page.locator(sel).evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return [r.left, r.right] as [number, number];
+        });
+      const width = Number(size.split("x")[0]);
+      for (const bar of [".main > .page > .bar", ".sess-ctl", ".tabbar"])
+        expect(await sides(bar), `${bar}, ${where}`).toEqual([0, width]);
+      const [from, to] = await sides(".bar-title");
+      expect((from + to) / 2, where).toBeCloseTo((left + width - right) / 2, 0);
+      expect(from, where).toBeGreaterThanOrEqual((await sides(".bar-back"))[1]);
+      expect(to, where).toBeLessThanOrEqual((await sides(".bar-actions"))[0]);
+      await page.getByRole("button", { name: "Files", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Close files" })).toBeVisible();
+      await measure("a session's files");
+
+      await page.goto(`${url}${DUO_SESSIONS.done}`);
+      await page.getByRole("button", { name: "Ask another agent…" }).click();
+      await expect(page.locator("[data-handoff] [data-hs-text]")).toBeVisible();
+      await measure("Ask another agent");
+
+      // spacesheep out of reach: the pill that says so, and retries, floats in the middle
+      // of what the band leaves.
+      await page.goto(`${url}${DUO_SESSIONS.done}`);
+      await expect(composer(page)).toBeVisible();
+      b.hub.down = true;
+      const pill = page.locator(".phone-conn");
+      await expect(pill).toBeVisible({ timeout: 30_000 });
+      await measure("the pill");
+      const at = await pill.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return (r.left + r.right) / 2;
+      });
+      expect(at, where).toBeCloseTo((left + width - right) / 2, 0);
+      b.hub.down = false;
+
+      expect(held, where).toEqual(Object.fromEntries(Object.keys(held).map((state) => [state, []])));
+      expect(Object.keys(held), where).toHaveLength(18);
+    } finally {
+      await b.close();
+    }
+
+    // A new install's last screen, over the board: "You're in", with its two ways on.
+    const fresh = await duoBed(browser, size, { fresh: true, insets });
+    try {
+      fresh.hub.add("me@example.com", fresh.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+      await fresh.page.goto(fresh.server.url);
+      const sheet = fresh.page.locator("[data-first-run='phone']");
+      await expect(sheet.getByRole("button", { name: "Approve this iPhone" })).toBeVisible();
+      await expect(sheet.getByRole("button", { name: "Later" })).toBeVisible();
+      expect(await underBands(fresh.page), `You're in, ${where}`).toEqual([]);
+    } finally {
+      await fresh.close();
+    }
+  });
+}
+
+test("a page open on the outer display, unfolded and turned: nothing is under the band there either, at the simulator's size or at the earlier estimate's", async ({
   browser,
 }) => {
   const b = await duoBed(browser, "466x678");
   const { page } = b;
-  /** Each control by its first words: a row's name ends with its age, which moves. */
-  const named = (names: string[]) => names.map((name) => name.split(" ").slice(0, 3).join(" ")).sort();
   /** The pages, each with what shows once it is whole (`answers`: Allow, ready to be tapped). */
   const PAGES: [name: string, path: string, shown: string, answers: boolean][] = [
     ["Board", "/", "Release notes for 0.8.3", false],
@@ -441,26 +644,20 @@ test("the inner display turned holds no control under its band that the outer di
     }
     return found;
   };
+  const none = Object.fromEntries(PAGES.map(([name]) => [name, []]));
   try {
     await page.goto(b.server.url);
     await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
     await b.approve();
-    // The phone's own layout, on the outer display: what it holds there is the measure.
-    // Today that is its gutter's doing: a bar's last button is 44 wide round a glyph that
-    // ends at the band (10 pt under it), and a board row's ground runs 8 pt past its words.
-    // Turned, the same and nothing of a Mac's layout; none at either is the gutter's to fix.
-    const outer = await under();
+    // The gutter is inside what the band leaves, so a bar's last button (44 wide round its
+    // glyph) and a row's ground (8 pt past its words) end short of it. The same page, moved
+    // to the inner display turned: its band is another width at the earlier estimate (56 pt).
+    expect(await under(), "466x678").toEqual(none);
     for (const size of TURNED) {
       const [width, height] = size.split("x").map(Number) as [number, number];
       await pose(page, width, height);
-      const turned = await under();
       expect(await shapeOf(page), size).toEqual({ size, insets: DUO[size]!.insets });
-      for (const [name] of PAGES) {
-        // What answers a prompt, sends, or turns something on is never one of them.
-        for (const held of turned[name]!)
-          expect(held, `${name} at ${size}`).not.toMatch(/^(Allow|Deny|Send|Stop|Ask another agent…|Turn on)\b/);
-        expect(named(turned[name]!), `${name} at ${size}`).toEqual(named(outer[name]!));
-      }
+      expect(await under(), size).toEqual(none);
     }
   } finally {
     await b.close();

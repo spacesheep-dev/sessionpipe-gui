@@ -225,6 +225,9 @@ export async function fakeKeyboard(page: Page, kb: number): Promise<void> {
  *  from under it (a row passing under the home indicator is not held there, nor a sticky
  *  head on its way up the page; a bar is, and a head once it is stuck). It goes by the box
  *  the eye aims at: a hit area that ::before or ::after widens past it is not counted.
+ *  A scrim is not one of them (an empty button from one side of the window to the other):
+ *  it is the dimmed ground round a sheet, a tap anywhere on it puts the sheet away, and
+ *  nobody aims at the part of it a band covers.
  *  Their names as a screen reader would say them, as near as the page can tell.
  *  Once, in WebKit, a measure made straight after a scroll from the test missed a control
  *  (one trial in 13, not seen again): after such a scroll, ask through expect.poll. */
@@ -302,6 +305,9 @@ export function bandOffenders(page: Page): Promise<string[]> {
     for (const el of Array.from(document.querySelectorAll<HTMLElement>(controls))) {
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0 || getComputedStyle(el).visibility === "hidden") continue;
+      const button = el.tagName === "BUTTON" || el.getAttribute("role") === "button";
+      const scrim = button && !el.childElementCount && !el.textContent?.trim() && r.left <= 0.5 && r.right >= W - 0.5;
+      if (scrim) continue;
       const held = bands.some(([bx0, by0, bx1, by1, across, on]) => {
         // The part of the control inside the band.
         const x0 = Math.max(r.left, bx0);

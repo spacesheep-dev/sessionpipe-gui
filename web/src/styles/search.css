@@ -874,8 +874,8 @@
   }
   .sx-pop {
     position: fixed;
-    left: 16px;
-    right: 16px;
+    left: calc(16px + var(--safe-left, env(safe-area-inset-left)));
+    right: calc(16px + var(--safe-right, env(safe-area-inset-right)));
     bottom: calc(var(--tabbar, 56px) + 16px + var(--safe-bottom, env(safe-area-inset-bottom)));
     width: auto;
   }
@@ -980,8 +980,8 @@
   .sx-range {
     position: fixed;
     top: auto;
-    left: 8px;
-    right: 8px;
+    left: calc(8px + var(--safe-left, env(safe-area-inset-left)));
+    right: calc(8px + var(--safe-right, env(safe-area-inset-right)));
     bottom: calc(8px + var(--safe-bottom, env(safe-area-inset-bottom)));
     width: auto;
     /* Two columns that share what there is: a date field's own width never pushes the
