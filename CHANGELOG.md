@@ -15,8 +15,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   status bar at the side. They now keep the phone's tab bar, sheets and words, inside the
   screen's safe areas, with the message field riding on the keyboard. Turning the screen no
   longer swaps the app under the hand: New session keeps its open list, the caret and the
-  words being typed. The sidebar, the panel beside a list and "Open beside" are a window
-  with a mouse's, which still changes at 720 px.
+  words being typed. The Mac's sidebar, the panel beside a list and "Open beside" are a
+  window with a mouse's, which still changes at 720 px.
 - **A touch screen with room has a sidebar in place of the tab bar.** On a tablet, either
   way up, and on a phone opened flat, the pages are a list down the left side of the
   screen: Board, Inbox with its count, Search, Machines, then what More held (Usage among

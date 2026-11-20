@@ -517,11 +517,18 @@ for (const [size, insets] of REGULAR) {
       expect(await hitSize(compose), where).toEqual({ width: 44, height: 44 });
       await expect(page.locator(".compose-btn--phone"), where).toBeHidden();
       // The sidebar keeps clear of the band at the left, and the page beside it has its gutter.
+      // The head's mark stands over the rows' glyphs.
       const sides = await page.evaluate(() => {
         const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
-        return { rail: box("nav.rail").right, glyph: box("nav.rail .nav-glyph").left, title: box(".bar-large").left };
+        return {
+          rail: box("nav.rail").right,
+          glyph: box("nav.rail .nav-glyph").left,
+          mark: box("nav.rail .rail-brand .mark").left,
+          title: box(".bar-large").left,
+        };
       });
       expect(sides.glyph, where).toBeGreaterThanOrEqual(left + 8);
+      expect(sides.mark, where).toBe(sides.glyph);
       expect(sides.rail, where).toBe(220 + left);
       expect(sides.title, where).toBe(sides.rail + 16);
       if (top || right || left) expect(await underBands(page), where).toEqual([]);
@@ -590,6 +597,41 @@ test("the outer display and a Split View half keep the tab bar; More or Display 
     await expect(tabbar).toBeVisible();
     await expect(display).toHaveCount(0);
     await expect(sheet).toHaveCount(0);
+  } finally {
+    await b.close();
+  }
+});
+
+test("with room, the palette's Display settings opens Display from the sidebar: no More sheet opens out of sight, to come back on a fold", async ({
+  browser,
+}) => {
+  const b = await duoBed(browser, "1180x820", { insets: [24, 0, 20, 0] });
+  const { page } = b;
+  const more = page.locator("nav.tabbar [data-nav='more']");
+  const sheet = page.getByRole("dialog", { name: "More" });
+  const display = page.getByRole("dialog", { name: "Quick settings" });
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular");
+    // A tablet's hardware keyboard.
+    await page.keyboard.press("ControlOrMeta+k");
+    const palette = page.getByRole("dialog", { name: "Command palette" });
+    await expect(palette).toBeVisible();
+    await page.keyboard.type("Display settings");
+    await palette.locator(".pal-row").filter({ hasText: "Display settings" }).first().click();
+    await expect(display).toBeVisible();
+    await expect(page.locator("nav.rail [data-nav='display']")).toHaveAttribute("aria-expanded", "true");
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(sheet).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(display).toHaveCount(0);
+    // Folded: the tab bar is back, and nothing opens with it.
+    await pose(page, 466, 678);
+    await expect(page.locator("nav.tabbar")).toBeVisible();
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(sheet).toHaveCount(0);
+    await expect(display).toHaveCount(0);
   } finally {
     await b.close();
   }

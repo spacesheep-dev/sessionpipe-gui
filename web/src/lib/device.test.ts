@@ -512,6 +512,23 @@ describe("sizeClass", () => {
     expect(html.dataset.sizeClass).toBe("compact");
   });
 
+  it("reads the window again when the app comes back, for a fold made while it was away", async () => {
+    const { followSizeClass, sizeClass } = await follow();
+    fakeMedia({ [TOUCH_QUERY]: true, [PHONE_QUERY]: true });
+    set(669, 951);
+    followSizeClass();
+    expect(html.dataset.sizeClass).toBe("regular");
+    // Folded in the background: no resize reaches the page.
+    set(466, 678);
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(sizeClass()).toBe("compact");
+    expect(html.dataset.sizeClass).toBe("compact");
+    // Opened again, and the page shown from the back-forward cache.
+    set(669, 951);
+    dispatchEvent(new Event("pageshow"));
+    expect(html.dataset.sizeClass).toBe("regular");
+  });
+
   it("takes a checkbox in hand for no keyboard", async () => {
     const { followSizeClass, sizeClass } = await follow();
     fakeMedia({ [TOUCH_QUERY]: true, [PHONE_QUERY]: true });

@@ -267,6 +267,9 @@ export function followSizeClass(): () => void {
   following = true;
   const offTouch = onTouch(settleSize);
   addEventListener("resize", settleSize);
+  // A phone folded or opened while the app was away may send no resize on the way back.
+  addEventListener("pageshow", settleSize);
+  document.addEventListener("visibilitychange", settleSize);
   settleSize();
   return () => {
     following = false;
@@ -274,6 +277,8 @@ export function followSizeClass(): () => void {
     shown = undefined;
     offTouch();
     removeEventListener("resize", settleSize);
+    removeEventListener("pageshow", settleSize);
+    document.removeEventListener("visibilitychange", settleSize);
   };
 }
 

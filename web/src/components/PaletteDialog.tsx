@@ -84,14 +84,22 @@ import { APPEARANCE, noContextMenu, SIZE_NAME, SkinSwatch, useListedSkins } from
 import { AskedLine, Inline, literalAsk } from "./SessionCard";
 import "../styles/palette.css";
 
-/** The quick settings: on the rail its own button, on a phone the row in the More sheet. */
+/** The quick settings: on the rail its own button, in the touch app's sidebar its Display
+ *  row, on a phone the row in the More sheet. Only a button that is shown is pressed: a
+ *  More sheet opened inside a hidden tab bar would come back by itself on a fold. */
 function openDisplaySettings(): void {
-  const rail = document.querySelector<HTMLElement>("nav.rail .qs-trigger");
-  if (rail && rail.offsetParent !== null) {
+  const shown = (sel: string) => {
+    const el = document.querySelector<HTMLElement>(sel);
+    return el && el.offsetParent !== null ? el : null;
+  };
+  const rail = shown("nav.rail .qs-trigger") ?? shown("nav.rail [data-nav='display']");
+  if (rail) {
     rail.click();
     return;
   }
-  document.querySelector<HTMLElement>("[data-nav='more']")?.click();
+  const more = shown("[data-nav='more']");
+  if (!more) return;
+  more.click();
   requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-nav='display']")?.click());
 }
 

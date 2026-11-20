@@ -25,8 +25,8 @@ html[data-size-class="regular"] .tabbar {
 }
 
 /* The sidebar: sticky, so it is a stacking context of its own above the page's rows, and
-   Display's sheet opens from inside it. It scrolls by itself when its rows are more than
-   the screen holds. */
+   Display's sheet opens from inside it. Its head and foot stay put; the rows between them
+   scroll by themselves when they are more than the screen holds. */
 html[data-size-class="regular"] .rail {
   position: sticky;
   top: 0;
@@ -39,8 +39,6 @@ html[data-size-class="regular"] .rail {
     calc(8px + var(--safe-left, env(safe-area-inset-left)));
   border-right: var(--hairline) solid var(--line);
   background: var(--chrome);
-  overflow-y: auto;
-  overscroll-behavior: contain;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -54,7 +52,7 @@ html[data-size-class="regular"] .rail-head {
   justify-content: space-between;
   box-sizing: content-box;
   height: var(--bar);
-  padding: var(--safe-top, env(safe-area-inset-top)) 0 0 8px;
+  padding: var(--safe-top, env(safe-area-inset-top)) 0 0 12px;
 }
 html[data-size-class="regular"] .rail-brand {
   display: flex;
@@ -76,11 +74,14 @@ html[data-size-class="regular"] .rail-compose {
 
 /* The rows: a glyph and its page's name, in the More sheet's type. */
 html[data-size-class="regular"] .rail-nav {
-  flex: 1 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 8px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 html[data-size-class="regular"] .rail .nav-link {
   flex-direction: row;

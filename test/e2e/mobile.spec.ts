@@ -310,6 +310,38 @@ test.describe("phone", () => {
     }
   });
 
+  test("a sidebar with more rows than a short tablet holds scrolls its rows alone: Display and Settings stay at its foot", async ({
+    page,
+  }) => {
+    // Advanced, with the server's views under their headings: more rows than 600 pt hold.
+    await page.setViewportSize({ width: 820, height: 600 });
+    await openBoard(page);
+    await expect(page.locator("nav.rail")).toBeVisible();
+    await expect(page.locator("nav.rail .rail-section").first()).toBeVisible();
+    const measure = () =>
+      page.evaluate(() => {
+        const el = (s: string) => document.querySelector<HTMLElement>(s)!;
+        const rail = el("nav.rail");
+        const nav = el("nav.rail .rail-nav");
+        return {
+          railScrolls: rail.scrollHeight > rail.clientHeight,
+          rowsScroll: nav.scrollHeight > nav.clientHeight,
+          settings: el("nav.rail .rail-foot .nav-link[data-nav='settings']").getBoundingClientRect().bottom,
+          height: innerHeight,
+        };
+      });
+    const m = await measure();
+    expect(m.rowsScroll).toBe(true);
+    expect(m.railScrolls).toBe(false);
+    expect(m.settings).toBeLessThanOrEqual(m.height);
+    // The rows scrolled to their end: the foot has not moved.
+    await page.locator("nav.rail .rail-nav").evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    expect((await measure()).settings).toBe(m.settings);
+    await expect(page.locator("nav.rail").getByRole("link", { name: "Settings" })).toBeInViewport();
+  });
+
   test("a pull down the board past the arm distance reopens the stream; a short one does nothing", async ({ page }) => {
     await openBoard(page);
     const html = page.locator("html");
