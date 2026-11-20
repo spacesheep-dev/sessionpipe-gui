@@ -343,6 +343,11 @@ pairing link that carries the board's key only for a pairing the sink token star
   on its fill (2 px with Increase contrast on), and a Files row no longer gets a ring of
   its own. Selected text is the system's own colour on a computer; the phone app keeps its
   tint.
+- **Menus, pop-up lists and the command palette mark the keys' item with the same edge.**
+  An item the arrow keys, a typed letter or a keyboard open moved to has the list rows'
+  cursor edge on its fill, where it had a faint fill alone; an item under the pointer keeps
+  the fill alone, as before. A touch screen is as it was. A skin whose focus ring is under
+  3:1 on its page or card is listed with "low contrast", as a pale text tier is.
 - **The Inbox badge counts the sessions that need you, as Needs you, the Dock and the menu
   bar do.** It counted only the prompts you could answer from here, so it said 2 beside
   "Needs you 3", and went dark once a prompt waited past its two minutes. The badge, the

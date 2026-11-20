@@ -379,6 +379,34 @@ test.describe("command palette", () => {
     await expect(rows(page).filter({ hasText: "Display settings" })).toBeVisible();
   });
 
+  test("the row the keys put the cursor on has the cursor edge; the pointer's has the fill alone", async ({ page }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await openBoard(page);
+    const meta = await page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement("i"));
+      probe.style.color = "var(--fg-3)";
+      const c = getComputedStyle(probe).color;
+      probe.remove();
+      return c;
+    });
+    const edge = `${meta} 0px 0px 0px 1px inset`;
+    await open(page);
+    // The actions: a list that holds still while the demo runs.
+    await page.keyboard.type(">");
+    const selected = dialog(page).locator(".pal-row[aria-selected='true']");
+    await page.keyboard.press("ArrowDown");
+    await expect(rows(page).nth(1)).toHaveAttribute("aria-selected", "true");
+    await expect(selected).toHaveCSS("box-shadow", edge);
+    // The mouse onto another row: it takes the cursor, as the fill alone.
+    await rows(page).nth(3).hover();
+    await expect(rows(page).nth(3)).toHaveAttribute("aria-selected", "true");
+    await expect(selected).toHaveCSS("box-shadow", "none");
+    // The keys again: the edge again.
+    await page.keyboard.press("ArrowDown");
+    await expect(rows(page).nth(4)).toHaveAttribute("aria-selected", "true");
+    await expect(selected).toHaveCSS("box-shadow", edge);
+  });
+
   test("`#<view>` jumps to an installed view", async ({ page, request }) => {
     const { themes } = (await (await request.get("/api/ui/themes")).json()) as {
       themes: { id: string; name: string; error?: string }[];

@@ -12,6 +12,15 @@ import { openBoard, openPage } from "./helpers.js";
 const trigger = (page: Page) => page.getByRole("combobox", { name: "Agent" });
 const list = (page: Page) => page.getByRole("listbox", { name: "Agent" });
 const active = (page: Page) => page.locator("[role=option].sel-opt--active");
+/** The meta ink (--fg-3) as getComputedStyle writes it: the cursor edge's colour. */
+const meta = (page: Page) =>
+  page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement("i"));
+    probe.style.color = "var(--fg-3)";
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return c;
+  });
 
 /** The harnesses of the cards on view, by the glyph's title; empty while none is on view. */
 const cardHarnesses = (page: Page) =>
@@ -129,6 +138,33 @@ test.describe("select", () => {
     await expect(list(page)).toHaveCount(0);
   });
 
+  test("the row the keys moved to has the cursor edge; the pointer's has the fill alone", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!!isMobile, "desktop project only");
+    const edge = `${await meta(page)} 0px 0px 0px 1px inset`;
+    // Date's rows are fixed; the Agent list's can grow while the index reads.
+    const date = page.getByRole("combobox", { name: "Date" });
+    const options = page.getByRole("listbox", { name: "Date" }).getByRole("option");
+    await date.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(active(page)).toHaveCSS("box-shadow", edge);
+    await page.keyboard.press("ArrowDown");
+    await expect(options.nth(1)).toHaveClass(/sel-opt--active/);
+    await expect(active(page)).toHaveCSS("box-shadow", edge);
+    // The mouse onto another row: it takes the cursor, as the fill alone.
+    await options.nth(3).hover();
+    await expect(options.nth(3)).toHaveClass(/sel-opt--active/);
+    await expect(active(page)).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("Escape");
+    // Opened by a click: the fill alone, until a key moves it.
+    await date.click();
+    await expect(active(page)).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("ArrowDown");
+    await expect(active(page)).toHaveCSS("box-shadow", edge);
+  });
+
   test("axe: nothing new with the list open", async ({ page, isMobile }) => {
     test.skip(!!isMobile, "desktop project only");
     // The list and a demo toast fade in; axe must sample text at full opacity, not mid-animation.
@@ -160,6 +196,12 @@ test.describe("select", () => {
   test("phone: the list is a bottom sheet with 44 px rows, still a listbox", async ({ page, isMobile }) => {
     test.skip(!isMobile, "phone project only");
     const t = trigger(page);
+    // Even a key's cursor is the fill alone on a touch screen.
+    await t.focus();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await expect(active(page)).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("Escape");
     await t.click();
     const sheet = page.locator(".sel-sheet");
     await expect(sheet).toBeVisible();

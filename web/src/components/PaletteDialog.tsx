@@ -1642,6 +1642,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               aria-label={sub ? SUB_TITLE(sub) : "Results"}
               key={stack.length}
               data-pushed={stack.length ? "" : undefined}
+              // The keys put the cursor where it is: its row gets the cursor edge.
+              data-keys={by.current === "key" || undefined}
             >
               {noResults && (
                 <div className="pal-empty" role="status">

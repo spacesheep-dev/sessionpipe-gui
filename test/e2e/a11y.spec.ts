@@ -470,6 +470,40 @@ test.describe("focus is ink", () => {
     }
   });
 
+  test("a menu's item has the cursor edge when the keys put it there, the fill alone under the pointer", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: "light" });
+    await openBoard(page);
+    const edge = `${await tokenColour(page, "--fg-3")} 0px 0px 0px 1px inset`;
+    const menu = page.locator(".menu[data-depth='0']");
+    const active = menu.locator(".menu-item--active");
+    // `.` on the j cursor: the menu opens on its first item, the keys'.
+    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("j");
+    await page.keyboard.press(".");
+    await expect(menu).toBeVisible();
+    await expect(active).toHaveCSS("box-shadow", edge);
+    await page.keyboard.press("ArrowDown");
+    await expect(active).toHaveCSS("box-shadow", edge);
+    // The mouse onto an item (one with no submenu): the fill alone.
+    const plain = menu.locator(".menu-item:not([aria-haspopup]):not([aria-disabled='true'])");
+    await plain.nth(1).hover();
+    await expect(plain.nth(1)).toHaveClass(/menu-item--active/);
+    await expect(active).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    // Opened by a right-click and hovered: the fill alone; an arrow key brings the edge.
+    await page.locator("article.card a.card-link").first().click({ button: "right" });
+    await expect(menu).toBeVisible();
+    await plain.first().hover();
+    await expect(plain.first()).toHaveClass(/menu-item--active/);
+    await expect(active).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("ArrowDown");
+    await expect(active).toHaveCSS("box-shadow", edge);
+    await page.keyboard.press("Escape");
+  });
+
   test("in the Mac app, text selection is the system's own", async ({ page }) => {
     await openBoard(page);
     await page.evaluate(() => {

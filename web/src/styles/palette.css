@@ -226,6 +226,14 @@
   background: var(--sel);
   color: var(--fg);
 }
+/* With a pointer that hovers, the keys' row (and the first row, ↵'s, until the pointer
+   moves the cursor) has the list rows' cursor edge; the pointer's is the plain fill. A
+   touch screen keeps the fill alone. */
+@media (hover: hover) {
+  .pal-list[data-keys] .pal-row[aria-selected="true"] {
+    box-shadow: var(--cursor-edge);
+  }
+}
 .pal-row--busy {
   opacity: 0.6;
 }

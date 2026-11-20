@@ -193,6 +193,18 @@ test.describe("phone", () => {
     }
   });
 
+  test("the palette's cursor row is the fill alone, even moved by a key", async ({ page }) => {
+    await openBoard(page);
+    await page.keyboard.press("ControlOrMeta+k");
+    const dialog = page.getByRole("dialog", { name: "Command palette" });
+    await expect(dialog).toBeVisible();
+    const selected = dialog.locator(".pal-row[aria-selected='true']");
+    await expect(selected).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("ArrowDown");
+    await expect(dialog.locator(".pal-row").nth(1)).toHaveAttribute("aria-selected", "true");
+    await expect(selected).toHaveCSS("box-shadow", "none");
+  });
+
   test("the session page keeps its control strip above the tab bar", async ({ page }) => {
     await openBoard(page);
     const link = page.locator("article.card a.card-link").first();

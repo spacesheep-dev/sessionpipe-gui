@@ -501,6 +501,9 @@ function MenuPanel({
   const actionable = items.map((i, n) => (isAction(i) ? n : -1)).filter((n) => n >= 0);
   const [active, setActive] = useState<number>(keyboard ? (actionable[0] ?? -1) : -1);
   const [open, setOpen] = useState<{ index: number; keyboard: boolean } | null>(null);
+  /** The keys moved the highlight last (or opened the menu): the item gets the cursor edge.
+   *  The pointer's highlight is the plain fill. */
+  const [byKeys, setByKeys] = useState(keyboard);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const typed = useRef({ text: "", at: 0 });
   const hoverTimer = useRef<number | null>(null);
@@ -617,6 +620,7 @@ function MenuPanel({
       if (hit !== undefined) setActive(hit);
     } else handled = false;
     if (handled) {
+      setByKeys(true);
       e.preventDefault();
       e.stopPropagation();
     }
@@ -633,6 +637,7 @@ function MenuPanel({
         role="menu"
         aria-label={label ?? "Actions"}
         tabIndex={-1}
+        data-keys={byKeys || undefined}
         onKeyDown={onKeyDown}
         onMouseMove={(e) => {
           const p = { x: e.clientX, y: e.clientY };
@@ -676,6 +681,7 @@ function MenuPanel({
                 onClick: () => run(n, false),
                 onMouseEnter: () => {
                   setActive(n);
+                  setByKeys(false);
                   if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
                   // On the way into the open submenu: wait longer before letting it go.
                   const heading = !!open && open.index !== n && towardSub();
@@ -728,13 +734,16 @@ function MenuPanel({
           label={sub.label}
           depth={depth + 1}
           onClose={() => {
+            // ← or Esc in the submenu: the keys are back on its row here.
             setOpen(null);
+            setByKeys(true);
             subRow.focus({ preventScroll: true });
           }}
           onCloseAll={onCloseAll}
           onPanelEnter={() => {
             if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
             setActive(open!.index);
+            setByKeys(false);
           }}
         />
       )}
