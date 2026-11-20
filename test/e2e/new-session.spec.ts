@@ -379,3 +379,61 @@ test("a file that didn't upload says why on the status line, and Try again sends
   await expect(chip).toHaveAttribute("data-file-state", "held");
   await expect(status(page)).toHaveText(`${m.name} is listening.`);
 });
+
+test("seven files go two at a time; the rest wait their turn, and one removed lets the next go", async ({ page }) => {
+  const m = await fakeDaemon(key, advertising(`ns-queue-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}`);
+  await expect(rowValue(page, "machine")).toHaveAttribute("data-value", m.name);
+  await sheet(page).locator("[data-ns-text]").fill("Read these.");
+  // Each upload is held until it is let go of; how many are in flight is read off the
+  // page's own requests (one stopped ends as failed).
+  let inFlight = 0;
+  let most = 0;
+  let asked = 0;
+  const held: (() => void)[] = [];
+  const files = (r: { url(): string; method(): string }) =>
+    r.method() === "POST" && new URL(r.url()).pathname === "/api/ui/control/files";
+  page.on("request", (r) => {
+    if (!files(r)) return;
+    asked++;
+    most = Math.max(most, ++inFlight);
+  });
+  const ended = (r: { url(): string; method(): string }) => {
+    if (files(r)) inFlight--;
+  };
+  page.on("requestfinished", ended);
+  page.on("requestfailed", ended);
+  await page.route("**/api/ui/control/files?*", async (route) => {
+    await new Promise<void>((r) => held.push(r));
+    await route.continue().catch(() => {});
+  });
+  await sheet(page)
+    .locator("input[data-ns-files]")
+    .setInputFiles(
+      Array.from({ length: 7 }, (_, i) => ({
+        name: `notes-${i + 1}.txt`,
+        mimeType: "text/plain",
+        buffer: Buffer.from(`note ${i + 1}\n`),
+      })),
+    );
+  const chips = sheet(page).locator(".ns-file");
+  await expect(chips).toHaveCount(7);
+  await expect.poll(() => asked).toBe(2);
+  await expect(sheet(page).locator(".ns-file[data-file-state=uploading]")).toHaveCount(2);
+  await expect(sheet(page).locator(".ns-file[data-file-state=waiting]")).toHaveCount(5);
+  await expect(sheet(page).locator("[data-ns-start]")).toBeDisabled();
+  // One removed while it goes: the next one starts.
+  await chips.nth(0).getByRole("button", { name: "Remove notes-1.txt" }).click();
+  await expect.poll(() => asked).toBe(3);
+  // The rest, each let go of as it comes.
+  while (held.length || asked < 7) {
+    await expect.poll(() => held.length).toBeGreaterThan(0);
+    held.shift()!();
+    await page.waitForTimeout(50);
+  }
+  await expect(sheet(page).locator(".ns-file[data-file-state=held]")).toHaveCount(6, { timeout: 15_000 });
+  expect(asked).toBe(7);
+  expect(most).toBeLessThanOrEqual(2);
+  await expect(sheet(page).locator("[data-ns-start]")).toBeEnabled();
+});

@@ -58,6 +58,8 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
   hub.rxBase = (id) => `https://rx.test/${id}`;
   hub.add("me@example.com", ss.key);
   const asked: string[] = [];
+  /** Each file's request to the hub's files door: the signal it went with. */
+  const fileAsks: { signal: AbortSignal | null }[] = [];
   /** What becomes of the next sends between the page and spacesheep, first in first out:
    *  `lost`: the hub's time ran out and spacesheep never had it; `unheard`: spacesheep took
    *  it and its answer never came back in the hub's time; `dropped`: the app's own
@@ -85,6 +87,7 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
     // A file's bytes come as bytes, with the two headers the files door reads.
     const bytes = init?.body instanceof Uint8Array ? init.body : null;
     const h = new Headers(init?.headers);
+    if (bytes) fileAsks.push({ signal: init?.signal ?? null });
     const a: FakeAnswer = await hub.door(id, {
       method: init?.method ?? "GET",
       path,
@@ -163,6 +166,7 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
     ss,
     hub,
     asked,
+    fileAsks,
     notices,
     calls,
     failGet,
@@ -651,6 +655,31 @@ describe("a page's own backend on a spacesheep account", () => {
       expect([status, (body as { reason: string }).reason], JSON.stringify(name)).toEqual([400, "bad_name"]);
     }
     expect(r.hub.log.filter((l) => l.startsWith("POST")).length).toBe(posts);
+  });
+
+  it("hands a picture's stop on to the hub: one the page lets go of ends its request there", async () => {
+    const b = await r.start();
+    await tick(400);
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 5, 6, 7, 8]);
+    const up = (signal: AbortSignal) =>
+      b.answer(`/api/ui/control/files?name=kiwi.png&machine=${M1}`, {
+        method: "POST",
+        headers: { "content-type": "image/png", accept: "application/json" },
+        body: PNG.slice().buffer,
+        signal,
+      });
+    const going = new AbortController();
+    expect((await up(going.signal)).status).toBe(201);
+    expect(r.fileAsks).toHaveLength(1);
+    // The very stop the page holds: letting the picture go aborts the hub's request.
+    expect(r.fileAsks[0]!.signal?.aborted).toBe(false);
+    going.abort();
+    expect(r.fileAsks[0]!.signal?.aborted).toBe(true);
+    // One let go of before it went asks the hub nothing.
+    const gone = new AbortController();
+    gone.abort();
+    expect((await up(gone.signal)).status).toBe(502);
+    expect(r.fileAsks).toHaveLength(1);
   });
 
   it("gives a refusal the shape the page reads: spacesheep's hold, the hub's own word, a machine that is not there", async () => {

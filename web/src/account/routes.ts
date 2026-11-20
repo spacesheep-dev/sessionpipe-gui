@@ -107,7 +107,8 @@ export function routes(d: RouteDeps): ApiBackend {
       const bad = fileNameProblem(name);
       if (bad) return json({ reason: "bad_name", error: bad }, 400);
       const r = await forwardRemoteUpload({ bytes, type, name }, async (file) => {
-        const a = await d.doors.uploadFile(file);
+        // A file the page let go of ends its request at the hub too.
+        const a = await d.doors.uploadFile(file, init?.signal ?? undefined);
         if (!a.hub) return { status: a.status, json: a.json, retryAfter: a.retryAfter };
         // The hub's own word: an app from before the files door has none.
         const words = cleanReason(a.json.error);

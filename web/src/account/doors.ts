@@ -142,12 +142,17 @@ export interface AccountDoors {
   device(): Promise<DoorAnswer>;
   /** `POST /api/machines/files`: one file's bytes for a machine to fetch, with its type and
    *  its name (percent-encoded, as the hub forwards it). The answer as it came, and its
-   *  Retry-After in seconds where it has one; a full room at the hub is asked again. */
-  uploadFile(file: {
-    bytes: Uint8Array;
-    type: string;
-    name: string;
-  }): Promise<DoorAnswer & { retryAfter: number | null }>;
+   *  Retry-After in seconds where it has one; a full room at the hub is asked again.
+   *  `signal`: the page let the file go (removed, or going again for another machine), which
+   *  ends its request at the hub. */
+  uploadFile(
+    file: {
+      bytes: Uint8Array;
+      type: string;
+      name: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<DoorAnswer & { retryAfter: number | null }>;
 }
 
 export interface DoorsOptions {
@@ -387,16 +392,19 @@ export function openDoors(o: DoorsOptions): AccountDoors {
       return { status: 504, json: { code: SEND_UNKNOWN_CODE, error: said.why } };
     },
     device: async () => read1(await get("/api/gui/device")),
-    async uploadFile(file) {
+    async uploadFile(file, signal) {
+      const name = encodeURIComponent(file.name);
       for (let i = 0; ; i++) {
+        signal?.throwIfAborted();
         const res = await f(`${o.rxBase}/api/machines/files`, {
           method: "POST",
           headers: {
             "content-type": file.type,
-            "x-file-name": encodeURIComponent(file.name),
+            "x-file-name": name,
             accept: "application/json",
           },
           body: file.bytes as Uint8Array<ArrayBuffer>,
+          ...(signal ? { signal } : {}),
         });
         const a = await read1(res);
         const after = Number(res.headers.get("retry-after"));

@@ -152,8 +152,8 @@ export const ONLY_PICTURES_WORDS = "Only pictures can be dropped here.";
 /** Send was pressed while pictures still upload: nothing goes until they are in. */
 export const waitingWords = (n: number): string =>
   n === 1 ? "Waiting for 1 picture to finish uploading." : `Waiting for ${n} pictures to finish uploading.`;
-/** This many upload at once; the rest wait their turn in the tray. */
-const UPLOADS_AT_ONCE = 2;
+/** This many upload at once; the rest wait their turn (the tray, New session's files). */
+export const UPLOADS_AT_ONCE = 2;
 /** CONTROL.md §3.1: a file's name is at most this long. */
 const NAME_MAX = 200;
 const PICTURE_EXT_RE = /\.(png|jpe?g|gif|webp|heic|heif)$/i;

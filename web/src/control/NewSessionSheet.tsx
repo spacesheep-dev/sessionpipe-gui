@@ -52,7 +52,14 @@ import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { useNow } from "../lib/time";
 import { START, ThisPhone } from "../native/accountWords";
-import { boardNow, markSpacesheepRefused, pictureName, progressWords, useSpacesheepRefused } from "./Attachments";
+import {
+  boardNow,
+  markSpacesheepRefused,
+  pictureName,
+  progressWords,
+  UPLOADS_AT_ONCE,
+  useSpacesheepRefused,
+} from "./Attachments";
 import { ControlError, controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
@@ -133,6 +140,8 @@ interface FileItem {
   was?: number;
   /** A picture being made smaller (shrink.ts); its upload waits for that. */
   shrinking?: boolean;
+  /** Its upload waits its turn: two run at a time, as the composer's do. */
+  waiting?: boolean;
   /** Goes as a file, but not as a picture the agent can look at (a HEIC this engine can't draw). */
   note?: string;
   /** The bytes that go, for Retry; absent on one brought back from the draft (held already). */
@@ -467,8 +476,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       }
       count++;
       total += f.size;
-      add.push({ key, name: f.name, size: f.size, file: f });
-      upload(key, f);
+      add.push({ key, name: f.name, size: f.size, file: f, waiting: true });
     }
     filesNow.current = [...filesNow.current, ...add];
     setFiles((prev) => [...prev, ...add]);
@@ -488,7 +496,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     const stop = new AbortController();
     stops.current.set(key, stop);
     const to = goesTo.current;
-    patchFile(key, { to });
+    patchFile(key, { to, waiting: false });
     controlApi
       .uploadFile(f, to.machine, {
         signal: stop.signal,
@@ -537,8 +545,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       return;
     }
     if (small === "heic") {
-      patchFile(key, { ...done, note: HEIC_FILE_NOTE, file: f });
-      upload(key, f);
+      patchFile(key, { ...done, note: HEIC_FILE_NOTE, file: f, waiting: true });
       return;
     }
     const type = shrunk?.type ?? f.type;
@@ -548,13 +555,12 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       others.map((x) => x.name),
     );
     const goes = new File([shrunk?.blob ?? f], name, { type });
-    patchFile(key, { ...done, name, file: goes });
-    upload(key, goes);
+    patchFile(key, { ...done, name, file: goes, waiting: true });
   };
   const retry = (x: FileItem) => {
     if (!x.file || !x.failed?.retry) return;
-    patchFile(x.key, { error: undefined, failed: undefined, sent: undefined });
-    upload(x.key, x.file);
+    stops.current.delete(x.key);
+    patchFile(x.key, { error: undefined, failed: undefined, sent: undefined, waiting: true });
   };
   const removeFile = (key: string) => {
     stops.current.get(key)?.abort();
@@ -567,10 +573,22 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     for (const x of filesNow.current) {
       if (!x.file || !uploadsAgain(x, relayed)) continue;
       stops.current.get(x.key)?.abort();
-      patchFile(x.key, { entry: undefined, error: undefined, failed: undefined, sent: undefined });
-      upload(x.key, x.file);
+      stops.current.delete(x.key);
+      patchFile(x.key, { entry: undefined, error: undefined, failed: undefined, sent: undefined, waiting: true });
     }
   }, [relayed]);
+  // Two uploads at a time, in the chips' order; the rest wait. The next goes when one is
+  // in, fails or is removed: the app's hub answers only a few requests at once, and the
+  // account's own reads need theirs.
+  useEffect(() => {
+    let busy = files.filter((x) => x.file && !x.waiting && !x.entry && !x.error && !x.shrinking).length;
+    for (const x of files) {
+      if (busy >= UPLOADS_AT_ONCE) break;
+      if (!x.waiting || !x.file || x.error || stops.current.has(x.key)) continue;
+      busy++;
+      upload(x.key, x.file);
+    }
+  }, [files]);
   const onDrop = (e: DragEvent) => {
     if (!e.dataTransfer?.files?.length) return;
     e.preventDefault();
@@ -922,7 +940,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           <li
             key={f.key}
             className={`ns-file ${f.error ? "ns-file--err" : ""}`}
-            data-file-state={f.error ? "error" : f.entry ? "held" : f.shrinking ? "shrinking" : "uploading"}
+            data-file-state={
+              f.error ? "error" : f.entry ? "held" : f.shrinking ? "shrinking" : f.waiting ? "waiting" : "uploading"
+            }
             title={
               f.shrinking
                 ? "Making it smaller…"
