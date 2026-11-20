@@ -714,8 +714,12 @@ test.describe("command palette: an answer only where it would be sent", () => {
       await page.goto(`${CONTROL_BASE}/`);
       await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
       await expect(page.locator(`article.card[data-flip="${newest.key}"]`)).toBeVisible();
-      // No query. The session's own row: the command, in mono under its tool, and no "Asked".
+      // The test's tag as the query: its four sessions and their rows, whatever other tests
+      // on this receiver have waiting (an empty query lists only the newest few sessions).
+      // The session's own row: the command, in mono under its tool, and no "Asked".
       await open(page);
+      await page.keyboard.type(t);
+      await expect(session(page, `Plan wait ${t}`)).toHaveCount(1);
       await cursorTo(page, session(page, `Newest wait ${t}`));
       await expect(peek.locator(".pal-peek-title")).toHaveText(`Newest wait ${t}`);
       await expect(labels).toHaveText(["Bash", "Replying"]);
