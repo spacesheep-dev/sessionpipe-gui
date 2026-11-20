@@ -896,6 +896,22 @@ test.describe("inside the native shell", () => {
     await expect(state.getByRole("button", { name: "Start sessionpipe" })).not.toHaveAttribute("aria-busy");
   });
 
+  test("a start from the board on a Mac without Node names the same Node as the welcome", async ({ page }) => {
+    await openInShell(page, "/", {
+      stream: "down",
+      start: [{ kind: "noNode", line: "sessionpipe needs Node 22.12 or later, or Node 20 from 20.19 on" }],
+    });
+    const state = page.locator("main .state");
+    await state.getByRole("button", { name: "Start sessionpipe" }).click({ timeout: 10_000 });
+    await expect(state.getByRole("heading")).toHaveText(
+      "Install Node 22.12 or later (or Node 20 from 20.19 on) from nodejs.org, then try again.",
+    );
+    await expect(state.getByRole("link", { name: "nodejs.org" })).toHaveAttribute(
+      "href",
+      "https://nodejs.org/en/download",
+    );
+  });
+
   test("a start from the board that fails says it as the welcome does, and Try again starts it again", async ({
     page,
   }) => {

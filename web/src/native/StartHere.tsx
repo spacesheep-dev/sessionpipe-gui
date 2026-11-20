@@ -37,6 +37,20 @@ const read = () => current;
 const isBusy = (s: StartState) => s.kind === "starting" || s.kind === "busy";
 
 /** The receiver a start brought, selected; with `then`, the start is over here. */
+/** The one sentence for a computer without a Node sessionpipe runs on (the floor the
+ *  desktop app's StartError::NoNode says too). */
+function NeedsNode() {
+  return (
+    <>
+      Install Node 22.12 or later (or Node 20 from 20.19 on) from{" "}
+      <a href="https://nodejs.org/en/download" target="_blank" rel="noreferrer">
+        nodejs.org
+      </a>
+      , then try again.
+    </>
+  );
+}
+
 async function take(id: string, then?: () => void): Promise<void> {
   await invoke("rx_select", { id });
   if (!then) return;
@@ -132,13 +146,7 @@ export function StartRow({ here }: { here: string }) {
           ) : start.kind === "failed" ? (
             start.sentence
           ) : start.kind === "needsNode" ? (
-            <>
-              Install Node 22.12 or later (or Node 20 from 20.19 on) from{" "}
-              <a href="https://nodejs.org/en/download" target="_blank" rel="noreferrer">
-                nodejs.org
-              </a>
-              , then try again.
-            </>
+            <NeedsNode />
           ) : (
             `Runs sessionpipe in the background, so this ${here}'s sessions show up here.`
           )}
@@ -183,13 +191,7 @@ export function NoConnectionStart({
     ) : start.kind === "failed" ? (
       start.sentence
     ) : start.kind === "needsNode" ? (
-      <>
-        Install Node 20 or later from{" "}
-        <a href="https://nodejs.org/en/download" target="_blank" rel="noreferrer">
-          nodejs.org
-        </a>
-        , then try again.
-      </>
+      <NeedsNode />
     ) : (
       NEW_WORDS.reachFailed(where)
     );
