@@ -42,133 +42,6 @@ All notable changes to `sessionpipe-gui`. The format follows
   before (a deleted `uiKey` gives a new one, as before); a running receiver takes one of
   at least 16 characters at once and leaves any other until then. `sessionpipe-gui key renew` gives a
   new key while the receiver runs.
-
-### Fixed
-
-- **"Switched to …" stays under the turn it fell in.** On a long session whose switch to
-  another account is older than its newest page, the chat and the timeline drew the note
-  under the first turn the page had loaded; it now appears, under its own turn, once Older
-  turns brings that turn in.
-
-## [0.8.6] - 2026-11-19
-
-The web app is built on React 19 and Vite 8, and the receiver runs sessionpipe-core 0.17.0;
-with them sessionpipe-gui needs Node 22.12 or later, or Node 20 from 20.19 on. And a round
-of fixes, most of them from contributors: files a Windows editor saved with a byte-order
-mark load, a `--host` or `--port` the receiver cannot listen on is named, an event the
-store could not write is read from the outbox again, and Search says which filter value it
-could not read.
-
-### Changed
-
-- **sessionpipe 0.17.0.** The receiver runs sessionpipe-core 0.17.0 (it was 0.13.6), and its
-  conformance fixtures are that version's (170 control vectors, 33 delivery scenarios). A
-  session of Grok Build, whose hooks sessionpipe reads from 0.16, is named "Grok Build" on
-  the board and in search's agent chips, where it read `grok-build`; fx, which a 0.16
-  machine can start and message, is listed under its own name. Events and commands are
-  accepted and refused as before.
-- **A view gets React 19.** `api.react` is the host's React, now 19. What React 19 took
-  out is gone from it: `ReactDOM.render`, `hydrate`, `unmountComponentAtNode` and
-  `findDOMNode`, string refs and legacy context; `propTypes` and a function component's
-  `defaultProps` are ignored, and an element made by another copy of React is not drawn.
-  A view that bundles its own React, and the bundled Canvas and Office, draw as before.
-  [docs/theme-authoring.md](docs/theme-authoring.md) lists what to use instead.
-- **sessionpipe-gui needs Node 22.12 or later, or Node 20 from 20.19 on** (it was any Node
-  20): what the web app's build (Vite 8) needs, and `npx github:spacesheep-dev/sessionpipe-gui`
-  builds it on your Node. An older Node is told so in one line, before anything is installed.
-  Working on the code needs 22.12 or later.
-
-### Fixed
-
-- **A shortcut's keys are read out as they are shown.** On the Shortcuts page a screen
-  reader said "Command palette: mod+k. Press to change" where the key shows ⌘K (Ctrl+K on
-  Windows and Linux); it now says the key as it is drawn, ⌘K or Ctrl+K, and so for every
-  key with a modifier. The text of a two-key shortcut such as g b is "g b", two keys, not
-  the one word "gb", there, in the `?` help and in Settings › Keyboard. Nothing on screen
-  moves.
-- **Turn on (the secure address) finds openssl on Windows.** The receiver looked for
-  `openssl` on the PATH only, and neither Git for Windows (its `usr\bin`; only `Git\cmd` is
-  on the PATH) nor `winget install ShiningLight.OpenSSL.Light` (`Program Files\OpenSSL-Win64`,
-  `-ARM` on arm64) puts it there, so Setup kept saying "Needs the openssl command" with
-  either installed. It now also looks in those folders, so an install shows without a PATH
-  change or a restart, and the note says so.
-- **A saved workflow run whose plan does not read no longer stops the server.** A run in
-  `workflow-runs.json` with a plan step that is not an object, has no entry in `steps`, or
-  has an `after` that is not a list of step ids threw from the orchestrator's tick, and the
-  server exited about a second after every start. Such a run, and one whose plan step has
-  text that is not a string, an id that is not an id or is used twice, or an `after` naming
-  a step that is not before it, is now left out when the file is read, as a workflow that
-  no longer reads already is; so is a run whose input or a step's reply is not text, and
-  one with an entry in `steps` that no plan step names (it kept the run from ever ending).
-  The other runs are kept, and the file as it was is set aside as
-  `workflow-runs.json.bad-<time>`; until it can be, the runs left out are written back with
-  the others. A run started from now on with a step called `__proto__` keeps that step's
-  entry in its `steps`, so it is read back like any other.
-- **A picture sent from Windows to an older sessionpipe shows in the message, and is
-  kept.** For a session on the same computer whose sessionpipe is older than 0.10, a GUI
-  on Windows names a picture by its path, with `\`. The message did not read that back, so
-  the picture was missing from it, and the daily clean-up did not see it in the stored
-  events, so a picture a session still named was removed once it was 30 days old. Both now
-  read either slash.
-- A session's "missing events" flag waits 30 s from when each hole opened. When an older
-  hole filled while a newer one was still open, the newer one kept the older one's time,
-  so it was flagged at once, with a "since" from before it opened.
-- **An event the store can't write is read from the outbox again, not lost.** When the
-  store failed to take a batch from this machine's outbox (a full disk, a store file the
-  GUI may not write), the reader had already moved past it, so those events never reached
-  the board, even once there was room again; the same failure during the first read at
-  start left the outbox off until a restart. The batch is now read again on the next tick,
-  said once, and the other sessions carry on meanwhile.
-- **A color theme, skin, view or plugin saved by Notepad or PowerShell 5 loads.** Those
-  editors start a UTF-8 file with a byte-order mark, and the receiver refused it: a theme
-  in `color-themes/` was listed as "not JSON: Unexpected token", and a `skin.json`,
-  `theme.json` or `plugin.json` as "not valid JSON". It now reads past the mark, as it
-  already did for `config.json`.
-- **A `control/machines.json` that does not read no longer unpairs every machine.** One
-  saved with a UTF-8 byte-order mark (PowerShell 5's `-Encoding UTF8`, older Windows
-  editors) is now read past it. One left empty, cut short, unreadable or without a list of
-  machines was read as "no machines": the receiver deleted every machine's queued sends at
-  start, and the next pairing or hello wrote the file over, so every machine had to pair
-  again. The receiver now stops at start with a message naming the file and what to do, as
-  it does for `config.json`, and leaves the file as it was.
-- **Search's status line says when history search is off but its index could not be
-  deleted.** It read "The index needs rebuilding" instead. It now says the history index
-  could not be deleted, and that Rebuild (on this computer) or restarting the app tries
-  again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
-  code when there is one, and points at `index --rebuild`. The status carries a new
-  `historyLeft` field for it.
-- **Search names a filter value it could not read.** `since:2026-2-1`, `until:3days`,
-  `in:everything` or `source:mars` was left out of the search but reported as "“since:”
-  isn't a filter, so it was searched as text", though `since:` is a filter and nothing was
-  searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
-  date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
-  lists the fields or indexes), and keep the old words for a key that is not a filter.
-- **Search finds Gemini CLI history when `GEMINI_CLI_HOME` is set.** Gemini CLI keeps
-  its `.gemini` folder inside that path, but search took `$GEMINI_CLI_HOME` to be the
-  `.gemini` folder itself, so it found none of those sessions. It now reads
-  `$GEMINI_CLI_HOME/.gemini`; with the variable unset nothing changes (`~/.gemini`).
-- **Labels, read marks and usage limits saved with a byte-order mark are kept.** A
-  `labels.json`, `marks.json` or `limits.json` saved by Notepad or PowerShell 5 (which
-  start a UTF-8 file with a byte-order mark) was taken for a broken file: it was set aside
-  as `<file>.bad-<time>` and the board started without its label names and colours, read
-  marks and notification levels. It is now read past the mark, as `config.json` is.
-- **A GUI that stops at "port N is in use" ends there.** The search indexer it had already
-  started then printed a Node crash (`Error: write EPIPE`) on the same terminal. It now
-  stops quietly once the GUI has gone, as it does when a GUI is stopped while indexing.
-- **A `--host` or `--port` the receiver cannot listen on is named.** A `--host` that is
-  not an address of this machine (say, after a network change) or a name that does not
-  look up, and a `--port` this user may not open, stopped with Node's own message
-  (`listen EADDRNOTAVAIL: …`, `getaddrinfo ENOTFOUND …`, `listen EACCES: …`). It now says
-  which flag to change, as it already did for a port in use, and still exits 2.
-
-## [0.8.5] - 2026-11-18
-
-Pictures from a session's message box reach the agent as files in the session's own
-folder, at every permission level, and the receiver is stricter about which requests it
-answers: a browser on its own pages, a proxy's visitor by the proxy's own word, and a
-pairing link that carries the board's key only for a pairing the sink token started.
-
-### Changed
 - **Sessions opened one after another beside the page share one tab.** A plain open beside
   the page reuses one preview tab, its title in italics; typing in it, a double-click on the
   tab or a drag keeps it, and an open holding ⌘ adds a kept tab. Answering keeps nothing, so
@@ -382,86 +255,10 @@ pairing link that carries the board's key only for a pairing the sink token star
 
 ### Fixed
 
-- **A shortcut's keys are read out as they are shown.** On the Shortcuts page a screen
-  reader said "Command palette: mod+k. Press to change" where the key shows ⌘K (Ctrl+K on
-  Windows and Linux); it now says the key as it is drawn, ⌘K or Ctrl+K, and so for every
-  key with a modifier. The text of a two-key shortcut such as g b is "g b", two keys, not
-  the one word "gb", there, in the `?` help and in Settings › Keyboard. Nothing on screen
-  moves.
-- **Turn on (the secure address) finds openssl on Windows.** The receiver looked for
-  `openssl` on the PATH only, and neither Git for Windows (its `usr\bin`; only `Git\cmd` is
-  on the PATH) nor `winget install ShiningLight.OpenSSL.Light` (`Program Files\OpenSSL-Win64`,
-  `-ARM` on arm64) puts it there, so Setup kept saying "Needs the openssl command" with
-  either installed. It now also looks in those folders, so an install shows without a PATH
-  change or a restart, and the note says so.
-- **A saved workflow run whose plan does not read no longer stops the server.** A run in
-  `workflow-runs.json` with a plan step that is not an object, has no entry in `steps`, or
-  has an `after` that is not a list of step ids threw from the orchestrator's tick, and the
-  server exited about a second after every start. Such a run, and one whose plan step has
-  text that is not a string, an id that is not an id or is used twice, or an `after` naming
-  a step that is not before it, is now left out when the file is read, as a workflow that
-  no longer reads already is; so is a run whose input or a step's reply is not text, and
-  one with an entry in `steps` that no plan step names (it kept the run from ever ending).
-  The other runs are kept, and the file as it was is set aside as
-  `workflow-runs.json.bad-<time>`; until it can be, the runs left out are written back with
-  the others. A run started from now on with a step called `__proto__` keeps that step's
-  entry in its `steps`, so it is read back like any other.
-- **A picture sent from Windows to an older sessionpipe shows in the message, and is
-  kept.** For a session on the same computer whose sessionpipe is older than 0.10, a GUI
-  on Windows names a picture by its path, with `\`. The message did not read that back, so
-  the picture was missing from it, and the daily clean-up did not see it in the stored
-  events, so a picture a session still named was removed once it was 30 days old. Both now
-  read either slash.
-- A session's "missing events" flag waits 30 s from when each hole opened. When an older
-  hole filled while a newer one was still open, the newer one kept the older one's time,
-  so it was flagged at once, with a "since" from before it opened.
-- **An event the store can't write is read from the outbox again, not lost.** When the
-  store failed to take a batch from this machine's outbox (a full disk, a store file the
-  GUI may not write), the reader had already moved past it, so those events never reached
-  the board, even once there was room again; the same failure during the first read at
-  start left the outbox off until a restart. The batch is now read again on the next tick,
-  said once, and the other sessions carry on meanwhile.
-- **A color theme, skin, view or plugin saved by Notepad or PowerShell 5 loads.** Those
-  editors start a UTF-8 file with a byte-order mark, and the receiver refused it: a theme
-  in `color-themes/` was listed as "not JSON: Unexpected token", and a `skin.json`,
-  `theme.json` or `plugin.json` as "not valid JSON". It now reads past the mark, as it
-  already did for `config.json`.
-- **A `control/machines.json` that does not read no longer unpairs every machine.** One
-  saved with a UTF-8 byte-order mark (PowerShell 5's `-Encoding UTF8`, older Windows
-  editors) is now read past it. One left empty, cut short, unreadable or without a list of
-  machines was read as "no machines": the receiver deleted every machine's queued sends at
-  start, and the next pairing or hello wrote the file over, so every machine had to pair
-  again. The receiver now stops at start with a message naming the file and what to do, as
-  it does for `config.json`, and leaves the file as it was.
-- **Search's status line says when history search is off but its index could not be
-  deleted.** It read "The index needs rebuilding" instead. It now says the history index
-  could not be deleted, and that Rebuild (on this computer) or restarting the app tries
-  again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
-  code when there is one, and points at `index --rebuild`. The status carries a new
-  `historyLeft` field for it.
-- **Search names a filter value it could not read.** `since:2026-2-1`, `until:3days`,
-  `in:everything` or `source:mars` was left out of the search but reported as "“since:”
-  isn't a filter, so it was searched as text", though `since:` is a filter and nothing was
-  searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
-  date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
-  lists the fields or indexes), and keep the old words for a key that is not a filter.
-- **Search finds Gemini CLI history when `GEMINI_CLI_HOME` is set.** Gemini CLI keeps
-  its `.gemini` folder inside that path, but search took `$GEMINI_CLI_HOME` to be the
-  `.gemini` folder itself, so it found none of those sessions. It now reads
-  `$GEMINI_CLI_HOME/.gemini`; with the variable unset nothing changes (`~/.gemini`).
-- **Labels, read marks and usage limits saved with a byte-order mark are kept.** A
-  `labels.json`, `marks.json` or `limits.json` saved by Notepad or PowerShell 5 (which
-  start a UTF-8 file with a byte-order mark) was taken for a broken file: it was set aside
-  as `<file>.bad-<time>` and the board started without its label names and colours, read
-  marks and notification levels. It is now read past the mark, as `config.json` is.
-- **A GUI that stops at "port N is in use" ends there.** The search indexer it had already
-  started then printed a Node crash (`Error: write EPIPE`) on the same terminal. It now
-  stops quietly once the GUI has gone, as it does when a GUI is stopped while indexing.
-- **A `--host` or `--port` the receiver cannot listen on is named.** A `--host` that is
-  not an address of this machine (say, after a network change) or a name that does not
-  look up, and a `--port` this user may not open, stopped with Node's own message
-  (`listen EADDRNOTAVAIL: …`, `getaddrinfo ENOTFOUND …`, `listen EACCES: …`). It now says
-  which flag to change, as it already did for a port in use, and still exits 2.
+- **"Switched to …" stays under the turn it fell in.** On a long session whose switch to
+  another account is older than its newest page, the chat and the timeline drew the note
+  under the first turn the page had loaded; it now appears, under its own turn, once Older
+  turns brings that turn in.
 - **A session's title is plain words everywhere.** A title written with Markdown showed
   its marks: "the old \`--sink\` flag?". It now reads "the old --sink flag?" wherever a
   title shows, in the menu bar and notifications as well. Code written without backticks
@@ -654,6 +451,117 @@ pairing link that carries the board's key only for a pairing the sink token star
 - **The right-click that opens a menu no longer chooses from it.** Letting the button go
   ran the item under the pointer, and the first one starts a few pixels from where the
   menu opens. Only a press held and dragged onto an item chooses it now.
+
+## [0.8.6] - 2026-11-19
+
+The web app is built on React 19 and Vite 8, and the receiver runs sessionpipe-core 0.17.0;
+with them sessionpipe-gui needs Node 22.12 or later, or Node 20 from 20.19 on. And a round
+of fixes, most of them from contributors: files a Windows editor saved with a byte-order
+mark load, a `--host` or `--port` the receiver cannot listen on is named, an event the
+store could not write is read from the outbox again, and Search says which filter value it
+could not read.
+
+### Changed
+
+- **sessionpipe 0.17.0.** The receiver runs sessionpipe-core 0.17.0 (it was 0.13.6), and its
+  conformance fixtures are that version's (170 control vectors, 33 delivery scenarios). A
+  session of Grok Build, whose hooks sessionpipe reads from 0.16, is named "Grok Build" on
+  the board and in search's agent chips, where it read `grok-build`; fx, which a 0.16
+  machine can start and message, is listed under its own name. Events and commands are
+  accepted and refused as before.
+- **A view gets React 19.** `api.react` is the host's React, now 19. What React 19 took
+  out is gone from it: `ReactDOM.render`, `hydrate`, `unmountComponentAtNode` and
+  `findDOMNode`, string refs and legacy context; `propTypes` and a function component's
+  `defaultProps` are ignored, and an element made by another copy of React is not drawn.
+  A view that bundles its own React, and the bundled Canvas and Office, draw as before.
+  [docs/theme-authoring.md](docs/theme-authoring.md) lists what to use instead.
+- **sessionpipe-gui needs Node 22.12 or later, or Node 20 from 20.19 on** (it was any Node
+  20): what the web app's build (Vite 8) needs, and `npx github:spacesheep-dev/sessionpipe-gui`
+  builds it on your Node. An older Node is told so in one line, before anything is installed.
+  Working on the code needs 22.12 or later.
+
+### Fixed
+
+- **A shortcut's keys are read out as they are shown.** On the Shortcuts page a screen
+  reader said "Command palette: mod+k. Press to change" where the key shows ⌘K (Ctrl+K on
+  Windows and Linux); it now says the key as it is drawn, ⌘K or Ctrl+K, and so for every
+  key with a modifier. The text of a two-key shortcut such as g b is "g b", two keys, not
+  the one word "gb", there, in the `?` help and in Settings › Keyboard. Nothing on screen
+  moves.
+- **Turn on (the secure address) finds openssl on Windows.** The receiver looked for
+  `openssl` on the PATH only, and neither Git for Windows (its `usr\bin`; only `Git\cmd` is
+  on the PATH) nor `winget install ShiningLight.OpenSSL.Light` (`Program Files\OpenSSL-Win64`,
+  `-ARM` on arm64) puts it there, so Setup kept saying "Needs the openssl command" with
+  either installed. It now also looks in those folders, so an install shows without a PATH
+  change or a restart, and the note says so.
+- **A saved workflow run whose plan does not read no longer stops the server.** A run in
+  `workflow-runs.json` with a plan step that is not an object, has no entry in `steps`, or
+  has an `after` that is not a list of step ids threw from the orchestrator's tick, and the
+  server exited about a second after every start. Such a run, and one whose plan step has
+  text that is not a string, an id that is not an id or is used twice, or an `after` naming
+  a step that is not before it, is now left out when the file is read, as a workflow that
+  no longer reads already is; so is a run whose input or a step's reply is not text, and
+  one with an entry in `steps` that no plan step names (it kept the run from ever ending).
+  The other runs are kept, and the file as it was is set aside as
+  `workflow-runs.json.bad-<time>`; until it can be, the runs left out are written back with
+  the others. A run started from now on with a step called `__proto__` keeps that step's
+  entry in its `steps`, so it is read back like any other.
+- **A picture sent from Windows to an older sessionpipe shows in the message, and is
+  kept.** For a session on the same computer whose sessionpipe is older than 0.10, a GUI
+  on Windows names a picture by its path, with `\`. The message did not read that back, so
+  the picture was missing from it, and the daily clean-up did not see it in the stored
+  events, so a picture a session still named was removed once it was 30 days old. Both now
+  read either slash.
+- A session's "missing events" flag waits 30 s from when each hole opened. When an older
+  hole filled while a newer one was still open, the newer one kept the older one's time,
+  so it was flagged at once, with a "since" from before it opened.
+- **An event the store can't write is read from the outbox again, not lost.** When the
+  store failed to take a batch from this machine's outbox (a full disk, a store file the
+  GUI may not write), the reader had already moved past it, so those events never reached
+  the board, even once there was room again; the same failure during the first read at
+  start left the outbox off until a restart. The batch is now read again on the next tick,
+  said once, and the other sessions carry on meanwhile.
+- **A color theme, skin, view or plugin saved by Notepad or PowerShell 5 loads.** Those
+  editors start a UTF-8 file with a byte-order mark, and the receiver refused it: a theme
+  in `color-themes/` was listed as "not JSON: Unexpected token", and a `skin.json`,
+  `theme.json` or `plugin.json` as "not valid JSON". It now reads past the mark, as it
+  already did for `config.json`.
+- **A `control/machines.json` that does not read no longer unpairs every machine.** One
+  saved with a UTF-8 byte-order mark (PowerShell 5's `-Encoding UTF8`, older Windows
+  editors) is now read past it. One left empty, cut short, unreadable or without a list of
+  machines was read as "no machines": the receiver deleted every machine's queued sends at
+  start, and the next pairing or hello wrote the file over, so every machine had to pair
+  again. The receiver now stops at start with a message naming the file and what to do, as
+  it does for `config.json`, and leaves the file as it was.
+- **Search's status line says when history search is off but its index could not be
+  deleted.** It read "The index needs rebuilding" instead. It now says the history index
+  could not be deleted, and that Rebuild (on this computer) or restarting the app tries
+  again; `sessionpipe-gui index --status` against a running GUI says so too, with the error
+  code when there is one, and points at `index --rebuild`. The status carries a new
+  `historyLeft` field for it.
+- **Search names a filter value it could not read.** `since:2026-2-1`, `until:3days`,
+  `in:everything` or `source:mars` was left out of the search but reported as "“since:”
+  isn't a filter, so it was searched as text", though `since:` is a filter and nothing was
+  searched as text. The page and `sessionpipe-gui search` now say "“since:2026-2-1” isn't a
+  date, so it was left out", with the forms that read (an unknown `in:` or `source:` value
+  lists the fields or indexes), and keep the old words for a key that is not a filter.
+- **Search finds Gemini CLI history when `GEMINI_CLI_HOME` is set.** Gemini CLI keeps
+  its `.gemini` folder inside that path, but search took `$GEMINI_CLI_HOME` to be the
+  `.gemini` folder itself, so it found none of those sessions. It now reads
+  `$GEMINI_CLI_HOME/.gemini`; with the variable unset nothing changes (`~/.gemini`).
+- **Labels, read marks and usage limits saved with a byte-order mark are kept.** A
+  `labels.json`, `marks.json` or `limits.json` saved by Notepad or PowerShell 5 (which
+  start a UTF-8 file with a byte-order mark) was taken for a broken file: it was set aside
+  as `<file>.bad-<time>` and the board started without its label names and colours, read
+  marks and notification levels. It is now read past the mark, as `config.json` is.
+- **A GUI that stops at "port N is in use" ends there.** The search indexer it had already
+  started then printed a Node crash (`Error: write EPIPE`) on the same terminal. It now
+  stops quietly once the GUI has gone, as it does when a GUI is stopped while indexing.
+- **A `--host` or `--port` the receiver cannot listen on is named.** A `--host` that is
+  not an address of this machine (say, after a network change) or a name that does not
+  look up, and a `--port` this user may not open, stopped with Node's own message
+  (`listen EADDRNOTAVAIL: …`, `getaddrinfo ENOTFOUND …`, `listen EACCES: …`). It now says
+  which flag to change, as it already did for a port in use, and still exits 2.
 
 ## [0.8.5] - 2026-11-18
 
