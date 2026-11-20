@@ -28,6 +28,11 @@ const SHARED = [PHONE_QUERY, DESKTOP_QUERY, PANEL_COVERS_QUERY];
 /** The queries that name a width and are none of those, each with why it may. */
 const OWN: { file: string; query: string; why: string }[] = [
   {
+    file: "control/attachments.css",
+    query: `(max-width: ${NARROW}px) and (pointer: coarse)`,
+    why: "a picture's frame in the message box under a finger in the phone layout: a touch screen's alone, a narrow window with a mouse keeps the larger frame",
+  },
+  {
     file: "styles/chat.css",
     query: `(hover: none), ${PHONE_QUERY}`,
     why: "a bubble's time shows on hover: it is hidden where nothing hovers, at any width, and in the phone layout",

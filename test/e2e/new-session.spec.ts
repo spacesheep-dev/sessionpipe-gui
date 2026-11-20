@@ -16,6 +16,7 @@ import {
   CONTROL_BASE,
   type FakeDaemon,
   fakeDaemon,
+  HEIC,
   type PageKey,
   passkeyPage,
   postSession,
@@ -122,12 +123,15 @@ test("right-click a session: New session here, prefilled; a machine's menu: New 
   await expect(rowValue(page, "machine")).toHaveAttribute("data-value", name);
   await expect(rowValue(page, "agent")).toHaveAttribute("data-value", "codex");
   // sessionpipe 0.10's hello names no home folder: the session's own `~/…` folder is what
-  // the sheet carries (CONTROL.md §3.1), and it can be sent where both this receiver's core
-  // and the machine take one (`MachineControl.tilde`); elsewhere it asks for the full path.
-  await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "~/code/billing");
-  await expect(rowValue(page, "folder")).toContainText("~/code/billing");
-  if (!(await tildeOn(name)))
-    await expect(status(page)).toHaveText(`${name} needs the full path; type it starting with /`);
+  // the sheet carries (CONTROL.md §3.1) where both this receiver's core and the machine take
+  // one (`MachineControl.tilde`); elsewhere it starts from the machine's own folders.
+  if (await tildeOn(name)) {
+    await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "~/code/billing");
+    await expect(rowValue(page, "folder")).toContainText("~/code/billing");
+  } else {
+    await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "/Users/e2e/code");
+    await expect(status(page)).not.toHaveText(/needs the full path/);
+  }
   await page.keyboard.press("Escape");
 
   await page.goto(`${CONTROL_BASE}/machines`);
@@ -313,4 +317,192 @@ test("?new=1 with machine, harness and cwd opens prefilled, and leaves the addre
   await page.keyboard.press("Escape");
   await page.keyboard.press("c");
   await expect(sheet(page).locator("[data-ns-text]")).toHaveValue("Keep me.");
+});
+
+test("files on a new session: a big photo is made smaller first, a HEIC this browser can't draw stays a file with a note, others go as they are", async ({
+  page,
+}) => {
+  const m = await fakeDaemon(key, advertising(`ns-files-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}&cwd=/Users/e2e/code/billing`);
+  await expect(sheet(page).locator("input[data-ns-files]")).toBeAttached();
+  // A 13.5 MB photo the page draws itself (padded with zeros after its end), a HEIC and a text file.
+  await page.evaluate(async (heic) => {
+    const cv = new OffscreenCanvas(4032, 3024);
+    const cx = cv.getContext("2d")!;
+    const g = cx.createLinearGradient(0, 0, 4032, 3024);
+    g.addColorStop(0, "#2f6f4e");
+    g.addColorStop(1, "#d9c27a");
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, 4032, 3024);
+    const drawn = await cv.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+    const dt = new DataTransfer();
+    dt.items.add(new File([drawn, new Uint8Array(13_500_000 - drawn.size)], "IMG_0412.jpg", { type: "image/jpeg" }));
+    dt.items.add(
+      new File([Uint8Array.from(atob(heic), (c) => c.charCodeAt(0))], "IMG_0413.heic", { type: "image/heic" }),
+    );
+    dt.items.add(new File(["the date picker is off by one\n"], "notes.txt", { type: "text/plain" }));
+    const input = document.querySelector<HTMLInputElement>("input[data-ns-files]")!;
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, HEIC.toString("base64"));
+  const chips = sheet(page).locator(".ns-file");
+  await expect(chips).toHaveCount(3);
+  for (const i of [0, 1, 2]) await expect(chips.nth(i)).toHaveAttribute("data-file-state", "held", { timeout: 30_000 });
+  await expect(chips.nth(0).locator(".ns-file-name")).toHaveText("IMG_0412.webp");
+  await expect(chips.nth(0)).toHaveAttribute("title", /^IMG_0412\.webp · [\d.]+ (KB|MB) \(was 12\.9 MB\)$/);
+  await expect(chips.nth(1).locator(".ns-file-name")).toHaveText("IMG_0413.heic");
+  await expect(sheet(page).locator("[data-ns-files-note]")).toHaveText(
+    "The agent can't look at HEIC. Export it as JPEG to send it as a picture.",
+  );
+  await expect(chips.nth(2).locator(".ns-file-name")).toHaveText("notes.txt");
+
+  await sheet(page).locator("[data-ns-text]").fill("What is in these?");
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(page).toHaveURL(/\/s\/claude-code\/[0-9a-f-]{36}$/, { timeout: 15_000 });
+  await expect.poll(() => m.seen.filter((c) => c.kind === "start").length, { timeout: 15_000 }).toBe(1);
+  const files = m.seen.find((c) => c.kind === "start")!.files as { name: string; type: string; size: number }[];
+  expect(files.map((f) => [f.name, f.type])).toEqual([
+    ["IMG_0412.webp", "image/webp"],
+    ["IMG_0413.heic", "image/heic"],
+    ["notes.txt", "text/plain"],
+  ]);
+  expect(files[0]!.size).toBeLessThanOrEqual(3 * 1024 * 1024);
+  expect(files[1]!.size).toBe(HEIC.length);
+});
+
+test("a file that didn't upload says why on the status line, and Try again sends it", async ({ page }) => {
+  const m = await fakeDaemon(key, advertising(`ns-up-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  const { hostname } = (await (await fetch(`${CONTROL_BASE}/api/ui/info`)).json()) as { hostname: string };
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}`);
+  await expect(rowValue(page, "machine")).toHaveAttribute("data-value", m.name);
+  await sheet(page).locator("[data-ns-text]").fill("Read the notes.");
+  await page.route("**/api/ui/control/files?*", (route) => route.abort("connectionrefused"));
+  await sheet(page)
+    .locator("input[data-ns-files]")
+    .setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("off by one\n") });
+  const chip = sheet(page).locator(".ns-file");
+  await expect(chip).toHaveAttribute("data-file-state", "error");
+  await expect(chip.locator(".ns-file-size")).toHaveText("didn't upload");
+  await expect(status(page)).toHaveText(`The file didn't upload: ${hostname} can't be reached. Try again.`);
+  await expect(sheet(page).locator("[data-ns-start]")).toBeDisabled();
+  await page.unroute("**/api/ui/control/files?*");
+  await chip.getByRole("button", { name: "Try notes.txt again" }).click();
+  await expect(chip).toHaveAttribute("data-file-state", "held");
+  await expect(status(page)).toHaveText(`${m.name} is listening.`);
+});
+
+test("seven files go two at a time; the rest wait their turn, and one removed lets the next go", async ({ page }) => {
+  const m = await fakeDaemon(key, advertising(`ns-queue-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}`);
+  await expect(rowValue(page, "machine")).toHaveAttribute("data-value", m.name);
+  await sheet(page).locator("[data-ns-text]").fill("Read these.");
+  // Each upload is held until it is let go of; how many are in flight is read off the
+  // page's own requests (one stopped ends as failed).
+  let inFlight = 0;
+  let most = 0;
+  let asked = 0;
+  const held: (() => void)[] = [];
+  const files = (r: { url(): string; method(): string }) =>
+    r.method() === "POST" && new URL(r.url()).pathname === "/api/ui/control/files";
+  page.on("request", (r) => {
+    if (!files(r)) return;
+    asked++;
+    most = Math.max(most, ++inFlight);
+  });
+  const ended = (r: { url(): string; method(): string }) => {
+    if (files(r)) inFlight--;
+  };
+  page.on("requestfinished", ended);
+  page.on("requestfailed", ended);
+  await page.route("**/api/ui/control/files?*", async (route) => {
+    await new Promise<void>((r) => held.push(r));
+    await route.continue().catch(() => {});
+  });
+  await sheet(page)
+    .locator("input[data-ns-files]")
+    .setInputFiles(
+      Array.from({ length: 7 }, (_, i) => ({
+        name: `notes-${i + 1}.txt`,
+        mimeType: "text/plain",
+        buffer: Buffer.from(`note ${i + 1}\n`),
+      })),
+    );
+  const chips = sheet(page).locator(".ns-file");
+  await expect(chips).toHaveCount(7);
+  await expect.poll(() => asked).toBe(2);
+  await expect(sheet(page).locator(".ns-file[data-file-state=uploading]")).toHaveCount(2);
+  await expect(sheet(page).locator(".ns-file[data-file-state=waiting]")).toHaveCount(5);
+  await expect(sheet(page).locator("[data-ns-start]")).toBeDisabled();
+  // One removed while it goes: the next one starts.
+  await chips.nth(0).getByRole("button", { name: "Remove notes-1.txt" }).click();
+  await expect.poll(() => asked).toBe(3);
+  // The rest, each let go of as it comes.
+  while (held.length || asked < 7) {
+    await expect.poll(() => held.length).toBeGreaterThan(0);
+    held.shift()!();
+    await page.waitForTimeout(50);
+  }
+  await expect(sheet(page).locator(".ns-file[data-file-state=held]")).toHaveCount(6, { timeout: 15_000 });
+  expect(asked).toBe(7);
+  expect(most).toBeLessThanOrEqual(2);
+  await expect(sheet(page).locator("[data-ns-start]")).toBeEnabled();
+});
+
+test("a file refused for too many at once offers Try again only once the wait is over", async ({ page }) => {
+  const m = await fakeDaemon(key, advertising(`ns-wait-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  await page.clock.install();
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}`);
+  await expect(rowValue(page, "machine")).toHaveAttribute("data-value", m.name);
+  await sheet(page).locator("[data-ns-text]").fill("Read the notes.");
+  await page.route("**/api/ui/control/files?*", (route) =>
+    route.fulfill({ status: 429, json: { reason: "rate_limited" }, headers: { "retry-after": "120" } }),
+  );
+  await sheet(page)
+    .locator("input[data-ns-files]")
+    .setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("off by one\n") });
+  const chip = sheet(page).locator(".ns-file");
+  await expect(chip).toHaveAttribute("data-file-state", "error");
+  await expect(status(page)).toHaveText("That's a lot of files in a short time. Try again in 2 minutes.");
+  const again = chip.getByRole("button", { name: "Try notes.txt again" });
+  await expect(again).toHaveCount(0);
+  await expect(chip.getByRole("button", { name: "Remove notes.txt" })).toBeVisible();
+  await page.clock.fastForward("02:01");
+  await expect(again).toHaveCount(1);
+  await page.unroute("**/api/ui/control/files?*");
+  await again.click();
+  await expect(chip).toHaveAttribute("data-file-state", "held");
+});
+
+test("a picture being made smaller says so on its chip", async ({ page }) => {
+  const m = await fakeDaemon(key, advertising(`ns-shrink-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}`);
+  await expect(sheet(page).locator("input[data-ns-files]")).toBeAttached();
+  await page.evaluate(async () => {
+    // The page's decoder made slow, so the picture is seen being made smaller.
+    const own = window.createImageBitmap.bind(window);
+    window.createImageBitmap = (async (...a: Parameters<typeof createImageBitmap>) => {
+      await new Promise((r) => setTimeout(r, 2000));
+      return own(...a);
+    }) as typeof createImageBitmap;
+    const cv = new OffscreenCanvas(4032, 3024);
+    const cx = cv.getContext("2d")!;
+    cx.fillStyle = "#2f6f4e";
+    cx.fillRect(0, 0, 4032, 3024);
+    const drawn = await cv.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+    const dt = new DataTransfer();
+    dt.items.add(new File([drawn, new Uint8Array(5_000_000 - drawn.size)], "IMG_0412.jpg", { type: "image/jpeg" }));
+    const input = document.querySelector<HTMLInputElement>("input[data-ns-files]")!;
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const chip = sheet(page).locator(".ns-file");
+  await expect(chip).toHaveAttribute("data-file-state", "shrinking");
+  await expect(chip.locator(".ns-file-size")).toHaveText("Making it smaller…");
+  await expect(chip).toHaveAttribute("data-file-state", "held", { timeout: 30_000 });
+  await expect(chip.locator(".ns-file-size")).not.toHaveText("Making it smaller…");
 });

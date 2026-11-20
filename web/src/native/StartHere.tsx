@@ -36,7 +36,6 @@ const watch = (w: () => void) => {
 const read = () => current;
 const isBusy = (s: StartState) => s.kind === "starting" || s.kind === "busy";
 
-/** The receiver a start brought, selected; with `then`, the start is over here. */
 /** The one sentence for a computer without a Node sessionpipe runs on (the floor the
  *  desktop app's StartError::NoNode says too). */
 function NeedsNode() {
@@ -51,6 +50,7 @@ function NeedsNode() {
   );
 }
 
+/** The receiver a start brought, selected; with `then`, the start is over here. */
 async function take(id: string, then?: () => void): Promise<void> {
   await invoke("rx_select", { id });
   if (!then) return;

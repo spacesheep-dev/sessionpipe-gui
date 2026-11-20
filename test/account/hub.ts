@@ -3,7 +3,7 @@
 // The real one is Rust (apps/crates/sp-receivers, apps/mobile); this plays the contract the
 // page codes against, read from that section: an account as an entry of the receiver list
 // with `kind: "spacesheep"`, the `acct_*` commands, the `account` event, the documents, and
-// the five doors with the hub's own refusals (their status, their code in
+// the page's six doors with the hub's own refusals (their status, their code in
 // `x-sessionpipe-hub`, the body `{ hub: true, reason, error }` with the hub's own words).
 // It holds the account's key and adds it; the page never sees it. Upstream is whatever
 // answers as spacesheep does: the fake one in memory (fake-spacesheep.ts), or a real one
@@ -20,6 +20,7 @@ const REFUSALS: Record<string, [number, string]> = {
   not_a_door: [403, "The app does not forward this to a spacesheep account."],
   bad_query: [400, "That request has a parameter the app does not forward."],
   bad_body: [400, "That request's body is not one the app forwards."],
+  bad_header: [400, "That file's type or name is not one the app forwards."],
   not_signed: [400, "The app forwards only a signed command to a machine."],
   too_large: [413, "That is too large to send."],
   forbidden_origin: [403, "Only the app's own page may ask."],
@@ -153,6 +154,29 @@ const DIGITS = /^\d+$/;
 const MACHINE_JOBS = /^\/api\/machines\/(m_[A-Za-z0-9_-]{16,40})\/jobs$/;
 const BOX = /^m_box[0-9a-f]{16}$/;
 const RELAY = "/api/sessionpipe/v1/relay";
+const MACHINE_FILES = "/api/machines/files";
+/** The largest file the files door carries (CONTROL.md's limit for one, 25 MiB). */
+export const FILE_MAX = 26_214_400;
+/** A file's type as CONTROL.md has it, at most 100 characters (account.rs is_media_type). */
+const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
+/** A file's name as the page percent-encodes it: 1 to 1024 visible ASCII characters. */
+const FILE_NAME = /^[\x21-\x7e]{1,1024}$/;
+
+/** How long the hub gives a request of `bytes` bytes (proxy.rs send_timeout): fifteen
+ *  seconds and one more for each 32 KiB, at most ten minutes. */
+export const sendTimeoutS = (bytes: number): number => Math.min(600, 15 + Math.ceil(bytes / 32_768));
+
+/** One request of the page's to a door. A file's bytes come as `bytes`, its type and name as
+ *  `headers` (every other header of the page's stays in the hub). */
+export interface DoorRequest {
+  method: string;
+  path: string;
+  body?: string;
+  bytes?: Uint8Array;
+  headers?: Record<string, string>;
+  origin?: string;
+  signal?: AbortSignal;
+}
 
 export interface HubOptions {
   upstream: Upstream;
@@ -189,6 +213,11 @@ export class HubStandIn {
   unheard = 0;
   /** Each door request takes this much longer, as a phone's network would make it. */
   latencyMs = 0;
+  /** The phone's uplink for a file, in bytes a second (0: at once). The files door's time
+   *  limit is `sendTimeoutS` of its bytes. */
+  uplinkBytesPerS = 0;
+  /** Off: the hub of an app from before the files door, which answers it `not_a_door`. */
+  filesDoor = true;
   /** The most a relay answer may hold, unpacked (8 MiB in the hub; a test lowers it). */
   relayMax = 8 * MIB;
   /** The native alerts: what the person answers ("use this account?", "disconnect?"). `null`:
@@ -667,20 +696,42 @@ export class HubStandIn {
 
   // ---------- the doors ----------
 
+  /** `ask`'s answer when it comes within the hub's limit for `bytes`; null when it does not
+   *  (the request is then given up). */
+  private async inTime(
+    bytes: number,
+    outer: AbortSignal | undefined,
+    ask: (signal: AbortSignal) => Promise<FakeAnswer>,
+  ): Promise<FakeAnswer | null> {
+    const ac = new AbortController();
+    const stop = () => ac.abort();
+    outer?.addEventListener("abort", stop);
+    let timer: unknown;
+    const late = new Promise<null>((r) => {
+      timer = this.clock.setTimeout(() => {
+        ac.abort();
+        r(null);
+      }, sendTimeoutS(bytes) * 1000);
+    });
+    const answer = ask(ac.signal);
+    // Given up on, it may still fail: that is no one's to hear.
+    answer.catch(() => {});
+    try {
+      return await Promise.race([answer, late]);
+    } finally {
+      this.clock.clearTimeout(timer);
+      outer?.removeEventListener("abort", stop);
+    }
+  }
+
   /** One request of the page's to `${rxBase(id)}<path>`. `origin`: who asks. */
-  async door(
-    id: string,
-    req: { method: string; path: string; body?: string; origin?: string; signal?: AbortSignal },
-  ): Promise<FakeAnswer> {
+  async door(id: string, req: DoorRequest): Promise<FakeAnswer> {
     const answer = await this.doorAnswer(id, req);
     this.log.push(`${req.method} ${req.path.split("?")[0]} ${answer.headers[HUB_HEADER] ?? answer.status}`);
     return answer;
   }
 
-  private async doorAnswer(
-    id: string,
-    req: { method: string; path: string; body?: string; origin?: string; signal?: AbortSignal },
-  ): Promise<FakeAnswer> {
+  private async doorAnswer(id: string, req: DoorRequest): Promise<FakeAnswer> {
     if (this.o.appOrigin && req.origin !== this.o.appOrigin) return this.refuse("forbidden_origin");
     const a = this.accounts.get(id);
     if (!a) return this.refuse("not_a_door");
@@ -691,11 +742,12 @@ export class HubStandIn {
     if (path.includes("..") || path.includes("//") || path.includes("%") || path.endsWith("/"))
       return this.refuse("not_a_door");
     const jobs = MACHINE_JOBS.exec(path);
-    let door: "relay" | "machines" | "jobs" | "send" | "device";
+    let door: "relay" | "machines" | "jobs" | "send" | "files" | "device";
     if (req.method === "GET" && path === RELAY) door = "relay";
     else if (req.method === "GET" && path === `${RELAY}/machines`) door = "machines";
     else if (req.method === "GET" && path === `${RELAY}/jobs`) door = "jobs";
     else if (req.method === "POST" && jobs && !BOX.test(jobs[1]!)) door = "send";
+    else if (req.method === "POST" && path === MACHINE_FILES && this.filesDoor) door = "files";
     else if (req.method === "GET" && path === "/api/gui/device") door = "device";
     else return this.refuse("not_a_door");
 
@@ -717,8 +769,23 @@ export class HubStandIn {
       params.push([k, v]);
     }
 
-    // The body: none on a GET; on a send, a signed command within the limit.
-    if (door !== "send") {
+    // A file's type and name: the only headers of the page's that go on, and only from here.
+    const fileHeaders: Record<string, string> = {};
+    if (door === "files") {
+      const type = req.headers?.["content-type"];
+      const name = req.headers?.["x-file-name"];
+      if (!type || type.length > 100 || !MEDIA_TYPE.test(type)) return this.refuse("bad_header");
+      if (name !== undefined && !FILE_NAME.test(name)) return this.refuse("bad_header");
+      fileHeaders["content-type"] = type;
+      if (name !== undefined) fileHeaders["x-file-name"] = name;
+    }
+
+    // The body: none on a GET; on a send, a signed command within the limit; a file's bytes.
+    const bytes = req.bytes ?? new TextEncoder().encode(req.body ?? "");
+    if (door === "files") {
+      if (bytes.length > FILE_MAX) return this.refuse("too_large");
+      if (!bytes.length) return this.refuse("bad_body");
+    } else if (door !== "send") {
       if (req.body) return this.refuse("bad_body");
     } else {
       const raw = req.body ?? "";
@@ -750,13 +817,24 @@ export class HubStandIn {
     try {
       if (this.latencyMs > 0) await new Promise<void>((r) => this.clock.setTimeout(r, this.latencyMs));
       const rebuilt = door === "device" ? `id=${a.deviceKeyId}` : params.map(([k, v]) => `${k}=${v}`).join("&");
-      res = await this.o.upstream.ask({
-        method: req.method,
-        path: rebuilt ? `${path}?${rebuilt}` : path,
-        authorization: `Bearer ${a.key}`,
-        ...(door === "send" ? { body: req.body } : {}),
-        signal: req.signal,
-      });
+      const asked = (signal?: AbortSignal) =>
+        this.o.upstream.ask({
+          method: req.method,
+          path: rebuilt ? `${path}?${rebuilt}` : path,
+          authorization: `Bearer ${a.key}`,
+          ...(door === "send" ? { body: req.body } : {}),
+          ...(door === "files" ? { bytes, headers: fileHeaders } : {}),
+          signal,
+        });
+      if (door === "files") {
+        const answered = await this.inTime(bytes.length, req.signal, async (signal) => {
+          if (this.uplinkBytesPerS > 0)
+            await new Promise<void>((r) => this.clock.setTimeout(r, (bytes.length / this.uplinkBytesPerS) * 1000));
+          return asked(signal);
+        });
+        if (!answered) return this.refuse("timeout");
+        res = answered;
+      } else res = await asked(req.signal);
     } catch {
       return this.refuse("unreachable");
     } finally {
@@ -772,8 +850,9 @@ export class HubStandIn {
     if (res.status >= 300 && res.status < 400) return this.refuse(door === "send" ? "unreachable" : "redirected");
     if (Buffer.byteLength(res.body) > (door === "relay" ? this.relayMax : MIB)) return this.refuse("answer_too_large");
     if (res.body.includes(a.key)) return this.refuse("withheld");
-    // spacesheep's own 401 marks the account (on a send only its `unauthorized`); a 2xx clears it.
-    if (res.status === 401) {
+    // spacesheep's own 401 marks the account (on a send only its `unauthorized`; on the files
+    // door never, as an older spacesheep says `unauthorized` there to a live key); a 2xx clears it.
+    if (res.status === 401 && door !== "files") {
       let code = "";
       try {
         code = String((JSON.parse(res.body) as { code?: unknown }).code ?? "");

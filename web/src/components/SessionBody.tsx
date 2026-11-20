@@ -51,7 +51,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { forkOf } from "../control/Activity";
-import { PromptBody, promptParts } from "../control/Attachments";
+import { PromptBody, promptParts, SentFilesRows } from "../control/Attachments";
 import { machineHome, tildify } from "../control/folders";
 import { useAnswersOut, useControlActivity } from "../control/hooks";
 import { SessionControl } from "../control/SessionControl";
@@ -60,7 +60,6 @@ import {
   editAgain,
   optionsIgnored,
   SentFailure,
-  SentFiles,
   StatusRow,
   sentRow,
   startTitle,
@@ -260,13 +259,30 @@ interface Timeline {
   /** The open plan's panel has its plan: the view opens on it, once per prompt. */
   planShown: (id: string) => void;
 }
+/** A message sent from here that carried files (SentFilesRows). */
+const carriedFiles = (a: ControlActivity): boolean => !!a.files?.length;
+
 const TimelineCtx = createContext<Timeline | null>(null);
 const useTimeline = () => useContext(TimelineCtx)!;
-/** What the timeline's rows share, and the instant its clocks stand at (null: they run). */
-function TimelineScope({ value, standAt, children }: { value: Timeline; standAt: number | null; children: ReactNode }) {
+/** What the timeline's rows share, the instant its clocks stand at (null: they run), and
+ *  the sent messages whose files its prompts show. */
+function TimelineScope({
+  value,
+  standAt,
+  files,
+  children,
+}: {
+  value: Timeline;
+  standAt: number | null;
+  /** The messages sent from here with files (SentFilesRows). */
+  files: readonly ControlActivity[];
+  children: ReactNode;
+}) {
   return (
     <ClockHold.Provider value={standAt}>
-      <TimelineCtx.Provider value={value}>{children}</TimelineCtx.Provider>
+      <TimelineCtx.Provider value={value}>
+        <SentFilesRows.Provider value={files}>{children}</SentFilesRows.Provider>
+      </TimelineCtx.Provider>
     </ClockHold.Provider>
   );
 }
@@ -905,6 +921,12 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     [key],
   );
   const sentAll = useControlActivity(isMine);
+  // Every message sent from here with files: the machine's list in a turn's words names
+  // each file by the message's nonce (a start's by its session), and its bytes are the
+  // row's. One list for the whole timeline, new only when a message with files is.
+  const withFiles = useControlActivity(carriedFiles);
+  const filesSeen = withFiles.map((a) => a.id).join();
+  const fileRows = useMemo(() => withFiles, [filesSeen]);
   const joined = useMemo(
     () =>
       sentTurns(
@@ -913,6 +935,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
           at: a.at,
           takenAt: a.takenAt,
           text: promptParts(a.text ?? "").body,
+          files: a.files,
           start: a.kind === "start",
           outcome: a.outcome,
           code: a.code,
@@ -1345,7 +1368,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   ];
 
   return (
-    <TimelineScope value={timeline} standAt={standAt}>
+    <TimelineScope value={timeline} standAt={standAt} files={fileRows}>
       <CodeFrame.Provider value={CodeWell}>
         <div
           className={`page session ${mode === "panel" ? "session--panel" : ""} ${chat ? "session--chat" : ""} ${drawer.open && s ? "session--files" : ""} ${s ? "" : "starting"}`}
@@ -2125,11 +2148,11 @@ function overLines(el: HTMLElement, lines: number): boolean {
 }
 
 /** The person's prompt: a well in the timeline, a bubble in the chat. A message sent from
- *  here keeps the files it carried as chips under it. A start's first message is the
- *  session's first bubble in both modes (the started moment is one surface). A long
- *  message shows its first eight lines and "Show all", which opens it in place; one the
- *  receiver cut short (`cut`) is read whole first. Only the words fold: the pictures it
- *  carried and the lines that say where it came from stay in sight. */
+ *  here shows the files it carried under its words, as thumbnails and chips. A start's
+ *  first message is the session's first bubble in both modes (the started moment is one
+ *  surface). A long message shows its first eight lines and "Show all", which opens it in
+ *  place; one the receiver cut short (`cut`) is read whole first. Only the words fold: the
+ *  pictures it carried and the lines that say where it came from stay in sight. */
 function Prompt({
   text,
   seq,
@@ -2232,24 +2255,19 @@ function Prompt({
     </>
   );
   return (
-    <>
-      <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} ref={boxRef} {...menu}>
-        <PromptBody text={words} render={render} />
-        {via && <span className="prompt-via">Sent from {via}</span>}
-        {askedBy && (
-          <span className="prompt-via">
-            Asked by {harnessMark(splitKey(askedBy).harness).label} with sessionpipe ask
-          </span>
-        )}
-        {answer && (
-          <span className="prompt-via">
-            answer from {harnessMark(answer.harness).label}, brought back by {machine}
-          </span>
-        )}
-        {by && <span className="prompt-via">{by}</span>}
-      </blockquote>
-      <SentFiles files={files ?? sent?.files} />
-    </>
+    <blockquote className={cls} data-start-message={sent?.kind === "start" ? "" : undefined} ref={boxRef} {...menu}>
+      <PromptBody text={words} files={files ?? sent?.files} render={render} />
+      {via && <span className="prompt-via">Sent from {via}</span>}
+      {askedBy && (
+        <span className="prompt-via">Asked by {harnessMark(splitKey(askedBy).harness).label} with sessionpipe ask</span>
+      )}
+      {answer && (
+        <span className="prompt-via">
+          answer from {harnessMark(answer.harness).label}, brought back by {machine}
+        </span>
+      )}
+      {by && <span className="prompt-via">{by}</span>}
+    </blockquote>
   );
 }
 

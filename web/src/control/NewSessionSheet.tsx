@@ -17,6 +17,8 @@
 // idle (NewSession.tsx mounts it).
 import type { ControlActivity, MachineSummary, RunLevel, StartFile } from "@shared/api";
 import {
+  ATTACHMENT_TYPES,
+  PICTURE_INPUT_MAX_BYTES,
   START_FILE_MAX_BYTES,
   START_FILES_MAX,
   START_FILES_TOTAL_BYTES,
@@ -43,17 +45,26 @@ import { useAppState, useLimits, useListedSessions, useMachines } from "../data/
 import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import "../lib/acp";
+import { UPLOAD_REFUSED, UPLOAD_WORDS } from "@shared/attachments";
 import { bytes, harnessMark } from "../lib/format";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
-import { accountMode } from "../lib/net";
+import { accountMode, uploadProgress } from "../lib/net";
 import { navigate, sessionPath } from "../lib/router";
 import { hintFor, matches, useShortcut } from "../lib/shortcuts";
 import { useNow } from "../lib/time";
 import { START, ThisPhone } from "../native/accountWords";
-import { controlApi, wrongOriginHere } from "./api";
+import {
+  boardNow,
+  markSpacesheepRefused,
+  pictureName,
+  progressWords,
+  UPLOADS_AT_ONCE,
+  useSpacesheepRefused,
+} from "./Attachments";
+import { ControlError, controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
-import { folderChoices, machineHome, tildify, typedFolder } from "./folders";
+import { folderChoices, machineHome, tildify, typedFolder, unnamedHere } from "./folders";
 import { HeldNotice, useHeld } from "./HeldNotice";
 import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
@@ -76,9 +87,13 @@ import {
   readRemembered,
   rememberStart,
   saveDraft,
+  uploadsAgain,
 } from "./newSessionState";
+import { keepSentPicture } from "./sentPictures";
+import { HEIC_FILE_NOTE, pictureType, SHRINKING_WORDS, ShrinkRefused, type Shrunk, shrinkImage } from "./shrink";
 import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "./signer";
 import { machineBlocked, startGate } from "./startGate";
+import { nounFor, spacesheepName, uploadWords } from "./uploadWords";
 import { notSentWords, PERMISSION_LABEL } from "./words";
 import "./newSessionSheet.css";
 
@@ -110,8 +125,27 @@ interface FileItem {
   key: string;
   name: string;
   size: number;
+  /** The original's size, where a picture goes as a smaller redraw of it. */
+  was?: number;
+  /** A picture being made smaller (shrink.ts); its upload waits for that. */
+  shrinking?: boolean;
+  /** Its upload waits its turn: two run at a time, as the composer's do. */
+  waiting?: boolean;
+  /** Goes as a file, but not as a picture the agent can look at (a HEIC this engine can't draw). */
+  note?: string;
+  /** The bytes that go, for Retry; absent on one brought back from the draft (held already). */
+  file?: File;
   entry?: StartFile;
+  /** When it was held (ms): the receiver keeps it a day from then. */
+  at?: number;
+  /** Bytes of it sent so far, where that is counted (a browser). */
+  sent?: number;
+  /** In the chip: what is wrong with it, in a few words. */
   error?: string;
+  /** Why its upload failed, as a sentence (the status line says it), and whether Retry can mend it. */
+  failed?: { words: string; retry: boolean };
+  /** The machine its upload went for, and whether that one is reached through spacesheep. */
+  to?: { machine?: string; remote: boolean };
 }
 
 export function Sheet({ target, closing }: { target: NewSessionTarget; closing: boolean }) {
@@ -185,8 +219,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         folders: cc.folders,
         home: machineHome(cc),
       });
+      // A session's `~/…` folder this page can't name ("New session here" on a computer
+      // reached through spacesheep) is not kept: the machine's own folders are offered.
       let folder = "";
-      if (prefer.cwd) {
+      if (prefer.cwd && !unnamedHere(prefer.cwd, machineHome(cc))) {
         const t = typedFolder(prefer.cwd, { folders: cc.folders, home: machineHome(cc), machine: mm.name });
         folder = t.ok ? t.path : prefer.cwd;
       } else folder = r.cwd ?? choices.recent[0]?.path ?? choices.allowed[0]?.path ?? "";
@@ -221,12 +257,39 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const [model, setModel] = useState(first.model ?? "");
   const [text, setText] = useState(target.text ?? initial.draft?.text ?? "");
   const [files, setFiles] = useState<FileItem[]>(() =>
-    (target.files ?? initial.draft?.files ?? []).map((f) => ({ key: f.sha256, name: f.name, size: f.size, entry: f })),
+    (target.files ?? initial.draft?.files ?? []).map((f) => ({
+      key: f.sha256,
+      name: f.name,
+      size: f.size,
+      entry: f,
+      at: (target.files ? target.filesAt : initial.draft?.filesAt) || Date.now(),
+    })),
+  );
+  /** How each running upload is stopped, by file key. */
+  const stops = useRef(new Map<string, AbortController>());
+  /** A file refused for too many at once: the timer that offers its Try again once the wait is over. */
+  const waits = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const unwait = (key?: string) => {
+    for (const [k, t] of waits.current)
+      if (key === undefined || k === key) {
+        clearTimeout(t);
+        waits.current.delete(k);
+      }
+  };
+  useEffect(
+    () => () => {
+      for (const stop of stops.current.values()) stop.abort();
+      for (const t of waits.current.values()) clearTimeout(t);
+    },
+    [],
   );
   const [busy, setBusy] = useState(false);
   const [tap, setTap] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  /** `files` now, for a picture that finishes shrinking between renders. */
+  const filesNow = useRef(files);
+  filesNow.current = files;
 
   // Opened before the stream's first snapshot (`?new=1` on a fresh load): the machines
   // arrive a moment later, and the context is worked out then, once.
@@ -297,8 +360,11 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const showPermission = levels.length >= 2;
   const showModel = !!opts && (!!opts.anyModel || !!opts.models?.length);
   const takesFiles = c?.files === true;
-  // Reached through spacesheep: no file can be carried there yet (server/control/state.ts).
+  // Reached through spacesheep: its files are uploaded there (server/control/remote.ts),
+  // unless spacesheep refused this app's uploads, which holds for the page's life.
   const relayed = !!c?.remote;
+  const ssRefused = useSpacesheepRefused();
+  const filesRefused = relayed && ssRefused;
   const listsFolders = !!c?.folders?.length;
   const folderCheck = machine
     ? typedFolder(folder, { folders: c?.folders, home: machineHome(c), machine })
@@ -316,7 +382,12 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       text,
       ...(permission ? { permission } : {}),
       ...(model ? { model } : {}),
-      ...(files.some((f) => f.entry) ? { files: files.flatMap((f) => (f.entry ? [f.entry] : [])) } : {}),
+      ...(files.some((f) => f.entry)
+        ? {
+            files: files.flatMap((f) => (f.entry ? [f.entry] : [])),
+            filesAt: Math.min(...files.flatMap((f) => (f.entry ? [f.at ?? Date.now()] : []))),
+          }
+        : {}),
     };
     saveDraft(d);
   }, [machine, harness, folder, text, permission, model, files]);
@@ -358,8 +429,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // ----- files: 📎, paste, drop; uploaded here, named by hash in the signed command -----
   const addFiles = (list: File[]) => {
     if (!list.length) return;
-    if (relayed) {
-      setNote(`Files can't be sent to ${machine ?? "this machine"} through spacesheep yet.`);
+    if (filesRefused) {
+      setNote(UPLOAD_WORDS.refused);
       return;
     }
     if (!takesFiles) {
@@ -368,7 +439,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     }
     setNote(null);
     let count = files.length;
-    let total = files.reduce((n, f) => n + (f.error ? 0 : f.size), 0);
+    let total = files.reduce((n, f) => n + (f.error || f.shrinking ? 0 : f.size), 0);
     const add: FileItem[] = [];
     for (const f of list) {
       const key = `${f.name}:${f.size}:${Math.random().toString(36).slice(2)}`;
@@ -376,12 +447,26 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         setNote(`Up to ${START_FILES_MAX} files on a new session.`);
         break;
       }
-      if (f.size > START_FILE_MAX_BYTES) {
-        add.push({ key, name: f.name, size: f.size, error: "over 25 MB" });
-        continue;
-      }
       if (f.size === 0) {
         add.push({ key, name: f.name, size: f.size, error: "empty" });
+        continue;
+      }
+      // A picture is made smaller first, and held to the caps at the size it goes at.
+      if (pictureType(f.type, f.name)) {
+        if (f.size > PICTURE_INPUT_MAX_BYTES) {
+          add.push({ key, name: f.name, size: f.size, error: "over 50 MB" });
+          continue;
+        }
+        count++;
+        add.push({ key, name: f.name, size: f.size, shrinking: true });
+        shrinkImage(f, { name: f.name }).then(
+          (small) => shrunkFile(key, f, small),
+          (e) => shrunkFile(key, f, e instanceof ShrinkRefused ? "heic" : null),
+        );
+        continue;
+      }
+      if (f.size > START_FILE_MAX_BYTES) {
+        add.push({ key, name: f.name, size: f.size, error: "over 25 MB" });
         continue;
       }
       if (total + f.size > START_FILES_TOTAL_BYTES) {
@@ -390,14 +475,137 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       }
       count++;
       total += f.size;
-      add.push({ key, name: f.name, size: f.size });
-      controlApi.uploadFile(f).then(
-        (entry) => setFiles((prev) => prev.map((x) => (x.key === key ? { ...x, entry } : x))),
-        (e) => setFiles((prev) => prev.map((x) => (x.key === key ? { ...x, error: uploadWords(e) } : x))),
-      );
+      add.push({ key, name: f.name, size: f.size, file: f, waiting: true });
     }
+    filesNow.current = [...filesNow.current, ...add];
     setFiles((prev) => [...prev, ...add]);
   };
+  const patchFile = (key: string, p: Partial<FileItem>) => {
+    filesNow.current = filesNow.current.map((x) => (x.key === key ? { ...x, ...p } : x));
+    setFiles((prev) => prev.map((x) => (x.key === key ? { ...x, ...p } : x)));
+  };
+  /** Where an upload goes now: the selected machine, and whether it is reached through
+   *  spacesheep (the bytes go on to spacesheep for it). Read when the upload begins, which
+   *  can be after a picture is made smaller. */
+  const goesTo = useRef({ machine: c?.machineId, remote: relayed });
+  goesTo.current = { machine: c?.machineId, remote: relayed };
+  /** One file's upload, for the machine selected now: its progress where it is counted,
+   *  stopped when it is removed. */
+  const upload = (key: string, f: File) => {
+    const stop = new AbortController();
+    stops.current.set(key, stop);
+    const to = goesTo.current;
+    patchFile(key, { to, waiting: false });
+    controlApi
+      .uploadFile(f, to.machine, {
+        signal: stop.signal,
+        ...(uploadProgress() ? { onProgress: (sent: number) => patchFile(key, { sent }) } : {}),
+      })
+      .then(
+        (entry) => {
+          if (stop.signal.aborted) return;
+          patchFile(key, { entry, at: Date.now() });
+          // No receiver keeps a picture sent through spacesheep to show: this page does.
+          if ((to.remote || accountMode()) && f.type in ATTACHMENT_TYPES)
+            void f
+              .arrayBuffer()
+              .then((b) => keepSentPicture(entry.sha256, b, f.type))
+              .catch(() => {});
+        },
+        async (e) => {
+          // spacesheep takes none from this app: no files for its computers from now on.
+          if (e instanceof ControlError && e.reason === UPLOAD_REFUSED) markSpacesheepRefused();
+          // The board is named as its Info says, which a page opened on ?new=1 may not have
+          // read yet; spacesheep, where the upload went on to it.
+          const board = to.remote ? spacesheepName() : await boardNow();
+          if (stop.signal.aborted) return;
+          const failed = uploadWords(e, board, nounFor(f.type));
+          patchFile(key, { error: "didn't upload", failed });
+          // Too many at once: Try again is offered once the wait its words say is over.
+          if (failed.waitS !== undefined) {
+            unwait(key);
+            waits.current.set(
+              key,
+              setTimeout(
+                () => {
+                  waits.current.delete(key);
+                  const x = filesNow.current.find((y) => y.key === key);
+                  if (x?.failed) patchFile(key, { failed: { ...x.failed, retry: true } });
+                },
+                Math.min(failed.waitS * 1000, 2 ** 31 - 1),
+              ),
+            );
+          }
+        },
+      )
+      .finally(() => {
+        if (stops.current.get(key) === stop) stops.current.delete(key);
+      });
+  };
+  /** A picture made smaller (`small`), left as it was (null), or a HEIC this engine can't
+   *  draw ("heic", which goes as a file with a note): held to the caps, named, uploaded. */
+  const shrunkFile = (key: string, f: File, small: Shrunk | null | "heic") => {
+    // Taken back while it was being made smaller.
+    if (!filesNow.current.some((x) => x.key === key)) return;
+    const others = filesNow.current.filter((x) => x.key !== key && !x.error && !x.shrinking);
+    const shrunk = small && small !== "heic" ? small : null;
+    const size = shrunk ? shrunk.blob.size : f.size;
+    const done: Partial<FileItem> = { shrinking: false, size, ...(shrunk ? { was: f.size } : {}) };
+    if (size > START_FILE_MAX_BYTES) {
+      patchFile(key, { ...done, error: shrunk ? "over 25 MB after shrinking" : "over 25 MB" });
+      return;
+    }
+    if (others.reduce((n, x) => n + x.size, 0) + size > START_FILES_TOTAL_BYTES) {
+      patchFile(key, { ...done, error: "over 50 MB in all" });
+      return;
+    }
+    if (small === "heic") {
+      patchFile(key, { ...done, note: HEIC_FILE_NOTE, file: f, waiting: true });
+      return;
+    }
+    const type = shrunk?.type ?? f.type;
+    const name = pictureName(
+      f.name,
+      type,
+      others.map((x) => x.name),
+    );
+    const goes = new File([shrunk?.blob ?? f], name, { type });
+    patchFile(key, { ...done, name, file: goes, waiting: true });
+  };
+  const retry = (x: FileItem) => {
+    if (!x.file || !x.failed?.retry) return;
+    stops.current.delete(x.key);
+    patchFile(x.key, { error: undefined, failed: undefined, sent: undefined, waiting: true });
+  };
+  const removeFile = (key: string) => {
+    stops.current.get(key)?.abort();
+    stops.current.delete(key);
+    unwait(key);
+    filesNow.current = filesNow.current.filter((x) => x.key !== key);
+    setFiles((prev) => prev.filter((x) => x.key !== key));
+  };
+  // Another machine chosen, reached another way: its files go again, for it (`uploadsAgain`).
+  useEffect(() => {
+    for (const x of filesNow.current) {
+      if (!x.file || !uploadsAgain(x, relayed)) continue;
+      stops.current.get(x.key)?.abort();
+      stops.current.delete(x.key);
+      unwait(x.key);
+      patchFile(x.key, { entry: undefined, error: undefined, failed: undefined, sent: undefined, waiting: true });
+    }
+  }, [relayed]);
+  // Two uploads at a time, in the chips' order; the rest wait. The next goes when one is
+  // in, fails or is removed: the app's hub answers only a few requests at once, and the
+  // account's own reads need theirs.
+  useEffect(() => {
+    let busy = files.filter((x) => x.file && !x.waiting && !x.entry && !x.error && !x.shrinking).length;
+    for (const x of files) {
+      if (busy >= UPLOADS_AT_ONCE) break;
+      if (!x.waiting || !x.file || x.error || stops.current.has(x.key)) continue;
+      busy++;
+      upload(x.key, x.file);
+    }
+  }, [files]);
   const onDrop = (e: DragEvent) => {
     if (!e.dataTransfer?.files?.length) return;
     e.preventDefault();
@@ -524,6 +732,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const discard = () => {
     saveDraft(null);
     setText("");
+    for (const stop of stops.current.values()) stop.abort();
+    stops.current.clear();
+    unwait();
     setFiles([]);
     setNote(null);
     setError(null);
@@ -542,12 +753,20 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     if (!harness) return { text: harnesses.length ? "Choose an agent" : `${m.name} hasn't said which agents it runs.` };
     if (!folderCheck.ok) return { text: folderCheck.reason };
     if (note) return { text: note };
-    if (files.length && relayed)
-      return { text: `Files can't be sent to ${m.name} through spacesheep yet. Remove them to start.` };
+    const failedFile = files.find((f) => f.failed);
+    if (failedFile?.failed) return { text: failedFile.failed.words, tone: "err" };
     if (files.length && !takesFiles)
       return { text: `${m.name} can't take files on a new session. Update sessionpipe there.` };
     if (model && !modelOk)
       return { text: `${model} isn't a model ${m.name} offers for ${harnessMark(harness).label}.` };
+    // A picture still being made smaller is counted once it is (its size is not known yet).
+    const going = files.filter((f) => !f.entry && !f.error && !f.shrinking);
+    if (going.length > 0) {
+      const whole = going.reduce((n, f) => n + f.size, 0);
+      return {
+        text: progressWords(whole, uploadProgress() ? going.reduce((n, f) => n + (f.sent ?? 0), 0) : undefined),
+      };
+    }
     // spacesheep holds a start a day (server/control/state.ts), this receiver an hour.
     if (c && !c.online)
       return {
@@ -730,33 +949,70 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     </div>
   );
 
+  // A file that goes but is no picture the agent can look at is said once, under them all.
+  const fileNote = files.find((f) => f.note && !f.error)?.note;
   const chips = files.length > 0 && (
-    <ul className="ns-files" aria-label="Files">
-      {files.map((f) => (
-        <li
-          key={f.key}
-          className={`ns-file ${f.error ? "ns-file--err" : ""}`}
-          data-file-state={f.error ? "error" : f.entry ? "held" : "uploading"}
-        >
-          {!f.entry && !f.error && <span className="spinner" aria-hidden="true" />}
-          <span className="ns-file-name ellipsis">{f.name}</span>
-          <span className="ns-file-size num">{f.error ?? bytes(f.size)}</span>
-          <button
-            type="button"
-            className="icon-btn ns-file-x"
-            aria-label={`Remove ${f.name}`}
-            onClick={() => setFiles((prev) => prev.filter((x) => x.key !== f.key))}
+    <>
+      <ul className="ns-files" aria-label="Files">
+        {files.map((f) => (
+          <li
+            key={f.key}
+            className={`ns-file ${f.error ? "ns-file--err" : ""}`}
+            data-file-state={
+              f.error ? "error" : f.entry ? "held" : f.shrinking ? "shrinking" : f.waiting ? "waiting" : "uploading"
+            }
+            title={
+              f.shrinking
+                ? SHRINKING_WORDS
+                : f.was && !f.error
+                  ? `${f.name} · ${bytes(f.size)} (was ${bytes(f.was)})`
+                  : (f.note ?? undefined)
+            }
           >
-            <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-              <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
-        </li>
-      ))}
-    </ul>
+            {!f.entry && !f.error && <span className="spinner" aria-hidden="true" />}
+            <span className="ns-file-name ellipsis">{f.name}</span>
+            <span className="ns-file-size num">{f.error ?? (f.shrinking ? SHRINKING_WORDS : bytes(f.size))}</span>
+            {f.failed?.retry && f.file && (
+              <button
+                type="button"
+                className="icon-btn ns-file-x"
+                aria-label={`Try ${f.name} again`}
+                data-tip="Try again"
+                onClick={() => retry(f)}
+              >
+                <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" fill="none">
+                  <path
+                    d="M9.6 6.6A3.7 3.7 0 1 1 8.4 3.2M9.4 1.6v2.3H7.1"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
+            <button
+              type="button"
+              className="icon-btn ns-file-x"
+              aria-label={`Remove ${f.name}`}
+              onClick={() => removeFile(f.key)}
+            >
+              <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+                <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {fileNote && (
+        <p className="ns-files-note" data-ns-files-note>
+          {fileNote}
+        </p>
+      )}
+    </>
   );
 
-  const fileButton = takesFiles && (
+  const fileButton = takesFiles && !filesRefused && (
     <>
       <input
         ref={fileInput}
@@ -1136,12 +1392,4 @@ function landStart(from: { x: number; y: number }): void {
   });
   watch.observe(document.body, { childList: true, subtree: true });
   setTimeout(() => watch.disconnect(), 200);
-}
-
-function uploadWords(e: unknown): string {
-  const s = (e as { status?: number })?.status;
-  if (s === 413) return "over 25 MB";
-  if (s === 415) return "not a file type the machine can take";
-  if (s === 400) return "not a name a machine can save";
-  return "didn't upload";
 }

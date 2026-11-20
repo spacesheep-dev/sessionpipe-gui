@@ -185,7 +185,8 @@ export function pageSearch(src: PageSearchSource): SearchClient {
 
   const allowed = (s: Sess, p: ParsedSearch, tz: number): boolean => {
     const lab = src.labels();
-    const test = (key: keyof ParsedSearch["filters"], v: string): boolean => {
+    // undefined: a value that does not read (a date like 2026-02-30), left out either way.
+    const test = (key: keyof ParsedSearch["filters"], v: string): boolean | undefined => {
       switch (key) {
         case "agent":
           return s.harness === v;
@@ -208,11 +209,11 @@ export function pageSearch(src: PageSearchSource): SearchClient {
         }
         case "since": {
           const t = resolveSearchDate(v, "start", Date.now(), tz);
-          return t === undefined || lastAt(s) >= t;
+          return t === undefined ? undefined : lastAt(s) >= t;
         }
         case "until": {
           const t = resolveSearchDate(v, "end", Date.now(), tz);
-          return t === undefined || firstAt(s) <= t;
+          return t === undefined ? undefined : firstAt(s) <= t;
         }
         case "source":
           return v === "history" ? s.source === "history" : !!s.summary;
@@ -221,9 +222,9 @@ export function pageSearch(src: PageSearchSource): SearchClient {
       }
     };
     for (const [k, vs] of Object.entries(p.filters) as [keyof ParsedSearch["filters"], string[]][])
-      if (k !== "in" && !vs.some((v) => test(k, v))) return false;
+      if (k !== "in" && !vs.some((v) => test(k, v) ?? true)) return false;
     for (const [k, vs] of Object.entries(p.notFilters) as [keyof ParsedSearch["filters"], string[]][])
-      if (k !== "in" && vs.some((v) => test(k, v))) return false;
+      if (k !== "in" && vs.some((v) => test(k, v) ?? false)) return false;
     return true;
   };
 

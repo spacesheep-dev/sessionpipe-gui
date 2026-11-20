@@ -14,6 +14,7 @@
 // (control/useSend.ts answerState).
 import type { AgentRun, Attention, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
 import { isEmptySession, LABEL_COLORS, SNIPPET_CHARS, sessionKey, splitKey } from "@shared/api";
+import { promptWords } from "@shared/attachments";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -1824,8 +1825,8 @@ function Peek({ item }: { item: Item | undefined }) {
   const said = waiting?.tool ? attentionMessage(waiting) : undefined;
   // A session that needs you says that, not the old ask. A turn the harness opened itself
   // (a `<task-notification>`, a `<command-name>`) is not what the person asked: its markup
-  // is never shown as the ask.
-  const asked = s.state === "needs_you" ? undefined : flat(s.progress?.user ?? s.lastUser);
+  // is never shown as the ask. Nor is a block of pictures.
+  const asked = s.state === "needs_you" ? undefined : flat(promptWords(s.progress?.user ?? s.lastUser ?? ""));
   const ask = asked && !HARNESS_TURN.test(asked) ? asked : undefined;
   const reply = flat(s.progress?.assistant ?? s.lastAssistant);
   return (

@@ -18,7 +18,7 @@ import type {
   UploadedFile,
 } from "@shared/api";
 import { ROUTES } from "@shared/api";
-import { apiFetch } from "../lib/net";
+import { apiFetch, apiUpload } from "../lib/net";
 import { sendingOriginOf, wrongOrigin } from "./origin";
 
 export type { TrustedKey };
@@ -118,6 +118,8 @@ export class ControlError extends Error {
     readonly code?: string,
     readonly detail?: string,
     readonly until?: number,
+    /** A busy receiver's Retry-After, in seconds. */
+    readonly retryAfterS?: number,
   ) {
     super(detail ?? reason);
     this.name = "ControlError";
@@ -167,26 +169,53 @@ export const controlApi = {
   /** One file a start or a prompt will carry: held by the receiver under its hash, named in
    *  the signed `files`. `machineId`: the machine it is for (a receiver that holds every
    *  file itself does not read it). The body goes as an ArrayBuffer, never the File: the
-   *  app's webview can hand a Blob to the shell's rx: protocol as an empty stream. */
-  uploadFile: async (file: File, machineId?: string): Promise<UploadedFile> => {
+   *  app's webview can hand a Blob to the shell's rx: protocol as an empty stream.
+   *  `signal` stops it; `onProgress` hears how far it got, where that is known
+   *  (lib/net.ts uploadProgress). A refusal keeps a plain-text answer (the app's hub says
+   *  why it gave up in words) as its detail, and a Retry-After as `retryAfterS`. */
+  uploadFile: async (file: File, machineId?: string, opts: FileUploadOpts = {}): Promise<UploadedFile> => {
     const to = machineId ? `&machine=${encodeURIComponent(machineId)}` : "";
-    const res = await apiFetch(`${BASE}/files?name=${encodeURIComponent(file.name)}${to}`, {
-      method: "POST",
+    const res = await apiUpload(`${BASE}/files?name=${encodeURIComponent(file.name)}${to}`, {
       headers: { "content-type": file.type || "application/octet-stream", accept: "application/json" },
       body: await file.arrayBuffer(),
+      ...opts,
     });
-    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!res.ok) {
-      const reason = typeof json.reason === "string" ? json.reason : `http_${res.status}`;
-      throw new ControlError(res.status, reason, undefined, typeof json.error === "string" ? json.error : undefined);
-    }
-    return json as unknown as UploadedFile;
+    if (!res.ok) throw await uploadRefusal(res);
+    return (await res.json().catch(() => ({}))) as UploadedFile;
   },
   deviceRequest: (body: { key: TrustedKey; name?: string }) => call<DeviceRequest>("POST", `${BASE}/devices`, body),
   devices: () => call<{ devices: DeviceRequest[] }>("GET", `${BASE}/devices`).then((r) => r.devices),
   device: (requestId: string) => call<DeviceRequest>("GET", `${BASE}/devices/${encodeURIComponent(requestId)}`),
   rejectDevice: (requestId: string) => call<void>("POST", `${BASE}/devices/${encodeURIComponent(requestId)}/reject`),
 };
+
+export interface FileUploadOpts {
+  signal?: AbortSignal;
+  onProgress?: (sent: number, total: number) => void;
+}
+
+/** A refused upload as a ControlError: the JSON body's reason and sentence, or a plain-text
+ *  answer as the sentence; a Retry-After (seconds, or a date) as `retryAfterS`. */
+export async function uploadRefusal(res: Response): Promise<ControlError> {
+  const type = res.headers.get("content-type") ?? "";
+  let json: Record<string, unknown> = {};
+  let plain: string | undefined;
+  if (type.startsWith("text/plain")) plain = (await res.text().catch(() => "")).trim() || undefined;
+  else json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const reason = typeof json.reason === "string" ? json.reason : `http_${res.status}`;
+  const detail = typeof json.error === "string" ? json.error : typeof json.detail === "string" ? json.detail : plain;
+  return new ControlError(res.status, reason, undefined, detail, undefined, retryAfter(res, json));
+}
+
+function retryAfter(res: Response, json: Record<string, unknown>): number | undefined {
+  const own = json.retryAfterS ?? json.retry_after;
+  if (typeof own === "number" && Number.isFinite(own) && own >= 0) return own;
+  const h = res.headers.get("retry-after")?.trim();
+  if (!h) return undefined;
+  if (/^\d+$/.test(h)) return Number(h);
+  const at = Date.parse(h);
+  return Number.isFinite(at) ? Math.max(0, Math.round((at - Date.now()) / 1000)) : undefined;
+}
 
 let rpIdPromise: Promise<string> | null = null;
 let rpCache: string | undefined;

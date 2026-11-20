@@ -39,6 +39,26 @@ const HEAD_LIMIT: Duration = if cfg!(test) {
     Duration::from_secs(20)
 };
 
+/// The `rx:` proxy's limits (`proxy::send_timeout`, `proxy::STALL_SECS`) as this build
+/// waits them out. Tests run the clock 25 times faster, so a request held past its limit
+/// is seen to be cut off.
+fn proxy_wait(d: Duration) -> Duration {
+    if cfg!(test) {
+        d / 25
+    } else {
+        d
+    }
+}
+
+/// How reading a receiver's answer ended, short of the whole of it.
+enum BodyStop {
+    TooLarge,
+    /// No byte came for `proxy::STALL_SECS`, or the whole took longer than
+    /// `proxy::LONGEST_SECS`.
+    Stalled,
+    Broken(reqwest::Error),
+}
+
 /// One `rx:` failure line per receiver at most this often (a page polling a receiver
 /// that is down would fill the log otherwise).
 const PROXY_LOG_EVERY: Duration = Duration::from_secs(10);
@@ -770,7 +790,8 @@ impl Hub {
         if let Err(r) = proxy::check_path(&path) {
             return refuse(r, "refused");
         }
-        if req.body().len() > proxy::MAX_BODY {
+        let len = req.body().len();
+        if len > proxy::MAX_BODY {
             return refuse(Refusal::TooLarge, "too large");
         }
         let url = match proxy::upstream_url(&rx.origin, &path) {
@@ -786,9 +807,9 @@ impl Hub {
                 return proxy::refusal(http::StatusCode::BAD_GATEWAY, &e, origin, allowed);
             }
         };
-        let mut b = self
-            .request(&client, &rx, method.clone(), url)
-            .timeout(Duration::from_secs(proxy::TIMEOUT_SECS));
+        // No limit on the request as a whole: the upload has as long as its bytes take on
+        // a slow uplink, and the answer as long as it keeps coming.
+        let mut b = self.request(&client, &rx, method.clone(), url);
         for h in proxy::FORWARD_REQUEST_HEADERS {
             if let Some(v) = req.headers().get(*h) {
                 b = b.header(*h, v.as_bytes());
@@ -798,9 +819,17 @@ impl Hub {
         if !body.is_empty() {
             b = b.body(body);
         }
-        let res = match b.send().await {
-            Ok(r) => r,
-            Err(e) => {
+        let timed_out = || {
+            proxy::refusal(
+                http::StatusCode::GATEWAY_TIMEOUT,
+                "the receiver didn't answer",
+                origin,
+                allowed,
+            )
+        };
+        let res = match tokio::time::timeout(proxy_wait(proxy::send_timeout(len)), b.send()).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => {
                 let status = if e.is_timeout() {
                     http::StatusCode::GATEWAY_TIMEOUT
                 } else {
@@ -808,6 +837,10 @@ impl Hub {
                 };
                 self.proxy_failed(&id, method.as_str(), &path, &describe(e));
                 return proxy::refusal(status, "the receiver didn't answer", origin, allowed);
+            }
+            Err(_) => {
+                self.proxy_failed(&id, method.as_str(), &path, "timed out");
+                return timed_out();
             }
         };
         if res
@@ -823,35 +856,51 @@ impl Hub {
                 out = out.header(*h, v.as_bytes());
             }
         }
-        let mut body = Vec::new();
-        let mut s = res.bytes_stream();
-        while let Some(chunk) = s.next().await {
-            match chunk {
-                Ok(c) => {
-                    if body.len() + c.len() > proxy::MAX_BODY {
-                        self.proxy_failed(
-                            &id,
-                            method.as_str(),
-                            &path,
-                            "response over the size limit",
-                        );
-                        return refuse(Refusal::TooLarge, "too large");
+        // The answer: each piece within `STALL_SECS` of the last, the whole within
+        // `LONGEST_SECS`. A large picture on a slow downlink keeps coming, and is read.
+        let read = async {
+            let mut body = Vec::new();
+            let mut s = res.bytes_stream();
+            let stall = proxy_wait(Duration::from_secs(proxy::STALL_SECS));
+            loop {
+                match tokio::time::timeout(stall, s.next()).await {
+                    Err(_) => return Err(BodyStop::Stalled),
+                    Ok(None) => return Ok(body),
+                    Ok(Some(Err(e))) => return Err(BodyStop::Broken(e)),
+                    Ok(Some(Ok(c))) => {
+                        if body.len() + c.len() > proxy::MAX_BODY {
+                            return Err(BodyStop::TooLarge);
+                        }
+                        body.extend_from_slice(&c);
                     }
-                    body.extend_from_slice(&c);
-                }
-                Err(e) => {
-                    let why = format!("the body stopped: {}", describe(e));
-                    self.proxy_failed(&id, method.as_str(), &path, &why);
-                    return proxy::refusal(
-                        http::StatusCode::BAD_GATEWAY,
-                        "the receiver stopped answering",
-                        origin,
-                        allowed,
-                    );
                 }
             }
+        };
+        let longest = proxy_wait(Duration::from_secs(proxy::LONGEST_SECS));
+        let read = tokio::time::timeout(longest, read)
+            .await
+            .unwrap_or(Err(BodyStop::Stalled));
+        match read {
+            Ok(body) => proxy::finish(out.body(body).expect("response"), origin, allowed),
+            Err(BodyStop::TooLarge) => {
+                self.proxy_failed(&id, method.as_str(), &path, "response over the size limit");
+                refuse(Refusal::TooLarge, "too large")
+            }
+            Err(BodyStop::Stalled) => {
+                self.proxy_failed(&id, method.as_str(), &path, "the body stalled");
+                timed_out()
+            }
+            Err(BodyStop::Broken(e)) => {
+                let why = format!("the body stopped: {}", describe(e));
+                self.proxy_failed(&id, method.as_str(), &path, &why);
+                proxy::refusal(
+                    http::StatusCode::BAD_GATEWAY,
+                    "the receiver stopped answering",
+                    origin,
+                    allowed,
+                )
+            }
         }
-        proxy::finish(out.body(body).expect("response"), origin, allowed)
     }
 
     /// An `rx:` request that never got the receiver's answer, in shell.log (rate-limited).
@@ -1260,7 +1309,7 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{serve, TempDir};
+    use crate::testutil::{serve, serve_replies, Reply, TempDir};
 
     fn hub(home: &std::path::Path, env: Option<String>) -> Hub {
         Hub::new(HubConfig {
@@ -1478,6 +1527,134 @@ mod tests {
             pre.headers()["access-control-allow-origin"],
             "tauri://localhost"
         );
+    }
+
+    /// A loopback server that reads a request (one small one), writes `head` and `first`, then
+    /// each of `rest` after `gap`; `hang` keeps the socket open after the last of them.
+    async fn trickling_server(
+        head: &'static str,
+        first: &'static [u8],
+        rest: Vec<&'static [u8]>,
+        gap: Duration,
+        hang: bool,
+    ) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let Ok((mut s, _)) = l.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf).await;
+            let _ = s.write_all(head.as_bytes()).await;
+            let _ = s.write_all(first).await;
+            let _ = s.flush().await;
+            for c in rest {
+                tokio::time::sleep(gap).await;
+                if s.write_all(c).await.is_err() {
+                    return;
+                }
+                let _ = s.flush().await;
+            }
+            if hang {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+            let _ = s.shutdown().await;
+        });
+        port
+    }
+
+    /// An upload has as long as its bytes take at 256 kbit/s: a receiver that answers a
+    /// large picture after longer than fifteen seconds is waited for, and the same
+    /// lateness for a request that carries nothing is cut off.
+    #[tokio::test]
+    async fn an_upload_is_waited_for_as_long_as_its_bytes_take() {
+        let t = TempDir::new("hub-upload-time");
+        // Late enough that the cut-off for a small body is well before it.
+        let late = proxy_wait(Duration::from_secs(proxy::STALL_SECS + 10));
+        let port = serve_replies(move |s| {
+            Reply::json(201, format!("{{\"len\":{}}}", s.body.len())).after(late)
+        })
+        .await;
+        let h = hub(t.path(), Some(format!("http://127.0.0.1:{port}")));
+        let id = h.active().unwrap().id;
+        let uri = format!("rx://localhost/{id}/api/ui/control/files");
+        // Two megabytes: fifteen seconds and sixty-four more.
+        let picture = vec![7u8; 2 * 1024 * 1024];
+        assert!(proxy_wait(proxy::send_timeout(picture.len())) > late * 2);
+        let res = proxied(&h, "POST", &uri, Some("tauri://localhost"), picture).await;
+        assert_eq!(
+            res.status(),
+            201,
+            "{:?}",
+            String::from_utf8_lossy(res.body())
+        );
+        assert_eq!(res.body(), b"{\"len\":2097152}");
+        // Nothing to carry: fifteen seconds, as before.
+        let t0 = std::time::Instant::now();
+        let res = proxied(&h, "POST", &uri, Some("tauri://localhost"), b"{}".to_vec()).await;
+        assert_eq!(res.status(), 504);
+        assert_eq!(res.body(), b"the receiver didn't answer");
+        assert_eq!(res.headers()["content-type"], "text/plain; charset=utf-8");
+        assert!(t0.elapsed() < late, "cut off, not waited out");
+    }
+
+    /// An answer is read as long as it keeps coming, and cut off when it stops.
+    #[tokio::test]
+    async fn an_answer_that_keeps_coming_is_read_and_one_that_stalls_is_cut_off() {
+        let t = TempDir::new("hub-answer-time");
+        let stall = proxy_wait(Duration::from_secs(proxy::STALL_SECS));
+        // Five pieces, each a little inside the stall limit: the whole takes three times
+        // as long as it.
+        let head = "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncontent-length: 12\r\nconnection: close\r\n\r\n";
+        let gap = stall * 3 / 4;
+        let port = trickling_server(
+            head,
+            b"ab",
+            vec![b"cd", b"ef", b"gh", b"ij", b"kl"],
+            gap,
+            false,
+        )
+        .await;
+        let h = hub(t.path(), Some(format!("http://127.0.0.1:{port}")));
+        let id = h.active().unwrap().id;
+        let t0 = std::time::Instant::now();
+        let res = proxied(
+            &h,
+            "GET",
+            &format!("rx://localhost/{id}/api/ui/image"),
+            None,
+            vec![],
+        )
+        .await;
+        assert_eq!(
+            res.status(),
+            200,
+            "{:?}",
+            String::from_utf8_lossy(res.body())
+        );
+        assert_eq!(res.body(), b"abcdefghijkl");
+        assert!(t0.elapsed() > stall * 3);
+
+        // A head and two bytes, then nothing: cut off a stall after the last byte.
+        let t2 = TempDir::new("hub-answer-stall");
+        let port = trickling_server(head, b"ab", vec![], gap, true).await;
+        let h = hub(t2.path(), Some(format!("http://127.0.0.1:{port}")));
+        let id = h.active().unwrap().id;
+        let t0 = std::time::Instant::now();
+        let res = proxied(
+            &h,
+            "GET",
+            &format!("rx://localhost/{id}/api/ui/image"),
+            None,
+            vec![],
+        )
+        .await;
+        assert_eq!(res.status(), 504);
+        assert_eq!(res.body(), b"the receiver didn't answer");
+        let took = t0.elapsed();
+        assert!(took >= stall && took < stall * 4, "{took:?}");
     }
 
     #[tokio::test]

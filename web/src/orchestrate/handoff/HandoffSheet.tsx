@@ -29,7 +29,7 @@ import { Select, type SelectOption } from "../../components/Select";
 import { wrongOriginHere } from "../../control/api";
 import { uuid } from "../../control/bytes";
 import { sendCommand } from "../../control/command";
-import { folderChoices, machineHome, tildify, typedFolder } from "../../control/folders";
+import { folderChoices, machineHome, tildify, typedFolder, unnamedHere } from "../../control/folders";
 import { HeldNotice, useHeld } from "../../control/HeldNotice";
 import type { HeldMeta } from "../../control/held";
 import { HELD_WORDS } from "../../control/heldWords";
@@ -151,6 +151,8 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     [session?.machine, c, sessions, home],
   );
   const ownFolder = session?.cwd ? typedFolder(session.cwd, { folders: c?.folders, home, machine: name }) : null;
+  // Said only of a folder outside the machine's: a `~/…` one this page can't name is not.
+  const ownOutside = !!session?.cwd && !!ownFolder && !ownFolder.ok && !unnamedHere(session.cwd, home);
   const [folder, setFolder] = useState(
     () =>
       initial.draft?.folder ??
@@ -503,9 +505,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
               autoComplete="off"
             />
           ),
-          session.cwd && ownFolder && !ownFolder.ok ? (
-            <span className="ns-aside">This session's folder isn't allowed on {name}</span>
-          ) : null,
+          ownOutside ? <span className="ns-aside">This session's folder isn't allowed on {name}</span> : null,
         )}
     </div>
   );

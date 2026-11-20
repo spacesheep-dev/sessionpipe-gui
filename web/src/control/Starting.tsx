@@ -11,7 +11,8 @@ import { type ControlActivity, type MachineControl, type SessionKey, sessionKey,
 import { useCallback, useMemo, useState } from "react";
 import { ActionButton, CommandWell, Since } from "../components/bits";
 import { useMachines } from "../data/hooks";
-import { bytes, harnessMark, plainTitle, rememberStartTitles } from "../lib/format";
+import { harnessMark, plainTitle, rememberStartTitles } from "../lib/format";
+import { accountMode } from "../lib/net";
 import { navigate, sessionPath } from "../lib/router";
 import { rpId } from "./api";
 import { uuid } from "./bytes";
@@ -74,9 +75,11 @@ export function appliedFact(a: ControlActivity | undefined): string | null {
 }
 
 /** A start that asked for options and was delivered without `applied` reached a machine
- *  that ignored them (a daemon before 0.10); the sender rule makes this rare. */
+ *  that ignored them (a daemon before 0.10); the sender rule makes this rare. On a
+ *  spacesheep account no row says what the machine applied (spacesheep's jobs keep no
+ *  `applied`), so there it is not known, and not said. */
 export const optionsIgnored = (a: ControlActivity | undefined): boolean =>
-  !!a && a.outcome === "delivered" && !!(a.permission || a.model) && !a.applied;
+  !!a && a.outcome === "delivered" && !!(a.permission || a.model) && !a.applied && !accountMode();
 
 /** Reopens the sheet with what the start carried, so it can be fixed and sent again. */
 export function editAgain(a: ControlActivity, machine: string | undefined): void {
@@ -87,7 +90,8 @@ export function editAgain(a: ControlActivity, machine: string | undefined): void
     text: a.text ?? "",
     ...(a.permission ? { permission: a.permission } : {}),
     ...(a.model ? { model: a.model } : {}),
-    ...(a.files ? { files: a.files } : {}),
+    // Uploaded before the start was signed: held a day from then at most.
+    ...(a.files ? { files: a.files, filesAt: Date.parse(a.at) || Date.now() } : {}),
   });
 }
 
@@ -116,21 +120,6 @@ async function startAtSafe(a: ControlActivity, control: MachineControl): Promise
     ...(a.files?.length ? { files: a.files } : {}),
   });
   navigate(sessionPath(harness, sid), { replace: true });
-}
-
-/** The files a start carried, as quiet chips under its message. */
-export function SentFiles({ files }: { files: ControlActivity["files"] }) {
-  if (!files?.length) return null;
-  return (
-    <ul className="starting-files" aria-label="Files">
-      {files.map((f) => (
-        <li key={f.sha256} className="starting-file">
-          <span className="ellipsis">{f.name}</span>
-          <span className="num">{bytes(f.size)}</span>
-        </li>
-      ))}
-    </ul>
-  );
 }
 
 /** The one status row of a message on its way, or of a turn running: a neutral glyph, the

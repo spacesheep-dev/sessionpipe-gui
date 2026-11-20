@@ -4,10 +4,10 @@
 // (this account, another one, a GUI server). So nothing here is removed by whose window
 // last wrote: each thing is the account's or it is not, and is decided by itself.
 //
-// - Keyed by a session (a draft not yet sent; an entry of the hidden list, or of the
-//   list of opened agents): the account's when the session is one of its sessions. It
-//   goes with that account, or with that session when the account forgets it, and with
-//   nothing else.
+// - Keyed by a session (a draft not yet sent, its words and its pictures; an entry of the
+//   hidden list, or of the list of opened agents): the account's when the session is one
+//   of its sessions. It goes with that account, or with that session when the account
+//   forgets it, and with nothing else.
 // - Keyed by the account's id (the reader's read times): that account's.
 // - Of no session (the recent searches, what the new-session and handoff sheets remember,
 //   the tabs open beside): conveniences that may hold what was typed on an account. They
@@ -19,7 +19,7 @@
 // (gone.ts), so it stays small.
 
 /** One value per session: the key is this and the session's key. */
-export const SESSION_KEYED: readonly string[] = ["sessionpipe-gui.draft:"];
+export const SESSION_KEYED: readonly string[] = ["sessionpipe-gui.draft:", "sessionpipe-gui.draft-pictures:"];
 /** One value for many sessions: an object keyed by session, or a list of `[session, …]`. */
 export const SESSION_LISTS: readonly string[] = ["sessionpipe-gui.hidden", "sessionpipe-gui.agentsOpen"];
 /** One value per account: the key is this, a name, a dot and the account's id. */

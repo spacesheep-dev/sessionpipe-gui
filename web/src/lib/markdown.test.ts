@@ -14,8 +14,15 @@ const inlines = (src: string): Inline[] => {
 };
 
 describe("parseMarkdown", () => {
-  it("splits paragraphs on blank lines and joins wrapped lines", () => {
-    expect(parseMarkdown("one\ntwo\n\nthree")).toEqual([para(text("one\ntwo")), para(text("three"))]);
+  it("splits paragraphs on blank lines, and a single newline is a line break", () => {
+    expect(parseMarkdown("one\ntwo\n\nthree")).toEqual([
+      para(text("one"), { type: "br" }, text("two")),
+      para(text("three")),
+    ]);
+    // An agent's reply of three lines reads as three lines.
+    expect(parseMarkdown("Purple, Iris\nGreen, Thyme\nBrown, Copper")).toEqual([
+      para(text("Purple, Iris"), { type: "br" }, text("Green, Thyme"), { type: "br" }, text("Brown, Copper")),
+    ]);
   });
 
   it("parses ATX headings and clamps h5/h6 to level 4", () => {
@@ -157,7 +164,15 @@ describe("parseMarkdown", () => {
   });
 
   it("makes hard breaks from two trailing spaces or a backslash", () => {
-    expect(inlines("a  \nb\\\nc\nd")).toEqual([text("a"), { type: "br" }, text("b"), { type: "br" }, text("c\nd")]);
+    expect(inlines("a  \nb\\\nc\nd")).toEqual([
+      text("a"),
+      { type: "br" },
+      text("b"),
+      { type: "br" },
+      text("c"),
+      { type: "br" },
+      text("d"),
+    ]);
   });
 
   it("never passes HTML through: tags are plain text", () => {

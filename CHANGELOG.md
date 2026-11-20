@@ -50,9 +50,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   Board stays in view. Where the panel can't show, and on the phone, a session opens as its
   page. The two choices read Beside and As a page, in Settings and in the Board's ⋯ menu.
 - **Sessions opened one after another beside the page share one tab.** A plain open beside
-  the page reuses one preview tab, its title in italics; typing in it, a picture added to it,
-  a double-click on the tab or a drag keeps it, and an open holding ⌘ adds a kept tab. Answering keeps nothing, so
-  going down the Inbox leaves one tab.
+  the page reuses one preview tab, its title in italics; typing in it, a picture added to
+  it, a double-click on the tab or a drag keeps it, and an open holding ⌘ adds a kept tab.
+  Answering keeps nothing, so going down the Inbox leaves one tab.
 - **On a computer, the notifications hold still under your hand.** Prompts sit nearest the
   corner, newest first, with a failed turn, Delivered and "Hidden · Undo" under them, so a
   passing card never pushes a prompt's Allow down. While the pointer or focus is on them,
@@ -154,10 +154,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   whichever row the cursor was on. They now answer the row under the cursor, as in the
   Inbox, and never another prompt. The row then says what became of the answer, in the
   request's place: "Allowed · waiting for studio-mac", "Not sent: …", or why it cannot go.
-- **On a computer, a Board row's menu leads with Allow and Deny, and shows their keys.** The
-  pair came after Open, New session here and Ask another agent…; it comes first now, as in
-  the Inbox, and both show A and D beside it; the phone's sheet keeps its order. On a machine that is not paired a Board row's
-  menu leaves the pair out.
+- **On a computer, a Board row's menu leads with Allow and Deny, and shows their keys.**
+  The pair came after Open, New session here and Ask another agent…; it comes first now,
+  as in the Inbox, and both show A and D beside it; the phone's sheet keeps its order. On
+  a machine that is not paired a Board row's menu leaves the pair out.
 - **On a computer, a plan the agent asks to start on is read in the conversation, whole.**
   It sat in the dock at the bottom, beside Keep planning and Approve plan, eight lines
   until "Show the whole plan" and then a box of its own that scrolled, while the
@@ -236,11 +236,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **The Inbox badge counts the sessions that need you, as Needs you, the Dock and the menu
   bar do.** It counted only the prompts you could answer from here, so it said 2 beside
   "Needs you 3", and went dark once a prompt waited past its two minutes. The badge, the
-  title's "(n)" and the phone's app badge now count every session in Needs you, a
-  question and a prompt waiting in a terminal too (0.8.4 left both out). A session whose
-  answer has gone, or that you hid, counts no more, and the Board's Needs you drops it
-  from its number at once, its row in its place. VoiceOver reads "Inbox, 3 need you".
-  Notifications are as they were: only a prompt you can answer here raises one.
+  title's "(n)" and the phone's app badge now count every session in Needs you, a question
+  and a prompt waiting in a terminal too (0.8.4 left both out). A session whose answer has
+  gone, or that you hid, counts no more, and the Board's Needs you drops it from its
+  number at once, its row in its place. The Dock and the menu bar still count a session
+  you hid on this device. VoiceOver reads "Inbox, 3 need you". Notifications are as they
+  were: only a prompt you can answer here raises one.
 - **Settings › Data's spacesheep account is a quiet option.** Its Connect… was the one
   solid button in Settings; it is now a small one like Rebuild…, Forget… and Download
   JSON, and Disconnect is the same size. "Open the confirm page" stays solid while a
@@ -267,10 +268,109 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **`--port` and `--keep-days` take digits only, and a flag is never another flag's
+  value.** `--port ""` (a script's unset `$PORT`) started on a random port and
+  `--keep-days ""` kept every event whole, both without a word; `--port 0x1F90` listened on
+  8080. `--host --no-tls` took `--no-tls` as the host. Each now stops with the flag's own
+  message.
 - **"Switched to …" stays under the turn it fell in.** On a long session whose switch to
   another account is older than its newest page, the chat and the timeline drew the note
   under the first turn the page had loaded; it now appears, under its own turn, once Older
   turns brings that turn in.
+- **Closing the terminal stops the receiver cleanly.** Closing the window or tab a
+  receiver runs in (SIGHUP) ended it at once and left its `run.json` behind; it now stops
+  as Ctrl-C does. A receiver whose output was already gone when it was stopped (a `| tee`
+  ended by the same Ctrl-C) no longer exits with an error before it has closed.
+- **Search's status line says which computer to restart.** With history search off and its
+  index still on disk, a viewer on another device read "Restarting the app tries again",
+  which could mean the app on the phone; it now reads "Restarting the app on that computer
+  tries again".
+- **`--rp-id` takes a host name alone.** `--rp-id https://foo.example`,
+  `--rp-id foo.example:7373`, a path or an empty value started a receiver whose passkey
+  origin (`https://https://foo.example:<port>`, `https://:<port>`) no browser makes a
+  passkey for, without a word. Each now stops with an `--rp-id` message; an IP address is
+  taken as before.
+- **`tls status` names a broken certificate file.** A certificate folder with a file
+  missing, cut short or not a certificate was reported as "none yet", and an unreadable
+  `server.key` ended in Node's stack trace. It now names the file and the cause, and says
+  what the next `--tls` start does about it: a new server certificate from the same CA, a
+  new CA that phones must trust again, or nothing, when the file has to be fixed by hand
+  (or the folder deleted with `sessionpipe-gui tls reset`). A `tls` folder this account
+  cannot read is named too, instead of "none yet".
+- **Search's `since:` and `until:` refuse a day the month does not have.** `until:2026-02-30`
+  searched up to March 2, `since:2026-11-31` from December 1 and `2026-02-29` read as March
+  1, without a word, and the Date chip said "Until Mar 2". Such a date is now left out, as
+  `2026-13-01` already was, and the receiver's Search page and `sessionpipe-gui search`
+  name it ("“until:2026-02-30” isn't a date, so it was left out"). `2028-02-29` still reads.
+- **A picture is made smaller before it uploads.** In the message box and in New session,
+  a big photo or screenshot is redrawn at most 2560 px on its long edge, as WebP (JPEG
+  where the browser can't write WebP), the way spacesheep does it: a 13 MB phone photo
+  goes at about 2 MB, and a 30 MB screenshot goes at all. A picture may be 50 MB before
+  and 25 MB after (8 MB where the prompt names its path). A HEIC photo is sent as a JPEG
+  where the browser can open one (Safari, the apps on a Mac and an iPhone); elsewhere the
+  message box says how to export it, and New session sends it as a file with a note that
+  the agent can't look at it. A JPEG that says where it was taken is always redrawn, which
+  leaves the location behind; one that can't be redrawn goes without its metadata. The
+  thumbnail's tooltip says the size it goes at and the size it was.
+- **A sent message shows the pictures it carried.** In the session's view, and in the row
+  of a message that went to a copy of the session, each picture is a thumbnail that opens
+  it whole: while the message is on its way, once the session's turn arrives and after a
+  reload, for a message and for a new session's first one alike. The list of saved files
+  the computer adds to the message is no longer shown as text. Any other file, and a
+  picture the receiver no longer keeps, is a chip with its name, type and size
+  (`kiwi.png · PNG · 32 KB`). The receiver keeps a picture you sent for 30 days to show it,
+  and makes room among those, oldest first, before it refuses an upload for space.
+- **In the desktop and phone apps, a picture on a slow connection has time to arrive.** A
+  request to a receiver was cut off after 15 seconds, so a large photo on a slow uplink
+  failed with `http_504`; it now has 15 seconds and one more for each 32 KiB it carries (up
+  to ten minutes), and an answer that keeps coming, such as a large picture on a slow
+  downlink, is read for as long as it does. An answer that stops for 15 seconds is still
+  cut off.
+- **New session on a computer reached through spacesheep offers only folders spacesheep
+  takes.** It used to offer a recent session's `~/…` folder, which spacesheep refused
+  ("only lets the agent work in"); now it offers the computer's own folders and recent
+  ones under them, as full paths, and Start sends the full path. New session here and Ask
+  another agent, from a session in a `~/…` folder, start from those too.
+- **Pictures another surface sent are chips, not links or paths.** A message sent from
+  spacesheep's Talk pane shows each picture by its name (`kiwi.png · picture · kept on
+  spacesheep`) instead of its link, on the board, on a spacesheep account and in a row of
+  the board, which quotes only the words. On a spacesheep account, a message sent from an
+  older version of this app's message box shows a chip for each picture it named
+  (`picture · 1200×900 · kept on the board it was sent from`), and one of pictures alone is
+  its chips instead of an empty bubble.
+- **A picture that doesn't upload says why, and keeps its place.** The message box and
+  New session say what went wrong in one sentence, offer ↻ where trying again can help,
+  and show how far an upload is. A picture dropped anywhere on a session's page goes to its
+  message box, and an unsent message's pictures come back with its words after a reload.
+- **A picture is shown whole, and opens over the page.** A thumbnail in the message box
+  and in a sent message is the whole picture, in a frame of its own shape up to 120×88,
+  so two screenshots that start alike can be told apart. A sent one opens large over the
+  page in the browser and in the desktop and phone apps alike: Esc, a tap outside it or ×
+  closes it, and the arrow keys (or the two arrows beside it) go through the message's
+  pictures. A picture that doesn't load is a chip with its name, never words in an empty
+  frame, and why one in the message box can't go is said once, on a line under them all.
+- **An agent's reply keeps its lines.** A single line break in a reply is a line break
+  on the page, the way the agent wrote it, everywhere a reply is shown.
+- **A phone's browser on the board's Wi-Fi or tailnet address says what works there.**
+  Over plain http no passkey can sign, so the line under the message box says: "To send
+  from this phone, use the sessionpipe app (scan the code on /connect) or open this board
+  over HTTPS (start it with --tls).", with /connect a link, and the greyed paperclip says
+  the same.
+- **On a spacesheep account a new session's level is not second-guessed.** spacesheep
+  doesn't say what level the computer ran a start at, so the session no longer says the
+  computer ran it at its own mode.
+- **The iPhone app asks for the camera for photos too.** Its question now says it reads
+  your computer's code and takes photos you send to a session.
+- **Pictures reach a computer through spacesheep.** The iPhone app on a spacesheep
+  account, and a board connected to spacesheep, now have the paperclip, paste, drop and
+  the camera for a session on a computer whose sessionpipe is 0.10 or later, and New
+  session takes pictures and files for one: they upload to spacesheep, where the computer
+  fetches them. A sent message shows them as thumbnails on the device that sent them
+  (kept 30 days, up to 50 MB, and removed with the account on Disconnect) and as chips
+  elsewhere. A computer with an older sessionpipe gets the line to update it, and a
+  spacesheep that takes no pictures from here says so once (`spacesheep.dev can't take
+  pictures from here yet.`) and the paperclip is gone until the app or the page is opened
+  again.
 - **A session's title is plain words everywhere.** A title written with Markdown showed
   its marks: "the old \`--sink\` flag?". It now reads "the old --sink flag?" wherever a
   title shows, in the menu bar and notifications as well. Code written without backticks
