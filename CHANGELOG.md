@@ -6,6 +6,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-11-20
+
+A round on the desktop app: on a computer a session opens beside the page, Settings opens
+over the page you were on, the Board's bar has one Filter, keyboard focus is drawn in ink
+so orange only means "needs you", Windows and Linux get their own menu bar and keys, and a
+new version of the app brings this Mac's background service along. And pictures in
+sessions: a big photo is made smaller before it uploads, a sent message shows its
+pictures, an upload that fails says why, and the iPhone app on a spacesheep account can
+send them to a computer once spacesheep takes them.
+
 ### Added
 
 - **A board's link can be replaced.** `sessionpipe-gui key renew`, or *New link…* in the
@@ -2125,7 +2135,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.3...v0.8.4
