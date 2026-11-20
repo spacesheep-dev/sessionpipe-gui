@@ -572,6 +572,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   March 2, December 1 or the next day, though `schemas/v1/event.json` refuses it. It is now
   rejected as `bad_time`, as `T25:00:00Z` already was, and the outbox and spacesheep sources
   skip it as they skip any other invalid event; `2028-02-29` is still accepted.
+- **`tls status` agrees with the next `--tls` start in three more corners.** With the CA
+  near its end beside a file that needs a hand, status said to fix it by hand while the
+  start makes a new CA; with `server.key` or `server.crt` read-only and the server
+  certificate due to be remade, or a folder in place of `ca.crt` (or any of the four
+  files), it promised a new certificate that the start then fails to write or delete. It
+  now says a new CA in the first case and names the file to fix by hand in the others. The `tls status` line in
+  `--help` says what it prints for a broken set.
 
 ## [0.8.6] - 2026-11-19
 

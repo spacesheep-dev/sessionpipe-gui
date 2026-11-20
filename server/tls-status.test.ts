@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { tempDir } from "../test/events.js";
-import { ensureCerts, opensslAvailable } from "./tls/certs.js";
+import { certsProblem, ensureCerts, opensslAvailable, readCerts } from "./tls/certs.js";
 
 const HAVE_OPENSSL = opensslAvailable();
 if (!HAVE_OPENSSL) process.stderr.write("[tls-status.test] openssl is not on the PATH: these tests are skipped\n");
@@ -185,4 +185,91 @@ describe.skipIf(!HAVE_OPENSSL)("sessionpipe-gui tls status", () => {
     },
     20_000,
   );
+  // The corners kombuchapunk listed on #194: status says what the next --tls start does,
+  // and each test runs that start (ensureCerts) to show it does that.
+  it("says a CA near its end is made anew even beside a file that needs a hand", () => {
+    const state = stateWithCerts();
+    writeFileSync(path.join(tls(state), "server.key"), "");
+    const nearEnd = Date.parse(readCerts(tls(state))!.caExpiresAt) - 86_400_000;
+    expect(certsProblem(tls(state), nearEnd)).toEqual({ problem: "server.key is not a private key", repair: "ca" });
+    expect(ensureCerts(tls(state), { hostname: "box.local", addresses: [], now: () => nearEnd }).made).toBe("all");
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "says a server.key it cannot write is fixed by hand when the server certificate is to be remade",
+    () => {
+      const state = stateWithCerts();
+      const key = path.join(tls(state), "server.key");
+      rmSync(path.join(tls(state), "server.crt"));
+      chmodSync(key, 0o400);
+      try {
+        const r = status(state);
+        expect(r.stderr).toBe(refusal(state, "server.crt is missing, server.key cannot be written", byHand()));
+        expect(r.status).toBe(2);
+        expect(() => ensureCerts(tls(state), { hostname: "box.local", addresses: [] })).toThrow(/server\.key/);
+      } finally {
+        chmodSync(key, 0o600);
+      }
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "says a server.crt it cannot write is fixed by hand when the server certificate is to be remade",
+    () => {
+      const state = stateWithCerts();
+      const crt = path.join(tls(state), "server.crt");
+      writeFileSync(crt, "not a certificate");
+      chmodSync(crt, 0o400);
+      try {
+        const r = status(state);
+        expect(r.stderr).toBe(
+          refusal(state, "server.crt is not a certificate, server.crt cannot be written", byHand()),
+        );
+        expect(r.status).toBe(2);
+        expect(() => ensureCerts(tls(state), { hostname: "box.local", addresses: [] })).toThrow(/server\.crt/);
+      } finally {
+        chmodSync(crt, 0o600);
+      }
+    },
+    20_000,
+  );
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "still says a new CA when files it cannot write are deleted first",
+    () => {
+      const state = stateWithCerts();
+      const key = path.join(tls(state), "server.key");
+      rmSync(path.join(tls(state), "ca.key"));
+      rmSync(path.join(tls(state), "server.crt"));
+      chmodSync(key, 0o400);
+      const r = status(state);
+      expect(r.stderr).toBe(refusal(state, "ca.key is missing, server.crt is missing", NEW_CA));
+      expect(r.status).toBe(2);
+      expect(ensureCerts(tls(state), { hostname: "box.local", addresses: [] }).made).toBe("all");
+    },
+    20_000,
+  );
+
+  it("says a folder named ca.crt is fixed by hand, as start stops at deleting it", () => {
+    const state = stateWithCerts();
+    const ca = path.join(tls(state), "ca.crt");
+    rmSync(ca);
+    mkdirSync(ca);
+    const r = status(state);
+    expect(r.stderr).toBe(refusal(state, "ca.crt is a folder", byHand()));
+    expect(r.status).toBe(2);
+    expect(() => ensureCerts(tls(state), { hostname: "box.local", addresses: [] })).toThrow(/EISDIR|is a directory/);
+  }, 20_000);
+
+  it("says a folder in place of any file is fixed by hand, even when a new CA is due", () => {
+    const state = stateWithCerts();
+    rmSync(path.join(tls(state), "ca.key"));
+    rmSync(path.join(tls(state), "server.crt"));
+    mkdirSync(path.join(tls(state), "server.crt"));
+    const r = status(state);
+    expect(r.stderr).toBe(refusal(state, "ca.key is missing, server.crt is a folder", byHand()));
+    expect(r.status).toBe(2);
+    expect(() => ensureCerts(tls(state), { hostname: "box.local", addresses: [] })).toThrow(/EISDIR|is a directory/);
+  }, 20_000);
 });
