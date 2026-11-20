@@ -1272,6 +1272,13 @@ test.describe("pictures another surface sent, on an account", () => {
     const prompts = page4.locator("blockquote.prompt, blockquote.chat-bubble");
     await expect(prompts).toHaveCount(2);
     for (const p of await prompts.all()) expect((await p.textContent())?.trim()).not.toBe("");
+    // The one of a picture alone is its chip in the message's well, never a chip left loose.
+    const well = await prompts.last().evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { fill: cs.backgroundColor, padding: Number.parseFloat(cs.paddingTop) };
+    });
+    expect(well.fill).not.toBe("rgba(0, 0, 0, 0)");
+    expect(well.padding).toBeGreaterThan(0);
     const html = await page4.content();
     for (const no of [STATE, LOCAL, "/attachments/"]) expect(html).not.toContain(no);
     expect(server4.seen.filter((r) => r.includes("/attachments/"))).toEqual([]);

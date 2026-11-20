@@ -339,8 +339,9 @@ html:has(.main > .session) {
   -webkit-user-select: none;
   user-select: none;
 }
-/* A message of pictures alone is its pictures: no well, no bubble around them. */
-:is(.prompt, .chat-bubble):not(:has(.prompt-words)):has(> .att-thumbs) {
+/* A message of pictures alone is its pictures: no well, no bubble around them. One that
+   holds a chip (a picture kept elsewhere, a file) keeps its well, which groups them. */
+:is(.prompt, .chat-bubble):not(:has(.prompt-words)):not(:has(.att-chip, .att-thumb-wait)):has(> .att-thumbs) {
   padding: 0;
   background: none;
 }
