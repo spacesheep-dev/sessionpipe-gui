@@ -36,7 +36,7 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Face ID signs what you send to your computers, so only you can.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>sessionpipe reads the code your computer shows, to connect to it.</string>
+	<string>sessionpipe uses the camera to read your computer's code and to take photos you send to a session.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>sessionpipe connects to the receiver on your computer over your local network.</string>
 	<key>UILaunchStoryboardName</key>

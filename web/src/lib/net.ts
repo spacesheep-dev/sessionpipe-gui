@@ -24,7 +24,10 @@ export interface EventSourceLike {
 
 const shell = (
   globalThis as {
-    sessionpipeShell?: { rxBase?: string | null; receiver?: { origin?: string; kind?: string } | null };
+    sessionpipeShell?: {
+      rxBase?: string | null;
+      receiver?: { origin?: string; kind?: string; name?: string } | null;
+    };
   }
 ).sessionpipeShell;
 const base = shell?.rxBase || "";
@@ -60,9 +63,63 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(apiUrl(path), init);
 }
 
+/** What an upload is: its bytes as an ArrayBuffer (never a Blob: the app's webview can
+ *  hand one to the shell's rx: protocol as an empty stream), how far it got, and a way to
+ *  stop it. */
+export interface UploadInit {
+  method?: "POST" | "PUT";
+  headers: Record<string, string>;
+  body: ArrayBuffer;
+  signal?: AbortSignal;
+  /** Bytes sent so far, of `total`; only where `uploadProgress()` says it is known. */
+  onProgress?: (sent: number, total: number) => void;
+}
+
+/** An upload says how far it got: in a browser on the receiver's own page, whose
+ *  XMLHttpRequest counts the bytes as they go. The app's shell and an account's page answer
+ *  a request whole, so there only its size is known. */
+export const uploadProgress = (): boolean =>
+  !backend && !accountMode() && base === "" && typeof XMLHttpRequest === "function";
+
+/** An upload to the page's backend, as `apiFetch`, with its progress where it is known.
+ *  A network failure rejects with a TypeError, as fetch does; a stop with an AbortError. */
+export function apiUpload(path: string, init: UploadInit): Promise<Response> {
+  const { method = "POST", headers, body, signal, onProgress } = init;
+  if (!uploadProgress()) return apiFetch(path, { method, headers, body, signal });
+  return new Promise((resolve, reject) => {
+    const stopped = () => new DOMException("The upload was stopped.", "AbortError");
+    if (signal?.aborted) return reject(stopped());
+    const x = new XMLHttpRequest();
+    x.open(method, apiUrl(path));
+    for (const [k, v] of Object.entries(headers)) x.setRequestHeader(k, v);
+    x.responseType = "arraybuffer";
+    x.upload.onprogress = (e) => onProgress?.(e.loaded, e.lengthComputable ? e.total : body.byteLength);
+    x.onload = () => {
+      if (x.status < 200 || x.status > 599) return reject(new TypeError("Failed to fetch"));
+      const h = new Headers();
+      for (const line of x
+        .getAllResponseHeaders()
+        .trim()
+        .split(/[\r\n]+/)) {
+        const at = line.indexOf(":");
+        if (at > 0) h.append(line.slice(0, at).trim(), line.slice(at + 1).trim());
+      }
+      const empty = x.status === 204 || x.status === 304;
+      resolve(new Response(empty ? null : (x.response as ArrayBuffer), { status: x.status, headers: h }));
+    };
+    x.onerror = () => reject(new TypeError("Failed to fetch"));
+    x.onabort = () => reject(stopped());
+    signal?.addEventListener("abort", () => x.abort(), { once: true });
+    x.send(body);
+  });
+}
+
 /** The receiver's own address, for a link a person copies or opens elsewhere (in the
  *  shell the page's origin is the app's). */
 export const receiverOrigin = (): string => shell?.receiver?.origin || location.origin;
+
+/** The name the app gives the receiver this window shows; undefined in a browser. */
+export const receiverName = (): string | undefined => shell?.receiver?.name || undefined;
 
 /** The account this window shows is on spacesheep.dev itself: what the page says of
  *  spacesheep's own rules (what it takes, what it never holds) is said only there. An

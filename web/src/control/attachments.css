@@ -1,9 +1,13 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Images beside a prompt (control/Attachments.tsx): the paperclip inside the field, the
-   tray of 56 px thumbnails at the field's top (each one's size is its tooltip; only a
-   refusal is written under it), the drop highlight, and the thumbnails a sent
-   prompt shows in the activity list and the Session view. Fills and hairlines, no
-   badges; the shared spinner while one uploads. */
+   tray of thumbnails at the field's top (each one's size is its tooltip; one line under
+   the tray says a refusal or how far the uploads are), the drop highlight, the thumbnails
+   a sent prompt shows in the activity list and the Session view, with a chip for a file
+   that is no picture or is kept no more, and the lightbox a sent one opens
+   (control/Lightbox.tsx). A thumbnail is the whole picture: its frame takes the picture's
+   shape within 120×88 (88×64 in a phone's row, 44×32 in a list row), on a neutral fill
+   where a very long or tall one leaves room. Fills and hairlines, no badges; the shared
+   spinner while one uploads. */
 
 /* The paperclip: an icon button in the field (a label around the hidden picker). */
 .att-btn {
@@ -71,47 +75,82 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  width: 56px;
 }
 .att-frame {
   position: relative;
   display: block;
   line-height: 0;
 }
-.att-thumb {
+/* The picture's own shape within 120×88; one not drawn yet holds a 44 px square. */
+.att-thumb,
+.att-thumbs img {
   display: block;
-  width: 56px;
-  height: 56px;
-  object-fit: cover;
+  width: auto;
+  height: auto;
+  max-width: 120px;
+  max-height: 88px;
+  min-width: 44px;
+  min-height: 44px;
+  object-fit: contain;
   border-radius: var(--radius-inner);
   outline: var(--hairline) solid var(--line);
   outline-offset: -1px;
   background: var(--bg-3);
 }
+/* Under a finger the pictures sit in one row that scrolls sideways, so the conversation
+   keeps its room and no picture's buttons sit over the row below. The row runs to the
+   field's inner edge, never past its border, and holds room above, below and at its end
+   for the buttons' targets a scroller would cut. */
+@media (pointer: coarse) {
+  .ctl-field > .att {
+    padding-top: 0;
+  }
+  .att-tray {
+    flex-wrap: nowrap;
+    margin: 0 -12px -24px;
+    padding: 20px 20px 24px 12px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .att-tray::-webkit-scrollbar {
+    display: none;
+  }
+  .att-item {
+    flex: none;
+  }
+}
+/* A phone (or a tablet held upright, as New session's phone row): each frame within 88×64. */
+@media (max-width: 839px) and (pointer: coarse) {
+  .att-thumb {
+    max-width: 88px;
+    max-height: 64px;
+  }
+}
 .att-item--busy .att-thumb {
   opacity: 0.45;
+}
+/* One that didn't upload: dimmed, in the error's colour; its words are the line under the tray. */
+.att-item--err .att-thumb {
+  opacity: 0.6;
+  outline-color: var(--err);
+}
+/* A picture that can't be drawn here (not a picture, or a draft's copy this page can't
+   load): its frame, with a picture glyph in it. */
+.att-thumb[data-broken] {
+  display: none;
+}
+.att-thumb--none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-3);
 }
 .att-busy {
   position: absolute;
   top: 50%;
   left: 50%;
   margin: -6px 0 0 -6px;
-}
-.att-meta {
-  display: flex;
-  flex-direction: column;
-  color: var(--fg-3);
-  font-size: var(--text-xs);
-  line-height: var(--lh-tight);
-  white-space: nowrap;
-}
-.att-meta > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.att-item--err .att-meta {
-  color: var(--err);
-  white-space: normal;
 }
 .att-x.icon-btn {
   position: absolute;
@@ -125,16 +164,46 @@
   box-shadow: var(--shadow-sm);
   color: var(--fg-2);
 }
-/* The 20 px face, a 24 px target. */
+/* The 20 px face, a 26 px target. */
 .att-x.icon-btn::before {
   content: "";
   position: absolute;
   inset: -3px;
 }
+/* Try again, beside × on one whose upload failed, their targets side by side. */
+.att-retry.icon-btn {
+  right: 18px;
+}
+/* Under a finger the same faces, each a 44 px target: × at the top right corner, Try again
+   at the bottom right, its target reaching down, so a tap meant for one never lands on the
+   other, whatever the picture's shape. */
+@media (pointer: coarse) {
+  /* Measured from inside the hairline: 12 px past the face on every side. */
+  .att-x.icon-btn::before {
+    inset: calc(-12px - var(--hairline));
+  }
+  .att-retry.icon-btn {
+    top: auto;
+    right: -8px;
+    bottom: -8px;
+  }
+  .att-retry.icon-btn::before {
+    inset: calc(-8px - var(--hairline)) calc(-12px - var(--hairline)) calc(-16px - var(--hairline));
+  }
+  /* The line under the tray clears a ↻ that hangs below its picture. */
+  .att:has(.att-retry) > .att-note {
+    margin-top: 14px;
+  }
+}
 .att-note {
   margin: 4px 0 0;
   color: var(--err);
   font-size: var(--text-sm);
+}
+/* How far the uploads are, or that a send waits for them. */
+.att-note--info {
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Thumbnails of a sent prompt (activity row, Session view). */
@@ -153,19 +222,211 @@
   outline: var(--focus-width) solid var(--focus);
   outline-offset: 2px;
 }
-.att-thumbs img {
-  width: 64px;
-  height: 64px;
-  object-fit: cover;
+.att-thumbs--sm img {
+  max-width: 44px;
+  max-height: 32px;
+  min-width: 24px;
+  min-height: 24px;
+}
+/* A picture this page kept, being read: its thumbnail's place. */
+.att-thumb-wait {
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-inner);
-  outline: var(--hairline) solid var(--line);
-  outline-offset: -1px;
   background: var(--bg-3);
 }
-.att-thumbs--sm img {
-  width: 32px;
-  height: 32px;
+.att-thumbs--sm .att-thumb-wait {
+  width: 24px;
+  height: 24px;
 }
 .att-thumbs--sm {
   margin-top: 4px;
+}
+/* Under a finger a row's small thumbnail is a 44 px target around the same face. */
+@media (pointer: coarse) {
+  .att-thumbs--sm {
+    gap: 12px;
+  }
+  .att-thumbs--sm a {
+    position: relative;
+  }
+  .att-thumbs--sm a::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* A file a sent message carried, drawn as words: a file's glyph when it is no picture,
+   its name (cut to fit), then its type and size in the meta tier. */
+.att-thumbs {
+  align-items: center;
+}
+.att-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-inner);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+.att-chip svg {
+  flex: none;
+  color: var(--fg-3);
+}
+.att-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.att-chip-meta {
+  flex: none;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.att-thumbs--sm .att-chip {
+  min-height: 24px;
+  padding: 0 6px;
+  font-size: var(--text-xs);
+}
+
+/* A picture kept elsewhere (an older version's block on an account, spacesheep's Talk
+   pane): its name stays whole up to half the chip, and where it is kept wraps under it
+   in a narrow column rather than cutting either. */
+.att-chip--elsewhere {
+  white-space: normal;
+}
+.att-chip--elsewhere .att-chip-name {
+  flex: none;
+  max-width: 50%;
+  white-space: nowrap;
+}
+.att-chip--elsewhere .att-chip-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* The lightbox: the picture whole over a dark ground in every scheme, its name under it,
+   × at the top right and, with several, a chevron each side. */
+.lb {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-menu);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  padding: max(56px, env(safe-area-inset-top)) 56px max(16px, env(safe-area-inset-bottom));
+  /* Opaque: nothing of the page (its tabs, the message box) shows through. */
+  background: oklch(0.14 0 0);
+  color: oklch(0.96 0 0);
+  overscroll-behavior: contain;
+  animation: fade-in var(--dur) var(--ease-out) both;
+}
+.lb:focus {
+  outline: none;
+}
+/* The picture at its own size, or smaller to fit, in the middle of what is left. */
+.lb-stage {
+  position: relative;
+  min-height: 0;
+}
+.lb-img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-inner);
+  background: var(--bg-3);
+}
+.lb-cap {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 12px 0 0;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+}
+.lb-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-count {
+  flex: none;
+  color: oklch(0.96 0 0 / 0.6);
+}
+.lb-btn.icon-btn {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  background: oklch(1 0 0 / 0.1);
+  color: inherit;
+}
+@media (hover: hover) {
+  .lb-btn.icon-btn:hover {
+    background: oklch(1 0 0 / 0.2);
+  }
+}
+.lb-btn.icon-btn:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: 2px;
+}
+.lb-x.icon-btn {
+  top: max(8px, env(safe-area-inset-top));
+  right: 8px;
+}
+.lb-prev.icon-btn,
+.lb-next.icon-btn {
+  top: 50%;
+  margin-top: -20px;
+}
+.lb-prev.icon-btn {
+  left: 8px;
+}
+.lb-next.icon-btn {
+  right: 8px;
+}
+/* Under a finger each is a 44 px target, wherever the lightbox is. */
+@media (pointer: coarse) {
+  .lb-btn.icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .lb-prev.icon-btn,
+  .lb-next.icon-btn {
+    margin-top: -22px;
+  }
+}
+/* A phone: the picture takes the width, the chevrons sit beside its name at the foot. */
+@media (max-width: 599px) {
+  .lb {
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-bottom: max(64px, calc(env(safe-area-inset-bottom) + 56px));
+  }
+  .lb-btn.icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .lb-prev.icon-btn,
+  .lb-next.icon-btn {
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    margin-top: 0;
+  }
 }

@@ -762,7 +762,9 @@ impl Hub {
         if proxy::allow_origin(origin, allowed).is_none() {
             return refuse(Refused::ForbiddenOrigin);
         }
-        let opened = match account::open_door(&method, path) {
+        let opened = match account::open_door(&method, path)
+            .and_then(|o| o.with_headers(|name| req.headers().get(name).map(|v| v.as_bytes())))
+        {
             Ok(o) => o,
             Err(r) => return refuse(r),
         };
@@ -857,9 +859,17 @@ impl Hub {
             .header(AUTHORIZATION, auth)
             .header(ACCEPT, JSON)
             .header(ACCEPT_ENCODING, "gzip")
-            .timeout(SECOND * opened.timeout_s() as u32);
+            .timeout(SECOND * opened.timeout_s(body.len()) as u32);
         if method == reqwest::Method::POST {
-            b = b.header(CONTENT_TYPE, JSON).body(body);
+            // A file goes with its own type and name (`Opened::with_headers`); everything
+            // else posted is JSON.
+            if door != Door::MachineFiles {
+                b = b.header(CONTENT_TYPE, JSON);
+            }
+            for (name, value) in &opened.headers {
+                b = b.header(*name, value.as_str());
+            }
+            b = b.body(body);
         }
         let failed = |why: &str| self.proxy_failed(&rx.id, method.as_str(), door.name(), why);
         let res = match b.send().await {

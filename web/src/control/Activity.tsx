@@ -13,7 +13,7 @@ import { Markdown } from "../components/Markdown";
 import { useSession } from "../data/hooks";
 import { harnessMark, oneLine, sessionTitle } from "../lib/format";
 import { Link, sessionPath } from "../lib/router";
-import { AttachmentThumbs, promptParts } from "./Attachments";
+import { attachmentRefs, LinkPictures, linkPictures, promptParts, SentPictures, shownFiles } from "./Attachments";
 import { isFinal, KIND_LABEL, outcomeWords, shownState } from "./words";
 import "./control.css";
 import "../styles/lineage.css";
@@ -41,8 +41,11 @@ export function ActivityRow({
 }) {
   const state = shownState(a);
   const live = !isFinal(a);
-  // A prompt's attachments block (shared/attachments.ts) is drawn as thumbnails, not read as text.
+  // A prompt's block of pictures (shared/attachments.ts) is drawn as thumbnails or chips, not
+  // read as text; so are the files it signed.
   const prompt = a.text ? promptParts(a.text) : null;
+  const legacy = attachmentRefs(prompt?.items ?? []);
+  const links = linkPictures(prompt?.items ?? []);
   const text = prompt && (prompt.body || prompt.items.length === 0) && (
     <span className="ctl-act-text" title={prompt.body}>
       {oneLine(prompt.body, 120)}
@@ -69,7 +72,8 @@ export function ActivityRow({
         {text}
         {when}
       </div>
-      {prompt && prompt.items.length > 0 && <AttachmentThumbs items={prompt.items} small />}
+      <LinkPictures items={links} small />
+      <SentPictures legacy={legacy} files={shownFiles([], a.files, [])} small />
       {(a.from || a.replyTo) && <ViaLine from={a.from} replyTo={a.replyTo} />}
       <p className={`ctl-act-state ${live ? "is-live" : ""}`} aria-live="polite">
         {live && <span className="spinner" aria-hidden="true" />}

@@ -388,6 +388,26 @@ describe("sentTurns", () => {
     expect(sentTurns([{ ...m, text: "x".repeat(400) }], turns).has("p")).toBe(false);
   });
 
+  it("gives a tier-2 turn to a message with files, its length counting the machine's list of them", () => {
+    const ev = session();
+    const text = "Look at the 3 attached pictures.";
+    const files = ["kiwi.png", "birch.png", "Screenshot 2026-11-17 at 10.41.07 PM.png"].map((name) => ({
+      name,
+      type: "image/png",
+    }));
+    // As sessionpipe frames it: the source line, the words, the list of saved files.
+    const sid = "8c132906-8c3f-4814-870a-afc3d05e1d2e";
+    const nonce = "Qk1dXyT0aZ3mR8vL2pN6sWc4";
+    const prompt = `Message via studio-mac.local:7373 (sessionpipe control, signed on the sender's device):\n\n${text}\n\nAttached files (saved in this folder):\n${files
+      .map((f) => `- .sessionpipe/files/${sid}/${nonce}/${f.name} (image/png, 32 KB)`)
+      .join("\n")}`;
+    const turns = groupTurns([ev("turn.started", 30, { prompt_chars: prompt.length })]);
+    const m = { id: "p", at: iso(20), takenAt: iso(25), text, files };
+    expect(sentTurns([m], turns).get("p")).toBe(1);
+    // Without its files the same length is too long to be these words.
+    expect(sentTurns([{ ...m, files: undefined }], turns).has("p")).toBe(false);
+  });
+
   it("gives a start the session's first turn, but only when the window begins at it", () => {
     const ev = session();
     const text = "Fix the invoice rounding in src/money.ts.";

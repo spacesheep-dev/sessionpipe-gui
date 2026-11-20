@@ -6,7 +6,8 @@
 //
 // Covered: paragraphs, ATX headings (levels clamped to 1–4), emphasis, inline code,
 // fenced code, nested lists, blockquotes, rules, GFM pipe tables, links, images
-// (alt only), bare http(s) autolinks and hard line breaks. Everything else is text.
+// (alt only), bare http(s) autolinks and line breaks (every newline in a paragraph is
+// one). Everything else is text.
 
 export type Inline =
   | { type: "text"; text: string }
@@ -218,13 +219,12 @@ function parseInlines(src: string, inLink = false): Inline[] {
   for (let i = 0; i < src.length; ) {
     const ch = src.charAt(i);
     if (ch === "\n") {
-      // Two trailing spaces or a trailing backslash make a hard break; otherwise soft.
+      // Every newline is a line break, as an agent means a reply's lines (GitHub's comments
+      // read them so too); the two trailing spaces or the backslash of a hard break go.
       const hard = /( {2,}|\\)$/.exec(text);
-      if (hard) {
-        text = text.slice(0, -group(hard, 1).length);
-        flush();
-        out.push({ type: "br" });
-      } else text += "\n";
+      if (hard) text = text.slice(0, -group(hard, 1).length);
+      flush();
+      out.push({ type: "br" });
       i++;
       continue;
     }

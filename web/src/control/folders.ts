@@ -40,6 +40,14 @@ export function expandHome(p: string, home?: string | null): string | null {
   return null;
 }
 
+/** `p` is a `~/…` folder this page can't name: the machine expands none itself and no home
+ *  is known (a computer reached through spacesheep, whose sessions report `~/…`). Such a
+ *  folder says nothing about the machine's own; a sheet starts from those instead. */
+export const unnamedHere = (p: string, home?: string | null): boolean => {
+  const t = p.trim();
+  return (t === "~" || t.startsWith("~/")) && !home;
+};
+
 /** `p` is `root` or inside it, by whole path segments (case-sensitive, as the daemon is). */
 export function under(root: string, p: string): boolean {
   const r = segments(root);
@@ -121,8 +129,7 @@ export function typedFolder(
 ): { ok: true; path: string } | { ok: false; reason: string } {
   const t = text.trim();
   if (!t) return { ok: false, reason: "Choose a folder" };
-  if ((t === "~" || t.startsWith("~/")) && !o.home)
-    return { ok: false, reason: `${o.machine} needs the full path; type it starting with /` };
+  if (unnamedHere(t, o.home)) return { ok: false, reason: `${o.machine} needs the full path; type it starting with /` };
   const abs = expandHome(t, o.home);
   if (!abs) return { ok: false, reason: "Type the folder's full path, starting with / or ~/" };
   if (segments(abs).some((x) => x === ".." || x === "."))

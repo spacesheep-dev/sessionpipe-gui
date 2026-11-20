@@ -9,6 +9,7 @@
 // no `turn.started`: its transcript, marked `injected`, is an exchange of its own after
 // that turn. Pure, so all of it is unit-tested.
 import type { AgentRun, StoredEvent } from "@shared/api";
+import { FILES_HEADING } from "@shared/attachments";
 import { harnessMark } from "./format";
 import { dur } from "./time";
 
@@ -328,6 +329,8 @@ export interface SentMessage {
   id: string;
   at: string;
   text: string;
+  /** The files it carried, as signed: the machine lists them after its words. */
+  files?: readonly { name: string; type: string }[];
   takenAt?: string;
   start?: boolean;
   outcome?: string;
@@ -463,13 +466,25 @@ function sameWords(sent: string, prompt: string): boolean {
 /** What the machine's framing adds to a message at most, as `prompt_chars` counts it. */
 const FRAME_MAX = 400;
 
+/** What the machine's list of a message's saved files adds to it at most (CONTROL.md §6):
+ *  a blank line and the heading, then a line per file, its path in the session's folder (a
+ *  session id and a nonce of at most 128 and 64 characters), its type and size. */
+function filesListMax(files: SentMessage["files"]): number {
+  if (!files?.length) return 0;
+  let n = 2 + FILES_HEADING.length;
+  for (const f of files)
+    n += 1 + "- .sessionpipe/files/".length + 128 + 1 + 64 + 1 + f.name.length + f.type.length + 16;
+  return n;
+}
+
 /** Whether a turn whose prompt can't be read (tier 2 sends its length only) could be this
- *  message: its length is the message's, give or take the machine's framing. */
+ *  message: its length is the message's, give or take the machine's framing and its list
+ *  of the files the message carried. */
 function hiddenFits(m: SentMessage, t: Turn): boolean {
   const chars = t.start?.data.prompt_chars;
   if (typeof chars !== "number") return true;
   const n = m.text.trim().length;
-  return chars >= n && chars <= n + FRAME_MAX;
+  return chars >= n && chars <= n + FRAME_MAX + filesListMax(m.files);
 }
 
 /** Which turn each sent message became: oldest message first, each takes the first turn

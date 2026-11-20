@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: web. The account's five doors (docs/rfcs/08, "The doors"): the page asks
+// Owned by: web. The account's six doors (docs/rfcs/08, "The doors"): the page asks
 // `${rxBase}<path>`, the native hub adds the account's key and forwards these and nothing
 // else. An answer with the header `x-sessionpipe-hub` is the hub's own (`{ hub: true,
 // reason, error }`), one without it is spacesheep's; the two are told apart here, once,
@@ -24,6 +24,8 @@ export const hubCode = (code: string): string => `hub_${code}`;
  *  it waits between tries when the hub names no time. */
 export const SEND_BUSY_TRIES = 3;
 export const SEND_BUSY_WAIT_MS = 1000;
+/** The hub's longest `x-file-name`, percent-encoded (sp-receivers account.rs FILE_NAME_MAX). */
+export const FILE_NAME_MAX = 1024;
 
 /** The hub's own answers to a send that come BEFORE any network, by the contract's list
  *  (docs/rfcs/08, "The doors": the refusals of a request as it stands, the account's full
@@ -140,6 +142,19 @@ export interface AccountDoors {
   look(m: { id: string }, body: Record<string, unknown>, askedAt: number, floor: number): Promise<Looked>;
   /** `GET /api/gui/device`: where this phone's own device key stands. */
   device(): Promise<DoorAnswer>;
+  /** `POST /api/machines/files`: one file's bytes for a machine to fetch, with its type and
+   *  its name (percent-encoded, as the hub forwards it, where it fits the hub's cap). The answer as it came, and its
+   *  Retry-After in seconds where it has one; a full room at the hub is asked again.
+   *  `signal`: the page let the file go (removed, or going again for another machine), which
+   *  ends its request at the hub. */
+  uploadFile(
+    file: {
+      bytes: Uint8Array;
+      type: string;
+      name: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<DoorAnswer & { retryAfter: number | null }>;
 }
 
 export interface DoorsOptions {
@@ -379,5 +394,28 @@ export function openDoors(o: DoorsOptions): AccountDoors {
       return { status: 504, json: { code: SEND_UNKNOWN_CODE, error: said.why } };
     },
     device: async () => read1(await get("/api/gui/device")),
+    async uploadFile(file, signal) {
+      const name = encodeURIComponent(file.name);
+      for (let i = 0; ; i++) {
+        signal?.throwIfAborted();
+        const res = await f(`${o.rxBase}/api/machines/files`, {
+          method: "POST",
+          headers: {
+            "content-type": file.type,
+            // A name longer than the hub takes goes without the header (it is optional
+            // there): the name signed is the page's own, whatever spacesheep was told.
+            ...(name.length <= FILE_NAME_MAX ? { "x-file-name": name } : {}),
+            accept: "application/json",
+          },
+          body: file.bytes as Uint8Array<ArrayBuffer>,
+          ...(signal ? { signal } : {}),
+        });
+        const a = await read1(res);
+        const after = Number(res.headers.get("retry-after"));
+        const retryAfter = Number.isFinite(after) && after > 0 ? after : null;
+        if (a.hub !== "busy" || i >= SEND_BUSY_TRIES - 1) return { ...a, retryAfter };
+        await sleep(retryAfter ? retryAfter * 1000 : SEND_BUSY_WAIT_MS);
+      }
+    },
   };
 }

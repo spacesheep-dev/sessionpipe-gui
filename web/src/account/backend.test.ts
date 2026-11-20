@@ -6,6 +6,7 @@
 // reaches spacesheep is read at the far end.
 import type { ControlActivity, Snapshot, StreamMessage } from "@shared/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fileSha256 } from "../../../server/control/remote";
 import { RELAY_BUDGET } from "../../../server/sources/relay";
 import { type FakeAnswer, type FakeRequest, FakeSpacesheep } from "../../../test/account/fake-spacesheep";
 import { HubStandIn } from "../../../test/account/hub";
@@ -43,6 +44,11 @@ const machine = (over: Record<string, unknown> = {}) => ({
 
 /** A hub over a spacesheep, an account connected on it, and a page's backend on that. */
 function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } = {}) {
+  /** The databases the backend deleted by name (a cache of its own is handed in). */
+  const deletedDbs: string[] = [];
+  const idb = o.cache
+    ? ({ deleteDatabase: (name: string) => void deletedDbs.push(name) } as unknown as IDBFactory)
+    : null;
   const ss = new FakeSpacesheep();
   ss.machines = [machine()];
   const hub = new HubStandIn({
@@ -52,6 +58,8 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
   hub.rxBase = (id) => `https://rx.test/${id}`;
   hub.add("me@example.com", ss.key);
   const asked: string[] = [];
+  /** Each file's request to the hub's files door: the signal it went with, and its name header. */
+  const fileAsks: { signal: AbortSignal | null; name: string | null }[] = [];
   /** What becomes of the next sends between the page and spacesheep, first in first out:
    *  `lost`: the hub's time ran out and spacesheep never had it; `unheard`: spacesheep took
    *  it and its answer never came back in the hub's time; `dropped`: the app's own
@@ -76,10 +84,23 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
       if (fault === "dropped") throw new TypeError("Load failed");
       return timedOut();
     }
+    // A file's bytes come as bytes, with the two headers the files door reads.
+    const bytes = init?.body instanceof Uint8Array ? init.body : null;
+    const h = new Headers(init?.headers);
+    if (bytes) fileAsks.push({ signal: init?.signal ?? null, name: h.get("x-file-name") });
     const a: FakeAnswer = await hub.door(id, {
       method: init?.method ?? "GET",
       path,
       ...(typeof init?.body === "string" ? { body: init.body } : {}),
+      ...(bytes
+        ? {
+            bytes,
+            headers: {
+              "content-type": h.get("content-type") ?? "",
+              ...(h.has("x-file-name") ? { "x-file-name": h.get("x-file-name")! } : {}),
+            },
+          }
+        : {}),
       ...(init?.signal ? { signal: init.signal } : {}),
     });
     // A send's answer is on its way back, and takes its time.
@@ -124,7 +145,7 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
       shell,
       calls,
       fetch: fetchDoors,
-      idb: null,
+      idb,
       ...(o.cache ? { cache: o.cache } : {}),
       local: {
         forget: (sessions) => void local.push(`forget ${sessions.join(",")}`),
@@ -148,12 +169,14 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
     ss,
     hub,
     asked,
+    fileAsks,
     notices,
     calls,
     failGet,
     sets,
     local,
     stored,
+    deletedDbs,
     gone,
     sendFaults,
     hold,
@@ -562,6 +585,131 @@ describe("a page's own backend on a spacesheep account", () => {
     };
     expect(activity.activity.map((a) => a.id)).toEqual([row.id]);
     page.off();
+  });
+
+  it("takes a picture through the files door: the entry a command names, spacesheep's hash held against the page's own", async () => {
+    const b = await r.start();
+    await tick(400);
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const own = await fileSha256(PNG);
+    const up = async (name = "kiwi.png", type = "image/png") => {
+      const res = await b.answer(`/api/ui/control/files?name=${encodeURIComponent(name)}&machine=${M1}`, {
+        method: "POST",
+        headers: { "content-type": type, accept: "application/json" },
+        body: PNG.slice().buffer,
+      });
+      return [res.status, await res.json()];
+    };
+    // Once NOT_HERE: now the files door, with the bytes, the type and the name.
+    expect(await up("Screenshot at 10.41 PM.png")).toEqual([
+      201,
+      { name: "Screenshot at 10.41 PM.png", type: "image/png", size: PNG.length, sha256: own },
+    ]);
+    expect(r.ss.files).toEqual([
+      { sha256: own, size: PNG.length, type: "image/png", name: "Screenshot at 10.41 PM.png" },
+    ]);
+    expect(r.hub.log.filter((l) => l.startsWith("POST"))).toEqual(["POST /api/machines/files 200"]);
+    expect(b.asked.get("POST /api/ui/control/files")).toBe(201);
+
+    const answer = (status: number, body: Record<string, unknown>, headers: Record<string, string> = {}) => {
+      r.ss.fileAnswer = {
+        status,
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      };
+    };
+    // Another hash than the page's: not signed.
+    answer(200, { sha256: "A".repeat(43), size: PNG.length, type: "image/png" });
+    expect(await up()).toEqual([502, { reason: "not_whole", error: "The picture didn't arrive whole. Try again." }]);
+    // spacesheep's refusals, in words.
+    answer(401, { error: "Unknown or revoked API key.", code: "unauthorized" });
+    expect(await up()).toEqual([
+      502,
+      { reason: "spacesheep_refused", error: "spacesheep.dev can't take pictures from here yet." },
+    ]);
+    answer(415, { error: "That file isn't the picture its type says.", code: "not_a_picture" });
+    expect(await up()).toEqual([415, { reason: "not_an_image", error: "That file isn't a picture." }]);
+    answer(429, { error: "rate_limited", retry_after: 125 }, { "retry-after": "125" });
+    expect(await up()).toEqual([
+      429,
+      {
+        reason: "rate_limited",
+        error: "That's a lot of pictures in a short time. Try again in 3 minutes.",
+        retry_after: 125,
+      },
+    ]);
+    // A 401 there marks nothing: the relay reads on.
+    expect(r.hub.log.some((l) => l.includes("unauthorized"))).toBe(false);
+    // The hub of an app from before the files door.
+    r.hub.filesDoor = false;
+    expect(await up()).toEqual([
+      501,
+      { reason: "no_door", error: "This app can't send pictures yet. Update the app." },
+    ]);
+    // Never a body the page did not give, nor a type that is none.
+    const none = await b.answer(`/api/ui/control/files?name=x.png&machine=${M1}`, { method: "POST" });
+    expect(none.status).toBe(415);
+    // A name a computer would refuse is refused here, as the receiver refuses it, before
+    // anything goes to spacesheep or is signed.
+    r.hub.filesDoor = true;
+    const posts = r.hub.log.filter((l) => l.startsWith("POST")).length;
+    for (const name of [".env", "", "a/b.png", "x".repeat(201), "tab\there.png"]) {
+      const [status, body] = await up(name, "text/plain");
+      expect([status, (body as { reason: string }).reason], JSON.stringify(name)).toEqual([400, "bad_name"]);
+    }
+    expect(r.hub.log.filter((l) => l.startsWith("POST")).length).toBe(posts);
+  });
+
+  it("hands a picture's stop on to the hub: one the page lets go of ends its request there", async () => {
+    const b = await r.start();
+    await tick(400);
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 5, 6, 7, 8]);
+    const up = (signal: AbortSignal) =>
+      b.answer(`/api/ui/control/files?name=kiwi.png&machine=${M1}`, {
+        method: "POST",
+        headers: { "content-type": "image/png", accept: "application/json" },
+        body: PNG.slice().buffer,
+        signal,
+      });
+    const going = new AbortController();
+    expect((await up(going.signal)).status).toBe(201);
+    expect(r.fileAsks).toHaveLength(1);
+    // The very stop the page holds: letting the picture go aborts the hub's request.
+    expect(r.fileAsks[0]!.signal?.aborted).toBe(false);
+    going.abort();
+    expect(r.fileAsks[0]!.signal?.aborted).toBe(true);
+    // One let go of before it went asks the hub nothing.
+    const gone = new AbortController();
+    gone.abort();
+    expect((await up(gone.signal)).status).toBe(502);
+    expect(r.fileAsks).toHaveLength(1);
+  });
+
+  it("takes a picture whose name is too long for the hub's header: it goes without one, under the page's name", async () => {
+    const b = await r.start();
+    await tick(400);
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]);
+    // 196 characters and its extension: 200, as a name may be, and 1 764 bytes encoded.
+    const name = `${"猫".repeat(196)}.png`;
+    expect(name.length).toBe(200);
+    expect(encodeURIComponent(name).length).toBeGreaterThan(1024);
+    const res = await b.answer(`/api/ui/control/files?name=${encodeURIComponent(name)}&machine=${M1}`, {
+      method: "POST",
+      headers: { "content-type": "image/png", accept: "application/json" },
+      body: PNG.slice().buffer,
+    });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ name, type: "image/png", size: PNG.length, sha256: await fileSha256(PNG) });
+    expect(r.fileAsks.at(-1)!.name).toBeNull();
+    // A name that fits goes with it, as before.
+    const short = `${"猫".repeat(100)}.png`;
+    const ok = await b.answer(`/api/ui/control/files?name=${encodeURIComponent(short)}&machine=${M1}`, {
+      method: "POST",
+      headers: { "content-type": "image/png", accept: "application/json" },
+      body: PNG.slice().buffer,
+    });
+    expect(ok.status).toBe(201);
+    expect(r.fileAsks.at(-1)!.name).toBe(encodeURIComponent(short));
   });
 
   it("gives a refusal the shape the page reads: spacesheep's hold, the hub's own word, a machine that is not there", async () => {
@@ -1770,6 +1918,8 @@ describe("a page's own backend on a spacesheep account", () => {
     // disconnected it here, what belongs to no session), and nothing was written to the hub
     // on the way out: its documents are the hub's to delete, not the page's to empty.
     expect(r.local).toEqual([`wipe ${id} [claude-code:s-1] and the conveniences`]);
+    // ...and the pictures it sent, kept to draw them.
+    expect(r.deletedDbs).toEqual([`sessionpipe.sent-pictures.${id}`]);
     expect(r.sets.length).toBe(docsBefore);
     // ...and not on screen: the board is empty, no machine is listed, Settings has no account.
     expect(b.view()).toMatchObject({ state: "gone", store: { sessions: 0 } });
@@ -1845,6 +1995,7 @@ describe("a page's own backend on a spacesheep account", () => {
     expect(cache.destroyed).toBe(true);
     // Its sessions' and its own, and nothing that is no session's: nobody disconnected it here.
     expect(r.local).toEqual([`wipe ${b.view().id} [claude-code:s-1]`]);
+    expect(r.deletedDbs).toEqual([`sessionpipe.sent-pictures.${b.view().id}`]);
     expect(r.gone).toEqual([null]);
     expect(page.last("snapshot")!.snapshot.sessions).toEqual([]);
     page.off();

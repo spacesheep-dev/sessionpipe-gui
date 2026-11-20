@@ -342,14 +342,22 @@ describe("the receiver's wiring and a page's, through one script", () => {
 
   it("machines, sends, refusals, jobs, a restart, a revoked key, a disconnect and another account: row for row", async () => {
     both((ss) => {
-      ss.machines = [listed(M1, "lab-mac"), listed(M2, "attic-linux", { online: false, passkey_ids: ["k1", "k2"] })];
+      ss.machines = [
+        listed(M1, "lab-mac"),
+        listed(M2, "attic-linux", { online: false, passkey_ids: ["k1", "k2"], files: false, prompt_files: false }),
+      ];
     });
     for (const s of sides) s.start(ME);
     await tick(50);
     let v = same("the first read of the relay and the machine list");
     expect(v.machines.map((m) => [m.machineId, m.online, m.files, m.remote?.rpId])).toEqual([
-      [M1, true, undefined, "spacesheep.test"],
+      [M1, true, true, "spacesheep.test"],
       [M2, false, undefined, "spacesheep.test"],
+    ]);
+    // Each takes a start, and neither is offered a `~/…` folder: spacesheep refuses one.
+    expect(v.machines.map((m) => [!!m.start, m.tilde])).toEqual([
+      [true, undefined],
+      [true, undefined],
     ]);
     expect(v.status).toMatchObject({ state: "ok", machines: ["lab-mac", "attic-linux"] });
 
@@ -400,10 +408,10 @@ describe("the receiver's wiring and a page's, through one script", () => {
       const r = await send(M1, command(M1, "prompt", "claude-code:s-1"));
       expect(r).toMatchObject({ refused: { status, body: { code } } });
     }
-    // A file is refused before spacesheep is asked at all.
+    // A file for a computer that takes none is refused before spacesheep is asked at all.
     const withFile = await send(
-      M1,
-      command(M1, "start", "claude-code:s-9", {
+      M2,
+      command(M2, "start", "claude-code:s-9", {
         files: [{ name: "a.txt", type: "text/plain", size: 1, sha256: "A".repeat(43) }],
       }),
     );

@@ -156,7 +156,7 @@ receiver.
 Everything above needs a GUI server. A phone has none: the app is the bundled page and a
 Rust hub. In this mode the page carries its own board, fed by the account's relay, and
 the hub is the only thing between the page and spacesheep. It holds the account's API key
-and does four things with it: connects, forwards five doors, asks spacesheep to trust
+and does four things with it: connects, forwards six doors, asks spacesheep to trust
 this phone's own device key, and keeps a few documents. This section is the contract
 between the two halves.
 
@@ -427,7 +427,7 @@ it has exactly one `@`, at most 64 characters before it and 190 after.
 ### The doors
 
 The page asks `${rxBase}<path>`; the hub adds `Authorization: Bearer <key>` and forwards
-these five and nothing else:
+these six and nothing else:
 
 | method | path | query | body | answer up to |
 |---|---|---|---|---|
@@ -435,6 +435,7 @@ these five and nothing else:
 | GET | `/api/sessionpipe/v1/relay/machines` | none | none | 1 MiB |
 | GET | `/api/sessionpipe/v1/relay/jobs` | `since`, optional | none | 1 MiB |
 | POST | `/api/machines/<id>/jobs`, id `m_` + 16…40 of `A-Za-z0-9_-`, never a cloud box's (`m_box` + 16 hex) | none | a signed command, 256 KB | 1 MiB |
+| POST | `/api/machines/files` | none | a file's bytes, 1 byte to 25 MiB (26 214 400 bytes) | 1 MiB |
 | GET | `/api/gui/device` | none: the hub adds `id=<this phone's key>` | none | 1 MiB |
 
 A path is a door only when it is written exactly so: no `..`, no `//`, no encoded
@@ -450,17 +451,29 @@ set: a body with any other field, or with nothing signing the command, is `not_s
 A cloud box (`m_box` and exactly sixteen lowercase hex digits) is not a door at all: spacesheep runs a message for one with no
 signature, so the account's key alone would be enough to make it work.
 
+A file is a picture a command names in its `files` (CONTROL.md §3.1), kept on spacesheep
+for the machine to fetch. The body is its bytes, never read by the hub (spacesheep checks
+what it keeps, the machine checks it against the signed hash). Of the page's headers the
+files door alone forwards two: `Content-Type`, a media type as CONTROL.md has a file's
+`type` (`type/subtype` of `[a-z0-9!#$&^_.+-]`, in any case, at most 100 characters, no
+parameter), and, when the page gives one, `X-File-Name`, the file's name percent-encoded
+by the page: 1 to 1024 visible ASCII characters. Either one otherwise, or no type, is
+`bad_header`.
+
 `POST /api/gui/device` is not a door for the page (`not_a_door`); `acct_device_ask` is
 how a key is enrolled.
 
-The hub's time limit is the relay's `wait` plus 20 s, and 15 s for the rest. Each
+The hub's time limit is the relay's `wait` plus 20 s; for a file, 15 s and one more for
+each 32 KiB it carries (a 256 kbit/s uplink), at most 600 s, so a 5 MB photo has 168 s;
+and 15 s for the rest. Each
 account has its own room: six of the page's requests in flight, of which two relay reads;
 the hub's own requests (the signer's questions, the device key) are counted apart and
 wait their turn.
 
 Upstream gets the hub's headers only (`Authorization`, `Accept: application/json`,
 `Accept-Encoding: gzip`, `Content-Type: application/json` on a POST, the hub's
-`User-Agent`): nothing the page sends as a header, `Authorization`, `Host` and `Cookie`
+`User-Agent`), and on the files door the file's `Content-Type` and `X-File-Name` as
+checked above: nothing else the page sends as a header, `Authorization`, `Host` and `Cookie`
 included, reaches spacesheep. The page gets spacesheep's status and its body unpacked,
 and of its headers `Content-Type` and `Retry-After` (both readable across origins);
 `Cache-Control: no-store` is the hub's. An answer's limit is on its size unpacked: a
@@ -474,8 +487,11 @@ retry after a refused HTTP/2 stream is off), so that what the hub says of a requ
 said of the only try there was.
 
 A 401 from spacesheep marks the account `unauthorized` (on the jobs door only its
-`code: "unauthorized"` does: a 401 `unlock` there is the signer's grant). The key is kept;
-the next 2xx on any door clears the mark. A 429 passes with its `Retry-After`.
+`code: "unauthorized"` does: a 401 `unlock` there is the signer's grant). A 401 on the
+files door never does: a spacesheep that takes no key there yet answers a live key with
+`code: "unauthorized"`, so that 401 is passed on and nothing more, and a dead key is still
+seen on the next read of any other door. The key is kept; the next 2xx on any door clears
+the mark. A 429 passes with its `Retry-After`.
 
 **The hub's own answers** carry the header `x-sessionpipe-hub: <code>` and the body
 `{ hub: true, reason: <code>, error }`. Response headers from spacesheep are never passed
@@ -485,7 +501,8 @@ on by name, so an answer with the header is the hub's and one without is spacesh
 |---|---|---|
 | 403 | `not_a_door` | another path or method, a path not written as a door is, a cloud box, the device door's POST; and any request to an account's id when no such account is in the list (it was disconnected a moment ago) |
 | 400 | `bad_query` | a parameter the door does not take, out of range, or twice |
-| 400 | `bad_body` | a body on a GET, or one that is not a JSON object |
+| 400 | `bad_body` | a body on a GET, one that is not a JSON object, or an empty file |
+| 400 | `bad_header` | the files door: no type, a type that is not a media type, or a name that is not 1 to 1024 visible ASCII characters |
 | 400 | `not_signed` | a send that is not a signed command |
 | 413 | `too_large` | a body over the door's limit |
 | 403 | `forbidden_origin` | not the bundled page asking |
@@ -502,7 +519,7 @@ on by name, so an answer with the header is the hub's and one without is spacesh
 | 502 | `bad_encoding` | the answer is packed some other way than gzip, is not what it says, or has anything after its one gzip member |
 | 502 | `withheld` | the answer held the key |
 
-Every refusal in the upper eleven rows comes before any network.
+Every refusal in the upper twelve rows comes before any network.
 
 **What an answer of the hub's says of a send.** Each code the send door can give is in
 exactly one of two lists, and the page may say "not sent" after the first only:
@@ -515,7 +532,7 @@ exactly one of two lists, and the page may say "not sent" after the first only:
   `unreachable` (the answer stopped on its way, or was a redirect: whoever redirects had
   the command), `timeout`, `answer_too_large`, `bad_encoding`, `withheld`.
 
-`redirected` and `no_device_key` are never said of a send. After an unknown the page
+`redirected`, `no_device_key` and `bad_header` are never said of a send. After an unknown the page
 asks again with the same signed bytes: spacesheep takes a command once, by its nonce,
 and its answer then says which it was. An answer without the hub's header is
 spacesheep's own, and says for itself what became of the command.

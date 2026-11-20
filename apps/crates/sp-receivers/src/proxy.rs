@@ -3,9 +3,28 @@
 //! does the forwarding.
 
 use http::{HeaderValue, Method, Response, StatusCode};
+use std::time::Duration;
 
 pub const MAX_BODY: usize = 32 * 1024 * 1024;
+/// The shell's own requests to a receiver (the signer's questions): small, and answered at
+/// once.
 pub const TIMEOUT_SECS: u64 = 15;
+/// How long a page's request may wait for the next piece of an answer: an answer that
+/// stops this long is cut off, however long it has been coming.
+pub const STALL_SECS: u64 = 15;
+/// The longest any request of the page's may take, its upload and its answer each.
+pub const LONGEST_SECS: u64 = 600;
+/// The slowest uplink a request is waited for: 32 768 bytes a second (256 kbit/s).
+const SLOWEST_UPLINK: usize = 32 * 1024;
+
+/// How long a request of `body_len` bytes may take to be sent and answered: fifteen
+/// seconds, and a second more for each 32 KiB it carries, at most ten minutes. A picture
+/// from a phone on a slow uplink takes as long as it takes; a request that carries little
+/// is cut off as soon as before.
+pub fn send_timeout(body_len: usize) -> Duration {
+    let carry = body_len.div_ceil(SLOWEST_UPLINK) as u64;
+    Duration::from_secs((15 + carry).min(LONGEST_SECS))
+}
 
 /// Request headers carried upstream. Everything else the webview adds stays behind.
 /// The webview's user-agent goes too, so the receiver labels this device ("Mac").
@@ -201,9 +220,12 @@ pub fn preflight(origin: Option<&str>, allowed: &[String]) -> Response<Vec<u8>> 
             "access-control-allow-methods",
             HeaderValue::from_static("GET, POST, PUT, PATCH, DELETE, OPTIONS"),
         );
+        // `x-file-name` is for an account's files door (account.rs `Door::MachineFiles`).
+        // The preflight is one for every door; a receiver is never sent it, as it is not
+        // in `FORWARD_REQUEST_HEADERS`.
         h.insert(
             "access-control-allow-headers",
-            HeaderValue::from_static("content-type, accept, if-match, if-none-match"),
+            HeaderValue::from_static("content-type, accept, if-match, if-none-match, x-file-name"),
         );
         h.insert("access-control-max-age", HeaderValue::from_static("600"));
     }
@@ -240,6 +262,21 @@ pub fn is_preflight(m: &Method) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_is_waited_for_as_long_as_its_bytes_take() {
+        let s = |n: u64| Duration::from_secs(n);
+        assert_eq!(send_timeout(0), s(15));
+        assert_eq!(send_timeout(1), s(16));
+        assert_eq!(send_timeout(32 * 1024), s(16));
+        assert_eq!(send_timeout(32 * 1024 + 1), s(17));
+        // A 5 MB photo: 153 seconds at 256 kbit/s, and the fifteen.
+        assert_eq!(send_timeout(5_000_000), s(168));
+        // The largest file a prompt carries, and anything larger: ten minutes.
+        assert_eq!(send_timeout(25 * 1024 * 1024), s(600));
+        assert_eq!(send_timeout(MAX_BODY), s(600));
+        assert_eq!(send_timeout(usize::MAX), s(600));
+    }
 
     #[test]
     fn maps_both_url_forms() {
@@ -354,6 +391,11 @@ mod tests {
             .to_str()
             .unwrap()
             .contains("content-type"));
+        // A picture's name rides in a header of its own (the account's files door).
+        assert!(r.headers()["access-control-allow-headers"]
+            .to_str()
+            .unwrap()
+            .contains("x-file-name"));
         let r = preflight(Some("https://evil.com"), &allowed);
         assert!(r.headers().get("access-control-allow-origin").is_none());
         assert!(r.headers().get("access-control-allow-methods").is_none());

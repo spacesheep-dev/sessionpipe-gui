@@ -38,15 +38,21 @@ import { type Approval, type SendState, sendWords } from "../account/sendable";
 import {
   AttachButton,
   AttachmentTray,
+  type KeptPicture,
+  keptPictures,
   pictureMode,
+  picturesOffWhy,
   picturesOffWords,
   useAttachments,
+  usePageDrop,
+  useSpacesheepRefused,
   useThisMachine,
 } from "../control/Attachments";
 import type { AnswerOut } from "../control/answers";
 import { httpsHere, wrongOriginHere, wrongOriginHref } from "../control/api";
 
 import { deviceWords, setupLabel, signerKind, signerLabel } from "../control/signer";
+import { PHONE_HTTP_WORDS, plainHttpHere } from "../control/webauthn";
 import { receiptWords } from "../control/words";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
@@ -180,6 +186,48 @@ function writeDraft(key: string, text: string): void {
   } catch {
     // this page only
   }
+}
+
+/** The pictures of a session's draft, uploaded and checked: the receiver holds each a day
+ *  from its upload (server/control/files.ts), so they come back for as long. */
+const DRAFT_PICTURES_KEY = (key: string) => `sessionpipe-gui.draft-pictures:${key}`;
+const PICTURES_KEPT_MS = 24 * 3600_000;
+const keptOk = (p: unknown): p is KeptPicture => {
+  const k = p as KeptPicture;
+  return (
+    !!k &&
+    typeof k.name === "string" &&
+    typeof k.type === "string" &&
+    typeof k.size === "number" &&
+    typeof k.sha256 === "string" &&
+    /^[A-Za-z0-9_-]{43}$/.test(k.sha256) &&
+    typeof k.at === "number"
+  );
+};
+function readPictures(key: string, now = Date.now()): KeptPicture[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(DRAFT_PICTURES_KEY(key)) ?? "[]") as unknown;
+    return Array.isArray(list) ? list.filter(keptOk).filter((p) => now - p.at < PICTURES_KEPT_MS) : [];
+  } catch {
+    return [];
+  }
+}
+function writePictures(key: string, kept: readonly KeptPicture[]): void {
+  try {
+    if (kept.length) localStorage.setItem(DRAFT_PICTURES_KEY(key), JSON.stringify(kept));
+    else localStorage.removeItem(DRAFT_PICTURES_KEY(key));
+  } catch {
+    // this page only
+  }
+}
+
+/** The strips open now, by session: a picture that finishes uploading after its strip moved
+ *  on or closed goes to the strip open on its session, else into that session's draft. */
+const openStrips = new Map<string, (p: KeptPicture) => void>();
+function landPicture(key: string, p: KeptPicture): void {
+  const open = openStrips.get(key);
+  if (open) open(p);
+  else writePictures(key, [...readPictures(key).filter((q) => q.sha256 !== p.sha256), p]);
 }
 
 function SendIcon() {
@@ -438,6 +486,9 @@ export function ControlStrip({
   // works, as a link to this very page there; never an offer to add a device.
   const wrong = blocked ? wrongOriginHere() : null;
   const httpsHref = blocked ? (wrong ? wrongOriginHref() : httpsHere()) : null;
+  // A phone's browser on the board's plain-http LAN or tailnet address, with no https
+  // address to send it to: the line says the two ways that work, beside the greyed paperclip.
+  const phoneHttp = !!blocked && !wrong && !httpsHref && touch && plainHttpHere();
   const enabled = paired && !!onSend && !blocked && !stream && approval === "ok";
   // Not approved: the way to approve it stands where Allow and Deny would.
   const approve = paired && !blocked && approval === "unapproved";
@@ -445,16 +496,47 @@ export function ControlStrip({
   // picker. How they go is the machine's: as the command's files where its sessionpipe takes
   // them, as paths for an older one on this machine, and not at all anywhere else. There a
   // picture pasted or dropped is answered by the line under the field, until the words change.
-  const mode = pictureMode(control, useThisMachine(session.machine));
+  const ssRefused = useSpacesheepRefused();
+  const mode = pictureMode(control, useThisMachine(session.machine), ssRefused);
   const refusedKey = `${session.key}\n${text}`;
   const [refusedAt, setRefusedAt] = useState<string | null>(null);
   const picturesOff = mode === "off" && refusedAt === refusedKey;
   const att = useAttachments({
     machineId: control?.machineId,
+    remote: !!control?.remote,
     enabled,
     mode,
     onRefused: () => setRefusedAt(refusedKey),
+    initial: () => readPictures(session.key),
+    land: (p) => landPicture(session.key, p),
   });
+  // The pictures uploaded and checked are kept with the draft, as the words are, and come
+  // back with it; another session's strip takes that session's own. (Kept first: the items
+  // are written only under the session they belong to.)
+  const picturesOf = useRef(session.key);
+  const { restore, adopt } = att;
+  // Written when what is kept changes, not at every tick of an upload's progress.
+  const kept = JSON.stringify(keptPictures(att.items));
+  useEffect(() => {
+    if (picturesOf.current === session.key) writePictures(session.key, JSON.parse(kept) as KeptPicture[]);
+  }, [kept, session.key]);
+  useEffect(() => {
+    if (picturesOf.current === session.key) return;
+    const was = picturesOf.current;
+    picturesOf.current = session.key;
+    // A picture still uploading for the session left finishes into that session's draft.
+    restore(readPictures(session.key), (p) => landPicture(was, p));
+  }, [session.key, restore]);
+  useEffect(() => {
+    const key = session.key;
+    openStrips.set(key, adopt);
+    return () => {
+      if (openStrips.get(key) === adopt) openStrips.delete(key);
+    };
+  }, [session.key, adopt]);
+  // A file dragged or dropped anywhere on the session's page comes to this composer.
+  const formRef = useRef<HTMLFormElement>(null);
+  usePageDrop(att, formRef);
   // A held message confirmed from its notice (control/HeldNotice.tsx) went: the composer
   // is clear, as after Send. Until then its words stayed here.
   const clearAtt = att.clear;
@@ -508,7 +590,7 @@ export function ControlStrip({
       return { kind: noteKind === "err" ? "error" : "note", text: note, tone: noteKind === "err" ? "err" : undefined };
     if (picturesOff) {
       // The sentence, with the command it names set as one.
-      const [words, command, rest] = picturesOffWords(name, !!control?.remote).split("`");
+      const [words, command, rest] = picturesOffWords(name, picturesOffWhy(control, ssRefused)).split("`");
       return {
         kind: "pictures-off",
         text: (
@@ -534,6 +616,22 @@ export function ControlStrip({
         ),
       };
     if (blocked && hourOnCard) return null;
+    if (phoneHttp) {
+      // "/connect" is the page it names.
+      const [before, after] = PHONE_HTTP_WORDS.split("/connect");
+      return {
+        kind: "phone-http",
+        text: (
+          <>
+            {before}
+            <Link to="/connect" className="ctl-origin-link">
+              /connect
+            </Link>
+            {after}
+          </>
+        ),
+      };
+    }
     if (blocked)
       return {
         kind: "blocked",
@@ -713,7 +811,9 @@ export function ControlStrip({
   ) : null;
   const canSend = review
     ? enabled && !busy && !!text.trim() && !tooLong && answers?.[review.attentionId]?.status !== "sent"
-    : enabled && !busy && !att.uploading && (!!text.trim() || att.items.length > 0);
+    : enabled && !busy && !att.failed && (!!text.trim() || att.items.length > 0);
+  // While a picture didn't upload nothing is sent: Send says what to do about it.
+  const sendBlocked = !review && enabled ? att.failed : null;
 
   const run = (id: string, action: ControlAction, after?: () => void) => {
     if (!enabled || busy) return;
@@ -771,6 +871,7 @@ export function ControlStrip({
 
   return (
     <form
+      ref={formRef}
       className={`ctl ${enabled ? "" : "ctl--off"} ${blocked ? "ctl--blocked" : ""} ${folded ? "ctl--folded" : ""} ${chat ? "ctl--chat" : ""} ${att.dragging ? "ctl--drop" : ""}`}
       aria-label="Control"
       {...att.handlers}
@@ -942,7 +1043,13 @@ export function ControlStrip({
         <div className="ctl-field">
           <AttachmentTray att={att} />
           <div className="ctl-ask">
-            {att.offered && <AttachButton att={att} disabled={!enabled || !!busy || !!review} />}
+            {att.offered && (
+              <AttachButton
+                att={att}
+                disabled={!enabled || !!busy || !!review}
+                why={phoneHttp ? PHONE_HTTP_WORDS : undefined}
+              />
+            )}
             <textarea
               ref={field}
               value={text}
@@ -974,7 +1081,8 @@ export function ControlStrip({
               disabled={!canSend}
               aria-label={review ? "Keep planning" : "Send"}
               aria-busy={busy === "prompt" || undefined}
-              data-tip-keys={touch ? "⌘↩" : "↩"}
+              data-tip={sendBlocked ?? undefined}
+              data-tip-keys={sendBlocked ? undefined : touch ? "⌘↩" : "↩"}
             >
               {busy === "prompt" ? <Spinner label="Sending" /> : <SendIcon />}
             </button>
