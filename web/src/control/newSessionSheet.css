@@ -211,10 +211,23 @@
   flex: none;
 }
 .ns-file-x {
+  position: relative;
   width: 20px;
   height: 20px;
   min-width: 0;
   min-height: 0;
+}
+/* Under a finger the same faces, each a 44 px target, far enough apart that the two never
+   overlap. */
+@media (pointer: coarse) {
+  .ns-file-x::before {
+    content: "";
+    position: absolute;
+    inset: -12px;
+  }
+  .ns-file-x + .ns-file-x {
+    margin-left: 18px;
+  }
 }
 /* A file that goes, but not as a picture the agent can look at: one line under them all. */
 .ns-files-note {
@@ -495,8 +508,9 @@
 /* The files sit in one row under the message that scrolls sideways, never stacked in it. */
 .ns-sheet--phone .ns-files {
   flex-wrap: nowrap;
-  margin: -8px -16px 16px;
-  padding: 0 16px 2px;
+  /* Room above and below for the buttons' targets, which the row would cut. */
+  margin: -14px -16px 10px;
+  padding: 6px 16px 8px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;

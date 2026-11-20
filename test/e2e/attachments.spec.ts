@@ -1327,3 +1327,77 @@ test("an agent's reply of three lines is drawn as three lines", async ({ context
   );
   expect(lines).toBe("Purple, Iris\nGreen, Thyme\nBrown, Copper");
 });
+
+/** Where a tap lands on `button`, read as the page answers it: from the button's centre
+ *  outwards along each axis, every point whose hit is the button (its target, cut by
+ *  whatever covers or clips it). */
+async function hitBox(button: Locator): Promise<{ left: number; right: number; top: number; bottom: number }> {
+  await button.scrollIntoViewIfNeeded();
+  return button.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const mine = (x: number, y: number) => {
+      const at = document.elementFromPoint(x, y);
+      return !!at && (at === el || el.contains(at));
+    };
+    const reach = (dx: number, dy: number) => {
+      let n = 0;
+      while (n < 80 && mine(cx + dx * (n + 1), cy + dy * (n + 1))) n++;
+      return n;
+    };
+    return { left: cx - reach(-1, 0), right: cx + reach(1, 0), top: cy - reach(0, -1), bottom: cy + reach(0, 1) };
+  });
+}
+
+async function apartAndBig(a: Locator, b: Locator): Promise<void> {
+  const x = await hitBox(a);
+  const y = await hitBox(b);
+  for (const h of [x, y]) {
+    // Read a pixel at a time from the centre: a 44 px target reads 42 or more.
+    expect(h.right - h.left, JSON.stringify(h)).toBeGreaterThanOrEqual(42);
+    expect(h.bottom - h.top, JSON.stringify(h)).toBeGreaterThanOrEqual(42);
+  }
+  const overlap = x.left < y.right && y.left < x.right && x.top < y.bottom && y.top < x.bottom;
+  expect(overlap, `${JSON.stringify(x)} ${JSON.stringify(y)}`).toBe(false);
+}
+
+test("under a finger, Try again and × are each a 44 px target, and the two never overlap", async ({
+  context,
+  page,
+  isMobile,
+}) => {
+  test.skip(!isMobile, "a touch screen's targets");
+  const { d } = await open(context, page, { takes: true, title: "Targets under a finger" });
+  await page.route(FILES_ROUTE, (route) => route.fulfill({ status: 500, json: { reason: "internal" } }));
+  // A panorama, whose frame is the shortest there is, and an ordinary one.
+  for (const [name, b] of [
+    ["wide.png", png(400, 100, [0x30, 0x60, 0x90])],
+    ["image.png", KIWI],
+  ] as const) {
+    await paste(page, [given(name, b)]);
+    const item = tray(page).last();
+    await expect(item).toHaveAttribute("data-state", "error");
+    await apartAndBig(
+      item.getByRole("button", { name: "Try again" }),
+      item.getByRole("button", { name: "Remove picture" }),
+    );
+  }
+  await page.unroute(FILES_ROUTE);
+
+  // New session's file chip.
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${d.name}`);
+  const sheet = page.locator("[data-new-session]");
+  await expect(sheet.locator("input[data-ns-files]")).toBeAttached();
+  await page.route(FILES_ROUTE, (route) => route.fulfill({ status: 500, json: { reason: "internal" } }));
+  await sheet
+    .locator("input[data-ns-files]")
+    .setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("off by one\n") });
+  const chip = sheet.locator(".ns-file");
+  await expect(chip).toHaveAttribute("data-file-state", "error");
+  await apartAndBig(
+    chip.getByRole("button", { name: "Try notes.txt again" }),
+    chip.getByRole("button", { name: "Remove notes.txt" }),
+  );
+  await page.unroute(FILES_ROUTE);
+});

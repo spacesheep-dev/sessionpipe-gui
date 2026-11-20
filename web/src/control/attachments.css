@@ -133,15 +133,32 @@
   box-shadow: var(--shadow-sm);
   color: var(--fg-2);
 }
-/* The 20 px face, a 24 px target. */
+/* The 20 px face, a 26 px target. */
 .att-x.icon-btn::before {
   content: "";
   position: absolute;
   inset: -3px;
 }
-/* Try again, beside × on one whose upload failed. */
+/* Try again, beside × on one whose upload failed, their targets side by side. */
 .att-retry.icon-btn {
-  right: 16px;
+  right: 18px;
+}
+/* Under a finger the same faces, each a 44 px target: × at the top right corner, Try again
+   at the bottom right, its target reaching down, so a tap meant for one never lands on the
+   other, whatever the picture's shape. */
+@media (pointer: coarse) {
+  /* Measured from inside the hairline: 12 px past the face on every side. */
+  .att-x.icon-btn::before {
+    inset: calc(-12px - var(--hairline));
+  }
+  .att-retry.icon-btn {
+    top: auto;
+    right: -8px;
+    bottom: -8px;
+  }
+  .att-retry.icon-btn::before {
+    inset: calc(-8px - var(--hairline)) calc(-12px - var(--hairline)) calc(-16px - var(--hairline));
+  }
 }
 .att-note {
   margin: 4px 0 0;
