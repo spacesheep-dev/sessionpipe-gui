@@ -831,13 +831,18 @@ async function main(): Promise<void> {
   process.on("exit", () => removeRunFile(app.stateDir));
 
   let closing = false;
+  // The output may be gone by the time a signal comes (a closed terminal, or a `| tee`
+  // stopped by the same Ctrl-C): a failed write (EIO, EPIPE) in shutdown or in app.close()'s
+  // logging must not end the process before app.close() has run. Taken here, not in the
+  // handler: Node opens a terminal's stream on first use, and on macOS opening a terminal
+  // that has been closed never returns.
+  for (const stream of [process.stdout, process.stderr])
+    stream.on("error", (e) => {
+      if (!closing) throw e;
+    });
   const shutdown = (signal: string): void => {
     if (closing) return;
     closing = true;
-    // The output may be gone by now (a closed terminal, or a `| tee` stopped by the same
-    // Ctrl-C): a failed write (EIO, EPIPE) here or in app.close()'s logging must not end
-    // the process before app.close() has run.
-    for (const stream of [process.stdout, process.stderr]) stream.on("error", () => {});
     if (!parsed.quiet) process.stdout.write(`\n${signal}: stopping\n`);
     removeRunFile(app.stateDir);
     const force = setTimeout(() => process.exit(0), 3000);
