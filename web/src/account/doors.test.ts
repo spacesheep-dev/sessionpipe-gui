@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The hub's files door as the page asks it (doors.ts uploadFile): a stop the page hands in
-// ends the request.
+// ends the request, and a name too long for the hub's header goes without it.
 import { describe, expect, it } from "vitest";
-import { openDoors } from "./doors";
+import { FILE_NAME_MAX, openDoors } from "./doors";
 
 const PNG = { bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), type: "image/png", name: "kiwi.png" };
 
@@ -28,5 +28,22 @@ describe("uploadFile", () => {
     // Stopped before it went: no request at all.
     await expect(d.uploadFile(PNG, stop.signal)).rejects.toMatchObject({ name: "AbortError" });
     expect(signals).toHaveLength(1);
+  });
+
+  it("sends a name too long for the hub's header without it", async () => {
+    const sent: Headers[] = [];
+    const fetch = (async (_url: string, init?: RequestInit) => {
+      sent.push(new Headers(init?.headers));
+      return Response.json({ sha256: "x", size: 4, type: "image/png" });
+    }) as typeof globalThis.fetch;
+    const d = openDoors({ rxBase: "https://rx.test/a1", fetch });
+    const long = `${"写".repeat(196)}.png`;
+    expect(encodeURIComponent(long).length).toBeGreaterThan(FILE_NAME_MAX);
+    expect((await d.uploadFile({ ...PNG, name: long })).status).toBe(200);
+    expect(sent[0]!.has("x-file-name")).toBe(false);
+    expect(sent[0]!.get("content-type")).toBe("image/png");
+    await d.uploadFile({ ...PNG, name: "kiwi ü.png" });
+    expect(sent[1]!.get("x-file-name")).toBe("kiwi%20%C3%BC.png");
+    expect(FILE_NAME_MAX).toBe(1024);
   });
 });

@@ -58,8 +58,8 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
   hub.rxBase = (id) => `https://rx.test/${id}`;
   hub.add("me@example.com", ss.key);
   const asked: string[] = [];
-  /** Each file's request to the hub's files door: the signal it went with. */
-  const fileAsks: { signal: AbortSignal | null }[] = [];
+  /** Each file's request to the hub's files door: the signal it went with, and its name header. */
+  const fileAsks: { signal: AbortSignal | null; name: string | null }[] = [];
   /** What becomes of the next sends between the page and spacesheep, first in first out:
    *  `lost`: the hub's time ran out and spacesheep never had it; `unheard`: spacesheep took
    *  it and its answer never came back in the hub's time; `dropped`: the app's own
@@ -87,7 +87,7 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
     // A file's bytes come as bytes, with the two headers the files door reads.
     const bytes = init?.body instanceof Uint8Array ? init.body : null;
     const h = new Headers(init?.headers);
-    if (bytes) fileAsks.push({ signal: init?.signal ?? null });
+    if (bytes) fileAsks.push({ signal: init?.signal ?? null, name: h.get("x-file-name") });
     const a: FakeAnswer = await hub.door(id, {
       method: init?.method ?? "GET",
       path,
@@ -95,7 +95,10 @@ function rig(o: { features?: string[]; cache?: KeptCache; noStorage?: boolean } 
       ...(bytes
         ? {
             bytes,
-            headers: { "content-type": h.get("content-type") ?? "", "x-file-name": h.get("x-file-name") ?? "" },
+            headers: {
+              "content-type": h.get("content-type") ?? "",
+              ...(h.has("x-file-name") ? { "x-file-name": h.get("x-file-name")! } : {}),
+            },
           }
         : {}),
       ...(init?.signal ? { signal: init.signal } : {}),
@@ -680,6 +683,33 @@ describe("a page's own backend on a spacesheep account", () => {
     gone.abort();
     expect((await up(gone.signal)).status).toBe(502);
     expect(r.fileAsks).toHaveLength(1);
+  });
+
+  it("takes a picture whose name is too long for the hub's header: it goes without one, under the page's name", async () => {
+    const b = await r.start();
+    await tick(400);
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]);
+    // 196 characters and its extension: 200, as a name may be, and 1 764 bytes encoded.
+    const name = `${"猫".repeat(196)}.png`;
+    expect(name.length).toBe(200);
+    expect(encodeURIComponent(name).length).toBeGreaterThan(1024);
+    const res = await b.answer(`/api/ui/control/files?name=${encodeURIComponent(name)}&machine=${M1}`, {
+      method: "POST",
+      headers: { "content-type": "image/png", accept: "application/json" },
+      body: PNG.slice().buffer,
+    });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ name, type: "image/png", size: PNG.length, sha256: await fileSha256(PNG) });
+    expect(r.fileAsks.at(-1)!.name).toBeNull();
+    // A name that fits goes with it, as before.
+    const short = `${"猫".repeat(100)}.png`;
+    const ok = await b.answer(`/api/ui/control/files?name=${encodeURIComponent(short)}&machine=${M1}`, {
+      method: "POST",
+      headers: { "content-type": "image/png", accept: "application/json" },
+      body: PNG.slice().buffer,
+    });
+    expect(ok.status).toBe(201);
+    expect(r.fileAsks.at(-1)!.name).toBe(encodeURIComponent(short));
   });
 
   it("gives a refusal the shape the page reads: spacesheep's hold, the hub's own word, a machine that is not there", async () => {
