@@ -806,7 +806,7 @@ test.describe("phone: a request shown whole", () => {
     }
   });
 
-  test("a board row's long-press menu answers a command only where the row's one line shows it whole: not at 320, at 820; where it does, Allow and Deny lead the sheet", async ({
+  test("a board row's long-press menu answers a command only where the row's one line shows it whole: not at 320, at 820; the sheet keeps its order, the pair after New session here", async ({
     context,
     page,
   }) => {
@@ -846,11 +846,10 @@ test.describe("phone: a request shown whole", () => {
         const sheet = page.locator(".menu-sheet");
         await expect(sheet.getByRole("menuitem", { name: "Hide", exact: true }), `${w}`).toBeVisible();
         await expect(sheet.getByRole("menuitem", { name: /^(Allow|Deny) Bash$/ }), `${w}`).toHaveCount(cut ? 0 : 2);
-        // Where it answers, the pair comes first; where it does not, Open does, as ever.
-        const names = (await sheet.getByRole("menuitem").allTextContents()).slice(0, 3);
-        expect(names, `${w}`).toEqual(
-          cut ? ["Open as page", "Preview", "New session here"] : ["Allow Bash", "Deny Bash", "Open as page"],
-        );
+        // Open leads, as ever (a computer's menu leads with the pair; the phone's does not).
+        const names = await sheet.getByRole("menuitem").allTextContents();
+        expect(names.slice(0, 3), `${w}`).toEqual(["Open as page", "Preview", "New session here"]);
+        if (!cut) expect(names.indexOf("Allow Bash"), `${w}`).toBeGreaterThan(names.indexOf("New session here"));
       }
     } finally {
       await asked.clear();

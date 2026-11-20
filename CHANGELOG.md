@@ -154,9 +154,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   whichever row the cursor was on. They now answer the row under the cursor, as in the
   Inbox, and never another prompt. The row then says what became of the answer, in the
   request's place: "Allowed · waiting for studio-mac", "Not sent: …", or why it cannot go.
-- **A Board row's menu leads with Allow and Deny, and shows their keys.** The pair came
-  after Open, New session here and Ask another agent…; it comes first now, as in the
-  Inbox, and both show A and D beside it. On a machine that is not paired a Board row's
+- **On a computer, a Board row's menu leads with Allow and Deny, and shows their keys.** The
+  pair came after Open, New session here and Ask another agent…; it comes first now, as in
+  the Inbox, and both show A and D beside it; the phone's sheet keeps its order. On a machine that is not paired a Board row's
   menu leaves the pair out.
 - **On a computer, a plan the agent asks to start on is read in the conversation, whole.**
   It sat in the dock at the bottom, beside Keep planning and Approve plan, eight lines

@@ -134,8 +134,10 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
   };
   // "New session here": its machine, agent and folder, when that machine is paired here.
   const paired = !!(s.machine && ctx.store.get().machines.get(s.machine)?.control);
+  // A computer's menu leads with the answer; the phone's sheet keeps it after Ask, as it was.
+  const answer = ctx.answer ?? [];
   const items: MenuList = [
-    ...(ctx.answer ?? []),
+    ...(phone ? [] : answer),
     { sep: true },
     ...open,
     !phone &&
@@ -154,6 +156,8 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     },
     // ⇧A is the session view's: it shows where that view is this session's.
     askItem(s, ctx.store, { hint: ctx.surface === "page" || ctx.surface === "panel" }),
+    { sep: true },
+    ...(phone ? answer : []),
     { sep: true },
     labelMenu(ctx.store, [s.key]),
     notifyMenu(ctx.store, s),

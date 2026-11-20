@@ -7,6 +7,7 @@ import type { MachineControl, SessionSummary } from "@shared/api";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { MenuItem } from "../components/ContextMenu";
 import type { Store } from "../data/store";
+import { PHONE_QUERY } from "./device";
 import { askItem, type SessionMenuContext, sessionItems } from "./menus";
 import { setSettings } from "./settings";
 
@@ -118,6 +119,25 @@ describe("sessionItems", () => {
     // A panel's tab and its head lead with the answer too.
     for (const surface of ["tab", "panel", "page"] as const)
       expect(labels(menu(asking, { surface, answer })).slice(0, 3)).toEqual(["Allow Bash", "Deny Bash", "─"]);
+  });
+
+  it("on the phone the sheet keeps the answer where it was, after Ask, between rules", () => {
+    const g = globalThis as Record<string, unknown>;
+    const wide = g.matchMedia;
+    g.matchMedia = (query: string) => ({
+      matches: query === PHONE_QUERY,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
+    try {
+      const items = labels(menu(asking, { answer }));
+      expect(items[0]).not.toBe("Allow Bash");
+      const at = items.indexOf("Allow Bash");
+      expect(items.slice(at - 2, at + 3)).toEqual(["Ask another agent…", "─", "Allow Bash", "Deny Bash", "─"]);
+    } finally {
+      g.matchMedia = wide;
+    }
   });
 
   it("on a row puts ↵'s way first with ↵, and the other way with ⇧↵, under either setting", () => {
