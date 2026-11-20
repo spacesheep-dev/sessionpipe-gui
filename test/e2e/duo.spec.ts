@@ -696,7 +696,10 @@ for (const [size, insets] of BANDS) {
       const sheet = fresh.page.locator("[data-first-run='phone']");
       await expect(sheet.getByRole("button", { name: "Approve this iPhone" })).toBeVisible();
       await expect(sheet.getByRole("button", { name: "Later" })).toBeVisible();
-      expect(await underBands(fresh.page), `You're in, ${where}`).toEqual([]);
+      // Asked until it holds: the sheet's stylesheet (native.css) can land after the sheet
+      // itself on a slow start, and until then it is the centred card any dialog is, with
+      // Approve at its right.
+      await expect.poll(() => underBands(fresh.page), `You're in, ${where}`).toEqual([]);
     } finally {
       await fresh.close();
     }
