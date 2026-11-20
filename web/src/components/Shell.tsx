@@ -813,7 +813,9 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           (lib/keys.ts), and Settings is over whatever the page has open (a file, the panel). */}
       <SettingsHost />
       <main className={`main ${route.name === "theme" ? "main--bleed" : ""}`} id="main" ref={mainRef} tabIndex={-1}>
-        <KeysOff.Provider value={covers}>{children}</KeysOff.Provider>
+        {/* Off under Settings too: the page stays mounted under it, and no a, d or Enter
+            may act on a row nobody can see. */}
+        <KeysOff.Provider value={covers || settingsShown}>{children}</KeysOff.Provider>
       </main>
       <nav className="tabbar" aria-label="Pages">
         {tabs.map((n) => entry(n, false))}

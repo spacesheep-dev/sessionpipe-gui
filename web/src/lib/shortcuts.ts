@@ -1151,6 +1151,9 @@ function viewOwns(e: KeyboardEvent, chord: Chord): boolean {
   return !t || t === document || host.contains(t) || t.contains(host);
 }
 
+/** The scopes whose keys still act with the focus in a dialog. */
+const DIALOG_SCOPES: ReadonlySet<Scope> = new Set<Scope>(["global", "palette", "compose"]);
+
 function onKeyDown(e: KeyboardEvent): void {
   // A key something else already took (a view's own listener) is not ours.
   if (e.defaultPrevented || e.isComposing) return;
@@ -1162,8 +1165,14 @@ function onKeyDown(e: KeyboardEvent): void {
   // In the notifications their buttons have Enter and Space: no list's, page's or panel's
   // key reaches past them to the row under the cursor, only the global ones.
   const inToasts = !!(e.target as Element | null)?.closest?.(".toasts");
+  // Nor past a dialog (Settings, a sheet) to the page or panel under it: there the global
+  // keys and the dialogs' own (the palette's, the New session sheet's) are in play.
+  const inDialog = !inToasts && !!(e.target as Element | null)?.closest?.('[aria-modal="true"]');
   const allowed = (a: Action) =>
-    (a.inInputs || !typing) && !(arrows && !a.inInputs) && (!inToasts || a.scope === "global");
+    (a.inInputs || !typing) &&
+    !(arrows && !a.inInputs) &&
+    (!inToasts || a.scope === "global") &&
+    (!inDialog || DIALOG_SCOPES.has(a.scope));
   // On a view's page only its own actions, the host's two-key sequences and Esc are in play
   // (mod chords never count as the view's: `viewOwns` is false for them).
   const all = candidates().filter(

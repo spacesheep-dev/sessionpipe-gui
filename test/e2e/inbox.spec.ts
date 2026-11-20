@@ -551,6 +551,51 @@ test.describe("inbox: Allow only beside a whole request", () => {
   });
 });
 
+test.describe("inbox: under Settings", () => {
+  test("with Settings open over the Inbox, a, d, e and Enter act on no row: nothing is answered, hidden or opened", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context, { mode: "advanced" });
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `under-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const p = await postPrompt(token, {
+      machine: d.name,
+      title: "Under Settings",
+      agoMs: 3_000,
+      message: "npm run deploy -- --target staging",
+    });
+    const answers = () => d.seen.filter((c) => c.kind === "permission.answer");
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
+      const row = page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+      await expect(row).toHaveClass(/inbox-row--answerable/, { timeout: 15_000 });
+      await row.locator(".inbox-main").focus();
+      await expect(row).toHaveAttribute("aria-current", "true");
+      await page.locator('[data-nav="settings"]').click();
+      await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+      // With the focus in Settings, and with it nowhere in particular (the body).
+      for (const where of ["settings", "body"]) {
+        if (where === "body") await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        for (const k of ["a", "d", "e", "Enter"]) await page.keyboard.press(k);
+      }
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
+      await expect(page.locator("aside.panel")).not.toHaveClass(/panel--open/);
+      await expect(page).toHaveURL(/\/inbox\?settings/);
+      await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+      // e hides a row by taking it off the list.
+      await expect(row).toBeAttached();
+    } finally {
+      await p.clear();
+      await d.stop();
+    }
+  });
+});
+
 test.describe("inbox: one preview tab", () => {
   test("row clicks one after another reuse one italic tab; an answer leaves it, typing and a double-click keep it", async ({
     context,
