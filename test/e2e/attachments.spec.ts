@@ -1434,3 +1434,24 @@ test("on a phone the tray is one row that scrolls sideways, and the conversation
   const field = await page.locator(".ctl-field").boundingBox();
   expect(field!.height).toBeLessThan(200);
 });
+
+/** The page's decoder made slow, so a picture is seen being made smaller. */
+const slowDecode = (page: Page, ms: number) =>
+  page.evaluate((ms) => {
+    const own = window.createImageBitmap.bind(window);
+    window.createImageBitmap = (async (...a: Parameters<typeof createImageBitmap>) => {
+      await new Promise((r) => setTimeout(r, ms));
+      return own(...a);
+    }) as typeof createImageBitmap;
+  }, ms);
+
+test("a picture being made smaller says so in the tray's line, not only in a tooltip", async ({ context, page }) => {
+  await open(context, page, { takes: true, title: "Made smaller, said" });
+  await slowDecode(page, 2000);
+  await pasteDrawn(page, { name: "IMG_0412.jpg", type: "image/jpeg", width: 4032, height: 3024, padTo: 5_000_000 });
+  await expect(tray(page)).toHaveAttribute("data-state", "shrinking");
+  await expect(trayLine(page)).toHaveText("Making it smaller…");
+  await expect(trayLine(page)).toHaveAttribute("role", "status");
+  await expect(tray(page)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
+  await expect(trayLine(page)).toHaveCount(0);
+});

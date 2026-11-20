@@ -89,7 +89,7 @@ import {
   uploadsAgain,
 } from "./newSessionState";
 import { keepSentPicture } from "./sentPictures";
-import { HEIC_FILE_NOTE, pictureType, ShrinkRefused, type Shrunk, shrinkImage } from "./shrink";
+import { HEIC_FILE_NOTE, pictureType, SHRINKING_WORDS, ShrinkRefused, type Shrunk, shrinkImage } from "./shrink";
 import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "./signer";
 import { machineBlocked, startGate } from "./startGate";
 import { nounFor, spacesheepName, uploadWords } from "./uploadWords";
@@ -974,7 +974,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
             }
             title={
               f.shrinking
-                ? "Making it smaller…"
+                ? SHRINKING_WORDS
                 : f.was && !f.error
                   ? `${f.name} · ${bytes(f.size)} (was ${bytes(f.was)})`
                   : (f.note ?? undefined)
@@ -982,7 +982,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           >
             {!f.entry && !f.error && <span className="spinner" aria-hidden="true" />}
             <span className="ns-file-name ellipsis">{f.name}</span>
-            <span className="ns-file-size num">{f.error ?? bytes(f.size)}</span>
+            <span className="ns-file-size num">{f.error ?? (f.shrinking ? SHRINKING_WORDS : bytes(f.size))}</span>
             {f.failed?.retry && f.file && (
               <button
                 type="button"

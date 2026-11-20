@@ -15,6 +15,8 @@ export const SHRINK_EDGE = 2560;
 /** One picture's whole shrink, decode and encode, at most; then it is as if it failed. */
 export const SHRINK_LIMIT_MS = 20_000;
 
+/** What a picture being made smaller says, in the tray's line and on New session's chip. */
+export const SHRINKING_WORDS = "Making it smaller…";
 /** A HEIC this engine cannot draw: it can't be sent as a picture. */
 export const HEIC_WORDS =
   "This browser can't open HEIC photos. Export it as JPEG (Photos › File › Export) and attach that.";

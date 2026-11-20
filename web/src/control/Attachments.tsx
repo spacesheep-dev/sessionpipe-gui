@@ -77,7 +77,15 @@ import { ControlError, controlApi, uploadRefusal } from "./api";
 import { b64url, sha256 } from "./bytes";
 import { Lightbox } from "./Lightbox";
 import { heldSentPicture, keepSentPicture, useSentPictureUrls } from "./sentPictures";
-import { PICKER_DESK, PICKER_TOUCH, pictureType, refuseInput, shrinkImage, stillOverWords } from "./shrink";
+import {
+  PICKER_DESK,
+  PICKER_TOUCH,
+  pictureType,
+  refuseInput,
+  SHRINKING_WORDS,
+  shrinkImage,
+  stillOverWords,
+} from "./shrink";
 import { boardName, spacesheepName, uploadWords } from "./uploadWords";
 import "./attachments.css";
 
@@ -541,8 +549,8 @@ export interface AttachmentsHandle {
   /** A file was refused or an upload failed, the pictures are too much together, or the
    *  text would be over the cap. */
   error: string | null;
-  /** The tray's one line: `error`, else what an upload is doing (how far it is, or that a
-   *  send waits for it). */
+  /** The tray's one line: `error`, else what an upload is doing (that a send waits for it,
+   *  that a picture is being made smaller, or how far it is). */
   note: { text: string; tone: "err" | "info" } | null;
   /** A file is being dragged over the drop zone, and would be taken. */
   dragging: boolean;
@@ -1062,18 +1070,22 @@ export function useAttachments(o: {
 
   // The tray's one line: what is wrong first, then what the uploads are doing.
   // One still being made smaller is waited for too, and counted in the uploads' size once it is.
+  // A picture being made smaller says so, in words a finger can read, once that takes a moment.
   const busyOnes = items.filter((it) => itemState(it) === "waiting" || itemState(it) === "uploading");
+  const shrinking = items.filter((it) => itemState(it) === "shrinking").length;
   const wrong = error ?? failedOne?.error ?? (misfit ? ELSEWHERE_WORDS : over ? TOGETHER_WORDS : null);
   const doing = !uploading
     ? null
     : held
-      ? waitingWords(busyOnes.length + items.filter((it) => itemState(it) === "shrinking").length)
-      : slow && busyOnes.length > 0
-        ? progressWords(
-            busyOnes.reduce((n, it) => n + it.bytes, 0),
-            uploadProgress() ? busyOnes.reduce((n, it) => n + (it.sent ?? 0), 0) : undefined,
-          )
-        : null;
+      ? waitingWords(busyOnes.length + shrinking)
+      : slow && shrinking > 0
+        ? SHRINKING_WORDS
+        : slow && busyOnes.length > 0
+          ? progressWords(
+              busyOnes.reduce((n, it) => n + it.bytes, 0),
+              uploadProgress() ? busyOnes.reduce((n, it) => n + (it.sent ?? 0), 0) : undefined,
+            )
+          : null;
   const note = wrong ? { text: wrong, tone: "err" as const } : doing ? { text: doing, tone: "info" as const } : null;
 
   return {
@@ -1244,7 +1256,7 @@ function TrayItem({ it, onRemove, onRetry }: { it: PendingItem; onRemove: () => 
   const px = it.attachment ?? it.entry;
   const size = state !== "ready" ? state : px?.width && px.height ? `${px.width}×${px.height}` : "";
   const bytes = it.was ? `${mb(it.bytes)} (was ${mb(it.was)})` : mb(it.bytes);
-  const tip = state === "shrinking" ? "Making it smaller…" : [name, size, bytes].filter(Boolean).join(" · ");
+  const tip = state === "shrinking" ? SHRINKING_WORDS : [name, size, bytes].filter(Boolean).join(" · ");
   const again = state === "error" && !!it.retry;
   const menu = useContextMenu(() => [
     copyItem("Copy name", name),

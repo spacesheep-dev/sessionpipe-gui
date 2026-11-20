@@ -463,3 +463,33 @@ test("a file refused for too many at once offers Try again only once the wait is
   await again.click();
   await expect(chip).toHaveAttribute("data-file-state", "held");
 });
+
+test("a picture being made smaller says so on its chip", async ({ page }) => {
+  const m = await fakeDaemon(key, advertising(`ns-shrink-${tag()}`), { sinkToken: sink });
+  daemons.push(m);
+  await page.goto(`${CONTROL_BASE}/?new=1&machine=${m.name}`);
+  await expect(sheet(page).locator("input[data-ns-files]")).toBeAttached();
+  await page.evaluate(async () => {
+    // The page's decoder made slow, so the picture is seen being made smaller.
+    const own = window.createImageBitmap.bind(window);
+    window.createImageBitmap = (async (...a: Parameters<typeof createImageBitmap>) => {
+      await new Promise((r) => setTimeout(r, 2000));
+      return own(...a);
+    }) as typeof createImageBitmap;
+    const cv = new OffscreenCanvas(4032, 3024);
+    const cx = cv.getContext("2d")!;
+    cx.fillStyle = "#2f6f4e";
+    cx.fillRect(0, 0, 4032, 3024);
+    const drawn = await cv.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+    const dt = new DataTransfer();
+    dt.items.add(new File([drawn, new Uint8Array(5_000_000 - drawn.size)], "IMG_0412.jpg", { type: "image/jpeg" }));
+    const input = document.querySelector<HTMLInputElement>("input[data-ns-files]")!;
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const chip = sheet(page).locator(".ns-file");
+  await expect(chip).toHaveAttribute("data-file-state", "shrinking");
+  await expect(chip.locator(".ns-file-size")).toHaveText("Making it smaller…");
+  await expect(chip).toHaveAttribute("data-file-state", "held", { timeout: 30_000 });
+  await expect(chip.locator(".ns-file-size")).not.toHaveText("Making it smaller…");
+});
