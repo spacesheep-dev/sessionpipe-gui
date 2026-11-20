@@ -1463,6 +1463,27 @@ test("on a phone the tray is one row that scrolls sideways, and the conversation
   }
   const field = await page.locator(".ctl-field").boundingBox();
   expect(field!.height).toBeLessThan(200);
+  // Scrolled part way, the row still ends inside the field's border, on both sides.
+  await row.evaluate((el) => {
+    el.scrollLeft = 120;
+  });
+  const inside = () =>
+    page.evaluate(() => {
+      const f = document.querySelector(".ctl-field")!.getBoundingClientRect();
+      const r = document.querySelector(".att-tray")!.getBoundingClientRect();
+      return r.left >= f.left + 1 && r.right <= f.right - 1;
+    });
+  expect(await inside()).toBe(true);
+  // The last picture's × keeps its whole target at the row's end.
+  const last = tray(page).last().getByRole("button", { name: "Remove picture" });
+  const hit = await hitBox(last);
+  expect(hit.right - hit.left, JSON.stringify(hit)).toBeGreaterThanOrEqual(42);
+  expect(hit.bottom - hit.top, JSON.stringify(hit)).toBeGreaterThanOrEqual(42);
+  // A tablet held sideways keeps the one row: no picture's buttons over a row below.
+  await page.setViewportSize({ width: 1180, height: 820 });
+  const wide = await tray(page).evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+  expect(new Set(wide).size).toBe(1);
+  expect(await inside()).toBe(true);
 });
 
 /** The page's decoder made slow, so a picture is seen being made smaller. */

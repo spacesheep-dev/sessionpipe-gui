@@ -97,18 +97,18 @@
   outline-offset: -1px;
   background: var(--bg-3);
 }
-/* A phone (or a tablet held upright, as New session's phone row): the pictures sit in one
-   row that scrolls sideways, each frame within 88×64, so the conversation keeps its room.
-   The row reaches past the field's padding, and holds room above and below, for the
-   buttons' targets a scroller would cut. */
-@media (max-width: 839px) and (pointer: coarse) {
+/* Under a finger the pictures sit in one row that scrolls sideways, so the conversation
+   keeps its room and no picture's buttons sit over the row below. The row runs to the
+   field's inner edge, never past its border, and holds room above, below and at its end
+   for the buttons' targets a scroller would cut. */
+@media (pointer: coarse) {
   .ctl-field > .att {
     padding-top: 0;
   }
   .att-tray {
     flex-wrap: nowrap;
-    margin: 0 -20px -24px;
-    padding: 20px 20px 24px;
+    margin: 0 -12px -24px;
+    padding: 20px 20px 24px 12px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
@@ -119,6 +119,9 @@
   .att-item {
     flex: none;
   }
+}
+/* A phone (or a tablet held upright, as New session's phone row): each frame within 88×64. */
+@media (max-width: 839px) and (pointer: coarse) {
   .att-thumb {
     max-width: 88px;
     max-height: 64px;
