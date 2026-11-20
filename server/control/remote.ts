@@ -628,6 +628,12 @@ export interface RemoteUploadAnswer {
  *  this account, where the computer fetches it with its own token. The receiver asks with
  *  the account's key; a page asks through the native hub, which holds it. */
 export type RemoteUpload = (file: { bytes: Uint8Array; type: string; name: string }) => Promise<RemoteUploadAnswer>;
+/** The same, for the computer `m` it is for: the board holds it to the spacesheep that
+ *  computer is on. */
+export type RemoteUploadFor = (
+  file: { bytes: Uint8Array; type: string; name: string },
+  m: MachineRow,
+) => Promise<RemoteUploadAnswer>;
 
 /** How long an upload of `bytes` may take to be sent and answered, as the app's hub times
  *  its files door (apps/crates/sp-receivers/src/proxy.rs `send_timeout`): fifteen seconds,

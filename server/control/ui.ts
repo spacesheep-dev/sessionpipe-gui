@@ -37,7 +37,7 @@ import {
   forwardRemoteUpload,
   RELAY_FILES,
   type RemoteSend,
-  type RemoteUpload,
+  type RemoteUploadFor,
   SendRefused,
   SPACESHEEP_UNAUTHORIZED,
 } from "./remote.js";
@@ -67,7 +67,7 @@ export interface UiRouteDeps {
   remoteSend?: RemoteSend;
   /** An upload for a machine paired on spacesheep: the bytes to spacesheep's files door as
    *  this account, where the machine fetches them; nothing is kept here. */
-  remoteUpload?: RemoteUpload;
+  remoteUpload?: RemoteUploadFor;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -516,7 +516,8 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
         throw new HttpError(415, { reason: "not_an_image", error: "This file isn't the picture its type says." });
       const target = state.machine(ctx.url.searchParams.get("machine") ?? "");
       if (target?.remote) {
-        const r = await forwardRemoteUpload({ bytes, type, name }, d.remoteUpload);
+        const up = d.remoteUpload;
+        const r = await forwardRemoteUpload({ bytes, type, name }, up && ((file) => up(file, target)));
         if (r.status !== 201) throw new HttpError(r.status, r.json);
         if (picture) Object.assign(r.json, { width: picture.width, height: picture.height });
         return { status: 201, json: r.json };

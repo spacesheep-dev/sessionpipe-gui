@@ -338,5 +338,20 @@ describe("a receiver connected to spacesheep", () => {
       status: 502,
       body: { reason: "spacesheep_refused", error: "spacesheep.dev can't take pictures from here yet." },
     });
+
+    // A computer on another spacesheep than the one this board is connected to: its picture
+    // goes nowhere, as a send to it would not.
+    const FAR = "m_relayfilesfar0000004";
+    app.control.remote.upsert([listed(FAR, { name: "far-mac", files: true, prompt_files: true })], {
+      via: "spacesheep",
+      origin: "https://other.example.com",
+      rpId: "other.example.com",
+    });
+    const sent = auth.length;
+    expect(await upload(app.url, FAR)).toEqual({
+      status: 503,
+      body: { reason: "no_relay", error: "Not connected to spacesheep any more." },
+    });
+    expect(auth).toHaveLength(sent);
   });
 });

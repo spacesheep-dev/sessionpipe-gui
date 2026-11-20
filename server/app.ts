@@ -414,9 +414,10 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     },
     // A file for a machine paired on spacesheep: its bytes to the files door, as this
     // account, where the machine fetches it. Nothing of it is kept here.
-    remoteUpload: async (file) => {
+    remoteUpload: async (file, m) => {
       const link = config.spacesheep;
-      if (!link)
+      // Only to the spacesheep the computer is on, as a send goes.
+      if (!link || m.remote?.origin !== link.origin)
         return {
           status: 503,
           json: { reason: "no_relay", error: "Not connected to spacesheep any more." },
