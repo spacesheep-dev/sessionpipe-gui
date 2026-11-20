@@ -153,6 +153,10 @@ describe("sessionpipe-gui search", () => {
     const none = await run(runSearchCli, ["zzzz since:3days"]);
     expect(none.code).toBe(1);
     expect(none.out).toContain("“since:3days” isn't a date, so it was left out.");
+    const feb30 = await run(runSearchCli, ["webhook until:2026-02-30"]);
+    expect(feb30.out).toContain(
+      "“until:2026-02-30” isn't a date, so it was left out. Dates: 7d, 12h, today, yesterday, 2026-10, 2026-10-01",
+    );
   });
 
   it("exit 1 with nothing, with the hint that applies", async () => {
