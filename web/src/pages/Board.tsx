@@ -63,7 +63,7 @@ import {
 } from "../data/hooks";
 import { agentFound } from "../lib/agents";
 import { foldsAway, nestDelegated } from "../lib/delegated";
-import { usePhoneLayout } from "../lib/device";
+import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import {
   canHideUntilNeeded,
@@ -146,7 +146,8 @@ function viewItems(o: {
     rows && { label: "Edit labels…", run: () => requestLabelRename() },
     rows && { label: "Mark all as read", disabled: o.unread.length === 0 || undefined, run: o.markRead },
     { sep: true },
-    {
+    // The phone has no beside: every session opens as its page, so there is nothing to choose.
+    !phoneLayout() && {
       label: "Open sessions",
       items: [
         { label: "Beside", radio: true, checked: o.beside, run: () => setSettings({ openSessions: "beside" }) },

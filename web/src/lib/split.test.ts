@@ -290,6 +290,25 @@ describe("openSession: every opener asks the one rule", () => {
     expect(previewTab()).toBeNull();
   });
 
+  it("the session whose page is open stays its page: no copy opens beside it, a hash lands on it", () => {
+    setSettings({ openSessions: "beside" });
+    at("/s/claude-code/a?s=claude-code%3Ax");
+    for (const how of ["primary", "other", "background"] as const) openSession("claude-code:a", how);
+    expect(where()).toBe("/s/claude-code/a?s=claude-code%3Ax");
+    expect(previewTab()).toBeNull();
+    const seen = vi.fn();
+    window.addEventListener("hashchange", seen);
+    openSession("claude-code:a", "primary", { hash: "#seq-3" });
+    window.removeEventListener("hashchange", seen);
+    expect(where()).toBe("/s/claude-code/a?s=claude-code%3Ax");
+    expect((g.location as URL).hash).toBe("#seq-3");
+    expect(seen).toHaveBeenCalledOnce();
+    // A subagent's page is not its session's: the session opens beside it.
+    at("/s/claude-code/a?agent=r1");
+    openSession("claude-code:a", "primary");
+    expect(tabs()).toEqual(["claude-code:a"]);
+  });
+
   it("a click's keys say how: ⌘ or Ctrl the background, ⇧ or ⌥ the other way", () => {
     const e = { metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
     expect(howOf(e)).toBe("primary");
@@ -328,6 +347,19 @@ describe("openAsked: a page the app asks for while its window is up (a notificat
     at("/");
     openAsked("/s/claude-code/z?agent=a1");
     expect(where()).toBe("/s/claude-code/z?agent=a1");
+  });
+
+  it("the session already on screen stays as it is", () => {
+    at("/s/claude-code/z?s=claude-code%3Ax");
+    openAsked("/s/claude-code/z");
+    expect(where()).toBe("/s/claude-code/z?s=claude-code%3Ax");
+    expect(previewTab()).toBeNull();
+  });
+
+  it("over Settings the session's page opens and Settings goes, so the click shows it", () => {
+    at("/inbox?settings=general&s=claude-code%3Ax");
+    openAsked("/s/claude-code/z");
+    expect(where()).toBe("/s/claude-code/z?s=claude-code%3Ax");
   });
 
   it("on the phone it is the page", () => {

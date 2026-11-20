@@ -100,7 +100,7 @@ export function rowMenu(m: SessionMatch, ctx: RowMenuContext): MenuList {
           { label: "Open as page", keys: "⇧↵", run: open("page") },
         ]
       : [
-          { label: "Open", keys: "↵", run: open("page") },
+          { label: "Open as page", keys: "↵", run: open("page") },
           !phoneLayout() && { label: "Open beside", keys: "⇧↵", run: open("beside") },
         ]),
     { label: "Open at the latest", run: latest },

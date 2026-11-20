@@ -567,6 +567,22 @@ test.describe("inside the native shell", () => {
     await expect(page).toHaveURL(/\/usage/);
     await emit(page, "navigate", { to: hrefs[0] });
     await expect(page).toHaveURL((u) => u.pathname === hrefs[0]);
+    // The session already on screen (its banner clicked while the window was behind) stays
+    // as it is: no copy of it opens beside its own page.
+    const onPage = page.url();
+    await emit(page, "navigate", { to: hrefs[0] });
+    // With a row to land on, too (the page reads the hash, and drops it).
+    await emit(page, "navigate", { to: `${hrefs[0]}#seq-1` });
+    await expect(page).toHaveURL(onPage);
+    await expect(panel.locator(`[role='tab'][data-tab-key='${keys[0]}']`)).toHaveCount(0);
+    // Over Settings the session shows and Settings goes, so the click is seen.
+    await emit(page, "navigate", { to: "/inbox" });
+    await emit(page, "navigate", { to: "/settings?section=general" });
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    await expect(settings).toBeVisible();
+    await emit(page, "navigate", { to: hrefs[1] });
+    await expect(page).toHaveURL((u) => u.pathname === hrefs[1] && !u.searchParams.has("settings"));
+    await expect(settings).toHaveCount(0);
   });
 
   test("a machine that doesn't trust the app's key: the palette lists no Allow for it, and its session says Approve this Mac", async ({

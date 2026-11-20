@@ -19,6 +19,7 @@ import { type SessionKey, sessionKey, splitKey } from "@shared/api";
 import { useMemo, useSyncExternalStore } from "react";
 import { phoneLayout } from "./device";
 import {
+  AGENT_PARAM,
   agentPath,
   navigate,
   onLocation,
@@ -28,11 +29,12 @@ import {
   SPLIT_PARAM,
   sessionPath,
   setSearchParams,
+  settingsOpen,
   usePath,
   useSearchParam,
 } from "./router";
 import { getSettings } from "./settings";
-import { AGENT_TAB_SEP, dropTab, isKey, parseSplit, type SplitState, splitParams } from "./splitState";
+import { AGENT_TAB_SEP, agentTabKey, dropTab, isKey, parseSplit, type SplitState, splitParams } from "./splitState";
 
 export { AGENT_TAB_SEP, agentTabKey, parseSplit, type SplitState } from "./splitState";
 
@@ -363,20 +365,34 @@ export function openWay(how: OpenHow): "page" | "beside" | "background" {
 export const howOf = (e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): OpenHow =>
   e.metaKey || e.ctrlKey ? "background" : e.shiftKey || e.altKey ? "other" : "primary";
 
+/** The tab key of the session (or subagent) whose page is open, else null. */
+function ownPageKey(): SessionKey | null {
+  const r = parseRoute(location.pathname);
+  if (r.name !== "session") return null;
+  const session = sessionKey(r.harness, r.id);
+  const agent = new URLSearchParams(location.search).get(AGENT_PARAM);
+  return agent ? agentTabKey(session, agent) : session;
+}
+
 /** Opens a session by the one rule (openWay): as its page, beside the page (a plain open
  *  is the preview tab; one that went the other way, or a menu's (`keep`), is kept) or as a
- *  background tab. `hash`
- *  (`#seq-N`) lands it on a row: the page carries it, the panel reads it once
- *  (components/SessionView.tsx). Not the theme API's openSession, which is always the page. */
+ *  background tab. The session whose page is open stays its page: no copy of it opens
+ *  beside. `hash` (`#seq-N`) lands it on a row: the page carries it, the panel reads it
+ *  once (components/SessionView.tsx). Not the theme API's openSession, which is always the
+ *  page. */
 export function openSession(
   key: SessionKey,
   how: OpenHow,
   opts: { from?: Rect; hash?: string; keep?: boolean } = {},
 ): void {
-  const way = openWay(how);
+  const here = ownPageKey() === key;
+  const way = here ? "page" : openWay(how);
   if (way === "page") {
-    navigate(tabPath(key));
-    if (opts.hash) history.replaceState(history.state, "", `${location.pathname}${location.search}${opts.hash}`);
+    if (!here) navigate(tabPath(key));
+    if (!opts.hash) return;
+    history.replaceState(history.state, "", `${location.pathname}${location.search}${opts.hash}`);
+    // The page already open reads the hash as it moves; a page just opened reads it on arrival.
+    if (here) window.dispatchEvent(new HashChangeEvent("hashchange"));
     return;
   }
   openSplit(key, { from: opts.from, background: way === "background", preview: how === "primary" && !opts.keep });
@@ -387,13 +403,14 @@ export function openSession(
 
 /** A page the app asks for while its window is up (a notification's click, the menu bar's
  *  session): a session's own page opens by the one rule, as a plain open, so the page and
- *  its tabs stay; any other address is navigated to. A cold start is not asked here: the
- *  window opens on the address. */
+ *  its tabs stay; any other address is navigated to, and so is a session asked for over
+ *  Settings, which would hide it (the address drops Settings, as before). A cold start is
+ *  not asked here: the window opens on the address. */
 export function openAsked(to: string): void {
   const at = to.indexOf("#");
   const bare = at < 0 ? to : to.slice(0, at);
   const r = parseRoute(bare);
-  if (r.name !== "session" || bare.includes("?")) {
+  if (r.name !== "session" || bare.includes("?") || settingsOpen()) {
     navigate(to);
     return;
   }

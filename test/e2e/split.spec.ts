@@ -1059,6 +1059,14 @@ test.describe("split panel", () => {
       await expect(page.locator("section.group").first()).toBeVisible();
     });
 
+    test("the Board's view menu offers no Open sessions: there is no beside to choose", async ({ page }) => {
+      await openBoard(page);
+      await page.getByRole("button", { name: "View options" }).click();
+      const menu = page.getByRole("menu");
+      await expect(menu.getByText("Mode", { exact: true })).toBeVisible();
+      await expect(menu.getByText("Open sessions", { exact: true })).toHaveCount(0);
+    });
+
     test("the tools line's glyph sits on the reply's edge, as it did", async ({ page, request }) => {
       await simpleMode(page);
       const asking = await postAskingSession(request);
