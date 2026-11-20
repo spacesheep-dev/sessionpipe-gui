@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HEIC_WORDS,
   jpegHasGps,
+  jpegWithoutApp1,
   NOT_A_PICTURE_WORDS,
   OVER_INPUT_WORDS,
   PICKER_DESK,
@@ -273,6 +274,42 @@ describe("shrinkImage", () => {
     await expect(shrinkImage(file(5_000_000, "image/heic", "slow.heic"), { limitMs: 20 })).rejects.toThrow(HEIC_WORDS);
     stub({ decode: { width: 4000, height: 3000 }, write: (t) => ({ type: t, size: 1_000_000 }) });
     expect(await shrinkImage(file(5_000_000, "image/jpeg", "next.jpg"))).toMatchObject({ width: 2560 });
+  });
+
+  it("takes the metadata out of a JPEG that says where it was taken when it can't be redrawn", async () => {
+    // A frame header of 800×600, an XMP block beside the Exif one, then the scan's bytes.
+    const sof = [0xff, 0xc0, 0x00, 0x11, 0x08, 0x02, 0x58, 0x03, 0x20, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
+    const xmp = [0xff, 0xe1, 0x00, 0x0a, ...Array.from("http://", (c) => c.charCodeAt(0)), 0];
+    const head = jpeg([[0x8825, 0x40]], { before: [...sof, ...xmp] });
+    const scan = Uint8Array.from({ length: 4000 }, (_, i) => (i * 7) & 0x7f);
+    const located = new File([head as Uint8Array<ArrayBuffer>, scan], "here.jpg", { type: "image/jpeg" });
+    const bare = async (out: Awaited<ReturnType<typeof shrinkImage>>) => {
+      expect(out).toMatchObject({ type: "image/jpeg", width: 800, height: 600 });
+      const b = new Uint8Array(await out!.blob.arrayBuffer());
+      // Not one APP1 segment before the scan; the scan and all after it as they were.
+      const sos = b.findIndex((x, i) => x === 0xff && b[i + 1] === 0xda);
+      expect(b.subarray(0, sos).some((x, i) => x === 0xff && b[i + 1] === 0xe1)).toBe(false);
+      expect(jpegHasGps(b)).toBe(false);
+      const was = new Uint8Array(await located.arrayBuffer());
+      const wasSos = was.findIndex((x, i) => x === 0xff && was[i + 1] === 0xda);
+      expect(Array.from(b.subarray(sos))).toEqual(Array.from(was.subarray(wasSos)));
+      expect(Array.from(b.subarray(0, 2 + sof.length))).toEqual(Array.from(was.subarray(0, 2 + sof.length)));
+    };
+    // The engine can't decode it.
+    stub({ decode: "fail", write: () => null });
+    await bare(await shrinkImage(located));
+    // It takes longer than the limit.
+    vi.stubGlobal("createImageBitmap", () => new Promise(() => {}));
+    await bare(await shrinkImage(located, { limitMs: 20 }));
+  });
+
+  it("finds a JPEG's size in its frame header, and leaves one without APP1 as it was", () => {
+    const plain = Uint8Array.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x04, 0, 0, 0xff, 0xda, 0x00, 0x02, 1, 2]);
+    expect(jpegWithoutApp1(plain)).toEqual({ bytes: plain, width: 0, height: 0 });
+    const stripped = jpegWithoutApp1(jpeg([[0x8825, 0x40]]));
+    expect(Array.from(stripped.bytes)).toEqual([
+      0xff, 0xd8, 0xff, 0xdb, 0x00, 0x04, 0, 0, 0xff, 0xda, 0x00, 0x02, 0x11, 0x22,
+    ]);
   });
 
   it("always redraws a small JPEG that says where it was taken, and keeps the redraw", async () => {

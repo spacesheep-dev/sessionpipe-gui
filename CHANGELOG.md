@@ -82,8 +82,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   where the browser can open one (Safari, the apps on a Mac and an iPhone); elsewhere the
   message box says how to export it, and New session sends it as a file with a note that
   the agent can't look at it. A JPEG that says where it was taken is always redrawn, which
-  leaves the location behind. The thumbnail's tooltip says the size it goes at and the
-  size it was.
+  leaves the location behind; one that can't be redrawn goes without its metadata. The
+  thumbnail's tooltip says the size it goes at and the size it was.
 - **A sent message shows the pictures it carried.** In the session's view, and in the row
   of a message that went to a copy of the session, each picture is a thumbnail that opens
   it whole: while the message is on its way, once the session's turn arrives and after a

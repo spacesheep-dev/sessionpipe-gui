@@ -6,7 +6,8 @@
 // and imageShrinkKeep, ported as they are), and the vectors in shrink.test.ts are in its
 // image-shrink.test.ts too, so the two decide the same. Added here: a HEIC or HEIF is always
 // redrawn, as JPEG (an agent reads none), and a JPEG that carries a location (an Exif GPS
-// block) is always redrawn, which leaves its metadata behind.
+// block) is always redrawn, which leaves its metadata behind; where it can't be, its
+// metadata segments are taken out of its bytes instead.
 import { type AttachmentType, PICTURE_INPUT_MAX_BYTES, PICTURE_INPUT_TYPES } from "@shared/api";
 
 /** The long edge a picture is drawn at, at most. */
@@ -128,6 +129,52 @@ export function jpegHasGps(b: Uint8Array): boolean {
     i += 2 + len;
   }
   return false;
+}
+
+/** A JPEG without its APP1 segments before the scan (Exif and XMP both live in one, and the
+ *  location with them), every other byte as it was; with the size its frame header (SOFn)
+ *  says, 0×0 where it has none. Nothing is decoded: what a picture that can't be redrawn
+ *  goes as, so its location stays behind all the same. */
+export function jpegWithoutApp1(b: Uint8Array): { bytes: Uint8Array; width: number; height: number } {
+  const parts: Uint8Array[] = [b.subarray(0, 2)];
+  let width = 0;
+  let height = 0;
+  let i = 2;
+  let from = 2;
+  while (i + 4 <= b.length && b[i] === 0xff) {
+    const m = b[i + 1]!;
+    if (m === 0xff) {
+      i++;
+      continue;
+    }
+    if (m === 0x01 || (m >= 0xd0 && m <= 0xd7)) {
+      i += 2;
+      continue;
+    }
+    // The scan (or the end): the rest goes as it is.
+    if (m === 0xda || m === 0xd9) break;
+    const len = (b[i + 2]! << 8) | b[i + 3]!;
+    if (len < 2) break;
+    // SOF0–SOF15, but DHT (C4), JPG (C8) and DAC (CC): precision, height, width.
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc && i + 9 <= b.length) {
+      height = (b[i + 5]! << 8) | b[i + 6]!;
+      width = (b[i + 7]! << 8) | b[i + 8]!;
+    }
+    const end = Math.min(b.length, i + 2 + len);
+    if (m === 0xe1) {
+      parts.push(b.subarray(from, i));
+      from = end;
+    }
+    i = end;
+  }
+  parts.push(b.subarray(from));
+  const bytes = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) {
+    bytes.set(p, at);
+    at += p.length;
+  }
+  return { bytes, width, height };
 }
 
 /** IFD0 of a TIFF header (an Exif block's body) has a GPS pointer that is not zero. */
@@ -276,8 +323,19 @@ async function shrinkNow(
   const out = await Promise.race([drawn, late]);
   clearTimeout(timer);
   if (out !== "failed") return out;
-  // Nothing an agent reads: the HEIC can't go. Any other picture goes as it is, if it fits.
+  // Nothing an agent reads: the HEIC can't go.
   if (heic) throw new ShrinkRefused(HEIC_WORDS);
+  // A JPEG that says where it was taken goes without its metadata, the location with it.
+  if (gps) {
+    const bare = jpegWithoutApp1(new Uint8Array(await file.arrayBuffer()));
+    return {
+      blob: new Blob([bare.bytes as Uint8Array<ArrayBuffer>], { type: "image/jpeg" }),
+      type: "image/jpeg",
+      width: bare.width,
+      height: bare.height,
+    };
+  }
+  // Any other picture goes as it is, if it fits.
   return null;
 }
 
