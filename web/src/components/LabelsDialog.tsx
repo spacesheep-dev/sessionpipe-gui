@@ -2,9 +2,10 @@
 // "Edit labels…": the seven colour labels and what the person calls them, as one grouped
 // form (ORGANIZE-SPEC.md §3.3). A 400 px dialog on a desktop, a sheet on a phone. Each row
 // is the colour's dot and a field holding its name (the colour's own name is the
-// placeholder); a field saves when it loses focus or on Enter, and an empty one goes back
-// to the colour's own name. Mounted once, in the shell; any "Edit labels…" item opens it
-// through `requestLabelRename`, at one colour's field or at the list.
+// placeholder); a field the person changed saves when it loses focus or on Enter, and an
+// empty one goes back to the colour's own name. Mounted once, in the shell; any
+// "Edit labels…" item opens it through `requestLabelRename`, at one colour's field or at
+// the list.
 import { LABEL_COLORS, LABEL_DEFAULT_NAMES, LABEL_NAME_MAX, type LabelColor } from "@shared/api";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useLabels, useStore } from "../data/hooks";
@@ -79,32 +80,40 @@ function Dialog({ focus, onClose }: { focus?: LabelColor; onClose: () => void })
   );
 }
 
-/** One label: its dot and its name, saved on blur or Enter; the server's refusal (or a name
- *  over the limit) shows under it and the field keeps the text. */
+/** One label: its dot and its name, saved on blur or Enter once the person has changed it;
+ *  the server's refusal (or a name over the limit) shows under it and the field keeps the
+ *  text. */
 function LabelField({ color }: { color: LabelColor }) {
   const store = useStore();
   const labels = useLabels();
   const saved = labels.names[color] ?? "";
   const [text, setText] = useState(saved);
   const [error, setError] = useState<string | null>(null);
+  /** The person changed the text and it is not saved yet. Having the focus is not that:
+   *  the dialog opens with a field in hand, and Tab passes through the others. */
   const editing = useRef(false);
   // Another device renamed it while this field was not being edited: show that.
   useEffect(() => {
     if (!editing.current) setText(saved);
   }, [saved]);
   const save = async () => {
-    editing.current = false;
+    // A field only looked at has nothing of the person's to save, and what it holds may
+    // be older than the name another device has given since.
+    if (!editing.current) return;
     const name = text.trim();
     if (name.length > LABEL_NAME_MAX) {
       setError(TOO_LONG);
       return;
     }
     setError(null);
+    editing.current = false;
     if (name === saved) return;
     try {
       await renameLabel(store, color, name || null);
       if (!name) setText("");
     } catch (e) {
+      // Still the person's, still unsaved: Enter, or leaving the field, tries again.
+      editing.current = true;
       setError((e as Error).message === "bad_name" ? TOO_LONG : "Not saved; try again");
     }
   };
@@ -129,9 +138,6 @@ function LabelField({ color }: { color: LabelColor }) {
         maxLength={LABEL_NAME_MAX * 2}
         autoComplete="off"
         spellCheck={false}
-        onFocus={() => {
-          editing.current = true;
-        }}
         onChange={(e) => {
           editing.current = true;
           setText(e.target.value);

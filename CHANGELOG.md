@@ -29,6 +29,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   narrow window (Mode) stayed as a page with no way back once the window was wide; the
   section shows instead. The Labels sheet becomes the dialog, and the dialog the sheet, as
   the window is resized, with the name being typed still in its field.
+- **A label's name given on another device is no longer undone by "Edit labels…" open
+  here.** The dialog opens with its first field in hand, and a field in hand kept the name
+  it had: a name given to that colour elsewhere meanwhile did not show in it, and was put
+  back to the old one as the field was left. A field now saves only a name you changed,
+  and shows a new one as it arrives.
 - **Search's range of days fits a narrow phone.** On Android and in Chrome, the two dates
   of "Custom range…" were as wide as the browser draws a date, whatever the card's width:
   on a phone under about 400 px wide the second one stood out of the card, and at 320 px

@@ -4,12 +4,14 @@
 // the session bar, the split tab and the palette, survives a reload and reaches a second
 // page live; ⌥⌘3 / ⌥⌘0 on the cursor; renaming red in "Edit labels…" changes the menu and
 // the chip and `label:<name>` filters; the keyboard path through Shift+F10; forgetting a
-// session takes its label away. The specs share one receiver, so they run in order and
-// each clears the labels it set.
+// session takes its label away; a name given on another device stays when its field here
+// was only looked at; the "Edit labels…" sheet becomes the dialog as the window is widened,
+// with the field in hand still in hand. The specs share one receiver, so they run in order
+// and each clears the labels it set: a spec that opens "Edit labels…" belongs here.
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openBoard, openPage, openPrompt, tier1Batch, ulid } from "./helpers.js";
+import { EVENTS, INFO, openBoard, openPage, openPrompt, resizeWindow, tier1Batch, ulid } from "./helpers.js";
 
 const LABELS = "/api/ui/labels";
 const menu = (page: Page) => page.getByRole("menu").last();
@@ -319,5 +321,58 @@ test.describe("colour labels", () => {
       )
       .toBeUndefined();
     await expect(row).toHaveCount(0);
+  });
+
+  test("a name given on another device stays when its field here was only looked at", async ({ page, request }) => {
+    await openBoard(page);
+    await page.getByRole("button", { name: "View options" }).click();
+    await page.getByRole("menuitem", { name: "Edit labels…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Labels" });
+    // The dialog opens with its first field in hand.
+    const red = dialog.getByRole("textbox", { name: "Red label name" });
+    await expect(red).toBeFocused();
+
+    // Another device names the colour: the field shows it.
+    expect((await request.patch(LABELS, { data: { names: { red: "Urgent" } } })).status()).toBe(200);
+    await expect(red).toHaveValue("Urgent");
+    // Left untouched for the next field, then the dialog closed: nothing is saved over it.
+    await dialog.getByRole("textbox", { name: "Grey label name" }).click();
+    await dialog.getByRole("button", { name: "Done" }).click();
+    await expect(dialog).toBeHidden();
+    const doc = (await (await request.get(LABELS)).json()) as { names: Record<string, string> };
+    expect(doc.names).toEqual({ red: "Urgent" });
+  });
+
+  test("the sheet becomes the dialog as the window is widened, with the field in hand and its words kept", async ({
+    page,
+  }) => {
+    // A window with a mouse, on either side of the phone layout's width (lib/device.ts).
+    const phone = { width: 700, height: 800 };
+    const wide = { width: 1000, height: 800 };
+    await page.setViewportSize(phone);
+    await openBoard(page);
+    await page.getByRole("button", { name: "View options" }).click();
+    await page.getByRole("menuitem", { name: "Edit labels…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Labels" });
+    await expect(dialog).toHaveClass(/labels-sheet/);
+    // Typed and not yet saved: a field saves when it is left.
+    const grey = dialog.getByRole("textbox", { name: "Grey label name" });
+    await grey.click();
+    await grey.pressSequentially("Later");
+    await expect(grey).toBeFocused();
+
+    await resizeWindow(page, wide);
+    await expect(dialog).toHaveClass(/labels-dialog/);
+    await expect(dialog).not.toHaveClass(/labels-sheet/);
+    await expect(page.locator(".menu-scrim--dialog")).toBeVisible();
+    await expect(grey).toBeFocused();
+    await expect(grey).toHaveValue("Later");
+
+    await resizeWindow(page, phone);
+    await expect(dialog).toHaveClass(/labels-sheet/);
+    await expect(grey).toBeFocused();
+    await expect(grey).toHaveValue("Later");
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
   });
 });
