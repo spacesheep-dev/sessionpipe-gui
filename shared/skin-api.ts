@@ -61,7 +61,7 @@ export interface SkinShape {
   radius?: number;
   /** `--hairline`: the width of every rule and border that is a hairline today. */
   hairline?: SkinHairline;
-  /** Row heights and paddings: `data-density` on <html>, mapped in app.css. */
+  /** Row heights and paddings: `data-density` on <html>, mapped in density.css. */
   density?: SkinDensity;
 }
 
