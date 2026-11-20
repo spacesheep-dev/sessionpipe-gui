@@ -62,6 +62,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   index still on disk, a viewer on another device read "Restarting the app tries again",
   which could mean the app on the phone; it now reads "Restarting the app on that computer
   tries again".
+- **`--rp-id` takes a host name alone.** `--rp-id https://foo.example`,
+  `--rp-id foo.example:7373`, a path or an empty value started a receiver whose passkey
+  origin (`https://https://foo.example:<port>`, `https://:<port>`) no browser makes a
+  passkey for, without a word. Each now stops with an `--rp-id` message; an IP address is
+  taken as before.
 
 ## [0.8.6] - 2026-11-19
 

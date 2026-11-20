@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: server-core. The CLI's flag values: --port and --keep-days take digits only
-// (Number() reads "" as 0 and "0x1F90" as 8080), and a flag never takes the next flag as
-// its value. A refused start exits 2 before it listens; one that is let through would
-// start a receiver, so each spawn has a short timeout and a refusal is checked by its
-// exit code.
+// (Number() reads "" as 0 and "0x1F90" as 8080), --rp-id takes a host name alone, and a
+// flag never takes the next flag as its value. A refused start exits 2 before it listens;
+// one that is let through would start a receiver, so each spawn has a short timeout and a
+// refusal is checked by its exit code.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -84,6 +84,57 @@ describe("sessionpipe-gui flag values", () => {
       const r = run("--port", "0", flag, value);
       expect(r.status).toBe(2);
       expect(r.stderr).toBe(`sessionpipe-gui: ${flag} needs a value\n`);
+    },
+    20_000,
+  );
+
+  it.each([[""], ["  "]])(
+    "--rp-id %j is refused",
+    (v) => {
+      const r = run("--port", "0", "--rp-id", v);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toBe("sessionpipe-gui: --rp-id needs a host name\n");
+    },
+    20_000,
+  );
+
+  it.each([
+    ["https://foo.example"],
+    ["https:foo.example"],
+    ["foo.example:7373"],
+    ["foo.example:443"],
+    ["foo.example:7373:"],
+    ["host::7373"],
+    ["[::1]:7373"],
+    ["foo.example/x"],
+    ["foo.example/"],
+    ["foo.example\\x"],
+    ["foo.example?x"],
+    ["foo.example#x"],
+    ["user@foo.example"],
+    [" foo.example"],
+    ["foo example"],
+  ])(
+    "--rp-id %j is refused",
+    (v) => {
+      const r = run("--port", "0", "--rp-id", v);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toBe(`sessionpipe-gui: --rp-id is a host name, no scheme, port or path: ${v}\n`);
+    },
+    20_000,
+  );
+
+  it.each([["foo.example"], ["localhost"], ["my-pc.local"], ["192.0.2.5"], ["::1"], ["[::1]"], ["fe80::1"]])(
+    "--rp-id %j is taken",
+    (v) => {
+      // An IP address is let through: whether a browser makes a passkey for one is not
+      // the parser's to decide.
+      const r = spawnSync(process.execPath, [cli, "--rp-id", v, "--version"], {
+        encoding: "utf8",
+        timeout: 15_000,
+        cwd: tmp.dir,
+      });
+      expect(r.status).toBe(0);
     },
     20_000,
   );

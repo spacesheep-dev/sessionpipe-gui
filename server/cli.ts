@@ -3,6 +3,7 @@
 // open it (with a QR code for a phone) and the one line that connects another
 // machine. Ctrl-C stops it cleanly.
 import { execFileSync, spawn } from "node:child_process";
+import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -239,6 +240,20 @@ interface Args {
  *  check after it refuses. */
 const digits = (v: string): number => (/^\d+$/.test(v) ? Number(v) : Number.NaN);
 
+/** `--rp-id`: a host name alone. Passkeys are made for it and the origin is
+ *  https://<rp id>:<port>, so "https://host", "host:7373", "host/x" or "user@host" would
+ *  start a receiver no browser makes a passkey for. An IP address is taken as given (the
+ *  caller checks isIP first). The URL parse refuses what is not a host at all. */
+function bareHost(v: string): boolean {
+  if (/[\s/\\?#@]|:\d*$/.test(v)) return false;
+  try {
+    new URL(`https://${v}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseArgs(argv: string[]): Args | "help" | "version" {
   const a: Args = {
     outbox: true,
@@ -304,6 +319,8 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         break;
       case "--rp-id":
         a.rpId = next();
+        if (!a.rpId.trim()) fail("--rp-id needs a host name");
+        if (!isIP(a.rpId) && !bareHost(a.rpId)) fail(`--rp-id is a host name, no scheme, port or path: ${a.rpId}`);
         break;
       case "--allow-host":
         a.allowHosts = [...(a.allowHosts ?? []), next()];
