@@ -458,7 +458,7 @@ test("an upload that did not arrive whole, and a file that is not the picture it
   await expect(tray(page)).toHaveAttribute("data-state", "error");
   // Said once, on a line under the whole tray; nothing is written inside the tray.
   await expect(trayLine(page)).toHaveText("The picture didn't arrive whole. Try again.");
-  expect(await tray(page).innerText()).toBe("");
+  expect(await tray(page).textContent()).toBe("");
   // Nothing is signed with it: Send is off and says to take it out or try it again.
   await composer(page).fill("try anyway");
   await expect(send(page)).toBeDisabled();
@@ -1289,5 +1289,9 @@ test("an agent's reply of three lines is drawn as three lines", async ({ context
   const said = page.locator(".page.session .md p", { hasText: "Purple, Iris" }).first();
   await expect(said).toBeVisible();
   await expect(said.locator("br")).toHaveCount(2);
-  expect(await said.innerText()).toBe("Purple, Iris\nGreen, Thyme\nBrown, Copper");
+  // Each line its own text, a <br> between.
+  const lines = await said.evaluate((p) =>
+    Array.from(p.childNodes, (n) => (n.nodeName === "BR" ? "\n" : n.textContent)).join(""),
+  );
+  expect(lines).toBe("Purple, Iris\nGreen, Thyme\nBrown, Copper");
 });

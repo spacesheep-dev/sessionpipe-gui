@@ -704,7 +704,7 @@ test("a start at a level the phone chose says nothing of the computer's own mode
     await expect(page.getByText("It refunds an order in two steps.").first()).toBeVisible();
     // Delivered, and no row says what it ran at: not known, so not said either way.
     await expect
-      .poll(() => page.evaluate(() => document.body.innerText.includes("It refunds an order in two steps.")))
+      .poll(() => page.evaluate(() => (document.body.textContent ?? "").includes("It refunds an order in two steps.")))
       .toBe(true);
     await page.waitForTimeout(1500);
     await expect(page.getByText(/at its own mode|ignores per-session options/)).toHaveCount(0);
