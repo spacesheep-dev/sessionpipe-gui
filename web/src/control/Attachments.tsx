@@ -1412,9 +1412,9 @@ interface SentThing {
 const receiverCopy = (sha: string): string => apiUrl(`${ROUTES.ui.control}/files/${sha}`);
 
 /** What a picture the prompt's text names (the composer's older block) says of itself, as
- *  a chip says a file: "Picture · PNG · 4032×3024". */
+ *  a chip says a file: "picture · PNG · 4032×3024". */
 const legacyFile = (it: AttachmentRef): ShownFile => ({
-  name: "Picture",
+  name: "picture",
   type: it.ext === "jpg" ? "image/jpeg" : `image/${it.ext}`,
   size: it.width && it.height ? `${it.width}×${it.height}` : "",
 });

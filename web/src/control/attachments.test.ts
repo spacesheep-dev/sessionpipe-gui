@@ -604,7 +604,7 @@ describe("a sent message's files, found and drawn", () => {
     // Every picture's alt is empty: a picture that does not load leaves no words in its frame.
     expect(html.match(/<img [^>]*>/g)!.map((i) => /alt="([^"]*)"/.exec(i)?.[1])).toEqual(["", ""]);
     expect(html).not.toContain("attachment 4032×3024");
-    expect(html).toContain('aria-label="Picture · JPEG · 4032×3024"');
+    expect(html).toContain('aria-label="picture · JPEG · 4032×3024"');
     expect(html).toContain('aria-label="birch.png · PNG · 2 KB"');
     // One strip: the lightbox moves through all of a message's pictures.
     expect(html.match(/class="att-thumbs /g)).toHaveLength(1);
