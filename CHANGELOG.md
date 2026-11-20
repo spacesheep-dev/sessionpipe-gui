@@ -54,6 +54,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   another account is older than its newest page, the chat and the timeline drew the note
   under the first turn the page had loaded; it now appears, under its own turn, once Older
   turns brings that turn in.
+- **`tls status` names a broken certificate file.** A certificate folder with a file
+  missing, cut short or not a certificate was reported as "none yet", and an unreadable
+  `server.key` ended in Node's stack trace. It now names the file and the cause, and says
+  what the next `--tls` start does about it: a new server certificate from the same CA, a
+  new CA that phones must trust again, or nothing, when the file has to be fixed by hand
+  (or the folder deleted with `sessionpipe-gui tls reset`). A `tls` folder this account
+  cannot read is named too, instead of "none yet".
 - **Closing the terminal stops the receiver cleanly.** Closing the window or tab a
   receiver runs in (SIGHUP) ended it at once and left its `run.json` behind; it now stops
   as Ctrl-C does. A receiver whose output was already gone when it was stopped (a `| tee`

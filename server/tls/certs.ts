@@ -11,8 +11,18 @@
 // The CA is what a phone installs once (GET /ca.crt, the /trust page); the server
 // certificate is what the https side of the listener presents.
 import { execFileSync } from "node:child_process";
-import { createHash, X509Certificate } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, createPrivateKey, X509Certificate } from "node:crypto";
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -252,6 +262,81 @@ export function readCerts(dir: string): Omit<TlsMaterial, "made"> | null {
   } catch {
     return null;
   }
+}
+
+/** What is wrong with a certificate folder that is there but not usable, for `tls status`:
+ *  each file (its name under dir, or dir itself) and its cause, and what the next `--tls`
+ *  start does about them. null when dir does not exist or holds none of the four files
+ *  (nothing made yet), or when all four read and parse. Reads only. */
+export function certsProblem(
+  dir: string,
+  now = Date.now(),
+): { problem: string; repair: "ca" | "server" | "folder" | "by-hand" } | null {
+  const paths = materialPaths(dir);
+  const code = (e: unknown) => (e as NodeJS.ErrnoException).code;
+  let owner: number | undefined;
+  try {
+    const st = statSync(dir);
+    if (!st.isDirectory()) return { problem: `${dir} is not a folder`, repair: "by-hand" };
+    owner = st.uid;
+    // existsSync and readFileSync on the files inside need the folder's search bit.
+    accessSync(dir, constants.X_OK);
+  } catch (e) {
+    if (code(e) === "ENOENT") return null;
+    // ensureCerts chmods the folder to 0700 first, which works when it is ours.
+    const ours = owner !== undefined && owner === process.getuid?.();
+    return { problem: `${dir} cannot be read (${code(e)})`, repair: ours ? "folder" : "by-hand" };
+  }
+  // What ensureCerts does when the file is missing or does not parse: a new CA (and so all
+  // four files) for ca.key or ca.crt (or ca.crt unreadable), a new server certificate from
+  // the same CA for server.key or server.crt. It never parses a key, so a bad key is left
+  // as it is unless the server certificate is made again, which writes server.key anew.
+  const files = [
+    { file: paths.caKeyPath, kind: "key", repair: "ca" },
+    { file: paths.caCertPath, kind: "cert", repair: "ca" },
+    { file: paths.serverKeyPath, kind: "key", repair: "server" },
+    { file: paths.serverCertPath, kind: "cert", repair: "server" },
+  ] as const;
+  if (files.every(({ file }) => !existsSync(file))) return null;
+  const problems: { problem: string; repair: "ca" | "server" | "by-hand"; badServerKey?: true }[] = [];
+  for (const { file, kind, repair } of files) {
+    const name = path.basename(file);
+    if (!existsSync(file)) {
+      problems.push({ problem: `${name} is missing`, repair });
+      continue;
+    }
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (e) {
+      problems.push({
+        problem: `${name} cannot be read (${code(e)})`,
+        repair: file === paths.caCertPath ? "ca" : "by-hand",
+      });
+      continue;
+    }
+    try {
+      if (kind === "cert") new X509Certificate(text);
+      else createPrivateKey(text);
+    } catch {
+      problems.push({
+        problem: `${name} is not ${kind === "cert" ? "a certificate" : "a private key"}`,
+        repair: kind === "cert" ? repair : "by-hand",
+        ...(file === paths.serverKeyPath ? { badServerKey: true as const } : {}),
+      });
+    }
+  }
+  if (problems.length === 0) return null;
+  // A new CA remakes every file, so it repairs anything (and start makes one when the CA is
+  // near its end too); a new server certificate also writes a key over one that is not a
+  // key; anything else start leaves needs a hand.
+  const reissue = problems.some((p) => p.repair === "server");
+  const all = problems.map((p) => (p.badServerKey && reissue ? "server" : p.repair));
+  if (!all.includes("ca") && !all.includes("by-hand") && !caUsable(paths.caCertPath, now)) all.push("ca");
+  return {
+    problem: problems.map((p) => p.problem).join(", "),
+    repair: all.includes("ca") ? "ca" : all.includes("by-hand") ? "by-hand" : "server",
+  };
 }
 
 function materialPaths(dir: string) {
