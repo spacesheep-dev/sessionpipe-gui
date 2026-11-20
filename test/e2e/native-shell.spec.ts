@@ -697,7 +697,8 @@ test.describe("inside the native shell", () => {
   test("on Linux Ctrl+Shift+2 opens the Inbox when the menu lets it through", async ({ page }) => {
     await openInShell(page, "/", { platform: "linux" });
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
-    await page.locator("main").click({ position: { x: 400, y: 300 } });
+    // The heading, not a card: a plain click on a card opens its session beside.
+    await page.getByRole("heading", { name: "Board", exact: true }).click();
     await page.keyboard.press("Control+Shift+Digit2");
     await expect(page).toHaveURL(/\/inbox$/);
     await page.keyboard.press("Control+k");
