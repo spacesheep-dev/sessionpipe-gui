@@ -67,6 +67,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   origin (`https://https://foo.example:<port>`, `https://:<port>`) no browser makes a
   passkey for, without a word. Each now stops with an `--rp-id` message; an IP address is
   taken as before.
+- **`tls status` names a broken certificate file.** A certificate folder with a file
+  missing, cut short or not a certificate was reported as "none yet", and an unreadable
+  `server.key` ended in Node's stack trace. It now names the file and the cause, and says
+  what the next `--tls` start does about it: a new server certificate from the same CA, a
+  new CA that phones must trust again, or nothing, when the file has to be fixed by hand
+  (or the folder deleted with `sessionpipe-gui tls reset`). A `tls` folder this account
+  cannot read is named too, instead of "none yet".
 
 ## [0.8.6] - 2026-11-19
 

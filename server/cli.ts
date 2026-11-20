@@ -33,7 +33,7 @@ import { processEnv, runService, type Verb } from "./service/index.js";
 import { sameMachine } from "./setup/index.js";
 import { addSkin, formatSkinList, linkSkin, listSkins, removeSkin } from "./skins/index.js";
 import { addTheme, formatList, linkTheme, listThemes, removeTheme } from "./themes/index.js";
-import { ensureCerts, localHostname, readCerts, resetCerts, TlsError } from "./tls/certs.js";
+import { certsProblem, ensureCerts, localHostname, readCerts, resetCerts, TlsError } from "./tls/certs.js";
 
 // Before anything else: an old Node fails somewhere deep with a stack trace; say it plainly.
 // (Imports are hoisted above this line, but the two external ones load on any Node.)
@@ -644,10 +644,23 @@ function tlsCommand(parsed: Args): void {
   const hostname = localHostname();
   switch (verb) {
     case "status": {
-      const m = readCerts(dir);
       const cfg = readGuiConfig(stateDir);
       out(`tls mode   ${cfg.tls ? "on (remembered; --no-tls turns it off)" : "off (start with --tls)"}`);
       out(`hostname   ${hostname}`);
+      // A set that is there but broken is named, not reported as "none yet" (and an
+      // unreadable file is not read again below, where it would throw).
+      const broken = certsProblem(dir);
+      if (broken) {
+        const reset = `\`sessionpipe-gui tls reset\`${parsed.state ? " (with the same --state)" : ""}`;
+        const next = {
+          ca: "The next --tls start makes a new CA and server certificate; phones must trust the new CA again.",
+          server: "The next --tls start makes a new server certificate from the same CA; phones need nothing new.",
+          folder: "The next --tls start makes the folder readable again (mode 700) and checks the files in it.",
+          "by-hand": `Fix it by hand, or run ${reset} and the next --tls start makes a new CA, which phones must trust again.`,
+        }[broken.repair];
+        fail(`the certificates under ${dir} cannot be used: ${broken.problem}. ${next}`);
+      }
+      const m = readCerts(dir);
       if (!m) {
         out(`certs      none yet under ${dir} (made on the first --tls start)`);
         return;
