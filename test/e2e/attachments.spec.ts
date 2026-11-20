@@ -1437,6 +1437,14 @@ test("under a finger, Try again and × are each a 44 px target, and the two neve
     chip.getByRole("button", { name: "Try notes.txt again" }),
     chip.getByRole("button", { name: "Remove notes.txt" }),
   );
+  // Nor does × reach into the chip beside it.
+  await sheet
+    .locator("input[data-ns-files]")
+    .setInputFiles({ name: "todo.txt", mimeType: "text/plain", buffer: Buffer.from("ship it\n") });
+  await expect(chip).toHaveCount(2);
+  const x = await hitBox(chip.first().getByRole("button", { name: "Remove notes.txt" }));
+  const next = (await chip.nth(1).boundingBox())!;
+  expect(x.right, `${JSON.stringify(x)} ${JSON.stringify(next)}`).toBeLessThanOrEqual(next.x + 1);
   await page.unroute(FILES_ROUTE);
 });
 

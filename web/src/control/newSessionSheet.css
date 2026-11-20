@@ -218,8 +218,15 @@
   min-height: 0;
 }
 /* Under a finger the same faces, each a 44 px target, far enough apart that the two never
-   overlap. */
+   overlap; each chip 32 px tall and 12 px from the next, so no target reaches a
+   neighbour's, beside it or in the row above. */
 @media (pointer: coarse) {
+  .ns-files {
+    gap: 12px;
+  }
+  .ns-file {
+    height: 32px;
+  }
   .ns-file-x::before {
     content: "";
     position: absolute;
