@@ -27,10 +27,11 @@ const [W, H] = (process.env.ACCOUNT_SCREENS_SIZE ?? "390x844").split("x").map(Nu
 const SCHEME = process.env.ACCOUNT_SCREENS_SCHEME === "dark" ? "dark" : "light";
 /** The hour on a prompt's card, with the way to answer it on spacesheep: the hour's own
  *  sentence, then on a phone the link on a line of its own, and wider after a "·". */
-const HOUR_ON_CARD =
-  W < 840
+const hourOnCard = (width: number) =>
+  width < 840
     ? /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.\sOpen on spacesheep\.dev$/
     : /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\s·\sOpen on spacesheep\.dev$/;
+const HOUR_ON_CARD = hourOnCard(W);
 const MACHINE = "m_studio0123456789abcd";
 const NAME = "studio-mac";
 /** The account's origin as a person reads it. Nothing is asked of it: spacesheep is stood in. */
@@ -2077,6 +2078,8 @@ test.describe("what else an account shows", () => {
         { width: 1180, height: 820 },
       ]) {
         await page.setViewportSize(size);
+        // The card takes the width's form, and draws the link anew as it does: measured after.
+        await expect(card.locator(".ctl-answer-note")).toHaveText(hourOnCard(size.width));
         await expect(elsewhere).toBeVisible();
         const hits = await elsewhere.evaluate((el) => {
           const r = el.getBoundingClientRect();
