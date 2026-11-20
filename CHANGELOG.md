@@ -34,6 +34,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   it had: a name given to that colour elsewhere meanwhile did not show in it, and was put
   back to the old one as the field was left. A field now saves only a name you changed,
   and shows a new one as it arrives.
+- **A label's new name that could not be saved stays in its field.** "Not saved; try
+  again" showed under the old name, put back in the field, so there was nothing to try
+  again. The name typed now stays, and Enter or leaving the field saves it.
 - **Search's range of days fits a narrow phone.** On Android and in Chrome, the two dates
   of "Custom range…" were as wide as the browser draws a date, whatever the card's width:
   on a phone under about 400 px wide the second one stood out of the card, and at 320 px

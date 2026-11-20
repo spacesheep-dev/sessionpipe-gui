@@ -92,6 +92,11 @@ function LabelField({ color }: { color: LabelColor }) {
   /** The person changed the text and it is not saved yet. Having the focus is not that:
    *  the dialog opens with a field in hand, and Tab passes through the others. */
   const editing = useRef(false);
+  /** How many times the person has changed the text: a save in flight that succeeds ends
+   *  the edit only if nothing was typed meanwhile. */
+  const edits = useRef(0);
+  /** A save is in flight: its name is shown as saved already, and may yet be refused. */
+  const sending = useRef(false);
   // Another device renamed it while this field was not being edited: show that.
   useEffect(() => {
     if (!editing.current) setText(saved);
@@ -106,15 +111,24 @@ function LabelField({ color }: { color: LabelColor }) {
       return;
     }
     setError(null);
-    editing.current = false;
-    if (name === saved) return;
+    if (name === saved) {
+      if (!sending.current) editing.current = false;
+      return;
+    }
+    // Still the person's until the server has it: a refusal puts the old name back in the
+    // store, and the field keeps what was typed, for Enter or leaving it to try again.
+    const at = edits.current;
+    sending.current = true;
     try {
       await renameLabel(store, color, name || null);
-      if (!name) setText("");
+      if (edits.current === at) {
+        editing.current = false;
+        if (!name) setText("");
+      }
     } catch (e) {
-      // Still the person's, still unsaved: Enter, or leaving the field, tries again.
-      editing.current = true;
       setError((e as Error).message === "bad_name" ? TOO_LONG : "Not saved; try again");
+    } finally {
+      sending.current = false;
     }
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -140,6 +154,7 @@ function LabelField({ color }: { color: LabelColor }) {
         spellCheck={false}
         onChange={(e) => {
           editing.current = true;
+          edits.current++;
           setText(e.target.value);
           if (error && e.target.value.trim().length <= LABEL_NAME_MAX) setError(null);
         }}

@@ -5,9 +5,10 @@
 // page live; ⌥⌘3 / ⌥⌘0 on the cursor; renaming red in "Edit labels…" changes the menu and
 // the chip and `label:<name>` filters; the keyboard path through Shift+F10; forgetting a
 // session takes its label away; a name given on another device stays when its field here
-// was only looked at; the "Edit labels…" sheet becomes the dialog as the window is widened,
-// with the field in hand still in hand. The specs share one receiver, so they run in order
-// and each clears the labels it set: a spec that opens "Edit labels…" belongs here.
+// was only looked at; a name the server refuses stays in its field to try again; the "Edit
+// labels…" sheet becomes the dialog as the window is widened, with the field in hand still
+// in hand. The specs share one receiver, so they run in order and each clears the labels it
+// set: a spec that opens "Edit labels…" belongs here.
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
@@ -341,6 +342,29 @@ test.describe("colour labels", () => {
     await expect(dialog).toBeHidden();
     const doc = (await (await request.get(LABELS)).json()) as { names: Record<string, string> };
     expect(doc.names).toEqual({ red: "Urgent" });
+  });
+
+  test("a name the server refuses stays in its field, and Enter tries again", async ({ page, request }) => {
+    await openBoard(page);
+    await page.getByRole("button", { name: "View options" }).click();
+    await page.getByRole("menuitem", { name: "Edit labels…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Labels" });
+    const red = dialog.getByRole("textbox", { name: "Red label name" });
+    await page.route(`**${LABELS}`, (route) =>
+      route.request().method() === "PATCH" ? route.fulfill({ status: 500, body: "" }) : route.fallback(),
+    );
+    await red.fill("Urgent");
+    await red.press("Enter");
+    await expect(dialog.getByRole("alert")).toHaveText("Not saved; try again");
+    await expect(red).toHaveValue("Urgent");
+    // The server answers again: Enter saves what is still in the field.
+    await page.unroute(`**${LABELS}`);
+    await red.press("Enter");
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    await expect
+      .poll(async () => ((await (await request.get(LABELS)).json()) as { names: Record<string, string> }).names)
+      .toEqual({ red: "Urgent" });
+    await expect(red).toHaveValue("Urgent");
   });
 
   test("the sheet becomes the dialog as the window is widened, with the field in hand and its words kept", async ({
