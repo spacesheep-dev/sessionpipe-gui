@@ -234,6 +234,11 @@ interface Args {
   extra?: string[];
 }
 
+/** Digits only: Number() reads "" and "  " as 0 (a random port, keep whole) and "0x1F90"
+ *  or "1e4" as numbers other than the ones typed. Anything else is NaN, which the range
+ *  check after it refuses. */
+const digits = (v: string): number => (/^\d+$/.test(v) ? Number(v) : Number.NaN);
+
 function parseArgs(argv: string[]): Args | "help" | "version" {
   const a: Args = {
     outbox: true,
@@ -249,7 +254,9 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
     const f = argv[i]!;
     const next = (): string => {
       const v = argv[++i];
-      if (v === undefined) fail(`${f} needs a value`);
+      // `--host --no-tls` (or `--port "$UNSET" --state …` read by a script) is a flag
+      // missing its value, not a host called "--no-tls".
+      if (v === undefined || v.startsWith("--")) fail(`${f} needs a value`);
       return v;
     };
     switch (f) {
@@ -260,7 +267,7 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       case "-v":
         return "version";
       case "--port":
-        a.port = Number(next());
+        a.port = digits(next());
         if (!Number.isInteger(a.port) || a.port < 0 || a.port > 65535) fail("--port needs a number 0–65535");
         break;
       case "--host":
@@ -276,7 +283,7 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         a.outboxPath = next();
         break;
       case "--keep-days":
-        a.keepDays = Number(next());
+        a.keepDays = digits(next());
         if (!Number.isInteger(a.keepDays) || a.keepDays < 0) fail("--keep-days needs a whole number of days");
         break;
       case "--demo":

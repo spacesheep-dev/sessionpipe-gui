@@ -45,6 +45,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **`--port` and `--keep-days` take digits only, and a flag is never another flag's
+  value.** `--port ""` (a script's unset `$PORT`) started on a random port and
+  `--keep-days ""` kept every event whole, both without a word; `--port 0x1F90` listened on
+  8080. `--host --no-tls` took `--no-tls` as the host. Each now stops with the flag's own
+  message.
+
 - **"Switched to …" stays under the turn it fell in.** On a long session whose switch to
   another account is older than its newest page, the chat and the timeline drew the note
   under the first turn the page had loaded; it now appears, under its own turn, once Older
