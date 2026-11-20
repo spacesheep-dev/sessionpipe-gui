@@ -743,6 +743,11 @@ html:has(.main > .session) {
     padding-left: var(--edge-l);
     padding-right: var(--edge-r);
   }
+  /* "3 new" stays over the message column, the middle of what the system leaves, and not
+     of a ground that runs on under the band. */
+  .main > .session > .sess-ctl > .sess-new {
+    left: calc(50% + (var(--safe-left, env(safe-area-inset-left)) - var(--safe-right, env(safe-area-inset-right))) / 2);
+  }
 }
 
 /* ----- subagents (ORGANIZE-SPEC.md §4.3) ----- */

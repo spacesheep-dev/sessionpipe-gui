@@ -224,16 +224,17 @@ function Picker<T>({
 
   // ----- placement (desktop): under the trigger, flipped above when there is no room -----
 
+  // From side to side the list has what the system leaves of the window: it never opens
+  // under the band its bars stand in beside a folding phone's page. Read each time the
+  // list is fitted (as it opens, as the window changes), not at a scroll: the band stays.
+  const sides = useRef({ left: 0, right: 0 });
   const measure = useCallback(() => {
     const t = trigger.current;
     const el = pop.current;
     if (!t || !el) return;
     const r = t.getBoundingClientRect();
-    // From side to side the list has what the system leaves of the window: it never opens
-    // under the band its bars stand in beside a folding phone's page.
-    const safe = safeSides();
-    const lo = safe.left + EDGE;
-    const hi = window.innerWidth - safe.right - EDGE;
+    const lo = sides.current.left + EDGE;
+    const hi = window.innerWidth - sides.current.right - EDGE;
     const vh = window.innerHeight;
     const maxWidth = Math.min(Math.max(MAX_LIST_WIDTH, r.width), hi - lo);
     const below = vh - r.bottom - GAP - EDGE;
@@ -256,12 +257,16 @@ function Picker<T>({
 
   useLayoutEffect(() => {
     if (!open || phone) return;
-    measure();
+    const fit = () => {
+      sides.current = safeSides();
+      measure();
+    };
+    fit();
     window.addEventListener("scroll", measure, true);
-    window.addEventListener("resize", measure);
+    window.addEventListener("resize", fit);
     return () => {
       window.removeEventListener("scroll", measure, true);
-      window.removeEventListener("resize", measure);
+      window.removeEventListener("resize", fit);
     };
   }, [open, phone, measure, shown.length]);
 

@@ -6,9 +6,11 @@
 // said here: the first run, the keyboard, a reply's lines, what a finger can copy, that
 // the inner display turned (wider than the width at which a window with a mouse takes the
 // Mac's layout) is still the touch app, and that nothing a finger lands on is under a band,
-// with the band at either side. What a page keeps as it moves from one to another is in
-// duo-continuity.spec.ts, which runs in WebKit too.
-import { expect, type Page, test } from "@playwright/test";
+// with the band at either side: those tests are tagged @webkit, and the `duo-webkit`
+// project runs them in the iPhone's engine as well. What a page keeps as it moves from one
+// shape to another is in duo-continuity.spec.ts, which runs in WebKit whole.
+import { expect, type Locator, type Page, test } from "@playwright/test";
+import { Session } from "../events.js";
 import {
   bandOffenders,
   coarsePointer,
@@ -440,9 +442,8 @@ async function underBands(page: Page): Promise<string[]> {
 
 for (const [size, insets] of BANDS) {
   const where = `${size}, the band on the ${insets[3] ? "left" : "right"}`;
-  test(`nothing a finger lands on is under the system's bands at ${where}: every page, a prompt, each sheet and menu`, async ({
-    browser,
-  }) => {
+  const title = `nothing a finger lands on is under the system's bands at ${where}: every page, a prompt, each sheet and menu`;
+  test(title, { tag: "@webkit" }, async ({ browser }) => {
     test.setTimeout(120_000);
     const b = await duoBed(browser, size, { insets });
     const { page } = b;
@@ -585,6 +586,87 @@ for (const [size, insets] of BANDS) {
       await expect(page.locator("[data-handoff] [data-hs-text]")).toBeVisible();
       await measure("Ask another agent");
 
+      // On a session's page, a prompt in another session: its banner comes down 8 pt inside
+      // what the band leaves.
+      await page.goto(`${url}${DUO_SESSIONS.done}`);
+      await expect(composer(page)).toBeVisible();
+      const site = new Session("s-site", "claude-code", Date.now() - 30_000);
+      const build = "npm run build -- --mode production --outDir dist/site";
+      const asking = () => ({
+        session: {
+          machine: "studio-mac",
+          cwd: "/Users/me/code/site",
+          title: "Build the site",
+          title_source: "custom" as const,
+        },
+        time: new Date().toISOString(),
+      });
+      b.ss.push([
+        site.ev("session.started", { source: "startup" }, asking()),
+        site.ev("turn.started", { turn_id: "t1" }, asking()),
+        site.ev("tool.started", { tool: "Bash", call_id: "c1", turn_id: "t1", input: { command: build } }, asking()),
+        site.ev(
+          "attention.needed",
+          { attention_id: "att_build", kind: "permission", tool: "Bash", message: build },
+          asking(),
+        ),
+      ]);
+      await expect(page.locator(".toasts--phone .toast")).toBeVisible({ timeout: 15_000 });
+      await measure("a banner");
+      expect(await sides(".toasts--phone .toast"), where).toEqual([left + 8, width - right - 8]);
+
+      // A long session read from its top while another turn lands at its end: "N new" stands
+      // over the message field, the middle of what the band leaves, and not of the strip's
+      // ground, which runs on under the band.
+      const long = new Session("s-export", "claude-code", Date.now() - 20 * 60_000);
+      const exporting = {
+        session: {
+          machine: "studio-mac",
+          cwd: "/Users/me/code/billing",
+          title: EXPORT.title,
+          title_source: "custom" as const,
+        },
+      };
+      b.ss.push([
+        long.ev("session.started", { source: "startup" }, exporting),
+        long.ev("turn.started", { turn_id: "t1" }, exporting),
+        long.ev(
+          "turn.transcript",
+          { turn: 1, user: EXPORT.user, assistant: Array(6).fill(EXPORT.assistant).join("\n\n") },
+          exporting,
+        ),
+        long.ev("turn.ended", { turn_id: "t1" }, exporting),
+      ]);
+      await page.goto(`${url}/s/claude-code/s-export`);
+      await expect(composer(page)).toBeVisible();
+      // It opens at its end. The person goes to its top, and the page has heard of it (its
+      // scroll event comes with the next frame) before the turn lands.
+      await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0);
+      await expect
+        .poll(() =>
+          page.evaluate(async () => {
+            scrollTo(0, 0);
+            await new Promise((seen) => requestAnimationFrame(() => requestAnimationFrame(seen)));
+            return scrollY;
+          }),
+        )
+        .toBe(0);
+      b.ss.push([
+        long.ev("turn.started", { turn_id: "t2" }, exporting),
+        long.ev("turn.transcript", { turn: 2, user: "And batch 8?", assistant: "It goes on from batch 8." }, exporting),
+        long.ev("turn.ended", { turn_id: "t2" }, exporting),
+      ]);
+      await expect(page.locator(".sess-new")).toBeVisible({ timeout: 20_000 });
+      await measure("a session read from its top, more below");
+      const middle = (of: Locator) =>
+        of.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return (r.left + r.right) / 2;
+        });
+      const column = await middle(page.locator(".sess-ctl > :not(.sess-new)").filter({ has: composer(page) }));
+      expect(column, where).toBeCloseTo((left + width - right) / 2, 0);
+      expect(await middle(page.locator(".sess-new")), where).toBeCloseTo(column, 0);
+
       // spacesheep out of reach: the pill that says so, and retries, floats in the middle
       // of what the band leaves.
       await page.goto(`${url}${DUO_SESSIONS.done}`);
@@ -601,7 +683,7 @@ for (const [size, insets] of BANDS) {
       b.hub.down = false;
 
       expect(held, where).toEqual(Object.fromEntries(Object.keys(held).map((state) => [state, []])));
-      expect(Object.keys(held), where).toHaveLength(18);
+      expect(Object.keys(held), where).toHaveLength(20);
     } finally {
       await b.close();
     }
@@ -621,9 +703,9 @@ for (const [size, insets] of BANDS) {
   });
 }
 
-test("a page open on the outer display, unfolded and turned: nothing is under the band there either, at the simulator's size or at the earlier estimate's", async ({
-  browser,
-}) => {
+const UNFOLDED =
+  "a page open on the outer display, unfolded and turned: nothing is under the band there either, at the simulator's size or at the earlier estimate's";
+test(UNFOLDED, { tag: "@webkit" }, async ({ browser }) => {
   const b = await duoBed(browser, "466x678");
   const { page } = b;
   /** The pages, each with what shows once it is whole (`answers`: Allow, ready to be tapped). */

@@ -98,9 +98,13 @@ export default defineConfig({
     },
     {
       // The same in WebKit, WKWebView's engine, for what the engine has a say in: what a
-      // page keeps when its window changes size. `npx playwright install webkit` once.
+      // page keeps when its window changes size (duo-continuity.spec.ts, all of it), and
+      // where it stands beside the system's bands (duo.spec.ts's tests tagged @webkit).
+      // `npx playwright install webkit` once.
       name: "duo-webkit",
-      testMatch: /duo-continuity\.spec\.ts/,
+      testMatch: /duo(-continuity)?\.spec\.ts/,
+      // Asked of "project file title tags": a whole file by its name, a test by its tag.
+      grep: /duo-continuity\.spec\.ts|@webkit/,
       use: { ...DUO_DEVICE, browserName: "webkit", defaultBrowserType: "webkit" },
     },
   ],

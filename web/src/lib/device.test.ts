@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The shell's platform as page code reads it (the <html> mark, else the flag), and the
 // phone layout and the touch keys from their media queries: one list for each query, one
-// listener on it, and every part of the page told of a change in that one call.
+// listener on it, and every part of the page told of a change in that one call. And what
+// the system keeps at the window's sides, as the stylesheets' own words come to.
 import "../native/test-env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -12,6 +13,7 @@ import {
   phoneShell,
   reachName,
   SELECT_SHEET_QUERY,
+  safeSides,
   shellPlatform,
   TOUCH_QUERY,
 } from "./device";
@@ -354,5 +356,57 @@ describe("touchKeys", () => {
     expect(touchKeys()).toBe(false);
     media.turn(TOUCH_QUERY, true);
     expect(touchKeys()).toBe(true);
+  });
+});
+
+describe("safeSides", () => {
+  const doc = document as unknown as Record<string, unknown>;
+  afterEach(() => {
+    delete doc.body;
+    delete doc.createElement;
+    delete g.getComputedStyle;
+  });
+
+  /** A page whose engine works the probe's padding out as `padding`; the probes it was
+   *  asked for, each with whether it is still in the page. */
+  function fakePage(padding: { paddingLeft: string; paddingRight: string }) {
+    const probes: { style: { cssText: string }; inPage: boolean; remove(): void }[] = [];
+    doc.createElement = () => {
+      const probe = {
+        style: { cssText: "" },
+        inPage: false,
+        remove() {
+          probe.inPage = false;
+        },
+      };
+      probes.push(probe);
+      return probe;
+    };
+    doc.body = {
+      append(probe: { inPage: boolean }) {
+        probe.inPage = true;
+      },
+    };
+    g.getComputedStyle = () => padding;
+    return probes;
+  }
+
+  it("is nothing at either side where there is no page to ask", () => {
+    expect(safeSides()).toEqual({ left: 0, right: 0 });
+  });
+
+  it("is what the stylesheets' own words come to, and leaves nothing in the page", () => {
+    const probes = fakePage({ paddingLeft: "84px", paddingRight: "0px" });
+    expect(safeSides()).toEqual({ left: 84, right: 0 });
+    expect(probes).toHaveLength(1);
+    // A shell's --safe-* first, else the engine's env(), as every stylesheet has it.
+    expect(probes[0]!.style.cssText).toContain("var(--safe-left, env(safe-area-inset-left))");
+    expect(probes[0]!.style.cssText).toContain("var(--safe-right, env(safe-area-inset-right))");
+    expect(probes[0]!.inPage).toBe(false);
+  });
+
+  it("is 0 for a side the engine has no length for", () => {
+    fakePage({ paddingLeft: "", paddingRight: "44.5px" });
+    expect(safeSides()).toEqual({ left: 0, right: 44.5 });
   });
 });
