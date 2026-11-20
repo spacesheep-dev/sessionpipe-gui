@@ -250,6 +250,9 @@ export interface MessageRow {
   permission?: StartPermission;
   model?: string;
   files?: StartFile[];
+  /** The signed nonce, on a row with files: the folder a machine saves a prompt's files in.
+   *  Kept apart from `cmd` for a page's row, which keeps no command. */
+  nonce?: string;
   /** What the machine ran the start with (`taken`, `delivered`). */
   applied?: Applied;
   /** A pool command's action and account, as signed (pool.ts read them). */
@@ -313,7 +316,11 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.cwd) a.cwd = m.cwd;
   if (m.permission) a.permission = m.permission;
   if (m.model) a.model = m.model;
-  if (m.files) a.files = m.files;
+  if (m.files) {
+    a.files = m.files;
+    const nonce = m.nonce ?? nonceOf(m.cmd);
+    if (nonce) a.nonce = nonce;
+  }
   if (m.applied) a.applied = m.applied;
   if (m.poolAction) a.poolAction = m.poolAction;
   if (m.poolAccount) a.poolAccount = m.poolAccount;
@@ -321,6 +328,17 @@ export function toActivity(m: MessageRow): ControlActivity {
   if (m.from) a.from = m.from;
   if (m.unfollowed && !isFinal(m.outcome)) a.unfollowed = m.unfollowed === "revoked" ? "revoked" : "disconnected";
   return a;
+}
+
+/** The signed command's nonce, read from its exact string; none where the row keeps no
+ *  command (a send spacesheep carried for a page on an account). */
+function nonceOf(cmd: string): string | undefined {
+  try {
+    const n = (JSON.parse(cmd) as { nonce?: unknown }).nonce;
+    return typeof n === "string" && n ? n : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** A permission answer's prompt and decision: as the row keeps them, else as the signed
@@ -495,8 +513,11 @@ export function messageRow(
   // say what a message carried.
   if (cmd.kind === "start" || cmd.kind === "prompt") {
     const files = (cmd as ControlCommand & { files?: StartFile[] }).files;
-    if (Array.isArray(files) && files.length)
+    if (Array.isArray(files) && files.length) {
       row.files = files.map((f) => ({ name: f.name, type: f.type, size: f.size, sha256: f.sha256 }));
+      const nonce = (cmd as { nonce?: unknown }).nonce;
+      if (typeof nonce === "string" && nonce) row.nonce = nonce;
+    }
   }
   return row;
 }

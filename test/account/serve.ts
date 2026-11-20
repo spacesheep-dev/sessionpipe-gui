@@ -33,12 +33,13 @@ export interface AccountServer {
   close(): Promise<void>;
 }
 
-const read = (req: IncomingMessage): Promise<string> =>
+const readBytes = (req: IncomingMessage): Promise<Buffer> =>
   new Promise((resolve) => {
     const parts: Buffer[] = [];
     req.on("data", (c: Buffer) => parts.push(c));
-    req.on("end", () => resolve(Buffer.concat(parts).toString("utf8")));
+    req.on("end", () => resolve(Buffer.concat(parts)));
   });
+const read = async (req: IncomingMessage): Promise<string> => (await readBytes(req)).toString("utf8");
 
 /** What the stand-in answers when it fails itself: fixed words, with the error in the test's
  *  console and never in an answer. */
@@ -104,11 +105,21 @@ export async function startAccountServer(o: { web: string; hub: HubStandIn; port
         const [, , id = "", ...rest] = p.split("/");
         const ac = new AbortController();
         res.on("close", () => ac.abort());
-        const body = req.method === "GET" ? "" : await read(req);
+        const bytes = req.method === "GET" ? Buffer.alloc(0) : await readBytes(req);
+        const body = bytes.toString("utf8");
+        // The page's headers the hub looks at (the files door's type and name); it forwards
+        // none of the rest.
+        const headers: Record<string, string> = {};
+        for (const h of ["content-type", "x-file-name"]) {
+          const v = req.headers[h];
+          if (typeof v === "string") headers[h] = v;
+        }
         const a = await hub.door(id, {
           method: req.method ?? "GET",
           path: `/${rest.join("/")}${url.search}`,
           ...(body ? { body } : {}),
+          ...(bytes.length ? { bytes: new Uint8Array(bytes) } : {}),
+          headers,
           signal: ac.signal,
         });
         if (res.writableEnded || res.destroyed) return;

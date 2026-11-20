@@ -8,6 +8,7 @@
 // that predates a field ignores it; this is the receiver keeping that rule for everyone.
 // The machine checks it all again: it stays the gate.
 import {
+  fileNameProblem,
   type HarnessStartOptions,
   INHERIT_LEVELS,
   type MachineMode,
@@ -50,15 +51,8 @@ export function filesProblem(v: unknown): string | null {
       return "a file is {name, type, size, sha256}";
     if (typeof f.name !== "string") return "a file's name is text";
     const name = f.name.normalize("NFC");
-    if (
-      name.length < 1 ||
-      name.length > 200 ||
-      name === "." ||
-      name === ".." ||
-      name.startsWith(".") ||
-      [...name].some((c) => c === "/" || c === "\\" || c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f)
-    )
-      return "a file's name is 1 to 200 characters, no slash, no control character, no leading dot";
+    const badName = fileNameProblem(name);
+    if (badName) return badName;
     if (typeof f.type !== "string" || f.type.length > 100 || !MEDIA_TYPE_RE.test(f.type))
       return "a file's type is a media type";
     if (typeof f.size !== "number" || !Number.isInteger(f.size) || f.size < 1 || f.size > START_FILE_MAX_BYTES)

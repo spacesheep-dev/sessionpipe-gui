@@ -67,9 +67,13 @@ describe("remote machines in the control state", () => {
     const c = state.machineControl(m);
     expect(c.online).toBe(true);
     expect(c.remote).toEqual({ via: "spacesheep", origin: "https://spacesheep.dev", rpId: "spacesheep.dev" });
-    // The computer takes files, but no file can be carried through spacesheep: none is offered.
-    expect(c.files).toBeUndefined();
-    expect(c.promptFiles).toBeUndefined();
+    // What the computer's hello said it takes, as spacesheep lists it: a file goes there.
+    expect(c.files).toBe(true);
+    expect(c.promptFiles).toBe(true);
+    // A computer whose sessionpipe takes none, or a spacesheep that does not say: none.
+    state.upsertRemoteMachines([listed({ files: undefined, prompt_files: false })], remote);
+    const older = state.machineControl(state.machine("m_0123456789abcdefghij")!);
+    expect([older.files, older.promptFiles]).toEqual([undefined, undefined]);
     // Offline there, offline here; gone there, gone here. Never written to machines.json.
     state.upsertRemoteMachines([listed({ online: false, passkey_ids: ["k1"] })], remote);
     expect(state.machineControl(state.machine("m_0123456789abcdefghij")!).online).toBe(false);
@@ -78,6 +82,36 @@ describe("remote machines in the control state", () => {
     expect(again.machine("m_0123456789abcdefghij")).toBeUndefined();
     state.upsertRemoteMachines([], remote);
     expect(state.machine("m_0123456789abcdefghij")).toBeUndefined();
+  });
+
+  it("offers no `~/…` folder for a machine reached through spacesheep, on a receiver or a page", () => {
+    // spacesheep checks a start's folder against the computer's absolute folders: a `~/…`
+    // one is refused there, so the sheet is told to offer absolute folders only.
+    const start = { "claude-code": { permissions: ["read", "safe"], permission: "safe" } };
+    state.takesTilde = true;
+    state.upsertRemoteMachines([listed({ start })], remote);
+    const m = state.machine("m_0123456789abcdefghij")!;
+    expect(m.start).toBeDefined();
+    expect(state.machineControl(m).tilde).toBeUndefined();
+    // The same receiver still offers one to a machine paired with it.
+    const local = state.createMachine(
+      "m_localrow000000000002",
+      parseHello({
+        name: "mac-mini",
+        harnesses: ["claude-code"],
+        modes: ["waiter"],
+        version: "0.13.0",
+        start: { "claude-code": { permissions: ["read", "safe"], permission: "safe" } },
+      })!,
+    );
+    expect(local.start).toBeDefined();
+    expect(state.machineControl(local).tilde).toBe(true);
+    const page = new MemoryControl();
+    page.remote.upsertRemoteMachines([listed({ start })], remote);
+    const pm = page.machine("m_0123456789abcdefghij")!;
+    expect(pm.start).toBeDefined();
+    expect(page.machineControl(pm).tilde).toBeUndefined();
+    expect([...page.machines().values()][0]!.tilde).toBeUndefined();
   });
 
   const account = { origin: "https://spacesheep.dev", email: "me@example.com" };

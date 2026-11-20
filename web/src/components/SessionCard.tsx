@@ -10,6 +10,7 @@
 // The class names are the e2e contract (`article.card`, `.card-status`, `.card-meta`…),
 // so they stay even though nothing here is a card any more.
 import type { AgentRun, Attention, SessionFlag, SessionKey, SessionSummary } from "@shared/api";
+import { promptWords } from "@shared/attachments";
 import {
   Fragment,
   type MutableRefObject,
@@ -201,8 +202,9 @@ export const SessionCard = memo(function SessionCard({
   const showText = lens === null || lens >= 2;
   const showTools = lens === null || lens >= 1;
   // The prompt as the preview, unless the title already is it (lib/format.ts uncutTitle):
-  // then only what follows its first line, never the same sentence twice.
-  const ask = (s.progress?.user || s.lastUser || "").trim();
+  // then only what follows its first line, never the same sentence twice. Its words only:
+  // no block of pictures, and no path or link of one.
+  const ask = promptWords(s.progress?.user || s.lastUser || "");
   const askRest = ask && ask.split("\n")[0]!.trim() === title ? ask.split("\n").slice(1).join(" ").trim() : ask;
   const liveText = showText
     ? s.progress?.assistant?.trim() || s.lastAssistant?.trim() || (askRest ? `“${askRest}”` : "")

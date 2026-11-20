@@ -79,6 +79,75 @@ All notable changes to `sessionpipe-gui`. The format follows
   1, without a word, and the Date chip said "Until Mar 2". Such a date is now left out, as
   `2026-13-01` already was, and the receiver's Search page and `sessionpipe-gui search`
   name it ("“until:2026-02-30” isn't a date, so it was left out"). `2028-02-29` still reads.
+- **A picture is made smaller before it uploads.** In the message box and in New session,
+  a big photo or screenshot is redrawn at most 2560 px on its long edge, as WebP (JPEG
+  where the browser can't write WebP), the way spacesheep does it: a 13 MB phone photo
+  goes at about 2 MB, and a 30 MB screenshot goes at all. A picture may be 50 MB before
+  and 25 MB after (8 MB where the prompt names its path). A HEIC photo is sent as a JPEG
+  where the browser can open one (Safari, the apps on a Mac and an iPhone); elsewhere the
+  message box says how to export it, and New session sends it as a file with a note that
+  the agent can't look at it. A JPEG that says where it was taken is always redrawn, which
+  leaves the location behind; one that can't be redrawn goes without its metadata. The
+  thumbnail's tooltip says the size it goes at and the size it was.
+- **A sent message shows the pictures it carried.** In the session's view, and in the row
+  of a message that went to a copy of the session, each picture is a thumbnail that opens
+  it whole: while the message is on its way, once the session's turn arrives and after a
+  reload, for a message and for a new session's first one alike. The list of saved files
+  the computer adds to the message is no longer shown as text. Any other file, and a
+  picture the receiver no longer keeps, is a chip with its name, type and size
+  (`kiwi.png · PNG · 32 KB`). The receiver keeps a picture you sent for 30 days to show it,
+  and makes room among those, oldest first, before it refuses an upload for space.
+- **In the desktop and phone apps, a picture on a slow connection has time to arrive.** A
+  request to a receiver was cut off after 15 seconds, so a large photo on a slow uplink
+  failed with `http_504`; it now has 15 seconds and one more for each 32 KiB it carries (up
+  to ten minutes), and an answer that keeps coming, such as a large picture on a slow
+  downlink, is read for as long as it does. An answer that stops for 15 seconds is still
+  cut off.
+- **New session on a computer reached through spacesheep offers only folders spacesheep
+  takes.** It used to offer a recent session's `~/…` folder, which spacesheep refused
+  ("only lets the agent work in"); now it offers the computer's own folders and recent
+  ones under them, as full paths, and Start sends the full path. New session here and Ask
+  another agent, from a session in a `~/…` folder, start from those too.
+- **Pictures another surface sent are chips, not links or paths.** A message sent from
+  spacesheep's Talk pane shows each picture by its name (`kiwi.png · picture · kept on
+  spacesheep`) instead of its link, on the board, on a spacesheep account and in a row of
+  the board, which quotes only the words. On a spacesheep account, a message sent from an
+  older version of this app's message box shows a chip for each picture it named
+  (`picture · 1200×900 · kept on the board it was sent from`), and one of pictures alone is
+  its chips instead of an empty bubble.
+- **A picture that doesn't upload says why, and keeps its place.** The message box and
+  New session say what went wrong in one sentence, offer ↻ where trying again can help,
+  and show how far an upload is. A picture dropped anywhere on a session's page goes to its
+  message box, and an unsent message's pictures come back with its words after a reload.
+- **A picture is shown whole, and opens over the page.** A thumbnail in the message box
+  and in a sent message is the whole picture, in a frame of its own shape up to 120×88,
+  so two screenshots that start alike can be told apart. A sent one opens large over the
+  page in the browser and in the desktop and phone apps alike: Esc, a tap outside it or ×
+  closes it, and the arrow keys (or the two arrows beside it) go through the message's
+  pictures. A picture that doesn't load is a chip with its name, never words in an empty
+  frame, and why one in the message box can't go is said once, on a line under them all.
+- **An agent's reply keeps its lines.** A single line break in a reply is a line break
+  on the page, the way the agent wrote it, everywhere a reply is shown.
+- **A phone's browser on the board's Wi-Fi or tailnet address says what works there.**
+  Over plain http no passkey can sign, so the line under the message box says: "To send
+  from this phone, use the sessionpipe app (scan the code on /connect) or open this board
+  over HTTPS (start it with --tls).", with /connect a link, and the greyed paperclip says
+  the same.
+- **On a spacesheep account a new session's level is not second-guessed.** spacesheep
+  doesn't say what level the computer ran a start at, so the session no longer says the
+  computer ran it at its own mode.
+- **The iPhone app asks for the camera for photos too.** Its question now says it reads
+  your computer's code and takes photos you send to a session.
+- **Pictures reach a computer through spacesheep.** The iPhone app on a spacesheep
+  account, and a board connected to spacesheep, now have the paperclip, paste, drop and
+  the camera for a session on a computer whose sessionpipe is 0.10 or later, and New
+  session takes pictures and files for one: they upload to spacesheep, where the computer
+  fetches them. A sent message shows them as thumbnails on the device that sent them
+  (kept 30 days, up to 50 MB, and removed with the account on Disconnect) and as chips
+  elsewhere. A computer with an older sessionpipe gets the line to update it, and a
+  spacesheep that takes no pictures from here says so once (`spacesheep.dev can't take
+  pictures from here yet.`) and the paperclip is gone until the app or the page is opened
+  again.
 - **The receiver rejects an event time on a day the month does not have, or at hour 24.**
   An event dated `2026-02-30`, `2026-11-31` or `T24:00:00Z` was accepted and filed under
   March 2, December 1 or the next day, though `schemas/v1/event.json` refuses it. It is now
