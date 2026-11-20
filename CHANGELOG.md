@@ -29,6 +29,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   narrow window (Mode) stayed as a page with no way back once the window was wide; the
   section shows instead. The Labels sheet becomes the dialog, and the dialog the sheet, as
   the window is resized, with the name being typed still in its field.
+- **Search's range of days fits a narrow phone.** On Android and in Chrome, the two dates
+  of "Custom range…" were as wide as the browser draws a date, whatever the card's width:
+  on a phone under about 400 px wide the second one stood out of the card, and at 320 px
+  Apply was off the screen. The two dates now share the card's width, with Cancel and
+  Apply under them. An iPhone already drew it so.
 
 ## [0.8.7] - 2026-11-20
 

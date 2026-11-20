@@ -984,6 +984,9 @@
     right: 8px;
     bottom: calc(8px + var(--safe-bottom, env(safe-area-inset-bottom)));
     width: auto;
+    /* Two columns that share what there is: a date field's own width never pushes the
+       second one, and Apply under it, out past the card's edge. */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     padding: 16px;
     border-radius: var(--radius-sheet);
   }
