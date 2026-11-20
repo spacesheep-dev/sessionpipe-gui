@@ -1226,6 +1226,9 @@ test("a phone adds its own passkey: the paired browser approves with a key.add, 
   await expect(p2.locator("[data-check]")).toBeVisible({ timeout: 20_000 });
   const spare = page.locator(".pending-devices .pending-item").filter({ hasText: "Spare phone" });
   await expect(spare).toBeVisible();
+  // The phone's "delivered" notification can sit over the row, and one under the pointer
+  // stays for as long as the pointer does: out of the way, as in the row-menu test.
+  await page.addStyleTag({ content: ".toasts { display: none !important; }" });
   await spare.getByRole("button", { name: "Reject" }).click();
   await expect(spare).toHaveCount(0);
   await expect(p2.locator(".pair-note--quiet")).toContainText("Rejected", { timeout: 10_000 });
