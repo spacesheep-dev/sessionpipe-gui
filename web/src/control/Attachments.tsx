@@ -105,12 +105,35 @@ export function pictureMode(
 
 /** Why no picture can go to `machine`, as the line under the field says it when one is
  *  pasted or dropped: its sessionpipe is too old for them (`old`, wherever it is reached
- *  from), or spacesheep would not take this app's uploads (`spacesheep`). What is between
- *  backticks is a command to type. */
-export function picturesOffWords(machine: string, why: "old" | "spacesheep" = "old"): string {
-  return why === "spacesheep"
-    ? UPLOAD_WORDS.refused
-    : `Pictures can't be sent to ${machine}: its sessionpipe is older than 0.10. Run \`sessionpipe update\` there.`;
+ *  from), spacesheep would not take this app's uploads (`spacesheep`), or the board in
+ *  between says nothing of pictures for a computer that takes them (`relay`: a board from
+ *  before it carried them through spacesheep). What is between backticks is a command to
+ *  type. */
+export function picturesOffWords(machine: string, why: PicturesOff = "old"): string {
+  if (why === "spacesheep") return UPLOAD_WORDS.refused;
+  if (why === "relay") return `Pictures can't be sent to ${machine} through spacesheep from here yet.`;
+  return `Pictures can't be sent to ${machine}: its sessionpipe is older than 0.10. Run \`sessionpipe update\` there.`;
+}
+
+export type PicturesOff = "old" | "spacesheep" | "relay";
+
+/** A sessionpipe version as a row gives it ("0.17.0", "sessionpipe 0.14.2") is 0.10 or
+ *  later; false where none can be read. */
+export function versionTakesPictures(version: string | undefined): boolean {
+  const m = /(\d+)\.(\d+)/.exec(version ?? "");
+  return !!m && (Number(m[1]) > 0 || Number(m[2]) >= 10);
+}
+
+/** Which of `picturesOffWords`'s reasons is so for a machine where no picture can go. A
+ *  computer reached through spacesheep that is 0.10 or later and still has no pictures is
+ *  on a board that says nothing of them (it never says it takes any): no update there helps. */
+export function picturesOffWhy(
+  control: Pick<MachineControl, "promptFiles" | "remote" | "version"> | undefined,
+  refused: boolean,
+): PicturesOff {
+  if (!control?.remote) return "old";
+  if (control.promptFiles) return refused ? "spacesheep" : "old";
+  return versionTakesPictures(control.version) ? "relay" : "old";
 }
 
 // spacesheep answered an upload of this app's that it takes none from it (an older

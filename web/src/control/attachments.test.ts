@@ -23,6 +23,7 @@ import {
   PromptBody,
   pictureMode,
   pictureName,
+  picturesOffWhy,
   picturesOffWords,
   progressWords,
   refuseFile,
@@ -175,6 +176,26 @@ describe("how a picture goes to a session's machine", () => {
       "Pictures can't be sent to studio-mac: its sessionpipe is older than 0.10. Run `sessionpipe update` there.",
     );
     expect(picturesOffWords("studio-mac", "spacesheep")).toBe("spacesheep.dev can't take pictures from here yet.");
+  });
+  it("a computer reached through spacesheep on 0.10 or later, on a board that says nothing of pictures, is not told to update", () => {
+    const remote = { via: "spacesheep" as const, origin: "https://spacesheep.dev", rpId: "spacesheep.dev" };
+    const said = (control: Parameters<typeof picturesOffWhy>[0], refused = false) =>
+      picturesOffWords("studio-mac", picturesOffWhy(control, refused));
+    const through = "Pictures can't be sent to studio-mac through spacesheep from here yet.";
+    const update =
+      "Pictures can't be sent to studio-mac: its sessionpipe is older than 0.10. Run `sessionpipe update` there.";
+    // An older board writes no prompt_files for a spacesheep row, whatever the computer runs.
+    expect(said({ remote, promptFiles: false, version: "0.17.0" })).toBe(through);
+    expect(said({ remote, promptFiles: false, version: "sessionpipe 0.10.2" })).toBe(through);
+    expect(said({ remote, version: "1.0.0" })).toBe(through);
+    // A computer that really is older, or one whose version is not known.
+    expect(said({ remote, promptFiles: false, version: "0.9" })).toBe(update);
+    expect(said({ remote, promptFiles: false, version: "sessionpipe 0.9.4" })).toBe(update);
+    expect(said({ remote, promptFiles: false })).toBe(update);
+    // spacesheep took none of this app's uploads.
+    expect(said({ remote, promptFiles: true }, true)).toBe("spacesheep.dev can't take pictures from here yet.");
+    // A machine paired with this board says its own version in its hello.
+    expect(said({ promptFiles: false, version: "0.17.0" })).toBe(update);
   });
   it("one picture is at most a command's file (25 MiB) as a file, and 8 MiB where the prompt names its path", () => {
     const sized = (size: number, type = "image/png") => ({ size, type }) as Blob;

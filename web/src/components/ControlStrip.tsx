@@ -41,6 +41,7 @@ import {
   type KeptPicture,
   keptPictures,
   pictureMode,
+  picturesOffWhy,
   picturesOffWords,
   useAttachments,
   usePageDrop,
@@ -589,10 +590,7 @@ export function ControlStrip({
       return { kind: noteKind === "err" ? "error" : "note", text: note, tone: noteKind === "err" ? "err" : undefined };
     if (picturesOff) {
       // The sentence, with the command it names set as one.
-      const [words, command, rest] = picturesOffWords(
-        name,
-        control?.remote && control.promptFiles && ssRefused ? "spacesheep" : "old",
-      ).split("`");
+      const [words, command, rest] = picturesOffWords(name, picturesOffWhy(control, ssRefused)).split("`");
       return {
         kind: "pictures-off",
         text: (
