@@ -57,6 +57,8 @@ export interface ControlDeps {
   origins?: () => string[];
   /** A send for a machine paired on spacesheep (ui.ts forwardSend, docs/rfcs/08). */
   remoteSend?: UiRouteDeps["remoteSend"];
+  /** An upload for a machine paired on spacesheep (ui.ts, remote.ts forwardRemoteUpload). */
+  remoteUpload?: UiRouteDeps["remoteUpload"];
 }
 
 export interface Control {
@@ -187,6 +189,7 @@ export function createControl(deps: ControlDeps): Control {
         base: ROUTES.ui.control,
         device,
         ...(deps.remoteSend ? { remoteSend: deps.remoteSend } : {}),
+        ...(deps.remoteUpload ? { remoteUpload: deps.remoteUpload } : {}),
       });
       if (deps.testDoor) registerTestDoor(router, { state, rpId, base: ROUTES.control, device });
     },

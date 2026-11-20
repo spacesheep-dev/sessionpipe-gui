@@ -98,7 +98,10 @@ export function reaches(file: string, text: string): string[] {
 /** The files that reach for the network by themselves, each with how often and why. One
  *  more in any of them, or one anywhere else, fails: use apiFetch, or say here why not. */
 const ALLOWED: Record<string, { n: number; why: string }> = {
-  "lib/net.ts": { n: 2, why: "apiFetch itself, and the receiver's stream (openEvents)" },
+  "lib/net.ts": {
+    n: 3,
+    why: "apiFetch itself, the receiver's stream (openEvents), and an upload's progress (apiUpload's XMLHttpRequest)",
+  },
   "pages/SetupPage.tsx": {
     n: 1,
     why: "the receiver's address over https, probed from the setup page: another origin on purpose",
@@ -110,7 +113,7 @@ const ALLOWED: Record<string, { n: number; why: string }> = {
   },
   "account/doors.ts": {
     n: 1,
-    why: "the five doors of a spacesheep account, through the native hub: the only requests a page on an account makes",
+    why: "the six doors of a spacesheep account, through the native hub: the only requests a page on an account makes",
   },
 };
 

@@ -211,7 +211,11 @@ export function registerMachineRoutes(to: Router, d: MachineRouteDeps): void {
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
     });
-    createReadStream(f.path).pipe(ctx.res);
+    // A file that can't be read once the answer has begun (gone meanwhile, made room
+    // from) ends that answer, and nothing else.
+    createReadStream(f.path)
+      .on("error", () => ctx.res.destroy())
+      .pipe(ctx.res);
     return undefined;
   });
 

@@ -77,3 +77,18 @@ describe("a permission answer's row", () => {
     expect(again.activityById(row.id)?.answer).toEqual({ for: "perm-1", decision: "allow" });
   });
 });
+
+describe("a message row with files", () => {
+  it("says its nonce, where the machine saves them, also on a page's row that keeps no command", () => {
+    const file = { name: "kiwi.png", type: "image/png", size: 158, sha256: "k".repeat(43) };
+    const cmd = { kind: "prompt", session: SESSION, text: "Look", files: [file], nonce: "n0nce-0123456789ab" } as never;
+    for (const signed of [{ cmd: JSON.stringify(cmd) }, { cmd: "" }])
+      expect(toActivity(messageRow(machine, signed, cmd, at))).toMatchObject({
+        files: [file],
+        nonce: "n0nce-0123456789ab",
+      });
+    // Without files there is nothing to find again by it.
+    const plain = { kind: "prompt", session: SESSION, text: "Look", nonce: "n0nce-0123456789ab" } as never;
+    expect(toActivity(messageRow(machine, { cmd: "" }, plain, at)).nonce).toBeUndefined();
+  });
+});

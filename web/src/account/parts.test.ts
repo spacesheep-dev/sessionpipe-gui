@@ -605,19 +605,23 @@ describe("the cache of relay pages", () => {
     expect(pagesTooOld([ahead, last], now + 38 * day)).toEqual([1]);
   });
 
-  it("deletes the databases of accounts that are no longer on this phone, and no other", async () => {
+  it("deletes the databases of accounts that are no longer on this phone, their sent pictures too, and no other", async () => {
     const deleted: string[] = [];
     const idb = {
       databases: async () => [
         { name: "sessionpipe.account.KEPT" },
         { name: "sessionpipe.account.GONE" },
+        { name: "sessionpipe.sent-pictures.KEPT" },
+        { name: "sessionpipe.sent-pictures.GONE" },
+        { name: "sent-pictures" },
         { name: "somebody-elses" },
         {},
       ],
       deleteDatabase: (name: string) => void deleted.push(name),
     } as unknown as IDBFactory;
-    expect(await sweepCaches(["KEPT"], idb)).toEqual(["sessionpipe.account.GONE"]);
-    expect(deleted).toEqual(["sessionpipe.account.GONE"]);
+    const gone = ["sessionpipe.account.GONE", "sessionpipe.sent-pictures.GONE"];
+    expect(await sweepCaches(["KEPT"], idb)).toEqual(gone);
+    expect(deleted).toEqual(gone);
     // A browser that cannot list them, or has none: nothing happens.
     expect(await sweepCaches(["KEPT"], {} as IDBFactory)).toEqual([]);
     expect(await sweepCaches(["KEPT"], undefined)).toEqual([]);

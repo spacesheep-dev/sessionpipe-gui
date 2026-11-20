@@ -18,6 +18,17 @@ const RFC3339_RE = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-
  *  predates `limits.observed`, an account's usage limits, at tier 1. */
 export const MIN_TIER: Record<string, Tier> = { ...TYPE_TIER, "turn.progress": 2, "limits.observed": 1 };
 
+/** For a time that already matched RFC3339_RE and that Date.parse read (so month 01-12, day
+ *  from 01, minute and second below 60): whether its day is one its month has and its hour is
+ *  below 24, as the schema's `time` pattern requires. Date.parse rolls 2026-02-30 into March
+ *  and reads T24:00 as the next day. Day 0 of the next month is this month's last day;
+ *  setUTCFullYear, unlike Date.UTC, keeps years 0-99, so 0000-02-29 reads (a leap year). */
+const isCalendarTime = (t: string): boolean => {
+  const last = new Date(0);
+  last.setUTCFullYear(Number(t.slice(0, 4)), Number(t.slice(5, 7)), 0);
+  return Number(t.slice(8, 10)) <= last.getUTCDate() && Number(t.slice(11, 13)) < 24;
+};
+
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
 /** Why an event is rejected, or null when it is a valid v1 envelope. */
@@ -26,7 +37,13 @@ export function eventProblem(e: unknown): string | null {
   if (e.protocol !== 1) return "unsupported_protocol";
   if (typeof e.id !== "string" || !isUlid(e.id)) return "bad_id";
   if (typeof e.type !== "string" || !TYPE_RE.test(e.type)) return "bad_type";
-  if (typeof e.time !== "string" || !RFC3339_RE.test(e.time) || !Number.isFinite(Date.parse(e.time))) return "bad_time";
+  if (
+    typeof e.time !== "string" ||
+    !RFC3339_RE.test(e.time) ||
+    !Number.isFinite(Date.parse(e.time)) ||
+    !isCalendarTime(e.time)
+  )
+    return "bad_time";
   if (!Number.isInteger(e.tier) || (e.tier as number) < 0 || (e.tier as number) > 3) return "bad_tier";
   if (!isObject(e.harness) || typeof e.harness.name !== "string" || !HARNESS_RE.test(e.harness.name))
     return "bad_harness";

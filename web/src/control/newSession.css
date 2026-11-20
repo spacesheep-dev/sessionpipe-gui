@@ -33,29 +33,6 @@
   }
 }
 
-.starting-files {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.starting-file {
-  display: inline-flex;
-  gap: 6px;
-  max-width: 260px;
-  padding: 2px 8px;
-  border: var(--hairline) solid var(--line);
-  border-radius: var(--radius);
-  color: var(--fg-2);
-  font-size: var(--text-sm);
-}
-.starting-file .num {
-  color: var(--fg-3);
-  font-size: var(--text-xs);
-}
 /* A start or a message that didn't make it: a neutral sentence after one small red ✕, the
    command it names in its own well, then the ways on. */
 .starting-failed {

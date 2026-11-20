@@ -305,7 +305,9 @@ export function resolveSearchDate(
       return edge === "start" ? start : Date.UTC(y, m + 1, 1) - offset - 1;
     }
     const day = Number(d[3]);
-    if (day < 1 || day > 31) return undefined;
+    // Day 0 of the next month is this month's last day, so 2026-02-30 and 2026-11-31 do not
+    // read (Date.UTC would roll them into the next month) and 02-29 reads in a leap year only.
+    if (day < 1 || day > new Date(Date.UTC(y, m + 1, 0)).getUTCDate()) return undefined;
     const start = Date.UTC(y, m, day) - offset;
     return edge === "start" ? start : start + DAY - 1;
   }

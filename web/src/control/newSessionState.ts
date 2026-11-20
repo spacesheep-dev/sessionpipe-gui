@@ -30,6 +30,8 @@ export interface NewSessionTarget {
   permission?: RunLevel;
   model?: string;
   files?: StartFile[];
+  /** When `files` were uploaded (ms), where it is known: they are held a day from then. */
+  filesAt?: number;
 }
 
 interface OpenState {
@@ -138,11 +140,21 @@ export interface Draft {
   model?: string;
   /** Uploaded already (held here a day), so a restored draft can still send them. */
   files?: StartFile[];
+  /** When the first of `files` was uploaded (ms): a day on, they are no longer held. */
+  filesAt?: number;
 }
 
-export function readDraft(): Draft | null {
+/** A draft's files are held a day from their upload (server/control/files.ts). */
+const DRAFT_FILES_MS = 24 * 3600_000;
+
+export function readDraft(now = Date.now()): Draft | null {
   const d = read<Draft>(DRAFT_KEY);
-  return d && typeof d === "object" && typeof d.text === "string" ? d : null;
+  if (!d || typeof d !== "object" || typeof d.text !== "string") return null;
+  if (d.files && typeof d.filesAt === "number" && now - d.filesAt >= DRAFT_FILES_MS) {
+    const { files: _gone, filesAt: _at, ...rest } = d;
+    return rest;
+  }
+  return d;
 }
 export function saveDraft(d: Draft | null): void {
   const empty = !d || (!d.text.trim() && !d.files?.length);
@@ -315,4 +327,18 @@ export function agentLeft(
   if (pool?.on && pool.harness === harness && pool.accounts.some((a) => a.enabled))
     return poolPickerWords(pool, (id) => limits.find((e) => e.harness === harness && e.accountId === id), now);
   return agentWords(accountFor(harness, machine, c?.accounts, limits), now);
+}
+
+/** A file New session uploads again when another machine is chosen: one whose bytes it
+ *  still has, uploaded (or on its way, or failed in a way trying again can mend) for a
+ *  machine reached through spacesheep where the one chosen now is not, or the other way
+ *  round. A file held here is not where spacesheep looks, nor one spacesheep holds where
+ *  this board does; every computer reached through spacesheep fetches from the same
+ *  account, and this board holds a file for any of its own. */
+export function uploadsAgain(
+  f: { file?: unknown; to?: { remote: boolean }; failed?: { retry: boolean } },
+  remote: boolean,
+): boolean {
+  if (!f.file || !f.to || f.to.remote === remote) return false;
+  return !f.failed || f.failed.retry;
 }

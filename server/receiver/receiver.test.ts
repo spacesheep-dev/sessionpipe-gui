@@ -120,6 +120,45 @@ describe("POST events", () => {
     ]);
   });
 
+  it("rejects a time on a day the month does not have, or at hour 24, as bad_time, as the schema does", async () => {
+    const s = new Session("time-real");
+    const at = (time: string) => eventProblem({ ...s.ev("turn.started"), time });
+    for (const time of [
+      "2026-02-30T00:00:00Z",
+      "2026-11-31T10:00:00Z",
+      "2026-02-29T00:00:00.000Z",
+      "2100-02-29T00:00:00Z",
+      "2026-04-31T00:00:00+02:00",
+      "2026-11-20T24:00:00Z",
+      "2026-11-20T24:00:00.000+01:00",
+      "2026-11-20T25:00:00Z",
+      "2026-11-20T23:60:00Z",
+    ])
+      expect(at(time), time).toBe("bad_time");
+    for (const time of [
+      "2028-02-29T00:00:00Z",
+      "2000-02-29T12:00:00.000Z",
+      "0000-02-29T00:00:00Z",
+      "2026-12-31T23:59:59.999Z",
+      "2026-01-31T00:00:00-05:00",
+      "2026-11-20t10:00:00z",
+    ])
+      expect(at(time), time).toBeNull();
+    const ok = s.ev("session.started", { source: "startup" });
+    const feb30 = { ...s.ev("turn.started"), time: "2026-02-30T00:00:00Z" };
+    const nov31 = { ...s.ev("turn.started"), time: "2026-11-31T10:00:00Z" };
+    const h24 = { ...s.ev("turn.started"), time: "2026-11-20T24:00:00Z" };
+    const res = await post({ events: [ok, feb30, nov31, h24] });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { accepted: number; rejected: { id: string; reason: string }[] };
+    expect(body.accepted).toBe(1);
+    expect(body.rejected).toEqual([
+      { id: feb30.id, reason: "bad_time" },
+      { id: nov31.id, reason: "bad_time" },
+      { id: h24.id, reason: "bad_time" },
+    ]);
+  });
+
   it("validates per event: rejected with a reason, counts add up, the rest is stored", async () => {
     const s = new Session("valid");
     const ok = s.ev("session.started", { source: "startup" });

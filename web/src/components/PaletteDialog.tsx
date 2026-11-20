@@ -12,6 +12,7 @@
 // leave the way the control strip sends them (web/src/control/command.ts).
 import type { AgentRun, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
 import { isEmptySession, LABEL_COLORS, SNIPPET_CHARS, sessionKey, splitKey } from "@shared/api";
+import { promptWords } from "@shared/attachments";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -1627,8 +1628,8 @@ function Peek({ item }: { item: Item | undefined }) {
   const a = item.agent;
   const where = [s.machine, repoShort(s.repo) || undefined, s.branch].filter(Boolean).join(" · ");
   // A turn the harness opened itself (a `<task-notification>`, a `<command-name>`) is not
-  // what the person asked: its markup is never shown as the ask.
-  const asked = item.section === "Needs you" ? undefined : flat(s.progress?.user ?? s.lastUser);
+  // what the person asked: its markup is never shown as the ask. Nor is a block of pictures.
+  const asked = item.section === "Needs you" ? undefined : flat(promptWords(s.progress?.user ?? s.lastUser ?? ""));
   const ask = asked && !HARNESS_TURN.test(asked) ? asked : undefined;
   const reply = flat(s.progress?.assistant ?? s.lastAssistant);
   const waiting = item.section === "Needs you" ? s.openAttentions[0] : undefined;
