@@ -129,11 +129,14 @@ function planSession(): unknown[] {
   ];
 }
 
-/** `n` sessions that each wait for an answer, "Ask 01: …" on: an Inbox longer than a screen. */
+/** `n` sessions that each wait for an answer, "Ask 01: …" on: an Inbox longer than a screen.
+ *  Each was asked three minutes ago or more, past the two in which a phone can answer one
+ *  (lib/answerWindow.ts): a row that went past them during the test would change its
+ *  height under the place being held. */
 function manyPrompts(n: number): unknown[] {
   const events: unknown[] = [];
   for (let i = 0; i < n; i++) {
-    const asked = Date.now() - (2 + i) * 60_000;
+    const asked = Date.now() - (3 + i) * 60_000;
     const s = new Session(`s-ask-${i}`, "claude-code", asked - 60_000);
     const row = (at?: number) => ({
       ...on(`Ask ${String(i + 1).padStart(2, "0")}: ship the billing module`),
@@ -191,6 +194,10 @@ async function putUnderBar(page: Page, el: Locator, pt: number): Promise<void> {
       window.scrollBy(0, node.getBoundingClientRect().top - (bar?.getBoundingClientRect().bottom ?? 0) - want);
     }, pt);
     await frames(page);
+    expect(Math.abs((await underBar(el)) - pt)).toBeLessThanOrEqual(1);
+    // And it stays there: a page still drawing what it opened on (a reply read whole, a
+    // stream read again) moves it on its own, and the place is then the one it was left at.
+    await frames(page, 15);
     expect(Math.abs((await underBar(el)) - pt)).toBeLessThanOrEqual(1);
   }, "the page is long enough to put it there, and has stopped moving").toPass({ timeout: 10_000 });
 }
@@ -665,12 +672,14 @@ test("a message opened in place and not scrolled since keeps its top as the phon
 test("the Inbox's prompt and Search's result stay in place as the phone is unfolded and turned", async ({
   browser,
 }) => {
-  const b = await bedWith(browser, "466x678", [...manyPrompts(14), ...manyRows(24)]);
+  // Twenty: a row past the time a phone can answer it is a line shorter than one with Allow
+  // and Deny, and the page must go on far enough under the prompt for it to be put back.
+  const b = await bedWith(browser, "466x678", [...manyPrompts(20), ...manyRows(24)]);
   const { page } = b;
   try {
     await page.goto(`${b.server.url}/inbox`);
     const prompt = page.locator(".inbox-row").filter({ hasText: "Ask 06:" });
-    await expect(page.locator(".inbox-row").filter({ hasText: "Ask 14:" })).toBeAttached();
+    await expect(page.locator(".inbox-row").filter({ hasText: "Ask 20:" })).toBeAttached();
     await putUnderBar(page, prompt, 186);
     for (const [width, height] of ROUND.slice(0, 3)) {
       await pose(page, width, height);
