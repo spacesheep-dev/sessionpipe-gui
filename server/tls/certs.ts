@@ -17,6 +17,7 @@ import {
   chmodSync,
   constants,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -299,10 +300,21 @@ export function certsProblem(
   ] as const;
   if (files.every(({ file }) => !existsSync(file))) return null;
   const problems: { problem: string; repair: "ca" | "server" | "by-hand"; badServerKey?: true }[] = [];
+  // A new CA starts by deleting the four files one by one, which stops at a folder in
+  // place of any of them, and openssl cannot read or write a folder in place of a key or
+  // certificate either; a new server certificate is written over server.key and
+  // server.crt, which stops at one this account cannot write (openssl's Permission denied).
+  let folderInPlace = false;
+  const readOnly: string[] = [];
   for (const { file, kind, repair } of files) {
     const name = path.basename(file);
     if (!existsSync(file)) {
       problems.push({ problem: `${name} is missing`, repair });
+      continue;
+    }
+    if (lstatSync(file).isDirectory()) {
+      folderInPlace = true;
+      problems.push({ problem: `${name} is a folder`, repair: "by-hand" });
       continue;
     }
     let text: string;
@@ -314,6 +326,13 @@ export function certsProblem(
         repair: file === paths.caCertPath ? "ca" : "by-hand",
       });
       continue;
+    }
+    if (repair === "server") {
+      try {
+        accessSync(file, constants.W_OK);
+      } catch {
+        readOnly.push(name);
+      }
     }
     try {
       if (kind === "cert") new X509Certificate(text);
@@ -327,15 +346,20 @@ export function certsProblem(
     }
   }
   if (problems.length === 0) return null;
-  // A new CA remakes every file, so it repairs anything (and start makes one when the CA is
-  // near its end too); a new server certificate also writes a key over one that is not a
-  // key; anything else start leaves needs a hand.
+  // A new CA remakes every file, so it repairs anything (and start makes one whenever the
+  // CA is near its end, whatever else is wrong) unless a folder stands in for a file; a new
+  // server certificate also writes a key over one that is not a key, unless server.key or
+  // server.crt cannot be written; anything else start leaves needs a hand.
   const reissue = problems.some((p) => p.repair === "server");
   const all = problems.map((p) => (p.badServerKey && reissue ? "server" : p.repair));
-  if (!all.includes("ca") && !all.includes("by-hand") && !caUsable(paths.caCertPath, now)) all.push("ca");
+  if (!all.includes("ca") && !caUsable(paths.caCertPath, now)) all.push("ca");
+  if (!folderInPlace && !all.includes("ca") && all.includes("server") && readOnly.length > 0) {
+    problems.push({ problem: `${readOnly.join(" and ")} cannot be written`, repair: "by-hand" });
+    all.push("by-hand");
+  }
   return {
     problem: problems.map((p) => p.problem).join(", "),
-    repair: all.includes("ca") ? "ca" : all.includes("by-hand") ? "by-hand" : "server",
+    repair: folderInPlace ? "by-hand" : all.includes("ca") ? "ca" : all.includes("by-hand") ? "by-hand" : "server",
   };
 }
 
