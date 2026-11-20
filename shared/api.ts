@@ -688,7 +688,10 @@ export type StreamMessage =
    *  has); `deleted` when it was taken away. */
   | { kind: "workflowRun"; run: WorkflowRun; deleted?: true }
   /** The saved workflows after a save or a delete (the whole list). */
-  | { kind: "workflows"; workflows: Workflow[] };
+  | { kind: "workflows"; workflows: Workflow[] }
+  /** What Info says has changed (the board's key, a spacesheep account): a page that
+   *  shows it reads `/api/ui/info` again. A stream that no longer has the key ends here. */
+  | { kind: "info" };
 
 // ---------- labels (the person's colour labels; GET / PATCH ROUTES.ui.labels) ----------
 
@@ -1305,7 +1308,8 @@ export interface Info {
    *  the secure origin TLS mode serves (`Info.tls`); `public` the one a trusted reverse
    *  proxy on this machine serves from anywhere (`Info.remote`). */
   urls: { local: string; lan: string[]; https?: string; public?: string };
-  /** The `sessionpipe sink add …` line for another machine, with the LAN URL and the token. */
+  /** The `sessionpipe sink add …` line for another machine, with the LAN URL and the token.
+   *  Empty, as `sinkToken` is, for a caller that is not this computer (ui/index.ts infoFor). */
   sinkCommand: string;
   sinkToken: string;
   /** Appended as `?k=` to the LAN URL so a phone can open the UI; embedded in the QR. */
@@ -1347,7 +1351,8 @@ export interface RemoteInfo {
   /** The https origin, e.g. `https://laptop.tail1234.ts.net`; `Info.control.rpId` is its host. */
   url: string;
   host: string;
-  /** For a machine elsewhere: push events, and pair control, through the same url. */
+  /** For a machine elsewhere: push events, and pair control, through the same url. The
+   *  sink line is empty for a caller that is not this computer. */
   sinkCommand: string;
   connectCommand: string;
 }
@@ -1799,6 +1804,9 @@ export const ROUTES = {
     forget: "/api/ui/sessions",
     /** POST → { sinkToken } */
     rotateToken: "/api/ui/token/rotate",
+    /** POST, this computer only (loopback, or the run's secret: server/localDoor.ts) → 204:
+     *  a new UI key, in use at once; the old one is refused from then on. */
+    renewKey: "/api/ui/key/renew",
     /** POST { on: boolean } → Info.sources.demo */
     demo: "/api/ui/demo",
     /** GET → { link: SpacesheepSourceStatus | null, pending: SpacesheepConnectStart | null };
@@ -1848,7 +1856,7 @@ export const ROUTES = {
      *  413 `too_large` over ATTACHMENT_MAX_BYTES, 415 `unsupported_type`, 400 `not_an_image`. */
     attachments: "/api/ui/attachments",
     /** GET → ExtrasResponse: the curated catalogue of official views, skins and plugins
-     *  with what is installed. POST /api/ui/extras/:id/install (loopback): install one
+     *  with what is installed. POST /api/ui/extras/:id/install (this computer): install one
      *  from npm; streams text/plain and ends with a line `ok` or `failed`. */
     extras: "/api/ui/extras",
     /** Connecting a phone (server/phone): GET → PhoneInfo; POST /tailscale (loopback:

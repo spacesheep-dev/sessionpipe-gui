@@ -387,6 +387,7 @@ describe("every route, behind the guard", () => {
     for (const [path, body] of [
       [ROUTES.ui.demo, '{"on":true}'],
       [ROUTES.ui.rotateToken, ""],
+      [ROUTES.ui.renewKey, ""],
       [`${ROUTES.ui.setup}/remote`, '{"url":"https://other.example"}'],
       [`${ROUTES.ui.setup}/tls/on`, ""],
       [ROUTES.ui.spacesheep, '{"origin":"https://other.invalid"}'],
@@ -834,7 +835,7 @@ describe("every route, behind the guard", () => {
     expect(link.headers["content-security-policy"]).toBe("frame-ancestors 'self'");
     expect(link.headers["x-frame-options"]).toBe("SAMEORIGIN");
     expect((await ask(port, { path: ROUTES.trust, headers: from("navigate", "document") })).status).toBe(200);
-    // The pairing link a terminal prints, opened from wherever it was pasted.
+    // The pairing page by a link that carries the key, and by the pairing link itself.
     const key = app.config().uiKey;
     const paired = await ask(port, { path: `/pair?code=abc&k=${key}`, headers: from("navigate", "document") });
     expect(paired.status).toBe(302);

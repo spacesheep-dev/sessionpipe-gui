@@ -378,6 +378,31 @@ test.describe("inside the native shell", () => {
     await expect(page.locator("main").getByRole("button", { name: "Retry now" })).toBeVisible();
   });
 
+  test("a refused key: Receivers… opens Settings › App over the screen, and every other page is the screen", async ({
+    page,
+  }) => {
+    // The receiver answers 401 to this window's key (it holds one the board no longer takes).
+    await page.route(/\/api\/ui\/info(\?|$)/, (r) =>
+      r.fulfill({ status: 401, contentType: "application/json", body: '{"reason":"unauthorized"}' }),
+    );
+    await openInShell(page, "/", { stream: "down" });
+    const screen = page.locator("[data-key-refused]");
+    await expect(screen).toBeVisible({ timeout: 20_000 });
+    await expect(screen.getByRole("heading", { name: "Open the board's link again" })).toBeVisible();
+    await expect(screen).toContainText("Receivers… opens the app's list of boards, where its link is added again.");
+    await expect(screen.getByRole("button", { name: "Scan the code" })).toHaveCount(0);
+    await screen.getByRole("button", { name: "Receivers…" }).click();
+    await expect(page).toHaveURL(/\/settings\?section=app$/);
+    const pane = page.getByRole("tabpanel", { name: "App" });
+    await expect(pane).toBeVisible({ timeout: 15_000 });
+    await expect(pane.getByText("This Mac", { exact: true })).toBeVisible();
+    await expect(pane.getByRole("button", { name: "Add…" })).toBeVisible();
+    // Any other page is the screen, not the page.
+    await page.goto("/machines");
+    await expect(page.locator("[data-key-refused]")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".rail")).toHaveCount(0);
+  });
+
   test("no receiver: the welcome; Try the demo works offline", async ({ page }) => {
     const hits: string[] = [];
     page.on("request", (r) => {

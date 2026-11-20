@@ -121,6 +121,8 @@ export class StoreCore {
   private loading = false;
   private readonly childrenOf = new Map<SessionKey, Set<SessionKey>>();
   private readonly listeners = new Set<StoreListener>();
+  /** Who reads each batch as it arrives, before any of it is kept (onArrival). */
+  private readonly arrivalReaders = new Set<(events: readonly ProtocolEvent[]) => void>();
   private latencies: number[] = [];
   private arrivals: number[] = [];
   private storageBytes = 0;
@@ -438,6 +440,13 @@ export class StoreCore {
   // ---------- API ----------
 
   ingest(events: ProtocolEvent[], source: EventSource): IngestResult {
+    for (const read of this.arrivalReaders) {
+      try {
+        read(events);
+      } catch (e) {
+        console.error("[store] arrival reader: %s", (e as Error).message);
+      }
+    }
     const now = Date.now();
     const arrivedAt = new Date(now).toISOString();
     const result: IngestResult = { accepted: 0, duplicates: 0, rejected: [], stored: [] };
@@ -773,6 +782,15 @@ export class StoreCore {
       stats.latencyP50Ms = sorted[Math.floor((sorted.length - 1) / 2)]!;
     }
     return stats;
+  }
+
+  /** Read every batch as it arrives, from any source, before any of it is kept: the
+   *  events as they were sent (server/ui/keyRenewal.ts looks for the board's key in them). */
+  onArrival(read: (events: readonly ProtocolEvent[]) => void): () => void {
+    this.arrivalReaders.add(read);
+    return () => {
+      this.arrivalReaders.delete(read);
+    };
   }
 
   subscribe(l: StoreListener): () => void {

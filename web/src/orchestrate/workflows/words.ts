@@ -16,6 +16,7 @@ import {
 } from "@shared/api";
 import { signerLabel } from "../../control/signer";
 import { harnessMark } from "../../lib/format";
+import { KEY_LOST } from "../../lib/keyWords";
 
 /** A run is still moving: its steps may change under the page. */
 export const runLive = (r: Pick<WorkflowRun, "status">): boolean => r.status === "running" || r.status === "waiting";
@@ -326,7 +327,7 @@ export function serverSaveWords(e: unknown): string {
   if (err?.reason === "too_large" && err.error) return err.error.replace(/^at most/, "up to");
   if (err?.reason === "too_many") return err.error ?? "too many workflows";
   if (err?.error) return err.error;
-  if (err?.status === 401) return "this page lost its key; reload it from the terminal's link";
+  if (err?.status === 401) return KEY_LOST;
   return err?.message ?? "the server didn't answer";
 }
 

@@ -51,8 +51,19 @@ function useCopyMenu(text: string | null | undefined, title: string, extra?: () 
 /** One address: its name in the secondary tier, then the address in mono: the scheme
  *  and the host:port, the key after it quiet (a phone shows only host:port, so the part
  *  that tells two addresses apart is never the part cut off). Copy takes it whole. */
-function UrlRow({ label, url, className = "" }: { label: string; url: string; className?: string }) {
-  const menu = useCopyMenu(url, label);
+function UrlRow({
+  label,
+  url,
+  className = "",
+  more,
+}: {
+  label: string;
+  url: string;
+  className?: string;
+  /** More items after Copy and Open (the link's "New link…"). */
+  more?: () => MenuList;
+}) {
+  const menu = useCopyMenu(url, label, more);
   const m = /^(https?:\/\/)([^/?#]+)(.*)$/.exec(url);
   return (
     <li className={`form-row url-row ${className}`} {...menu}>
@@ -139,7 +150,9 @@ function Fold({
 
 export function Connect() {
   const store = useStore();
-  const { stats } = useAppState();
+  // `infoRev` moves when what Info says changed (the board's key): the links and the QR
+  // are read again at once.
+  const { stats, infoRev } = useAppState();
   const [info, setInfo] = useState<Info | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
@@ -173,12 +186,17 @@ export function Connect() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   useEffect(() => {
+    void infoRev;
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store]);
+  }, [store, infoRev]);
 
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
-  const qr = store.transport.qrUrl();
+  // The receiver gives the sink token to this computer alone (server/ui/index.ts infoFor):
+  // without it this page is open elsewhere, and shows nothing that needs the token.
+  const thisComputer = !!info?.sinkToken;
+  const qrAt = store.transport.qrUrl();
+  // A new key is a new image: the QR is asked for again, never taken from the cache.
+  const qr = qrAt && infoRev ? `${qrAt}?v=${infoRev}` : qrAt;
   const lan = info?.urls.lan ?? [];
   const phoneUrl = (u: string) => (info?.uiKey ? `${u}/?k=${info.uiKey}` : u);
 
@@ -209,6 +227,28 @@ export function Connect() {
       setBusy(null);
     }
   };
+  // A new key for the board: every link and the QR change, and whoever came in by the old
+  // one is asked for the new one. The page reads the new links from the `info` frame.
+  const renewKey = store.transport.renewKey?.bind(store.transport);
+  const renew = async () => {
+    if (!renewKey) return;
+    const ok = await confirmAction({
+      title: "Give the board a new link?",
+      body: "Phones and browsers that came in by the current link or QR code are asked for the new one. Senders keep their sink token.",
+      action: "New link",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await renewKey();
+      resetInfoCache();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const linkMenu = (): MenuList =>
+    renewKey && thisComputer ? [{ sep: true }, { label: "New link…", danger: true, run: () => void renew() }] : [];
   const demo = async (on: boolean) => {
     if (
       on &&
@@ -254,14 +294,12 @@ export function Connect() {
             {
               label: reveal ? "Hide" : "Reveal",
               run: () => setReveal((r) => !r),
-              disabled: !loopback && !info.sinkToken ? "Only on the machine running the receiver" : undefined,
             },
             { sep: true },
             {
               label: "Rotate…",
               danger: true,
               run: () => void rotate(),
-              disabled: loopback ? undefined : "Only on the machine running the receiver",
             },
           ]
         : null,
@@ -320,7 +358,7 @@ export function Connect() {
                 <li className="form-row urls-none">No LAN address found; this machine may be offline.</li>
               )}
               {lan.map((u) => (
-                <UrlRow key={u} label={isTailnet(u) ? "Tailscale" : "Wi-Fi"} url={phoneUrl(u)} />
+                <UrlRow key={u} label={isTailnet(u) ? "Tailscale" : "Wi-Fi"} url={phoneUrl(u)} more={linkMenu} />
               ))}
               {info && <UrlRow label="This machine" url={info.urls.local} className="urls-local" />}
             </ul>
@@ -335,15 +373,17 @@ export function Connect() {
               <h3 className="section-label">From anywhere</h3>
             </div>
             <ul className="form-list urls">
-              <UrlRow label="Public" url={phoneUrl(info.remote.url)} />
+              <UrlRow label="Public" url={phoneUrl(info.remote.url)} more={linkMenu} />
             </ul>
-            <CmdWell
-              shown={masked(info.remote.sinkCommand)}
-              copy={info.remote.sinkCommand}
-              label="Copy sink line"
-              title="Sink line"
-              className="remote-cmd"
-            />
+            {thisComputer && (
+              <CmdWell
+                shown={masked(info.remote.sinkCommand)}
+                copy={info.remote.sinkCommand}
+                label="Copy sink line"
+                title="Sink line"
+                className="remote-cmd"
+              />
+            )}
             <CmdWell
               shown={masked(info.remote.connectCommand)}
               copy={info.remote.connectCommand}
@@ -365,28 +405,42 @@ export function Connect() {
             Another machine
           </h2>
         </div>
-        <div className="connect-sink">
-          <CmdWell shown={sinkLine ? masked(sinkLine) : "…"} copy={sinkLine} label="Copy command" title="Sink line" />
-          {info && (
-            <Select<string>
-              size="sm"
-              align="end"
-              className="connect-tier"
-              aria-label="Tier"
-              value={String(chosenTier)}
-              onChange={(v) => setTier(Number(v) as Tier)}
-              options={([0, 1, 2, 3] as const).map((t) => ({
-                value: String(t),
-                label: `Tier ${t} · ${TIER_LABEL[t]}`,
-                hint: t === sinkTier ? "receiver's" : undefined,
-              }))}
-            />
-          )}
-        </div>
-        <p className="caption">
-          Run it there after <code>npx sessionpipe install</code>. Tier {chosenTier}:{" "}
-          {TIER_HINT[chosenTier].replace(/^\+ /, "adds ")}
-        </p>
+        {thisComputer || !info ? (
+          <>
+            <div className="connect-sink">
+              <CmdWell
+                shown={sinkLine ? masked(sinkLine) : "…"}
+                copy={sinkLine}
+                label="Copy command"
+                title="Sink line"
+              />
+              {info && (
+                <Select<string>
+                  size="sm"
+                  align="end"
+                  className="connect-tier"
+                  aria-label="Tier"
+                  value={String(chosenTier)}
+                  onChange={(v) => setTier(Number(v) as Tier)}
+                  options={([0, 1, 2, 3] as const).map((t) => ({
+                    value: String(t),
+                    label: `Tier ${t} · ${TIER_LABEL[t]}`,
+                    hint: t === sinkTier ? "receiver's" : undefined,
+                  }))}
+                />
+              )}
+            </div>
+            <p className="caption">
+              Run it there after <code>npx sessionpipe install</code>. Tier {chosenTier}:{" "}
+              {TIER_HINT[chosenTier].replace(/^\+ /, "adds ")}
+            </p>
+          </>
+        ) : (
+          <p className="caption" data-connect-sink-away>
+            The command holds the sink token, so it is copied on the computer this board runs on, at{" "}
+            <code>{info.urls.local}</code>.
+          </p>
+        )}
       </section>
 
       <Fold
@@ -415,7 +469,7 @@ export function Connect() {
                 </a>
               </span>
             </li>
-            <UrlRow label="Secure address" url={phoneUrl(info.tls.httpsUrl)} className="passkeys-url" />
+            <UrlRow label="Secure address" url={phoneUrl(info.tls.httpsUrl)} className="passkeys-url" more={linkMenu} />
             <li className="form-row form-row--kv">
               <span className="form-key">CA fingerprint</span>
               <code className="form-kv passkeys-fp">{info.tls.caFingerprint}</code>
@@ -469,69 +523,68 @@ export function Connect() {
           data-connect-advanced
         >
           <span className="connect-advanced-chev" aria-hidden="true" />
-          Advanced: token, sources, this receiver
+          {thisComputer ? "Advanced: token, sources, this receiver" : "Advanced: sources, this receiver"}
         </button>
       )}
       <div className="connect-fold" hidden={simple && !advanced}>
-        <Fold title="Sink token" summary={info ? `${mask(info.sinkToken)} · sent with every batch` : "…"}>
-          <ul className="form-list">
-            <li className="form-row token-row" {...tokenMenu}>
-              <code className="token-text">{info ? (reveal ? info.sinkToken : mask(info.sinkToken)) : "…"}</code>
-              <span className="form-value token-actions">
-                <button
-                  type="button"
-                  className="icon-btn"
-                  onClick={() => setReveal((r) => !r)}
-                  disabled={!info || (!loopback && !info.sinkToken)}
-                  aria-label={reveal ? "Hide" : "Reveal"}
-                  aria-pressed={reveal}
-                >
-                  <svg
-                    viewBox="0 0 16 16"
-                    width="15"
-                    height="15"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    aria-hidden="true"
+        {thisComputer && (
+          <Fold title="Sink token" summary={info ? `${mask(info.sinkToken)} · sent with every batch` : "…"}>
+            <ul className="form-list">
+              <li className="form-row token-row" {...tokenMenu}>
+                <code className="token-text">{info ? (reveal ? info.sinkToken : mask(info.sinkToken)) : "…"}</code>
+                <span className="form-value token-actions">
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => setReveal((r) => !r)}
+                    disabled={!info}
+                    aria-label={reveal ? "Hide" : "Reveal"}
+                    aria-pressed={reveal}
                   >
-                    <path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" />
-                    <circle cx="8" cy="8" r="2" />
-                    {reveal && <path d="M2.5 13.5 13.5 2.5" strokeLinecap="round" />}
-                  </svg>
-                </button>
-                {info && <CopyIconButton text={info.sinkToken} label="Copy token" />}
-                <button
-                  type="button"
-                  className="icon-btn icon-btn--danger"
-                  onClick={() => void rotate()}
-                  disabled={!loopback || busy === "rotate"}
-                  aria-label="Rotate token…"
-                  data-tip={loopback ? "Rotate: mint a new token" : "Only on the machine running the receiver"}
-                >
-                  <svg
-                    viewBox="0 0 16 16"
-                    width="15"
-                    height="15"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
+                    <svg
+                      viewBox="0 0 16 16"
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      aria-hidden="true"
+                    >
+                      <path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" />
+                      <circle cx="8" cy="8" r="2" />
+                      {reveal && <path d="M2.5 13.5 13.5 2.5" strokeLinecap="round" />}
+                    </svg>
+                  </button>
+                  {info && <CopyIconButton text={info.sinkToken} label="Copy token" />}
+                  <button
+                    type="button"
+                    className="icon-btn icon-btn--danger"
+                    onClick={() => void rotate()}
+                    disabled={busy === "rotate"}
+                    aria-label="Rotate token…"
+                    data-tip="Rotate: mint a new token"
                   >
-                    <path d="M13 8a5 5 0 1 1-1.5-3.6" />
-                    <path d="M13 2.5v3h-3" />
-                  </svg>
-                </button>
-              </span>
-            </li>
-          </ul>
-          <p className="caption">
-            Sent as a bearer with every batch; rotating stops the old one at once.
-            {loopback ? "" : ` Shown and rotated on the receiver machine only (${info?.urls.local ?? "localhost"}).`}
-          </p>
-        </Fold>
+                    <svg
+                      viewBox="0 0 16 16"
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M13 8a5 5 0 1 1-1.5-3.6" />
+                      <path d="M13 2.5v3h-3" />
+                    </svg>
+                  </button>
+                </span>
+              </li>
+            </ul>
+            <p className="caption">Sent as a bearer with every batch; rotating stops the old one at once.</p>
+          </Fold>
+        )}
 
         <Fold
           title="Sources"

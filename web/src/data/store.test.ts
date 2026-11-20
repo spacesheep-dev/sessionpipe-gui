@@ -391,3 +391,63 @@ describe("the stream coming back", () => {
     expect(() => mock.store.loadControl()).not.toThrow();
   });
 });
+
+describe("the board's key replaced", () => {
+  const snap = (at: string): Snapshot => ({
+    at,
+    sessions: [],
+    machines: [],
+    stats: { events: 0, sessions: 0, machines: 0, eventsLastMinute: 0, storageBytes: 0, uptimeS: 0 },
+  });
+  function wired(info: () => Promise<unknown>) {
+    const streams: StreamHandlers[] = [];
+    const transport = {
+      openStream(h: StreamHandlers) {
+        streams.push(h);
+        return () => {};
+      },
+      info,
+    } as unknown as Transport;
+    return { store: new Store(transport), last: () => streams[streams.length - 1]! };
+  }
+  const refused = () => Promise.reject(Object.assign(new Error("unauthorized"), { status: 401 }));
+
+  it("a drop whose info answers 401 is said as the key refused, and the next snapshot clears it", async () => {
+    let answer: () => Promise<unknown> = refused;
+    const { store, last } = wired(() => answer());
+    store.start();
+    last().onMessage({ kind: "snapshot", snapshot: snap("a") });
+    last().onError(1000);
+    await vi.waitFor(() => expect(store.get().keyRefused).toBe(true));
+    // The board's link opened again (another tab set the new cookie): the stream is back.
+    answer = () => Promise.resolve({});
+    last().onMessage({ kind: "snapshot", snapshot: snap("b") });
+    expect(store.get()).toMatchObject({ keyRefused: false, connection: "live" });
+  });
+
+  it("any other drop is a drop: no word about the key", async () => {
+    for (const answer of [
+      () => Promise.resolve({}),
+      () => Promise.reject(new TypeError("Failed to fetch")),
+      () => Promise.reject(Object.assign(new Error("gone"), { status: 502 })),
+    ]) {
+      const info = vi.fn(answer);
+      const { store, last } = wired(info);
+      store.start();
+      last().onError(1000);
+      await vi.waitFor(() => expect(info).toHaveBeenCalledTimes(1));
+      await Promise.resolve();
+      expect(store.get().keyRefused).toBe(false);
+      expect(store.get().connection).toBe("reconnecting");
+    }
+  });
+
+  it("an info frame moves infoRev, which a page that shows the link reads again by", () => {
+    const { store } = wired(() => Promise.resolve({}));
+    expect(store.get().infoRev).toBe(0);
+    store.apply({ kind: "info" });
+    store.apply({ kind: "info" });
+    expect(store.get().infoRev).toBe(2);
+    expect(STREAM_KINDS).toContain("info");
+  });
+});

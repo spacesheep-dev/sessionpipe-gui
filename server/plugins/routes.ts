@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: platform. The plugin routes: the listing (uiAuth, secrets masked), the
-// reload, the settings save and the enable / disable switch (all loopback only: settings
+// reload, the settings save and the enable / disable switch (all for this computer only: settings
 // hold tokens, and reloading or enabling runs code). Registered from app.ts beside the
 // theme routes.
 import { PLUGIN_ID_RE, PLUGIN_ROUTES } from "../../shared/plugin-api.js";
@@ -29,7 +29,7 @@ export function registerPlugins(router: Router, deps: PluginRouteDeps): void {
       (ctx): Reply => ({
         status: 200,
         headers: { "cache-control": "no-store" },
-        json: { plugins: deps.host.list(ctx.remote.loopback), demo: deps.demo === true },
+        json: { plugins: deps.host.list(ctx.remote.thisComputer), demo: deps.demo === true },
       }),
     ),
   );
@@ -37,7 +37,7 @@ export function registerPlugins(router: Router, deps: PluginRouteDeps): void {
   router.post(
     PLUGIN_ROUTES.reload,
     guard(async (ctx): Promise<Reply> => {
-      if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+      if (!ctx.remote.thisComputer) return { status: 403, json: { reason: "loopback_only" } };
       await deps.host.reload();
       return { status: 200, json: { plugins: deps.host.list(true), demo: deps.demo === true } };
     }),
@@ -47,7 +47,7 @@ export function registerPlugins(router: Router, deps: PluginRouteDeps): void {
     router.post(
       `${PLUGIN_ROUTES.toggle}/:id/${verb}`,
       guard(async (ctx): Promise<Reply> => {
-        if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+        if (!ctx.remote.thisComputer) return { status: 403, json: { reason: "loopback_only" } };
         const id = ctx.params.id ?? "";
         if (!PLUGIN_ID_RE.test(id)) return { status: 400, json: { reason: "bad_id" } };
         try {
@@ -65,7 +65,7 @@ export function registerPlugins(router: Router, deps: PluginRouteDeps): void {
     "PUT",
     `${PLUGIN_ROUTES.settings}/:id/settings`,
     guard(async (ctx): Promise<Reply> => {
-      if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+      if (!ctx.remote.thisComputer) return { status: 403, json: { reason: "loopback_only" } };
       const id = ctx.params.id ?? "";
       if (!PLUGIN_ID_RE.test(id)) return { status: 400, json: { reason: "bad_id" } };
       let body: unknown;

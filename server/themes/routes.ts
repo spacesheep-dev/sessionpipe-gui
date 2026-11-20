@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: platform. The theme routes: the listing, the reload (loopback), per-theme
+// Owned by: platform. The theme routes: the listing, the reload (this computer), per-theme
 // state (a JSON document ≤ 256 KB under <stateDir>/themes-state/<id>.json) and the
 // theme's own files at /themes/<id>/<file>. Everything needs uiAuth, like /api/ui.
 // The state carries an ETag (a hash of the document), so a view on two devices can
@@ -61,7 +61,7 @@ export function registerThemes(router: Router, deps: ThemeRouteDeps): void {
       (ctx): Reply => ({
         status: 200,
         headers: { "cache-control": "no-store" },
-        json: { themes: deps.registry.list().map((t) => publicTheme(t, ctx.remote.loopback)) },
+        json: { themes: deps.registry.list().map((t) => publicTheme(t, ctx.remote.thisComputer)) },
       }),
     ),
   );
@@ -69,7 +69,7 @@ export function registerThemes(router: Router, deps: ThemeRouteDeps): void {
   router.post(
     THEME_ROUTES.reload,
     guard((ctx): Reply => {
-      if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+      if (!ctx.remote.thisComputer) return { status: 403, json: { reason: "loopback_only" } };
       const themes = deps.registry.scan().map((t) => publicTheme(t, true));
       return { status: 200, json: { themes } };
     }),
@@ -79,7 +79,7 @@ export function registerThemes(router: Router, deps: ThemeRouteDeps): void {
     router.post(
       `${THEME_ROUTES.toggle}/:id/${verb}`,
       guard((ctx): Reply => {
-        if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+        if (!ctx.remote.thisComputer) return { status: 403, json: { reason: "loopback_only" } };
         const id = ctx.params.id ?? "";
         if (!THEME_ID_RE.test(id)) return { status: 400, json: { reason: "bad_id" } };
         if (!deps.registry.has(id)) return { status: 404, json: { reason: "not_found" } };

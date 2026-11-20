@@ -24,6 +24,7 @@ import { extraInstalled, installExtra } from "./extensions/extras.js";
 import { InstallError } from "./extensions/install.js";
 import { bundledDirs } from "./extensions/kind.js";
 import { lanAddresses } from "./http/net.js";
+import { runKeyCommand } from "./keyCommand.js";
 import { DEFAULT_HOST, listenErrorMessage } from "./listen-error.js";
 import { addPlugin, formatPluginList, linkPlugin, listPlugins, removePlugin } from "./plugins/index.js";
 import { removeRunFile, writeRunFile } from "./runfile.js";
@@ -164,6 +165,17 @@ service (the receiver in the background: started at login; on macOS and Linux al
   A running receiver writes <state>/run.json (port, pid, version, url) so the desktop
   app finds it on any port; it is removed when the receiver stops.
 
+key (the board's key: what the phone link, the QR code and a browser's cookie carry):
+
+  sessionpipe-gui key renew                  a new key for the board in this state folder:
+                                             the receiver serving it takes it at once; with
+                                             none, config.json holds it for the next start.
+                                             Phones and browsers that came in by the old
+                                             link are asked for the new one, which Connect
+                                             shows. It prints no key, and changes nothing in
+                                             a folder with no board. --state DIR and --port N
+                                             as for the receiver
+
 tls (passkeys from a phone; README "Passkeys from a phone"):
 
   sessionpipe-gui tls status                 hostname, names in the certificate, expiry,
@@ -209,6 +221,8 @@ interface Args {
   tls?: boolean;
   /** `tls <verb>`: a subcommand instead of the server. */
   tlsCommand?: string;
+  /** `key <verb>`: a subcommand instead of the server. */
+  keyCommand?: string;
   /** `service install|uninstall|status`: a subcommand instead of the server. */
   service?: Verb;
   dryRun: boolean;
@@ -296,6 +310,10 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
       case "tls":
         if (a.tlsCommand !== undefined) fail("one tls command at a time");
         a.tlsCommand = argv[++i] ?? "";
+        break;
+      case "key":
+        if (a.keyCommand !== undefined) fail("one key command at a time");
+        a.keyCommand = argv[++i] ?? "";
         break;
       case "--test-door":
         a.testDoor = true;
@@ -719,6 +737,15 @@ async function main(): Promise<void> {
   if (parsed.ext) return extensionCommand(parsed);
   if (parsed.extras) return extrasCommand(parsed);
   if (parsed.tlsCommand !== undefined) return tlsCommand(parsed);
+  if (parsed.keyCommand !== undefined) {
+    process.exitCode = await runKeyCommand(parsed.keyCommand, {
+      stateDir: parsed.state ?? defaultStateDir(),
+      stdout: process.stdout,
+      stderr: process.stderr,
+      ...(parsed.port !== undefined ? { probePort: parsed.port } : {}),
+    });
+    return;
+  }
   if ((parsed.downgrade || parsed.ifInstalled) && parsed.service !== "install")
     fail(`${parsed.downgrade ? "--downgrade" : "--if-installed"} is only for \`service install\``);
   if (parsed.service) {

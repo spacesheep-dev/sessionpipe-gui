@@ -15,8 +15,11 @@ the others under *Other ways*.
 
 `sessionpipe-gui` prints a QR code in the terminal; the Connect and phone pages show the
 same one. Scan it on the same Wi-Fi and the board opens. Without the key, the network
-answers 401. Anyone with the link can read the board, so treat it like a password; delete
-`uiKey` from `config.json` and restart to make a new one.
+answers 401. Anyone with the link can read the board, so treat it like a password;
+`sessionpipe-gui key renew` (or *New link…* in a link's menu on Connect) makes a new one,
+in use at once. For a receiver on a computer without a browser (also one run as a service,
+which prints no banner): `ssh -L <port>:localhost:<port> <that computer>`, then open
+`http://localhost:<port>/connect` on your own computer; Connect shows the current link.
 
 ## Sending, way 1: Tailscale (works away from home too)
 
@@ -90,9 +93,9 @@ sessionpipe control pair http://<this-machine>:7373
 
 It prints a link and six digits; the page shows the same six; you approve with your
 passkey. Over Tailscale, `sessionpipe connect https://<machine>.<tailnet>.ts.net` does the
-hooks, the sink and the pairing in one approval. A machine that has a sink for this board
-gets a link any browser can open; one that has none yet (`connect`) gets a link for a
-browser where the board is already open, and the Machines page lists its request too.
+hooks, the sink and the pairing in one approval. The link carries the pairing's code and
+nothing else; approve the request on the Machines page of the computer this board runs on,
+which lists it with the same six digits.
 
 ## Other proxies and tunnels
 

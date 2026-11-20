@@ -397,7 +397,11 @@ describe("plugin host and routes", () => {
   });
 
   it("needs the UI key away from loopback, and refuses reload and settings from the LAN", async () => {
-    const ctx = { remote: { ip: "10.0.0.2", loopback: false }, url: new URL("http://x/"), cookies: () => ({}) };
+    const ctx = {
+      remote: { ip: "10.0.0.2", loopback: false, thisComputer: false },
+      url: new URL("http://x/"),
+      cookies: () => ({}),
+    };
     const reply = await app.router.match("GET", PLUGIN_ROUTES.list)!.handler(ctx as never);
     expect(reply).toMatchObject({ status: 401 });
     const key = app.config().uiKey;
@@ -540,7 +544,7 @@ export default { activate() { g.__bundledPlugin.activations++; return { deactiva
     expect((await fetch(url(`${PLUGIN_ROUTES.toggle}/nope/enable`), { method: "POST" })).status).toBe(404);
     expect((await fetch(url(`${PLUGIN_ROUTES.toggle}/Bad_Id/enable`), { method: "POST" })).status).toBe(400);
     const ctx = {
-      remote: { ip: "10.0.0.2", loopback: false },
+      remote: { ip: "10.0.0.2", loopback: false, thisComputer: false },
       url: new URL("http://x/"),
       cookies: () => ({ spgui: app.config().uiKey }),
       params: { id: "shipped" },
@@ -646,7 +650,7 @@ describe("a plugin or view the CLI turns on or off while the server runs", () =>
     expect(file().enabled).toBeUndefined();
   });
 
-  it("the server's secrets stay its own, and a bad file, or one with other secrets, changes nothing", async () => {
+  it("a bad file changes nothing; secrets the owner wrote there are taken, with the lists", async () => {
     cli("view:canvas", false);
     const { sinkToken, uiKey } = app.config();
     const f = path.join(tmp.dir, "config.json");
@@ -656,14 +660,24 @@ describe("a plugin or view the CLI turns on or off while the server runs", () =>
     expect(readFileSync(f, "utf8")).toBe("{ not json");
     expect(app.config()).toMatchObject({ sinkToken, uiKey, disabled });
     expect(app.config().enabled).toEqual(enabled);
-    // A file with other secrets than the server's (another install's, or the old token a
-    // CLI command wrote back across a rotation): its lists are not an edit of ours, so
-    // none is taken from it.
-    writeFileSync(f, JSON.stringify({ sinkToken: "spg_test_other", uiKey: "uik_other", enabled: ["plugin:shipped"] }));
+    // The file is the owner's: other secrets there (written by hand, by `key renew`, by a
+    // second receiver on this folder) are the newest, and are taken with the lists.
+    writeFileSync(
+      f,
+      JSON.stringify({
+        sinkToken: "spg_test_other_0123456789",
+        uiKey: "uik_other_0123456789",
+        enabled: ["plugin:shipped"],
+      }),
+    );
     await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
-    expect(await status("shipped")).toBe("inactive");
-    expect(app.config()).toMatchObject({ sinkToken, uiKey, disabled });
-    expect(app.config().enabled).toEqual(enabled);
+    expect(await status("shipped")).toBe("active");
+    expect(app.config()).toMatchObject({ sinkToken: "spg_test_other_0123456789", uiKey: "uik_other_0123456789" });
+    // The ones it replaced are not taken back: they are written over with the current ones.
+    writeFileSync(f, JSON.stringify({ sinkToken, uiKey, disabled, enabled }));
+    await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" });
+    expect(app.config()).toMatchObject({ sinkToken: "spg_test_other_0123456789", uiKey: "uik_other_0123456789" });
+    expect(file()).toMatchObject({ sinkToken: "spg_test_other_0123456789", uiKey: "uik_other_0123456789" });
   });
 
   it("a toggle in the GUI also starts or stops a plugin the CLI turned on or off meanwhile", async () => {

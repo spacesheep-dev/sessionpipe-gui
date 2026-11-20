@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: server-core. Serves the built web app (dist/web) as the router's fallback:
 // files by path, index.html for anything else (the SPA routes), a cookie from `?k=`,
-// and a short 401 page for a LAN visitor without the key.
+// and a short 401 page for a LAN visitor without the key (or with one that was replaced).
 import { createReadStream, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +38,8 @@ export function webDir(): string {
 export interface StaticOptions {
   uiAuth: (ctx: Ctx) => boolean;
   uiKey: () => string;
+  /** Where this computer opens the board with no key (Info.urls.local). */
+  home?: () => string;
 }
 
 export function staticFiles(dir: string, opts: StaticOptions): Handler {
@@ -66,7 +68,7 @@ export function staticFiles(dir: string, opts: StaticOptions): Handler {
         },
       };
     }
-    if (!opts.uiAuth(ctx)) return unauthorized(pathname);
+    if (!opts.uiAuth(ctx)) return unauthorizedPage(ctx, opts.home?.() ?? "http://localhost");
     if (!existsSync(path.join(dir, "index.html"))) {
       return { status: 503, text: "The web app is not built: run `npm run build` (dist/web is missing).\n" };
     }
@@ -119,27 +121,37 @@ function resolveFile(dir: string, pathname: string): string | null {
   }
 }
 
-/** The 401 page. A pairing link opened where the board never was says what to do next:
- *  an open pairing's link carries no key (control/routes.ts). */
-function unauthorized(pathname: string): Reply {
+/** The 401 page (also /trust's). A browser that brought a key which does not open the
+ *  board is asked for the board's link again; one that brought none is told where the
+ *  link is. A pairing link opened where the board
+ *  never was says what to do next: an open pairing's link carries no key (control/routes.ts). */
+const esc = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+export function unauthorizedPage(ctx: Ctx, home: string): Reply {
+  const brought = ctx.url.searchParams.get(UI_KEY_PARAM) !== null || ctx.cookies()[UI_KEY_COOKIE] !== undefined;
   const pairing =
-    pathname === "/pair"
-      ? "\n<p>This is a pairing link. Once this browser has the key, open the link again; or approve the pairing on the board itself, where Machines lists it.</p>"
+    ctx.url.pathname === "/pair"
+      ? "\n<p>This is a pairing link: approve the pairing under Machines on the computer this board runs on, or open the link in a browser where the board is already open.</p>"
       : "";
+  const what = brought
+    ? `<h1>Open the board's link again</h1>
+<p>The key this browser has does not open this board: on the computer this board runs on, open Connect, then open its link here or scan its QR code.</p>`
+    : `<h1>This board needs its key</h1>
+<p>On the computer this board runs on, open Connect, then open its link here or scan its QR code: the link sets the key in this browser, once.</p>`;
   return {
     status: 401,
     headers: { "cache-control": "no-store" },
     html: `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>sessionpipe-gui · not signed in</title>
+<title>sessionpipe · not signed in</title>
 <meta name="color-scheme" content="light dark">
 <style>:root{color-scheme:light dark;--bg:#ffffff;--bg-3:#f5f5f3;--line:#e4e4e1;--fg:#141414;--fg-3:#5c5c5a}
 @media (prefers-color-scheme:dark){:root{--bg:#141414;--bg-3:#222222;--line:#2a2a2a;--fg:#f5f5f3;--fg-3:#9a9a96}}
 body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1.5em;background:var(--bg);color:var(--fg)}code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.92em;background:var(--bg-3);padding:.1em .3em;border-radius:3px}
 header{padding-bottom:12px;border-bottom:1px solid var(--line)}${WORDMARK_CSS}</style>
 <header>${wordmarkHtml()}</header>
-<h1>This board needs its key</h1>
-<p>You are reaching sessionpipe-gui from another device. Open it through the link or the QR code the terminal printed where it runs: that link carries the key (<code>?k=…</code>) and sets a cookie here, once.</p>
-<p>From the machine itself, <code>http://localhost</code> needs no key.</p>${pairing}
+${what}
+<p>On that computer, <code>${esc(home)}</code> needs no key.</p>${pairing}
 `,
   };
 }

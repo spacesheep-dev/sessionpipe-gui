@@ -4,7 +4,7 @@
 // `view|skin|plugin add` use, fed the npm name. Two doors: `sessionpipe-gui extras add
 // <id|all>` (cli.ts) and, for the Views page, GET /api/ui/extras (the catalogue with what
 // is installed; a bundled view, skin or plugin counts as installed) and
-// POST /api/ui/extras/:id/install, loopback only, which streams the installer's lines as
+// POST /api/ui/extras/:id/install, this computer only, which streams the installer's lines as
 // plain text and ends with `ok` or `failed`, or answers 409 for a bundled entry. Every
 // official extension is bundled today, so the install door stays shut until the packages
 // are published.
@@ -68,7 +68,7 @@ export function catalogResponse(dirs: ExtrasDirs, catalog: readonly ExtraEntry[]
 /** POST /api/ui/extras/:id/install. Exported so a test can call it with a made-up context. */
 export function installHandler(deps: ExtrasRouteDeps): Handler {
   return async (ctx) => {
-    if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+    if (!ctx.remote.thisComputer) return { status: 403, json: { reason: "loopback_only" } };
     const id = ctx.params.id ?? "";
     const entry = deps.catalog ? deps.catalog.find((e) => e.id === id) : findExtra(id);
     if (!entry) return { status: 404, json: { reason: "not_found" } };

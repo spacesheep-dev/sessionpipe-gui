@@ -48,7 +48,7 @@ describe("createApp", () => {
     }
   });
 
-  it("answers a pairing started with no token with the code alone, and one the sink token started with the board's key", async () => {
+  it("answers a pairing with the code alone, whether it was started with no token or with the sink token", async () => {
     const tmp = tempDir();
     const app = await createApp({ port: 0, stateDir: tmp.dir, outbox: false, quiet: true });
     try {
@@ -71,7 +71,8 @@ describe("createApp", () => {
       const keyed = await pair(hello, app.config().sinkToken);
       expect(keyed.status).toBe(201);
       const k = (await keyed.json()) as { code: string; url: string };
-      expect(k.url).toBe(`http://localhost:${app.port}/pair?code=${k.code}&k=${encodeURIComponent(key)}`);
+      expect(k.url).toBe(`http://localhost:${app.port}/pair?code=${k.code}`);
+      expect(JSON.stringify(k)).not.toContain(key);
     } finally {
       await app.close();
       tmp.cleanup();

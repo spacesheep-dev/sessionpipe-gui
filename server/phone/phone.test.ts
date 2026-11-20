@@ -456,7 +456,12 @@ describe("POST /api/ui/phone/trust-check", () => {
     const ctx = (o: { encrypted?: boolean; forwarded?: boolean; proto?: string }) =>
       ({
         req: { socket: { encrypted: o.encrypted }, headers: o.proto ? { "x-forwarded-proto": o.proto } : {} },
-        remote: { ip: "127.0.0.1", loopback: true, forwarded: o.forwarded ?? false },
+        remote: {
+          ip: "127.0.0.1",
+          loopback: true,
+          forwarded: o.forwarded ?? false,
+          thisComputer: !(o.forwarded ?? false),
+        },
       }) as never;
     expect(arrivedOverHttps(ctx({ encrypted: true }))).toBe(true);
     expect(arrivedOverHttps(ctx({ proto: "https" }))).toBe(false);

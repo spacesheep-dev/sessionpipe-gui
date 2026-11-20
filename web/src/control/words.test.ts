@@ -260,7 +260,7 @@ describe("sendErrorWords", () => {
       sendErrorWords(new ControlError(422, "Files can't be sent to rc-mac through spacesheep yet.", "relay_files")),
     ).toBe("Not sent. Files can't be sent to rc-mac through spacesheep yet.");
     expect(sendErrorWords(new ControlError(401, "unauthorized"))).toBe(
-      "not sent · this page lost its key; reload it from the terminal's link",
+      "not sent · this page's key does not open the board: open the board's link again",
     );
   });
 

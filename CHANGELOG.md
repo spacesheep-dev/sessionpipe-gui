@@ -6,6 +6,43 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A board's link can be replaced.** `sessionpipe-gui key renew`, or *New link…* in the
+  menu of a link on the Connect page (on the computer this board runs on), gives the board
+  a new key, in use at once; Connect shows the new link and QR code without a reload. A
+  phone or browser that came in by the old link is asked for the new one ("Open the
+  board's link again"); the phone app offers to scan the code again, and the desktop app
+  offers its list of receivers. Senders keep their sink token: rotating it is what stops a
+  sender. The command prints no key and asks the receiver serving the state folder when
+  there is one; in a folder with no board, or when the receiver on the port serves another
+  folder or does not take the new key, it changes nothing and says so.
+
+### Changed
+
+- **The sink token is shown on the computer this board runs on, and nowhere else.** The
+  Connect page opened from a phone or another computer says where the sink line is copied
+  instead of showing it.
+- **"This computer" is one rule everywhere.** What needs no key, shows the sink token,
+  rotates it and makes a new key answers to a request from `localhost`; a receiver bound
+  with `--host` to one address that is not loopback answers so to a request from that
+  address instead. A browser on the computer that opens the board at its network address
+  (or the `.local` secure address) uses the board's key there; with it, Setup's actions,
+  the phone page's Tailscale button and search's index answer there too.
+- **A pairing link carries its code alone.** It opens in a browser where the board is
+  already open; a device that has never opened the board gets the page that asks for the
+  board's link, and the Machines page on the computer this board runs on lists the pairing
+  to approve, as before.
+- `config.json` is written whole: a new file only this user can read, flushed to disk,
+  then put in place, and only when it would change. A setting changes only its own field;
+  fields this version does not know are kept; and the file keeps the SHA-256 of every key
+  and token of 16 characters or more this board replaced, so no receiver on the folder
+  takes one back. A key or token written there by hand is used from the next start,
+  whatever its length, unless it is one of 16 characters or more that this board replaced
+  before (a deleted `uiKey` gives a new one, as before); a running receiver takes one of
+  at least 16 characters at once and leaves any other until then. `sessionpipe-gui key renew` gives a
+  new key while the receiver runs.
+
 ## [0.8.6] - 2026-11-19
 
 The web app is built on React 19 and Vite 8, and the receiver runs sessionpipe-core 0.17.0;

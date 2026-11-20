@@ -1,36 +1,55 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: onboarding. "This machine", for routes that act on it: loopback, or a
-// connection from one of this machine's own addresses (the Mac's browser reaching
-// https://<name>.local:7373 arrives from the LAN address, not from 127.0.0.1). Also the
-// two lookups the setup page needs about the machine: the sessionpipe CLI, and whether
-// a machine name control knows is this one.
+// Owned by: onboarding. The rule for routes that act on this computer (Setup's, the phone
+// page's Tailscale click, the search index's): this computer (http/net.ts onThisComputer);
+// or a request that did not come through the proxy, from one of this machine's own
+// addresses, that also brings the board's key (the `.local` secure page on the computer
+// itself, which passkeys need). Also the two lookups the setup page needs about the
+// machine: the sessionpipe CLI, and whether a machine name control knows is this one.
 import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isThisMachine } from "../http/net.js";
-import type { Handler } from "../http/router.js";
+import { isThisMachine, onThisComputer } from "../http/net.js";
+import type { Ctx, Handler } from "../http/router.js";
+import { uiAuth } from "../ui/auth.js";
 
 export { isThisMachine, ownAddresses } from "../http/net.js";
 
-/** The guard every route that acts on this machine wears (the setup actions, the phone
- *  page's Tailscale click): 403 `local_only` for anyone else, UI key or not. A request
- *  that came through the proxy is someone else whatever address the proxy names for it
- *  (router.ts `trustProxy`). With the test door on, `x-spgui-test-remote` stands in for
- *  the remote address (e2e). */
-export function thisMachineOnly(o: { testDoor: boolean; port: () => number }): (h: Handler) => Handler {
-  return (h) => (ctx) => {
-    let ip = ctx.remote.ip;
-    if (o.testDoor) {
-      const over = ctx.req.headers["x-spgui-test-remote"];
-      if (typeof over === "string" && over) ip = over;
+/** May this request act on this computer? `uiKey` is the board's key; with the test door
+ *  on, `x-spgui-test-remote` stands in for the remote address (e2e). */
+export function actsHere(ctx: Ctx, uiKey: string, testDoor = false): boolean {
+  let ip = ctx.remote.ip;
+  let here = ctx.remote.thisComputer;
+  if (testDoor) {
+    const over = ctx.req.headers["x-spgui-test-remote"];
+    if (typeof over === "string" && over) {
+      ip = over;
+      here = onThisComputer({ ip: over, forwarded: ctx.remote.forwarded }, null);
     }
-    if (ctx.remote.forwarded || !isThisMachine(ip))
+  }
+  if (here) return true;
+  if (ctx.remote.forwarded || !isThisMachine(ip)) return false;
+  // The key as the guard reads it (`?k=` or the cookie), and never this computer's free pass.
+  return uiAuth({ ...ctx, remote: { ...ctx.remote, thisComputer: false } }, uiKey);
+}
+
+/** The guard every route that acts on this machine wears (the setup actions, the phone
+ *  page's Tailscale click): 403 `local_only` for a request actsHere does not let in. A
+ *  request that came through the proxy is someone else whatever address the proxy names
+ *  for it (router.ts `trustProxy`). With the test door on, `x-spgui-test-remote` stands
+ *  in for the remote address (e2e). */
+export function thisMachineOnly(o: {
+  testDoor: boolean;
+  home: () => string;
+  uiKey: () => string;
+}): (h: Handler) => Handler {
+  return (h) => (ctx) => {
+    if (!actsHere(ctx, o.uiKey(), o.testDoor))
       return {
         status: 403,
         json: {
           reason: "local_only",
-          error: `Setup acts on the machine running sessionpipe-gui: open http://localhost:${o.port()}/setup there.`,
+          error: `Setup acts on the computer this board runs on: open ${o.home()}/setup there.`,
         },
       };
     return h(ctx);

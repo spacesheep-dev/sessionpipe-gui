@@ -62,6 +62,13 @@ export interface AppState {
   /** The newest ETag of each view's server-side state (`viewState` frames), so a mounted
    *  view can re-read what another device wrote. */
   viewStates: ReadonlyMap<string, string>;
+  /** Counts `info` frames: what Info says changed (the board's key), so a page that shows
+   *  it (Connect's link and QR) reads it again when this moves. */
+  infoRev: number;
+  /** The receiver refused this page's key (a 401 where the stream dropped): it was
+   *  replaced, so the page asks for the board's link again (KeyRefused). Cleared by the
+   *  next snapshot. */
+  keyRefused: boolean;
   /** Counts every message, so a page can tell "something changed" cheaply. */
   version: number;
 }
@@ -134,6 +141,8 @@ const initial: AppState = {
   limits: [],
   viewStates: new Map(),
   resyncs: 0,
+  infoRev: 0,
+  keyRefused: false,
   version: 0,
 };
 
@@ -149,6 +158,8 @@ export class Store {
   /** The `resyncs` the control activity was last asked for at; null until a page asks. */
   private controlAt: number | null = null;
   private quiet: ReturnType<typeof setTimeout> | null = null;
+  /** A look at /api/ui/info after a drop is under way (keyCheck). */
+  private checking = false;
 
   constructor(public readonly transport: Transport) {}
 
@@ -195,8 +206,27 @@ export class Store {
         this.hush();
         const offline = typeof navigator !== "undefined" && navigator.onLine === false;
         this.set({ connection: offline ? "offline" : "reconnecting", retryAt: Date.now() + retryIn });
+        if (!offline) this.keyCheck();
       },
     });
+  }
+
+  /** A stream cannot say why it dropped: a 401 for the page's key (replaced, or a stream
+   *  the receiver let go when it was) looks like any other drop. So the info is asked
+   *  for, once per drop at a time, and a 401 there is said as such. */
+  private keyCheck() {
+    if (this.checking || typeof this.transport.info !== "function") return;
+    this.checking = true;
+    this.transport.info().then(
+      () => {
+        this.checking = false;
+      },
+      (err: unknown) => {
+        this.checking = false;
+        if ((err as { status?: unknown } | null)?.status === 401 && !this.state.keyRefused)
+          this.set({ keyRefused: true });
+      },
+    );
   }
 
   close() {
@@ -281,6 +311,7 @@ export class Store {
         this.set({
           connection: "live",
           retryAt: null,
+          keyRefused: false,
           resyncs: this.state.resyncs + (again ? 1 : 0),
           snapshotAt: s.at,
           sessions: new Map(s.sessions.map((x) => [x.key, x])),
@@ -360,6 +391,9 @@ export class Store {
         return;
       case "limits":
         this.set({ limits: m.limits });
+        return;
+      case "info":
+        this.set({ infoRev: this.state.infoRev + 1 });
         return;
       case "viewState": {
         const viewStates = new Map(this.state.viewStates);

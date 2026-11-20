@@ -2,8 +2,20 @@
 // Owned by: server-core. Where the GUI keeps its own state, and the two secrets it
 // makes on first run: the sink token (what senders present) and the UI key (what a
 // phone presents). Both live in <stateDir>/config.json, mode 0600.
-import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +42,11 @@ export interface GuiConfig {
   /** A spacesheep account used as a backend (server/sources/spacesheep.ts, RFC 08): the
    *  relay's origin, the `gui` key it minted for this install, and who. Absent = off. */
   spacesheep?: SpacesheepLink;
+  /** SHA-256 (hex) of the board keys and sink tokens of 16 characters or more this board
+   *  replaced, oldest first, the
+   *  newest RETIRED_MAX kept: shared by every receiver on the folder and kept across starts,
+   *  so none of them is taken from this file again. Never the secrets themselves. */
+  retired?: string[];
 }
 
 export interface SpacesheepLink {
@@ -64,6 +81,27 @@ export function defaultStateDir(): string {
 
 export const newSinkToken = (): string => `spg_${randomBytes(24).toString("base64url")}`;
 export const newUiKey = (): string => randomBytes(12).toString("base64url");
+/** The shortest UI key or sink token a running receiver takes from config.json (app.ts
+ *  live): it makes 16 and 36 characters. A shorter one is not taken, and is written over. */
+export const SECRET_MIN = 16;
+
+/** How many retired secrets config.json remembers. */
+export const RETIRED_MAX = 64;
+/** A secret's entry in `retired`. */
+export const hashSecret = (s: string): string => createHash("sha256").update(s).digest("hex");
+/** `retired` as kept: hex SHA-256s only. */
+export const readRetired = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((h): h is string => typeof h === "string" && /^[0-9a-f]{64}$/.test(h)) : [];
+/** `list` with `secret` added: one shorter than SECRET_MIN is never recorded (its hash
+ *  would give a short word back, and a running receiver never takes one anyway). */
+export const retire = (list: readonly string[] | undefined, secret: string): string[] =>
+  secret.length >= SECRET_MIN ? mergeRetired(list ?? [], [hashSecret(secret)]) : [...(list ?? [])];
+/** Two lists as one: `a` in its order, then what only `b` holds; the newest RETIRED_MAX. */
+export function mergeRetired(a: readonly string[], b: readonly string[]): string[] {
+  const out = [...a];
+  for (const h of b) if (!out.includes(h)) out.push(h);
+  return out.slice(-RETIRED_MAX);
+}
 
 /** config.json (or control/machines.json, control/state.ts) holds something that cannot be
  *  read, and was left as it is. */
@@ -130,31 +168,124 @@ export function readGuiConfig(dir: string): GuiConfig {
   if (typeof cfg.searchHistory === "boolean") full.searchHistory = cfg.searchHistory;
   const link = readSpacesheepLink(cfg.spacesheep);
   if (link) full.spacesheep = link;
+  const retired = readRetired(cfg.retired);
+  if (retired.length) full.retired = retired;
   if (!complete) writeGuiConfig(dir, full);
   else tightenMode(f);
   return full;
 }
 
+/** The fields this version reads; any other a config.json holds is kept through a write. */
+const KNOWN: readonly string[] = [
+  "sinkToken",
+  "uiKey",
+  "createdAt",
+  "tls",
+  "publicUrl",
+  "disabled",
+  "enabled",
+  "searchHistory",
+  "spacesheep",
+  "retired",
+] satisfies readonly (keyof GuiConfig)[];
+
+/** Write config.json whole, keeping the fields this version does not know (a newer one
+ *  wrote them). See writePrivate for how. */
 export function writeGuiConfig(dir: string, cfg: GuiConfig): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const f = path.join(dir, "config.json");
-  // Before the write, so a secret never lands in a file others can read; a new file is
-  // made at 0600 by the write itself.
-  tightenMode(f);
-  writeFileSync(f, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
+  let kept: Record<string, unknown> = {};
+  try {
+    const disk = readConfigFile(f);
+    if (disk) kept = Object.fromEntries(Object.entries(disk).filter(([k]) => !KNOWN.includes(k)));
+  } catch {
+    // A file that does not read has nothing to keep; the caller decided to write anyway.
+  }
+  writeIfOther(f, `${JSON.stringify({ ...kept, ...cfg }, null, 2)}\n`);
 }
 
-/** Take the group and other bits off config.json. A write's `mode` applies only when the
- *  file is made, so one that already existed (saved by an editor at its own umask,
- *  restored from a backup) keeps its bits. Nothing to do for a file that is not there yet,
- *  nor on Windows, where the mode bits are not the file's access rules. A chmod that fails
+/** The text the last write here was for, to be taken by the writer at once (app.ts
+ *  `wrote`: what this process wrote is its own, with no read back that could pick up
+ *  another writer's rename). */
+let lastWrite: { file: string; text: string } | undefined;
+export function takeWrite(f: string): string | undefined {
+  const w = lastWrite;
+  lastWrite = undefined;
+  return w?.file === f ? w.text : undefined;
+}
+
+/** Write `text` to `f` only when the file does not already hold exactly that. */
+function writeIfOther(f: string, text: string): void {
+  lastWrite = { file: f, text };
+  try {
+    if (readFileSync(f, "utf8") === text) return;
+  } catch {}
+  writePrivate(f, text);
+}
+
+/** Win32 refuses a rename over a file another program holds open for a moment (an editor,
+ *  an indexer, an antivirus): tried again a few times before it counts. */
+const RENAME_TRIES = 6;
+
+/** Write a file only this user can read, whole: a new file beside it under a random name,
+ *  made at 0600 and made by this call alone (O_EXCL, and O_NOFOLLOW where there is one, so
+ *  nothing already at that name, a symbolic link included, is written through), flushed to
+ *  the disk, then renamed over `f`. A reader sees the old file or the new one, never half;
+ *  a symbolic link at `f` itself is replaced, not followed. */
+export function writePrivate(f: string, text: string): void {
+  const tmp = `${f}.${randomBytes(8).toString("hex")}.tmp`;
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0);
+  let fd: number | undefined = openSync(tmp, flags, 0o600);
+  try {
+    const buf = Buffer.from(text, "utf8");
+    let at = 0;
+    while (at < buf.length) at += writeSync(fd, buf, at, buf.length - at);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    for (let i = 1; ; i++) {
+      try {
+        renameSync(tmp, f);
+        break;
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (process.platform !== "win32" || i >= RENAME_TRIES || !["EPERM", "EBUSY", "EACCES"].includes(code ?? ""))
+          throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * i);
+      }
+    }
+  } catch (e) {
+    if (fd !== undefined) closeSync(fd);
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+  // The rename itself, on disk: the folder's entry, where the platform lets a folder be opened.
+  if (process.platform !== "win32") {
+    try {
+      const d = openSync(path.dirname(f), constants.O_RDONLY);
+      try {
+        fsyncSync(d);
+      } finally {
+        closeSync(d);
+      }
+    } catch {}
+  }
+}
+
+/** Take the group and other bits off config.json when it is read (a write makes it at
+ *  0600 itself): one saved by an editor at its own umask, or restored from a backup, keeps
+ *  its bits otherwise. Nothing to do for a file that is not there yet, for a symbolic link
+ *  (whatever it points at is not this folder's to change), nor on Windows, where the mode
+ *  bits are not the file's access rules. A chmod that fails
  *  (a share that refuses it, a file owned by someone else) warns, once per file in this
  *  process, and goes on: the secrets are already in the file either way. */
 const warnedMode = new Set<string>();
 export function tightenMode(f: string, platform: NodeJS.Platform = process.platform): void {
   if (platform === "win32") return;
   try {
-    const mode = statSync(f).mode & 0o777;
+    const st = lstatSync(f);
+    if (!st.isFile()) return;
+    const mode = st.mode & 0o777;
     if ((mode & 0o077) === 0) return;
     chmodSync(f, mode & 0o700);
   } catch (e) {
@@ -166,17 +297,61 @@ export function tightenMode(f: string, platform: NodeJS.Platform = process.platf
   }
 }
 
+/** Write what a setter changed, and only that: config.json is read again just before the
+ *  write, the fields that differ between `prev` and `next` are set (or dropped) in what it
+ *  holds, and the rest stays as it is on disk. A caller holding a copy read a while ago
+ *  (the CLI, a receiver) so never writes back secrets or lists it did not mean to change.
+ *  A file that is missing or does not read is written whole from `next`. */
+export function writeChanged(dir: string, prev: GuiConfig, next: GuiConfig): void {
+  const f = path.join(dir, "config.json");
+  let disk: Record<string, unknown> | undefined;
+  try {
+    disk = readConfigFile(f);
+  } catch {
+    disk = undefined;
+  }
+  if (!disk) {
+    writeGuiConfig(dir, next);
+    return;
+  }
+  const out: Record<string, unknown> = { ...disk };
+  const a = prev as unknown as Record<string, unknown>;
+  const b = next as unknown as Record<string, unknown>;
+  for (const k of KNOWN) {
+    if (k === "retired" || JSON.stringify(a[k]) === JSON.stringify(b[k])) continue;
+    if (b[k] === undefined) delete out[k];
+    else out[k] = b[k];
+  }
+  // The retired list only grows: what the file holds and what the writer knows, as one.
+  const retired = mergeRetired(readRetired(disk.retired), next.retired ?? []);
+  if (retired.length) out.retired = retired;
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeIfOther(f, `${JSON.stringify(out, null, 2)}\n`);
+}
+
 /** A new sink token, written; the old one stops working at once. */
 export function rotateSinkToken(dir: string, cfg: GuiConfig): GuiConfig {
-  const next = { ...cfg, sinkToken: newSinkToken() };
-  writeGuiConfig(dir, next);
+  let sinkToken = newSinkToken();
+  while (sinkToken === cfg.sinkToken) sinkToken = newSinkToken();
+  const next = { ...cfg, sinkToken, retired: retire(cfg.retired, cfg.sinkToken) };
+  writeChanged(dir, cfg, next);
+  return next;
+}
+
+/** A new UI key, written; the old one stops working at once (server/ui/auth.ts reads
+ *  the key on every call). Phones and browsers that came in by link open the new one. */
+export function renewUiKey(dir: string, cfg: GuiConfig): GuiConfig {
+  let uiKey = newUiKey();
+  while (uiKey === cfg.uiKey) uiKey = newUiKey();
+  const next = { ...cfg, uiKey, retired: retire(cfg.retired, cfg.uiKey) };
+  writeChanged(dir, cfg, next);
   return next;
 }
 
 /** Remember `--tls` / `--no-tls`, so a plain `npx sessionpipe-gui` keeps the choice. */
 export function setTlsPreference(dir: string, cfg: GuiConfig, on: boolean): GuiConfig {
   const next = { ...cfg, tls: on };
-  if (cfg.tls !== on) writeGuiConfig(dir, next);
+  if (cfg.tls !== on) writeChanged(dir, cfg, next);
   return next;
 }
 
@@ -186,7 +361,7 @@ export function setPublicUrl(dir: string, cfg: GuiConfig, url: string | undefine
   const next = { ...cfg };
   if (url) next.publicUrl = url;
   else delete next.publicUrl;
-  writeGuiConfig(dir, next);
+  writeChanged(dir, cfg, next);
   return next;
 }
 
@@ -196,14 +371,14 @@ export function setSpacesheep(dir: string, cfg: GuiConfig, link: SpacesheepLink 
   const next = { ...cfg };
   if (link) next.spacesheep = link;
   else delete next.spacesheep;
-  writeGuiConfig(dir, next);
+  writeChanged(dir, cfg, next);
   return next;
 }
 
 export function setSearchHistory(dir: string, cfg: GuiConfig, on: boolean): GuiConfig {
   if ((cfg.searchHistory !== false) === on) return cfg;
   const next = { ...cfg, searchHistory: on };
-  writeGuiConfig(dir, next);
+  writeChanged(dir, cfg, next);
   return next;
 }
 
@@ -216,7 +391,7 @@ export function setDisabled(dir: string, cfg: GuiConfig, key: string, off: boole
   const next: GuiConfig = { ...cfg };
   if (disabled.length) next.disabled = disabled;
   else delete next.disabled;
-  writeGuiConfig(dir, next);
+  writeChanged(dir, cfg, next);
   return next;
 }
 
@@ -233,7 +408,7 @@ export function setEnabled(dir: string, cfg: GuiConfig, key: string, on: boolean
   else delete next.disabled;
   if (enabled.length) next.enabled = enabled;
   else delete next.enabled;
-  if (JSON.stringify(next) !== JSON.stringify(cfg)) writeGuiConfig(dir, next);
+  if (JSON.stringify(next) !== JSON.stringify(cfg)) writeChanged(dir, cfg, next);
   return next;
 }
 

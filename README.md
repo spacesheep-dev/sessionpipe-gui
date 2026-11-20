@@ -388,6 +388,9 @@ the Connect page and in the banner:
 sessionpipe sink add http://<this-machine>:7373 --tier 3 --token <sink token>
 ```
 
+On a receiver with no browser (one run as a service prints no banner either), Connect is
+reached through `ssh -L`: [docs/remote.md](docs/remote.md#seeing-the-qr-code).
+
 The receiver implements sessionpipe's [HTTP binding](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/HTTP.md)
 and [control channel](https://github.com/spacesheep-dev/sessionpipe/blob/main/spec/CONTROL.md)
 and accepts every tier up to 3.
@@ -406,6 +409,8 @@ and secrets are redacted before the outbox. The GUI shows what arrived and nothi
 
 1. **Seeing** needs the UI key, carried once in the QR link and then as a cookie. The machine
    itself (`localhost`) needs none. Other machines post events with a separate sink token.
+   `sessionpipe-gui key renew` gives the board a new key: phones and browsers are asked for
+   the new link. The sink token is shown on this machine only.
 2. **Acting** needs a passkey. Every command is signed on your device and verified by the
    agent's machine against keys enrolled at its own terminal. The GUI holds no key that can
    sign, so it cannot forge a command, and a plugin can only *suggest* an answer for you to
@@ -465,7 +470,8 @@ Other sessionpipe receivers: [spacesheep.dev](https://spacesheep.dev) (hosted, t
 | `--themes-dir`, `--skins-dir`, `--plugins-dir`, `--bundled-dir` | under the state dir | where extensions live |
 | `--test-door` | off | loopback-only door for the conformance runner |
 
-`sessionpipe-gui --help` prints the full list.
+`sessionpipe-gui --help` prints the full list. The start banner prints the board's links
+with their key; Connect on that computer always shows the current link.
 
 </details>
 
@@ -478,6 +484,7 @@ sessionpipe-gui search "query" [--agent a] [--machine m] [--repo r] [--since 7d]
                        [--in f] [--source s] [--newest] [--limit n] [--json]
 sessionpipe-gui index [--rebuild] [--status] [--verify]
 sessionpipe-gui tls status|trust|reset
+sessionpipe-gui key renew                    # a new link for the board, in use at once
 sessionpipe-gui view|skin|plugin list|add|link|remove|enable|disable
 sessionpipe-gui extras list                  # the official extensions, all bundled
 ```
@@ -493,7 +500,7 @@ Everything is under `~/.local/state/sessionpipe-gui/` (or `--state DIR`):
 |---|---|
 | `events/<harness>/<session>.jsonl` | One append-only file per session, the full events; the index is rebuilt at boot |
 | `search/` | The search index: what the receiver holds, and this machine's history unless it is off |
-| `config.json` | The sink token, the UI key, TLS and public url, which extensions are on or off |
+| `config.json` | The sink token, the UI key, TLS and public url, which extensions are on or off. A key or token written here by hand is used from the next start, whatever its length, unless it is one of 16 characters or more that this board replaced before (a deleted `uiKey` gives a new one); a running receiver takes one of at least 16 characters at once and leaves any other until then. The receiver looks for its key in session text only when the key is at least 16 characters long. For a new key while it runs: `sessionpipe-gui key renew` |
 | `control/` | Paired machines (token hashes), their queues, and the files a new session or a message carries (its pictures) until the machine fetches them |
 | `tls/` | The local CA and certificate (`--tls`) |
 | `attachments/` | Images sent from the composer to a session whose sessionpipe is older than 0.10 |

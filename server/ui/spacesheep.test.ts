@@ -18,7 +18,7 @@ function fakeRouter(): { router: Router; call: (method: string, body?: unknown) 
     const ctx = {
       json: async () => body ?? {},
       req: { headers: {} },
-      remote: { ip: "127.0.0.1", loopback: true, forwarded: false },
+      remote: { ip: "127.0.0.1", loopback: true, thisComputer: true, forwarded: false },
     } as unknown as Ctx;
     return (await h(ctx)) as Reply;
   };

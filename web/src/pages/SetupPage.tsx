@@ -17,7 +17,7 @@ import { Ago, CommandWell, HarnessGlyph, Listening, Spinner, Toggle } from "../c
 import { PageBar } from "../components/PageBar";
 import { Select } from "../components/Select";
 import { ActivityRow } from "../control/Activity";
-import { controlApi, httpsPath, resetInfoCache } from "../control/api";
+import { controlApi, httpsPath, lastInfo, resetInfoCache } from "../control/api";
 import { sendCommand } from "../control/command";
 import { useMessage } from "../control/hooks";
 import { PairBody } from "../control/PairBody";
@@ -47,6 +47,20 @@ export const QUIT_CHROME = "Chrome keeps the old verdict until you quit and reop
 export function Setup() {
   const state = useSetupStatus(true);
   const s = state.status;
+  // Where this computer opens the board (Info.urls.local), for the words when Setup refuses.
+  const store = useStore();
+  const [home, setHome] = useState<string | null>(null);
+  useEffect(() => {
+    if (state.local !== false) return;
+    let on = true;
+    store.transport.info().then(
+      (i) => on && setHome(i.urls.local),
+      () => {},
+    );
+    return () => {
+      on = false;
+    };
+  }, [state.local, store]);
   const [tried, setTried] = useState(false);
   const macTrusted = useMacTrusted(s);
   const done = s ? stepsDone(s, tried, macTrusted) : null;
@@ -98,7 +112,9 @@ export function Setup() {
       />
       {state.local === false && (
         <p className="page-note" role="status">
-          Setup runs on the machine that runs sessionpipe-gui: open <code>http://localhost:7373/setup</code> there.
+          <span>
+            Setup acts on the computer this board runs on: open <code>{home ?? "http://localhost"}/setup</code> there.
+          </span>
         </p>
       )}
       {state.local !== false && !s && (
@@ -454,7 +470,8 @@ function SecureStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } 
             ]}
           />
           <p>
-            Phones are step 4. <code>http://localhost</code> keeps working for everything but signing.
+            Phones are step 4. <code>{lastInfo()?.urls.local ?? "http://localhost"}</code> keeps working for everything
+            but signing.
           </p>
         </>
       }
@@ -758,7 +775,10 @@ function PairStep({
 
 function PhoneStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark } & Fold) {
   const store = useStore();
-  const qr = store.transport.qrUrl();
+  // A new key for the board is a new QR (the `info` frame moves infoRev): never the cached one.
+  const { infoRev } = useAppState();
+  const qrAt = store.transport.qrUrl();
+  const qr = qrAt && infoRev ? `${qrAt}?v=${infoRev}` : qrAt;
   const [broken, setBroken] = useState(false);
   return (
     <Step

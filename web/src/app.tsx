@@ -7,12 +7,14 @@
 // the settings that already keep them.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApprovePhonePage } from "./account/ApproveRoute";
+import { KeyRefused } from "./components/KeyRefused";
 import { PageBar } from "./components/PageBar";
 import { Palette } from "./components/Palette";
 import { Settings } from "./components/Settings";
 import { Shell } from "./components/Shell";
 import { Toasts } from "./components/Toasts";
 import { AddDevicePage } from "./control/AddDevice";
+import { resetInfoCache } from "./control/api";
 import { PairPage } from "./control/Pair";
 import { useStartTitles } from "./control/Starting";
 import { useAnswerableCount, useAppState } from "./data/hooks";
@@ -22,6 +24,7 @@ import { titlePrefix, useAttentionEffects } from "./lib/notify";
 import { Link, navigate, parseRoute, usePath, useRoute } from "./lib/router";
 import { getSettings } from "./lib/settings";
 import { NEW_WORDS, thisPhone } from "./native/accountWords";
+import { isShell } from "./native/shell";
 import { Workflows } from "./orchestrate/workflows/Workflows";
 import { Board } from "./pages/Board";
 import { Connect } from "./pages/Connect";
@@ -36,7 +39,7 @@ import { Shortcuts } from "./pages/Shortcuts";
 import { Themes } from "./pages/Themes";
 import { Usage } from "./pages/Usage";
 import { PhonePage } from "./phone/PhonePage";
-import { markSetupSeen, setupSeen, useSetupStatus } from "./setup/api";
+import { markSetupSeen, refreshSetup, setupSeen, useSetupStatus } from "./setup/api";
 import { needsSetup } from "./setup/steps";
 import { fetchThemes, useThemes } from "./themes/host/registry";
 import { ThemeRoute } from "./themes/host/ThemeRoute";
@@ -77,7 +80,13 @@ function landOnDefaultPage(): void {
 
 export function App() {
   const route = useRoute();
-  const { connection } = useAppState();
+  const { connection, keyRefused, infoRev } = useAppState();
+  // What Info says changed (the board's key): what was read of it is read again.
+  useEffect(() => {
+    if (!infoRev) return;
+    resetInfoCache();
+    void refreshSetup().catch(() => {});
+  }, [infoRev]);
   const { themes } = useThemes();
   const themeName = route.name === "theme" ? themes.find((t) => t.id === route.id)?.name : undefined;
   // "(n) " ahead of every title while n answerable prompts are open (lib/notify.ts).
@@ -134,6 +143,17 @@ export function App() {
     }
     setDeciding(false);
   }, [route.name, setup.local, setup.status, setup.error, deciding]);
+  // The receiver refused this page's key: the link is asked for again. In the native app
+  // Settings (where its receivers are) opens over that page; no other page does.
+  if (keyRefused)
+    return route.name === "settings" && isShell() ? (
+      <>
+        <KeyRefused />
+        <Settings />
+      </>
+    ) : (
+      <KeyRefused />
+    );
   // On an account, the pages that are a receiver's own doing are not pages at all.
   if (account && RECEIVER_ONLY.has(route.name))
     return (

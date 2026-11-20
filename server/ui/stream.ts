@@ -6,6 +6,7 @@
 // Broadcast) as it happens, and a `: ping` comment every 15 s so proxies and phones keep the connection.
 // Each stream is one Viewer in the registry for as long as it stays open, except the
 // desktop app's menu-bar stream (`x-sessionpipe-client: shell`), which is not a person.
+// An `info` frame (the board's key replaced) ends a stream whose key is no longer the key.
 import type { Snapshot, StreamMessage } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
 import type { Ctx } from "../http/router.js";
@@ -24,6 +25,10 @@ export interface StreamDeps {
   plugins?: { subscribe(l: (m: StreamMessage) => void): () => void };
   /** Other sources forwarded as they are: label and limits changes, view-state writes. */
   more?: { subscribe(l: (m: StreamMessage) => void): () => void }[];
+  /** Whether this stream's caller may still read (the UI key it came with is still the
+   *  key), asked at each `info` frame: a stream opened with a key that was replaced ends
+   *  there, and its page asks for the board's link again. */
+  allowed?: (ctx: Ctx) => boolean;
 }
 
 export function serveStream(ctx: Ctx, deps: StreamDeps): void {
@@ -67,7 +72,12 @@ export function serveStream(ctx: Ctx, deps: StreamDeps): void {
     ? deps.viewers.subscribe(() => write({ kind: "viewers", viewers: deps.viewers.list(me) }))
     : () => {};
   const offPlugins = deps.plugins?.subscribe(write);
-  const offMore = (deps.more ?? []).map((src) => src.subscribe(write));
+  const offMore = (deps.more ?? []).map((src) =>
+    src.subscribe((m) => {
+      if (m.kind === "info" && deps.allowed && !deps.allowed(ctx)) cleanup();
+      else write(m);
+    }),
+  );
   const ping = setInterval(() => {
     if (res.destroyed || res.writableEnded) return;
     res.write(": ping\n\n");

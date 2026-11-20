@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: platform. The skin routes: the listing (uiAuth), the reload (loopback) and
+// Owned by: platform. The skin routes: the listing (uiAuth), the reload (this computer) and
 // a skin package's own files at /skins/<id>/<file>, with the same rules as a view's:
 // the real path must stay inside the (real) folder, json and css revalidate on every
 // load so a linked skin shows its edits, fonts are immutable.
@@ -41,7 +41,7 @@ export function registerSkins(router: Router, deps: SkinRouteDeps): void {
       (ctx): Reply => ({
         status: 200,
         headers: { "cache-control": "no-store" },
-        json: { skins: deps.registry.list().map((s) => publicSkin(s, ctx.remote.loopback)) },
+        json: { skins: deps.registry.list().map((s) => publicSkin(s, ctx.remote.thisComputer)) },
       }),
     ),
   );
@@ -49,7 +49,7 @@ export function registerSkins(router: Router, deps: SkinRouteDeps): void {
   router.post(
     SKIN_ROUTES.reload,
     guard((ctx): Reply => {
-      if (!ctx.remote.loopback) return { status: 403, json: { reason: "loopback_only" } };
+      if (!ctx.remote.thisComputer) return { status: 403, json: { reason: "loopback_only" } };
       const skins = deps.registry.scan().map((s) => publicSkin(s, true));
       return { status: 200, json: { skins } };
     }),

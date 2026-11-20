@@ -117,6 +117,7 @@ describe("trusted proxy", () => {
       ip: "100.64.0.9",
       loopback: false,
       forwarded: true,
+      thisComputer: false,
     });
     // A proxy that appends leaves what the sender wrote in front of its own entry.
     for (const sent of ["10.0.0.1", "127.0.0.1", "::1", "localhost", "127.0.0.1, ::1, 10.0.0.1"])
@@ -124,12 +125,14 @@ describe("trusted proxy", () => {
         ip: "203.0.113.9",
         loopback: false,
         forwarded: true,
+        thisComputer: false,
       });
     // A proxy that adds a header line of its own, after the sender's.
     expect(await probe(true, { "x-forwarded-for": ["127.0.0.1", "203.0.113.9"] })).toEqual({
       ip: "203.0.113.9",
       loopback: false,
       forwarded: true,
+      thisComputer: false,
     });
   });
 
@@ -149,7 +152,12 @@ describe("trusted proxy", () => {
       { "x-forwarded-host": "board.example" },
     ];
     for (const mark of marks)
-      expect(await probe(true, mark)).toEqual({ ip: "127.0.0.1", loopback: false, forwarded: true });
+      expect(await probe(true, mark)).toEqual({
+        ip: "127.0.0.1",
+        loopback: false,
+        forwarded: true,
+        thisComputer: false,
+      });
     expect(await probe(true, {})).toMatchObject({ loopback: true, forwarded: false });
     // With no proxy to trust, none of them is read.
     expect(await probe(false, { forwarded: "for=203.0.113.9", "x-real-ip": "203.0.113.9" })).toMatchObject({
@@ -165,6 +173,7 @@ describe("trusted proxy", () => {
       ip: "203.0.113.9",
       loopback: false,
       forwarded: true,
+      thisComputer: false,
     });
     // The same connection with no header is a browser on this machine, as before; and
     // with no proxy to trust the header is not read.

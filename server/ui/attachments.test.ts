@@ -300,7 +300,7 @@ describe("attachments API", () => {
         res: {},
         url: new URL(`http://x${pathname}${o.query ?? ""}`),
         params: {},
-        remote: { ip: "192.168.1.9", loopback: false },
+        remote: { ip: "192.168.1.9", loopback: false, thisComputer: false },
         body: async () => Buffer.alloc(0),
         json: async () => ({}),
         bearer: () => undefined,

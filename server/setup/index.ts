@@ -110,14 +110,18 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
   const pairer = new Pairer(deps.spawn);
   const harnesses = createHarnessDetector(deps.harnessFs ?? realHarnessFs(home, env, platform));
 
-  const local = thisMachineOnly({ testDoor: deps.testDoor ?? false, port: deps.port });
+  const local = thisMachineOnly({
+    testDoor: deps.testDoor ?? false,
+    home: () => deps.info().urls?.local ?? `http://localhost:${deps.port()}`,
+    uiKey: () => deps.info().uiKey,
+  });
 
   const tailscale = deps.tailscale ?? createTailscaleProbe(exec, { env, platform, home, port: deps.port });
 
   router.get(
     SETUP_ROUTES.status,
     local(
-      async (): Promise<Reply> => ({
+      async (ctx): Promise<Reply> => ({
         status: 200,
         headers: { "cache-control": "no-store" },
         json: await buildStatus({
@@ -127,7 +131,8 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
           tls: deps.tls,
           tlsDir,
           port: deps.port,
-          uiKey: () => deps.info().uiKey,
+          // The key goes to this computer only; a page that brought it already has it.
+          uiKey: () => (ctx.remote.thisComputer ? deps.info().uiKey : ""),
           rpId: () => deps.info().control.rpId,
           outbox: deps.outbox,
           outboxPath: deps.outboxPath,
@@ -254,7 +259,7 @@ export function registerSetup(router: Router, deps: SetupDeps): { pairer: Pairer
       const args = [
         "control",
         "pair",
-        `http://localhost:${deps.port()}`,
+        deps.info().urls?.local ?? `http://localhost:${deps.port()}`,
         "--token",
         deps.sinkToken(),
         ...folders.flatMap((f) => ["--folder", f]),

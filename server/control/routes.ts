@@ -17,10 +17,6 @@ export interface MachineRouteDeps {
   /** The browser origins passkeys work on (app.ts `origins`): the pairing link the
    *  terminal prints names one of these, never a bare LAN or tailnet address. */
   origins?: () => string[];
-  /** The UI key (config.ts): the link of a pairing the sink token started carries it, so
-   *  any browser that opens that link is let in; the machine showed the sink token, a
-   *  secret of the same rank. An open pairing showed nothing, so its link carries none. */
-  uiKey?: () => string;
 }
 
 /** The pairing link a terminal prints (CONTROL.md §2 step 2). A daemon reaches the
@@ -30,18 +26,19 @@ export interface MachineRouteDeps {
  *  came in on when that is one, else the first. On 2026-11-03 a person opened the
  *  printed http://100.68.187.81:7373/pair link on the Mac that runs the GUI and met the
  *  UI-key wall, then "sending works from https://…; open it there". */
-export function pairUrlFor(requestOrigin: string, origins: readonly string[], code: string, uiKey?: string): string {
+export function pairUrlFor(requestOrigin: string, origins: readonly string[], code: string): string {
   const same = origins.find((o) => o.replace(/\/+$/, "") === requestOrigin.replace(/\/+$/, ""));
   const base = (same ?? origins[0] ?? requestOrigin).replace(/\/+$/, "");
-  // The key rides along (UI_KEY_PARAM) where the caller passes one: a phone or a laptop
-  // that never saw this board opens the link and is let in, instead of "This board needs
-  // its key". Which pairings get it is the route's to say (POST pair, below).
-  return `${base}/pair?code=${encodeURIComponent(code)}${uiKey ? `&k=${encodeURIComponent(uiKey)}` : ""}`;
+  // The code alone: the board's key never rides along. The link is opened where the board
+  // is already open (this computer, or a browser with the board's cookie), and Machines on
+  // the computer itself lists the pairing too.
+  return `${base}/pair?code=${encodeURIComponent(code)}`;
 }
 
-/** Equal secrets, in constant time whatever their lengths. */
+/** Equal secrets, in constant time whatever their lengths; never two empty ones. */
 export function secretEquals(a: string | undefined, b: string): boolean {
-  if (a === undefined) return false;
+  // An empty secret matches nothing, an empty one included.
+  if (a === undefined || a === "" || b === "") return false;
   const h = (s: string) => createHash("sha256").update(s).digest();
   return timingSafeEqual(h(a), h(b));
 }
@@ -125,10 +122,9 @@ export function registerMachineRoutes(to: Router, d: MachineRouteDeps): void {
       json: {
         machine: m.id,
         code: p.code,
-        // The board's key goes only with a pairing the sink token started. An open pairing
-        // showed no token, so its link is the code alone: it is opened where the board is
+        // The code alone, whoever started it: the link is opened where the board is
         // already open, and the board lists it among the pairings that wait.
-        url: pairUrlFor(requestOrigin(ctx), d.origins?.() ?? [], p.code, pollKey ? undefined : d.uiKey?.()),
+        url: pairUrlFor(requestOrigin(ctx), d.origins?.() ?? [], p.code),
         check: p.check,
         expires_at: p.expiresAt,
       },

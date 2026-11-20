@@ -38,6 +38,7 @@ import {
   webauthnError,
 } from "./webauthn";
 import "./pairing.css";
+import { KEY_LOST_SENTENCE } from "../lib/keyWords";
 
 type Phase =
   | { k: "loading" }
@@ -51,7 +52,7 @@ function missingWords(e: unknown): string {
   if (e instanceof ControlError) {
     if (e.status === 404)
       return "No pairing with this code: it was rejected, renewed from the terminal, or never started here.";
-    if (e.status === 401) return "This page lost its key. Open the board again through the terminal's link.";
+    if (e.status === 401) return KEY_LOST_SENTENCE;
     return e.detail ?? e.reason;
   }
   return e instanceof Error ? e.message : String(e);
