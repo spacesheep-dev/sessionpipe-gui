@@ -235,6 +235,24 @@
 .att-thumbs--sm {
   margin-top: 4px;
 }
+/* Under a finger a row's small thumbnail is a 44 px target around the same face. */
+@media (pointer: coarse) {
+  .att-thumbs--sm {
+    gap: 12px;
+  }
+  .att-thumbs--sm a {
+    position: relative;
+  }
+  .att-thumbs--sm a::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
 
 /* A file a sent message carried, drawn as words: a file's glyph when it is no picture,
    its name (cut to fit), then its type and size in the meta tier. */
@@ -374,6 +392,17 @@
 }
 .lb-next.icon-btn {
   right: 8px;
+}
+/* Under a finger each is a 44 px target, wherever the lightbox is. */
+@media (pointer: coarse) {
+  .lb-btn.icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .lb-prev.icon-btn,
+  .lb-next.icon-btn {
+    margin-top: -22px;
+  }
 }
 /* A phone: the picture takes the width, the chevrons sit beside its name at the foot. */
 @media (max-width: 599px) {

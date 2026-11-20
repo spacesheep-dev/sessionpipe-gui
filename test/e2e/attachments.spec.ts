@@ -792,6 +792,7 @@ test("a start with two pictures shows them before its first turn arrives and aft
 test("the row of a message that went to a copy of the session shows its pictures, also after a reload", async ({
   context,
   page,
+  isMobile,
 }) => {
   const copy = `claude-code:${randomUUID()}`;
   await open(context, page, {
@@ -816,6 +817,12 @@ test("the row of a message that went to a copy of the session shows its pictures
   // Under the composer, which on a phone may be below the fold: a thumbnail loads in view.
   await row.scrollIntoViewIfNeeded();
   await expect.poll(() => drawn(row)).toEqual([64]);
+  // Under a finger the row's small thumbnail is a 44 px target.
+  if (isMobile) {
+    const hit = await hitBox(row.locator("[data-sent-picture]"));
+    expect(hit.right - hit.left).toBeGreaterThanOrEqual(42);
+    expect(hit.bottom - hit.top).toBeGreaterThanOrEqual(42);
+  }
   await page.reload();
   await expect(row.locator("[data-sent-picture]")).toHaveCount(1);
   await row.scrollIntoViewIfNeeded();
@@ -1236,6 +1243,19 @@ test("a picture is whole in the tray and the message, and a sent one opens whole
   await thumbs.first().click();
   await box.getByRole("button", { name: "Next picture" }).click();
   await expect(box.locator(".lb-count")).toHaveText("2 of 2");
+  if (isMobile) {
+    // Under a finger each is 44 px, on a tablet as on a phone.
+    for (const size of [
+      { width: 834, height: 1112 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(size);
+      for (const name of ["Close", "Previous picture", "Next picture"]) {
+        const b = await box.getByRole("button", { name }).boundingBox();
+        expect([size.width, name, Math.round(b!.width), Math.round(b!.height)]).toEqual([size.width, name, 44, 44]);
+      }
+    }
+  }
   await box.getByRole("button", { name: "Close" }).click();
   await expect(box).toHaveCount(0);
   // No tab was opened, and nothing left the page.
