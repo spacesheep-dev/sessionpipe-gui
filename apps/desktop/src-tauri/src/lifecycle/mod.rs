@@ -34,13 +34,29 @@ pub fn setup<R: Runtime>(app: &tauri::App<R>, hub: sp_receivers::Hub) -> tauri::
     let _ = HUB.set((hub.clone(), app.package_info().version.to_string()));
     power::observe(app.handle().clone());
     supervisor::watch(app.handle().clone(), hub.clone());
-    // A receiver older than the app (an app that updated itself): brought up to it, once;
-    // the menu bar item then says when it waits for a click.
+    // A receiver older than the app (an app that updated itself): brought up to it, once,
+    // and from the app's release on a new version's first launch; the menu bar item then
+    // says when it waits for a click.
+    let version = app.package_info().version.to_string();
+    let (h, v) = (app.handle().clone(), version.clone());
+    let opened = move || opened_version(&h, &v);
     let h = app.handle().clone();
-    supervisor::keep_current(hub, app.package_info().version.to_string(), move || {
-        crate::tray::refresh(&h)
-    });
+    supervisor::keep_current(hub, version, opened, move || crate::tray::refresh(&h));
     Ok(())
+}
+
+/// Notes `version` in the settings as the one that checked this computer's background
+/// service, and says whether it is new here (settings.rs last_version).
+fn opened_version<R: Runtime>(app: &tauri::AppHandle<R>, version: &str) -> bool {
+    let shell = app.state::<crate::Shell>();
+    let mut s = shell.settings.lock().unwrap();
+    let new = s.opened_version(version);
+    if new {
+        if let Err(e) = crate::settings::save(&shell.home, &s) {
+            log::warn!(target: "sessionpipe::lifecycle", "settings: {e}");
+        }
+    }
+    new
 }
 
 /// The welcome's "Start sessionpipe": `service install`, then the receiver it started

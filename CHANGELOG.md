@@ -90,6 +90,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **When this Mac's background service is behind the app, Settings › About says so**, in
   a row under the app's own update with Update, and the menu bar menu offers "Update
   Background Service…". Nothing said so before, unless an option was too old for it.
+- **A new version of the desktop app brings this Mac's background service along.** On
+  its first launch it updates the service to its own version, from the same release, as
+  Update would, and Settings › About shows the progress. It waited for that click unless a
+  sessionpipe-gui of the app's version was installed. A relaunch of the same version
+  still waits.
 - **An option this Mac's background service is too old for says it in fewer words.**
   "This Mac's background service is 0.7.4; this option needs 0.7.5." (or "… is too old
   for this option."), with Update; another machine's is "sessionpipe on studio-mac is

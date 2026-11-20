@@ -264,8 +264,10 @@ pub fn apply_settings<R: Runtime>(
 ) -> Result<AppSettings, String> {
     let shell = app.state::<Shell>();
     let prev = shell.settings();
-    // The shortcut goes through its own command (it can fail to register).
+    // The shortcut goes through its own command (it can fail to register), and the version
+    // that last checked the background service is the shell's to note.
     next.hotkey = prev.hotkey.clone();
+    next.last_version = prev.last_version.clone();
     next.first_run_done = next.first_run_done || prev.first_run_done;
     // Before the menu bar and Dock below: the item going also brings the Dock icon back.
     next = next.normalized();

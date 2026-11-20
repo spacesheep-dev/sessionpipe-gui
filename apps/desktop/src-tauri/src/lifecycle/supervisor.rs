@@ -1170,10 +1170,14 @@ async fn follow<R: Runtime>(app: AppHandle<R>, hub: Hub, state: PathBuf, r: Rece
 // - a `sessionpipe-gui` on PATH at the app's version or newer is there: it runs `service
 //   install --if-installed` in the background (the service upgraded in place, with its
 //   port and state dir; none installed where there was none). Nothing is downloaded.
-// - otherwise bringing it current needs the app's release through npx, a download, which
-//   needs a click: nothing runs, the log says so, and Settings › About (rx_local_update)
-//   offers Update, which runs the click path (update_local_click); the menu bar item
-//   offers "Update Background Service…", which opens it.
+// - otherwise bringing it current needs the app's release through npx, a download, and a
+//   download only when the person asked for it: a click, or opening a new version of the
+//   app. On the first launch of an app version (settings.rs last_version) the app runs the
+//   click path itself (launch_check, update_local_click), from that same release, and
+//   Settings › About shows it as it would a click's run. On a relaunch of the same version
+//   nothing runs, the log says so, and Settings › About (rx_local_update) offers Update,
+//   which runs the click path; the menu bar item offers "Update Background Service…",
+//   which opens it.
 // It is logged either way. A failure before the old receiver was stopped leaves it running;
 // one after (`service install` exits 4: the new one never came up) is logged as such, and
 // the page offers the click. Debug builds never do any of it (they keep away from :7373
@@ -1274,13 +1278,15 @@ pub enum Plan {
     /// Older (this version), and a CLI on PATH at the app's version or newer runs the update.
     Auto(String),
     /// Older (this version), and only the app's release through npx would bring it current:
-    /// a download, so it waits for a click.
+    /// a download, so it waits for a click, or for a new version of the app to open
+    /// (launch_check).
     Click(String),
 }
 
 /// The decision, from what is known: the receiver's version (running_version), the app's,
-/// and the version of the CLI on PATH (None: there is none, or it says none). Never a
-/// download: only a CLI already here is ever run unasked.
+/// and the version of the CLI on PATH (None: there is none, or it says none). A download
+/// only when the person asked for it: a click, or opening a new version of the app; so
+/// plan() runs only a CLI already here, and leaves the download to launch_check.
 pub fn plan(running: Option<&str>, app: &str, cli_version: Option<&str>) -> Plan {
     let Some(v) = running else {
         return Plan::NotThisComputers;
@@ -1594,10 +1600,16 @@ fn update_with_cli(t: &Tools, app: &str) -> Result<Updated, StartError> {
     ran.into_result().map(|_| Updated::Done)
 }
 
-/// Once per launch: the first local receiver that connects is checked (see above), and
-/// `checked` runs once what it found is kept (the menu bar item reads it).
-/// Called once from setup.
-pub fn keep_current(hub: Hub, app_version: String, checked: impl FnOnce() + Send + 'static) {
+/// Once per launch: the first local receiver that connects is checked (launch_check).
+/// `opened` notes this app version as the one that checked, and says whether it is new
+/// here; `checked` runs once what it found is kept, and again after an update the launch
+/// ran (the menu bar item reads it). Called once from setup.
+pub fn keep_current(
+    hub: Hub,
+    app_version: String,
+    opened: impl FnOnce() -> bool + Send + 'static,
+    checked: impl Fn() + Send + 'static,
+) {
     if cfg!(debug_assertions) {
         return;
     }
@@ -1619,13 +1631,67 @@ pub fn keep_current(hub: Hub, app_version: String, checked: impl FnOnce() + Send
         if !first_time(&CHECKED) {
             return;
         }
-        if let Some(u) =
-            check_local(&hub, &r, &state, &app_version, tools_here, update_with_cli).await
-        {
-            *LOCAL.lock().unwrap() = Some((r, u));
-            checked();
-        }
+        let (h, a) = (hub.clone(), app_version.clone());
+        let click = move || async move {
+            match update_local_click(&h, &a, |_, _| {}).await {
+                Ok(u) => {
+                    let now = u.map(|u| u.running).unwrap_or_default();
+                    log::info!(target: "sessionpipe::lifecycle", "update: done; the local receiver runs {now}")
+                }
+                Err(e) => log::warn!(target: "sessionpipe::lifecycle", "update: not done: {e}"),
+            }
+        };
+        launch_check(
+            &hub,
+            r,
+            &state,
+            &app_version,
+            tools_here,
+            update_with_cli,
+            opened,
+            checked,
+            click,
+        )
+        .await;
     });
+}
+
+/// Whether the launch runs the Update button's path itself: only a download would bring
+/// the service current (Click), and this launch is the first of this app version, whose
+/// opening is the person asking for it. A relaunch of the same version waits for a click.
+pub fn brings_along(u: &LocalUpdate, new_version: bool) -> bool {
+    new_version && u.state == UpdateState::Click
+}
+
+/// The launch's check of this computer's receiver `r`: check_local (with its CLI lookup
+/// `tools` and background update `update`), then what it found is kept for the page and the
+/// menu bar item (`checked`). When it found this computer's receiver, `opened` notes this
+/// app version and says whether it is new here; when it is and the update waits for a
+/// click (brings_along), `click` runs the click's path, LOCAL already saying Click, so
+/// Settings shows its progress and then what it left. None: not this computer's receiver
+/// (a spacesheep account is never one), and nothing is noted or run.
+#[allow(clippy::too_many_arguments)]
+pub async fn launch_check<F: std::future::Future<Output = ()>>(
+    hub: &Hub,
+    r: ReceiverRef,
+    state: &Path,
+    app: &str,
+    tools: fn() -> (Tools, Option<String>),
+    update: fn(&Tools, &str) -> Result<Updated, StartError>,
+    opened: impl FnOnce() -> bool,
+    checked: impl Fn(),
+    click: impl FnOnce() -> F,
+) -> Option<LocalUpdate> {
+    let u = check_local(hub, &r, state, app, tools, update).await?;
+    let bring = brings_along(&u, opened());
+    *LOCAL.lock().unwrap() = Some((r, u.clone()));
+    checked();
+    if bring {
+        log::info!(target: "sessionpipe::lifecycle", "update: this is the first launch of {app} here; its release brings the background service along, as Update would");
+        click().await;
+        checked();
+    }
+    Some(u)
 }
 
 /// The receiver's own word on its version and start.
@@ -1697,7 +1763,7 @@ pub async fn check_local(
             Some(done(&v, UpdateState::Current, None))
         }
         Plan::Click(v) => {
-            log::info!(target: "sessionpipe::lifecycle", "update: the local receiver runs {v}, older than this app ({app}); bringing it to {app} needs the app's release through npx (a download), so it waits for Update in Settings › About (the CLI on PATH: {})", cli_v.as_deref().unwrap_or("none"));
+            log::info!(target: "sessionpipe::lifecycle", "update: the local receiver runs {v}, older than this app ({app}); bringing it to {app} needs the app's release through npx (a download), so it waits for Update in Settings › About or this version's first launch (the CLI on PATH: {})", cli_v.as_deref().unwrap_or("none"));
             Some(done(&v, UpdateState::Click, None))
         }
         Plan::Auto(v) => {
@@ -1726,11 +1792,12 @@ pub async fn check_local(
     }
 }
 
-/// The page's Update (Settings › About, Settings › Data): the app's release through npx,
-/// with its progress lines. Never the CLI on PATH instead: when npx can't download it, nothing is
-/// changed and it says so (StartError::Download), since an older CLI there (one without
-/// this version's gates) would put its own version in place of the service's. Then the
-/// receiver's version is read again, waiting (up to 30 s) for the new one's run.json.
+/// The page's Update (Settings › About, Settings › Data), and a new app version's first
+/// launch (launch_check): the app's release through npx, with its progress lines. Never
+/// the CLI on PATH instead: when npx can't download it, nothing is changed and it says so
+/// (StartError::Download), since an older CLI there (one without this version's gates)
+/// would put its own version in place of the service's. Then the receiver's version is
+/// read again, waiting (up to 30 s) for the new one's run.json.
 pub async fn update_local_click(
     hub: &Hub,
     app: &str,
@@ -2634,7 +2701,7 @@ mod tests {
     }
 
     #[test]
-    fn plans_never_a_download_unasked_and_never_for_another_machine() {
+    fn plans_a_download_only_for_a_click_and_never_for_another_machine() {
         assert_eq!(plan(None, "0.8.1", Some("0.8.1")), Plan::NotThisComputers);
         assert_eq!(
             plan(Some("0.8.1"), "0.8.1", None),
@@ -3266,6 +3333,155 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(u.state, UpdateState::Current);
+    }
+
+    /// The launch brings an older service along only on a new app version's first launch,
+    /// and only where a click would (Click): a relaunch waits for the click, the CLI's own
+    /// update (Auto) is as before, and a spacesheep account is never checked or noted.
+    #[test]
+    fn a_new_app_version_brings_the_service_along_and_a_relaunch_waits_for_a_click() {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        let _alone = alone_with_the_guard();
+        let d = Temp::new("launch");
+        let port = receiver_answering("0.8.5", "2026-11-12T10:00:00.000Z");
+        let origin = format!("http://127.0.0.1:{port}");
+        let hub = hub_for(&origin, &d.0);
+        let r = hub.active().unwrap();
+        let state = d.0.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(
+            state.join("run.json"),
+            format!(
+                r#"{{"port":{port},"pid":{},"version":"0.8.5","url":"{origin}","startedAt":"2026-11-12T10:00:02.000Z"}}"#,
+                std::process::id()
+            ),
+        )
+        .unwrap();
+        fn npx_only() -> (Tools, Option<String>) {
+            (
+                Tools {
+                    npx: Some("/n/npx".into()),
+                    ..Tools::default()
+                },
+                None,
+            )
+        }
+        fn current_cli() -> (Tools, Option<String>) {
+            (
+                Tools {
+                    cli: Some("/c/sessionpipe-gui".into()),
+                    ..Tools::default()
+                },
+                Some("0.8.6".into()),
+            )
+        }
+        fn unasked() -> (Tools, Option<String>) {
+            panic!("the CLI was looked for on a spacesheep account's behalf")
+        }
+        fn ok(_: &Tools, _: &str) -> Result<Updated, StartError> {
+            Ok(Updated::Done)
+        }
+        fn never(_: &Tools, _: &str) -> Result<Updated, StartError> {
+            panic!("the background update ran where it mustn't")
+        }
+        type Checks = (
+            fn() -> (Tools, Option<String>),
+            fn(&Tools, &str) -> Result<Updated, StartError>,
+        );
+        // What one launch did: what it found, how often it noted the version, kept what
+        // it found, and ran the click's path (with what LOCAL said as it began).
+        let launch = |r: &ReceiverRef, checks: Checks, new: bool| {
+            let (noted, kept, clicked) = (
+                AtomicUsize::new(0),
+                AtomicUsize::new(0),
+                AtomicUsize::new(0),
+            );
+            let at_click = Mutex::new(None);
+            let u = tauri::async_runtime::block_on(launch_check(
+                &hub,
+                r.clone(),
+                &state,
+                "0.8.6",
+                checks.0,
+                checks.1,
+                || {
+                    noted.fetch_add(1, SeqCst);
+                    new
+                },
+                || {
+                    kept.fetch_add(1, SeqCst);
+                },
+                || async {
+                    clicked.fetch_add(1, SeqCst);
+                    *at_click.lock().unwrap() = local_update().map(|u| (u.origin, u.state));
+                },
+            ));
+            let n = |a: AtomicUsize| a.load(SeqCst);
+            let at = at_click.into_inner().unwrap();
+            (u.map(|u| u.state), n(noted), n(kept), n(clicked), at)
+        };
+        // A new version, and only npx would bring the service current: the click's path
+        // runs, with LOCAL already saying Click about this receiver, and the menu bar item
+        // is refreshed before and after it.
+        assert_eq!(
+            launch(&r, (npx_only, never), true),
+            (
+                Some(UpdateState::Click),
+                1,
+                2,
+                1,
+                Some((origin.clone(), UpdateState::Click))
+            )
+        );
+        // The same version again: it waits for a click.
+        assert_eq!(
+            launch(&r, (npx_only, never), false),
+            (Some(UpdateState::Click), 1, 1, 0, None)
+        );
+        assert_eq!(
+            local_update().map(|u| (u.origin, u.state)),
+            Some((origin.clone(), UpdateState::Click))
+        );
+        // A CLI here at the app's version: its background update, as before, new or not.
+        for new in [true, false] {
+            assert_eq!(
+                launch(&r, (current_cli, ok), new),
+                (Some(UpdateState::Updated), 1, 1, 0, None)
+            );
+        }
+        // A spacesheep account at the very same address: never checked, noted or run.
+        let account = ReceiverRef {
+            account: Some(sp_receivers::AccountRef {
+                kind: "spacesheep",
+                email: "someone@example.com".into(),
+                state: sp_receivers::AccountState::Ok,
+            }),
+            ..r.clone()
+        };
+        assert_eq!(
+            launch(&account, (unasked, never), true),
+            (None, 0, 0, 0, None)
+        );
+        // Whatever else it found, only Click on a new version brings it along.
+        let found = |state| LocalUpdate {
+            origin: origin.clone(),
+            running: "0.8.5".into(),
+            app: "0.8.6".into(),
+            state,
+            why: None,
+            busy: false,
+            progress: None,
+        };
+        for st in [
+            UpdateState::Current,
+            UpdateState::Updated,
+            UpdateState::Failed,
+            UpdateState::Unchanged,
+        ] {
+            assert!(!brings_along(&found(st), true), "{st:?}");
+        }
+        assert!(brings_along(&found(UpdateState::Click), true));
+        assert!(!brings_along(&found(UpdateState::Click), false));
     }
 
     /// A server on loopback that answers as an OLDER receiver would (`/api/ui/info`) and

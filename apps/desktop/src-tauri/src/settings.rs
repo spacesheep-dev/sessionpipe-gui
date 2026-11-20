@@ -48,6 +48,11 @@ pub struct AppSettings {
     pub first_run_done: bool,
     /// Check for updates on launch and every six hours (§3.7); off leaves Check now.
     pub auto_update: bool,
+    /// The app version whose launch last checked this computer's background service
+    /// (lifecycle::supervisor::launch_check). Another one's launch is a new version's
+    /// first, which brings the service along. None: none has (a first run, or a file from
+    /// an app before this field). The shell's own: the page's saves never change it.
+    pub last_version: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -62,6 +67,7 @@ impl Default for AppSettings {
             notifications: NotifySettings::default(),
             first_run_done: false,
             auto_update: true,
+            last_version: None,
         }
     }
 }
@@ -72,6 +78,14 @@ impl AppSettings {
     pub fn normalized(mut self) -> Self {
         self.menu_bar_only &= self.menu_bar && cfg!(target_os = "macos");
         self
+    }
+
+    /// Notes `app` as the version that last checked the background service, and says
+    /// whether it is another one than the last: this launch is that version's first.
+    pub fn opened_version(&mut self, app: &str) -> bool {
+        let new = self.last_version.as_deref() != Some(app);
+        self.last_version = Some(app.to_string());
+        new
     }
 }
 
@@ -117,6 +131,7 @@ mod tests {
         s.notifications.enabled = true;
         s.notifications.kinds.idle = true;
         s.notifications.paused_until = Some("2026-10-25T10:00:00.000Z".into());
+        s.last_version = Some("0.8.6".into());
         save(&dir, &s).unwrap();
         assert_eq!(load(&dir), s);
         // The page's JSON shape (§11.1).
@@ -130,6 +145,7 @@ mod tests {
             "hotkey",
             "notifications",
             "autoUpdate",
+            "lastVersion",
         ] {
             assert!(v.get(k).is_some(), "{k}");
         }
@@ -141,6 +157,8 @@ mod tests {
         std::fs::write(path(&dir), br#"{"menuBar":false,"future":1}"#).unwrap();
         let l = load(&dir);
         assert!(!l.menu_bar && l.dock_badge && l.auto_update);
+        // A file from before lastVersion: no version has checked the service yet.
+        assert_eq!(l.last_version, None);
         // A file saved before the two were tied: it can't start the app hidden.
         std::fs::write(path(&dir), br#"{"menuBar":false,"menuBarOnly":true}"#).unwrap();
         let l = load(&dir);
@@ -170,6 +188,20 @@ mod tests {
         };
         assert_eq!(s.clone().normalized(), s);
         assert_eq!(AppSettings::default().normalized(), AppSettings::default());
+    }
+
+    #[test]
+    fn a_launch_of_another_version_is_its_first() {
+        let mut s = AppSettings::default();
+        // A first run, or a file from an app before the field: new.
+        assert!(s.opened_version("0.8.6"));
+        assert_eq!(s.last_version.as_deref(), Some("0.8.6"));
+        // A relaunch of the same version: not new.
+        assert!(!s.opened_version("0.8.6"));
+        // An update, and a step back to an older app: each is that version's first.
+        assert!(s.opened_version("0.8.7"));
+        assert!(s.opened_version("0.8.6"));
+        assert_eq!(s.last_version.as_deref(), Some("0.8.6"));
     }
 
     #[test]
