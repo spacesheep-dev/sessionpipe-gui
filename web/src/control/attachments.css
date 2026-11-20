@@ -5,8 +5,9 @@
    a sent prompt shows in the activity list and the Session view, with a chip for a file
    that is no picture or is kept no more, and the lightbox a sent one opens
    (control/Lightbox.tsx). A thumbnail is the whole picture: its frame takes the picture's
-   shape within 120×88 (44×32 in a list row), on a neutral fill where a very long or tall
-   one leaves room. Fills and hairlines, no badges; the shared spinner while one uploads. */
+   shape within 120×88 (88×64 in a phone's row, 44×32 in a list row), on a neutral fill
+   where a very long or tall one leaves room. Fills and hairlines, no badges; the shared
+   spinner while one uploads. */
 
 /* The paperclip: an icon button in the field (a label around the hidden picker). */
 .att-btn {
@@ -95,6 +96,33 @@
   outline: var(--hairline) solid var(--line);
   outline-offset: -1px;
   background: var(--bg-3);
+}
+/* A phone (or a tablet held upright, as New session's phone row): the pictures sit in one
+   row that scrolls sideways, each frame within 88×64, so the conversation keeps its room.
+   The row reaches past the field's padding, and holds room above and below, for the
+   buttons' targets a scroller would cut. */
+@media (max-width: 839px) and (pointer: coarse) {
+  .ctl-field > .att {
+    padding-top: 0;
+  }
+  .att-tray {
+    flex-wrap: nowrap;
+    margin: 0 -20px -24px;
+    padding: 20px 20px 24px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .att-tray::-webkit-scrollbar {
+    display: none;
+  }
+  .att-item {
+    flex: none;
+  }
+  .att-thumb {
+    max-width: 88px;
+    max-height: 64px;
+  }
 }
 .att-item--busy .att-thumb {
   opacity: 0.45;

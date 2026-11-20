@@ -1166,21 +1166,29 @@ function frames(scope: ReturnType<Page["locator"]>): Promise<{ w: number; h: num
 test("a picture is whole in the tray and the message, and a sent one opens whole in the page: the arrows move, Esc, a tap outside and × close it", async ({
   context,
   page,
+  isMobile,
 }) => {
   const { d } = await open(context, page, { takes: true, title: "Whole pictures" });
-  // A 4:3 photo and a 16:9 screenshot: each frame the picture's shape, within 120×88.
+  // A 4:3 photo and a 16:9 screenshot: each frame the picture's shape, within 120×88
+  // (in a phone's tray, within 88×64).
   const FOUR_THREE = png(640, 480, [0xd9, 0x3a, 0x2b]);
   const WIDE = png(960, 540, [0x2a, 0x4d, 0x8f]);
   const whole = [
     { w: 117, h: 88, fit: "contain" },
     { w: 120, h: 68, fit: "contain" },
   ];
+  const inTray = isMobile
+    ? [
+        { w: 85, h: 64, fit: "contain" },
+        { w: 88, h: 50, fit: "contain" },
+      ]
+    : whole;
   await picker(page).setInputFiles([
     { name: "four-three.png", mimeType: "image/png", buffer: FOUR_THREE },
     { name: "wide.png", mimeType: "image/png", buffer: WIDE },
   ]);
   await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(2);
-  await expect.poll(() => frames(page.locator(".att-thumb"))).toEqual(whole);
+  await expect.poll(() => frames(page.locator(".att-thumb"))).toEqual(inTray);
   await shots(page, "11-whole-pictures-in-the-tray");
   await composer(page).fill("Which of the two is wider?");
   await send(page).click();
@@ -1400,4 +1408,29 @@ test("under a finger, Try again and × are each a 44 px target, and the two neve
     chip.getByRole("button", { name: "Remove notes.txt" }),
   );
   await page.unroute(FILES_ROUTE);
+});
+
+test("on a phone the tray is one row that scrolls sideways, and the conversation keeps its room", async ({
+  context,
+  page,
+  isMobile,
+}) => {
+  test.skip(!isMobile, "a phone's tray");
+  await open(context, page, { takes: true, title: "A phone's tray" });
+  await picker(page).setInputFiles(
+    SEVEN.slice(0, 6).map((b, i) => ({ name: `shot-${i + 1}.png`, mimeType: "image/png", buffer: b })),
+  );
+  await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(6);
+  const row = page.locator(".att-tray");
+  const tops = await tray(page).evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+  expect(new Set(tops).size).toBe(1);
+  const scroll = await row.evaluate((el) => ({ width: el.scrollWidth, shown: el.clientWidth }));
+  expect(scroll.width).toBeGreaterThan(scroll.shown);
+  // Each frame within 88×64, so the tray stays one row's height.
+  for (const f of await frames(page.locator(".att-thumb"))) {
+    expect(f.w).toBeLessThanOrEqual(88);
+    expect(f.h).toBeLessThanOrEqual(64);
+  }
+  const field = await page.locator(".ctl-field").boundingBox();
+  expect(field!.height).toBeLessThan(200);
 });
