@@ -1360,7 +1360,17 @@ test("an agent's reply of three lines is drawn as three lines", async ({ context
  *  outwards along each axis, every point whose hit is the button (its target, cut by
  *  whatever covers or clips it). */
 async function hitBox(button: Locator): Promise<{ left: number; right: number; top: number; bottom: number }> {
-  await button.scrollIntoViewIfNeeded();
+  await button.evaluate((el) => el.scrollIntoView({ block: "center", inline: "center" }));
+  // Where it rests, on the screen: a sheet still rising holds it below.
+  const tall = button.page().viewportSize()!.height;
+  await expect
+    .poll(async () => {
+      const a = await button.boundingBox();
+      await new Promise((r) => setTimeout(r, 150));
+      const b = await button.boundingBox();
+      return !!a && !!b && a.y === b.y && b.y > 0 && b.y + b.height < tall;
+    })
+    .toBe(true);
   return button.evaluate((el) => {
     const r = el.getBoundingClientRect();
     const cx = r.left + r.width / 2;
