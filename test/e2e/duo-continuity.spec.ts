@@ -878,12 +878,20 @@ test.describe("what duo.ts promises a test, in both engines", () => {
     }
   });
 
-  test("a wide touch screen's first frame is the touch app's: the tab bar, and no sidebar the app would then take away", async ({
+  test("a wide touch screen's first frame is the touch app's: its own sidebar where the window has room, never a Mac's, and the tab bar where it has none", async ({
     browser,
   }) => {
-    // The inner display turned, and a tablet on its side at the width a mouse window's
-    // sidebar gets its labels (index.html draws that frame before the app's script runs).
-    for (const size of ["951x669", "1280x800"]) {
+    // Four windows, each a page of its own.
+    test.setTimeout(90_000);
+    // The inner display upright and turned, a tablet on its side at the width a mouse
+    // window's sidebar gets its labels, and the outer display on its side, too short for a
+    // sidebar (index.html draws that frame before the app's script runs).
+    for (const [size, regular] of [
+      ["669x951", true],
+      ["951x669", true],
+      ["1280x800", true],
+      ["678x466", false],
+    ] as const) {
       const b = await duoBed(browser, size);
       const { page } = b;
       let letGo = () => {};
@@ -895,7 +903,8 @@ test.describe("what duo.ts promises a test, in both engines", () => {
         await route.continue().catch(() => {});
       });
       /** The shell as drawn: which of the tab bar and the rail shows, whether it is marked
-       *  as the labelled sidebar's, and where the page's bar and the tab bar stand. */
+       *  as a mouse window's labelled sidebar, and where the page's bar, the tab bar and the
+       *  rail stand. */
       const chrome = () =>
         page.evaluate(() => {
           const shell = document.querySelector(".shell")!;
@@ -908,14 +917,14 @@ test.describe("what duo.ts promises a test, in both engines", () => {
             tabbar: shows(".tabbar"),
             rail: shows(".rail"),
             side: shell.classList.contains("shell--side"),
-            at: { bar: box(".bar"), tabbar: box(".tabbar") },
+            at: { bar: box(".bar"), tabbar: box(".tabbar"), rail: box(".rail") },
           };
         });
       try {
         await page.goto(b.server.url, { waitUntil: "commit" });
         await expect(page.locator(".boot")).toBeVisible();
         const first = await chrome();
-        expect(first, size).toMatchObject({ tabbar: true, rail: false, side: false });
+        expect(first, size).toMatchObject({ tabbar: !regular, rail: regular, side: false });
         letGo();
         await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
         await expect(page.locator(".boot")).toHaveCount(0);

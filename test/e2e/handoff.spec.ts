@@ -234,31 +234,32 @@ test("the sheet dims the whole window, as New session's does: a click on the sid
 });
 
 // A phone and a tablet are touch screens: under 840 px a window with a mouse keeps the
-// desktop's layout down to 720 (lib/device.ts), so the tablet here has a finger.
+// desktop's layout down to 720 (lib/device.ts), so the tablet here has a finger. The phone
+// has the tab bar, the tablet the touch app's sidebar in its place.
 test.describe("on a touch screen", () => {
   test.use({ hasTouch: true });
 
-  test("a phone's sheet covers the tab bar, and a tablet's fills the width", async ({ page }) => {
+  test("a phone's sheet covers the tab bar, and a tablet's fills the width over its sidebar", async ({ page }) => {
     const name = `ho-full-${tag()}`;
     const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
     daemons.push(m);
     const s = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Totals ${name}` });
     await postTurn(sink, { ...s, machine: name }, "The totals are summed once.");
 
-    for (const size of [
-      { width: 390, height: 844 },
-      { width: 834, height: 1194 },
-    ]) {
+    for (const [size, pages] of [
+      [{ width: 390, height: 844 }, "nav.tabbar"],
+      [{ width: 834, height: 1194 }, "nav.rail"],
+    ] as const) {
       await page.setViewportSize(size);
       await page.goto(`${CONTROL_BASE}/s/${s.harness}/${s.id}`);
       await expect(page.locator(".ctl textarea")).toBeVisible();
-      const tabbar = await centre(page, ".tabbar");
+      const tabbar = await centre(page, pages);
       expect(await under(page, tabbar)).toBe("page");
       await page.locator("[data-ctl-ask]").click();
       await expect(sheet(page)).toBeVisible();
       expect(await sheet(page).evaluate((el) => el.closest(".sess-ctl") === null)).toBe(true);
       // The whole screen is the sheet's, edge to edge: nothing of the page beside it (the
-      // bar's ⋯, the composer), and the tab bar under it.
+      // bar's ⋯, the composer), and the tab bar or the sidebar under it.
       await expect.poll(async () => (await sheet(page).boundingBox())?.y).toBe(0);
       expect(await sheet(page).boundingBox()).toEqual({ x: 0, y: 0, ...size });
       for (const at of [tabbar, { x: size.width - 4, y: 24 }, { x: size.width - 4, y: size.height - 120 }])

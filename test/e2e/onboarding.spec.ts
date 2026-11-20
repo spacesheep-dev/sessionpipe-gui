@@ -355,25 +355,36 @@ test.describe("the phone shell at tablet width", () => {
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
   };
 
-  test("the tab bar under the page and no rail beside it: a tablet has the touch app at its width too", async ({
+  test("a labelled sidebar beside the page and no tab bar: a tablet has the touch app's own sidebar", async ({
     page,
   }) => {
     await tablet(page);
-    const tabs = page.locator("nav.tabbar");
-    await expect(tabs).toBeVisible();
-    await expect(page.locator("nav.rail")).toBeHidden();
-    // Along the bottom edge, from side to side, with the page above it.
-    const bar = await tabs.boundingBox();
-    expect(Math.round(bar!.x)).toBe(0);
-    expect(Math.round(bar!.width)).toBe(1032);
-    expect(Math.round(bar!.y + bar!.height)).toBe(1376);
-    for (const name of ["Board", "Inbox"]) await expect(tabs.getByRole("link", { name })).toBeVisible();
-    // New session is the page bar's own button, a finger's size, under the status bar.
-    const compose = await page.getByRole("button", { name: "New session" }).boundingBox();
-    expect(compose!.width).toBeGreaterThanOrEqual(44);
-    expect(compose!.height).toBeGreaterThanOrEqual(44);
-    expect(compose!.y).toBeGreaterThanOrEqual(24);
-    expect(compose!.y + compose!.height).toBeLessThanOrEqual(bar!.y);
+    const side = page.locator("nav.rail");
+    await expect(side).toBeVisible();
+    await expect(page.locator("nav.tabbar")).toBeHidden();
+    await expect(page.locator(".shell--side")).toHaveCount(0);
+    // Down the leading edge, from top to bottom, with the page beside it.
+    const box = (await side.boundingBox())!;
+    expect(Math.round(box.x)).toBe(0);
+    expect(Math.round(box.width)).toBe(220);
+    expect(Math.round(box.y + box.height)).toBe(1376);
+    for (const name of ["Board", "Inbox", "Search", "Machines", "Settings"])
+      await expect(side.getByRole("link", { name })).toBeVisible();
+    await expect(side.getByRole("button", { name: "Display" })).toBeVisible();
+    // Its head is under the status bar, the mark in it.
+    const head = side.locator(".rail-head");
+    expect(await head.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingTop))).toBe(24);
+    const mark = (await side.locator(".rail-brand .mark").boundingBox())!;
+    expect(mark.x).toBeGreaterThanOrEqual(box.x);
+    expect(mark.x + mark.width).toBeLessThanOrEqual(box.x + box.width);
+    expect(mark.y).toBeGreaterThanOrEqual(24);
+    // New session is the head's, a finger's size, under the status bar; the page bar has none.
+    const compose = (await side.getByRole("button", { name: "New session" }).boundingBox())!;
+    expect(compose.width).toBeGreaterThanOrEqual(44);
+    expect(compose.height).toBeGreaterThanOrEqual(44);
+    expect(compose.y).toBeGreaterThanOrEqual(24);
+    expect(compose.x + compose.width).toBeLessThanOrEqual(box.x + box.width);
+    await expect(page.getByRole("button", { name: "New session" })).toHaveCount(1);
   });
 
   test("the connected sheet is a centred form sheet, and a step keeps to one glance", async ({ page }) => {

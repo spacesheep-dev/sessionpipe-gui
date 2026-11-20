@@ -1714,17 +1714,20 @@ test.describe("notifications in the Mac app", () => {
 });
 
 // A touch screen as wide as a narrow Mac window (an iPad held upright, or beside another
-// app) is not one: the width alone gives it the phone's layout, as before.
+// app) is not one: it has the touch app, and with this much room the touch app's own
+// sidebar (lib/device.ts sizeClass), never a Mac's.
 test.describe("a touch screen 760 px wide", () => {
   test.use({ viewport: { width: 760, height: 800 }, hasTouch: true });
 
   for (const where of ["the phone app", "a browser"] as const)
-    test(`keeps the tab bar in ${where}`, async ({ page }) => {
+    test(`keeps the touch app in ${where}, its sidebar in the tab bar's place`, async ({ page }) => {
       if (where === "a browser") await page.goto("/");
       else await openInPhone(page, "/", { receiver: true });
       await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
-      await expect(page.locator("nav.tabbar")).toBeVisible();
-      await expect(page.locator("nav.rail")).toBeHidden();
+      await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular");
+      await expect(page.locator("nav.rail")).toBeVisible();
+      await expect(page.locator("nav.tabbar")).toBeHidden();
+      await expect(page.locator(".shell--side")).toHaveCount(0);
       await expect(page.locator(".main > .page > .bar")).toHaveClass(/bar--large/);
       expect(
         await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bar").trim()),

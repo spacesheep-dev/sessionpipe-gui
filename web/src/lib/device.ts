@@ -3,8 +3,9 @@
 // (native/shell.ts, which only main.tsx imports): the shell's platform, which shell.ts
 // writes to `<html data-shell>` before the app renders (the flag it parsed stands in until
 // then, and in a unit test), the phone layout (where tokens.css switches) and whether a
-// finger is the main pointer, each as a yes or no, now or live, and the place the
-// page's sessions come from, by the name the page says it with. The layout is decided
+// finger is the main pointer, each as a yes or no, now or live; inside the touch app its
+// size class (a sidebar, or the tab bar), from the window; and the place the page's
+// sessions come from, by the name the page says it with. The layout is decided
 // here and nowhere else (breakpoints.test.ts holds its widths to this file): every part
 // of the page asks this file, and all of them hear of a change in the same turn, so no
 // render has a phone's bar over a desktop's page.
@@ -193,6 +194,101 @@ const onTouch = subscribeTo(TOUCH_QUERY);
 
 /** `touchKeys`, live: re-renders when the main pointer changes. */
 export const useTouchKeys = (): boolean => useSyncExternalStore(onTouch, touchKeys, () => false);
+
+/** Inside the touch app, how much room the window gives: "regular" (a tablet, a phone
+ *  opened flat, either way up) has a labelled sidebar in the tab bar's place; "compact"
+ *  (every phone held upright, a folded phone, a Split View half) is the phone app as it
+ *  is. Worked out from the window, never from the device: no device's size is written
+ *  here. A window with a mouse has none. */
+export type SizeClass = "regular" | "compact";
+export const REGULAR = { minWidth: 600, minHeight: 560 } as const;
+
+/** The window as the size class reads it: its width, and its height as it stands with no
+ *  keyboard. Android's shell makes the view shorter for the keyboard (iOS makes only the
+ *  visual viewport shorter), and a tablet on its side would lose its sidebar while a field
+ *  is typed in. So a resize that keeps the width and lowers the height while a text field
+ *  has the focus keeps the height it had. Null until followSizeClass has settled once. */
+let steady: { width: number; height: number } | null = null;
+/** The inputs that raise no keyboard. */
+const NO_KEYS = new Set([
+  "button",
+  "checkbox",
+  "color",
+  "file",
+  "hidden",
+  "image",
+  "radio",
+  "range",
+  "reset",
+  "submit",
+]);
+const typing = (): boolean => {
+  const el = (typeof document === "undefined" ? null : document.activeElement) as HTMLElement | null;
+  if (!el) return false;
+  if (el.isContentEditable || el.tagName === "TEXTAREA") return true;
+  return el.tagName === "INPUT" && !NO_KEYS.has((el as HTMLInputElement).type);
+};
+const measured = (): { width: number; height: number } => {
+  const now = { width: innerWidth, height: innerHeight };
+  if (steady && now.width === steady.width && now.height < steady.height && typing()) return steady;
+  return now;
+};
+
+/** The touch app's size class now, or null where the main pointer is not a finger. Once
+ *  followSizeClass runs, the size it last settled, which is what <html> says. */
+export function sizeClass(): SizeClass | null {
+  if (typeof innerWidth !== "number" || !touchKeys()) return null;
+  const { width, height } = steady ?? measured();
+  return width >= REGULAR.minWidth && height >= REGULAR.minHeight ? "regular" : "compact";
+}
+
+const sizeSubs = new Set<() => void>();
+let shown: SizeClass | null | undefined;
+/** Writes the size class to <html data-size-class> and, when it changed, tells every
+ *  subscriber, all in the one call. */
+function settleSize(): void {
+  steady = measured();
+  const now = sizeClass();
+  if (now === shown) return;
+  shown = now;
+  const marks = document.documentElement.dataset;
+  if (now) marks.sizeClass = now;
+  else delete marks.sizeClass;
+  for (const tell of [...sizeSubs]) tell();
+}
+let following = false;
+/** From main.tsx, before the first render: the size class follows the window. Its
+ *  "resize" listener and its pointer one are made before any part's, so the stylesheet
+ *  (styles/regular.css) and every part that asks have the new class before any part
+ *  measures. index.html wrote the first one before the first paint. Returns the way to
+ *  stop (for a test). */
+export function followSizeClass(): () => void {
+  if (following || typeof matchMedia !== "function") return () => {};
+  following = true;
+  const offTouch = onTouch(settleSize);
+  addEventListener("resize", settleSize);
+  settleSize();
+  return () => {
+    following = false;
+    steady = null;
+    shown = undefined;
+    offTouch();
+    removeEventListener("resize", settleSize);
+  };
+}
+
+/** Calls the listener each time the size class changes; returns the way to stop. */
+export const onSizeClass = (l: () => void): (() => void) => {
+  sizeSubs.add(l);
+  return () => void sizeSubs.delete(l);
+};
+
+/** `sizeClass`, live. */
+export const useSizeClass = (): SizeClass | null => useSyncExternalStore(onSizeClass, sizeClass, () => null);
+
+const regularNow = (): boolean => sizeClass() === "regular";
+/** Whether the touch app has room for its sidebar (the regular size class), live. */
+export const useRegular = (): boolean => useSyncExternalStore(onSizeClass, regularNow, () => false);
 
 /** What the system keeps at the window's two sides, in px: a notch, the rounded corners,
  *  the band its own bars stand in beside a folding phone's page. As the stylesheets have

@@ -5,7 +5,8 @@
 // half 470×669, each with the bands the system keeps (duo.ts). What holds at a shape is
 // said here: the first run, the keyboard, a reply's lines, what a finger can copy, that
 // the inner display turned (wider than the width at which a window with a mouse takes the
-// Mac's layout) is still the touch app, and that nothing a finger lands on is under a band,
+// Mac's layout) is still the touch app, with its own sidebar where the window has room and
+// the tab bar where it has not, and that nothing a finger lands on is under a band,
 // with the band at either side: those tests are tagged @webkit, and the `duo-webkit`
 // project runs them in the iPhone's engine as well. What a page keeps as it moves from one
 // shape to another is in duo-continuity.spec.ts, which runs in WebKit whole.
@@ -252,7 +253,7 @@ test("on a wide touch screen a reply's prose stops at its measure from the colum
   }
 });
 
-test("on the inner display a plan waiting for its answer reads across its whole card: the reply's measure is not the plan's", async ({
+test("on the inner display turned and on a tablet a plan waiting for its answer reads across its whole card: the reply's measure is not the plan's", async ({
   browser,
 }) => {
   const plan = [
@@ -260,7 +261,9 @@ test("on the inner display a plan waiting for its answer reads across its whole 
     "Each batch takes a fresh connection and writes in pages of 100 invoices, so none of them sits idle long enough for the pooler to drop it, and a run that starts again goes on from the batch after the last one that finished.",
     "1. Keep the last finished batch in the export's own table.\n2. Start a run from the batch after it.",
   ].join("\n\n");
-  for (const size of ["669x951", "951x669"]) {
+  // Where the card is wider than a reply's measure. Upright, the inner display's page is
+  // narrower than that beside the sidebar, so there is nothing to tell apart.
+  for (const size of ["951x669", "1180x820"]) {
     const b = await duoBed(browser, size);
     const { page } = b;
     try {
@@ -325,7 +328,7 @@ test("Copy beside a tool's input and on a block of code takes a finger on the ou
   }
 });
 
-test("the inner display turned is the touch app still: its tab bar, one sentence on a prompt it cannot answer yet, and none of a Mac's words in New session or a row's menu", async ({
+test("the inner display turned is the touch app still: its own sidebar, one sentence on a prompt it cannot answer yet, and none of a Mac's words in New session or a row's menu", async ({
   browser,
 }) => {
   for (const size of TURNED) {
@@ -334,9 +337,11 @@ test("the inner display turned is the touch app still: its tab bar, one sentence
     try {
       await page.goto(b.server.url);
       await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
-      // The phone's tab bar under the page, and no rail beside it.
-      await expect(page.locator("nav.tabbar"), size).toBeVisible();
-      await expect(page.locator("nav.rail"), size).toBeHidden();
+      // The touch app's sidebar (its rows a finger's, named), not a Mac's icon rail.
+      await expect(page.locator("nav.rail"), size).toBeVisible();
+      await expect(page.locator("nav.tabbar"), size).toBeHidden();
+      await expect(page.locator(".shell--side"), size).toHaveCount(0);
+      await expect(page.locator("nav.rail").getByRole("link", { name: "Board" }), size).toBeVisible();
       // Not approved yet. The prompt's card says so in one sentence with the one way on: no
       // message field that would only refuse, and no second "Approve this iPhone" under it.
       await page.goto(`${b.server.url}${DUO_SESSIONS.prompt}`);
@@ -449,6 +454,147 @@ test("Ask another agent covers the whole window on the inner display turned and 
   }
 });
 
+/** The windows with room (lib/device.ts sizeClass "regular"): the inner display upright,
+ *  turned with the band on the right and on the left, and an iPad on its side (its status
+ *  bar and home indicator, as estimated). */
+const REGULAR: [size: string, insets: Insets][] = [
+  ["669x951", DUO["669x951"]!.insets],
+  ["951x669", DUO["951x669"]!.insets],
+  ["951x669", [0, 0, 20, 84]],
+  ["1180x820", [24, 0, 20, 0]],
+];
+
+/** The sidebar's rows as they show, top to bottom: each one's name, height and top. */
+const sidebarRows = (page: Page) =>
+  page.locator("nav.rail .nav-link").evaluateAll((els) =>
+    els
+      .filter((el) => el.getClientRects().length > 0)
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return { name: el.querySelector(".nav-label")?.textContent ?? "", height: r.height, top: r.top };
+      }),
+  );
+
+for (const [size, insets] of REGULAR) {
+  const where = `${size} [${insets}]`;
+  test(`with room, at ${where}, the pages are a labelled sidebar: the tab bar's and More's, rows a finger takes, New session at its head`, async ({
+    browser,
+  }) => {
+    const b = await duoBed(browser, size, { insets });
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+      await expect(page.locator("html"), where).toHaveAttribute("data-size-class", "regular");
+      await expect(page.locator("nav.rail"), where).toBeVisible();
+      await expect(page.locator("nav.tabbar"), where).toBeHidden();
+      // What the tab bar and then More list, in their order, Display and Settings last
+      // (an account has no Workflows).
+      const rows = await sidebarRows(page);
+      expect(
+        rows.map((r) => r.name),
+        where,
+      ).toEqual(["Board", "Inbox", "Search", "Machines", "Usage", "Display", "Settings"]);
+      for (const r of rows) expect(r.height, `${r.name}, ${where}`).toBeGreaterThanOrEqual(44);
+      expect(rows.map((r) => r.top)).toEqual([...rows.map((r) => r.top)].sort((x, y) => x - y));
+      // The Inbox's count: the sample's one prompt, as the tab bar says it.
+      const inbox = page.locator("nav.rail [data-nav='inbox']");
+      await expect(inbox.locator(".nav-badge"), where).toHaveText("1");
+      await expect(inbox, where).toHaveAccessibleName(/1 needs you/);
+      // No tooltip on a row, and none of a Mac's small buttons at its foot.
+      await expect(page.locator("nav.rail .nav-link[data-tip]"), where).toHaveCount(0);
+      await expect(page.locator("nav.rail .rail-foot .theme-btn:visible"), where).toHaveCount(0);
+      // The head starts under the status bar, as tall as the page's bar; the page's bar has
+      // no New session of its own.
+      const [top, right, , left] = insets;
+      const head = await page.locator("nav.rail .rail-head").evaluate((el) => ({
+        top: el.getBoundingClientRect().top,
+        pad: Number.parseFloat(getComputedStyle(el).paddingTop),
+      }));
+      expect(head, where).toEqual({ top: 0, pad: top });
+      const compose = page.locator("nav.rail .rail-compose");
+      expect((await compose.boundingBox())!.y, where).toBeGreaterThanOrEqual(top);
+      expect(await hitSize(compose), where).toEqual({ width: 44, height: 44 });
+      await expect(page.locator(".compose-btn--phone"), where).toBeHidden();
+      // The sidebar keeps clear of the band at the left, and the page beside it has its gutter.
+      const sides = await page.evaluate(() => {
+        const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+        return { rail: box("nav.rail").right, glyph: box("nav.rail .nav-glyph").left, title: box(".bar-large").left };
+      });
+      expect(sides.glyph, where).toBeGreaterThanOrEqual(left + 8);
+      expect(sides.rail, where).toBe(220 + left);
+      expect(sides.title, where).toBe(sides.rail + 16);
+      if (top || right || left) expect(await underBands(page), where).toEqual([]);
+      // New session opens from the head, Display from the foot, Settings beside it.
+      await compose.click();
+      const sheet = page.getByRole("dialog", { name: "New session" });
+      await expect(sheet, where).toBeVisible();
+      await sheet.getByRole("button", { name: "Cancel" }).click();
+      await expect(sheet).toHaveCount(0);
+      await page.locator("nav.rail").getByRole("button", { name: "Display" }).click();
+      await expect(page.getByRole("dialog", { name: "Quick settings" }), where).toBeVisible();
+      if (top || right || left) expect(await underBands(page), `Display, ${where}`).toEqual([]);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog", { name: "Quick settings" })).toHaveCount(0);
+      const settings = page.locator("nav.rail").getByRole("link", { name: "Settings" });
+      await settings.click();
+      await expect(page.getByRole("dialog", { name: "Settings" }), where).toBeVisible();
+      await expect(settings).toHaveAttribute("aria-expanded", "true");
+    } finally {
+      await b.close();
+    }
+  });
+}
+
+test("the outer display and a Split View half keep the tab bar; More or Display left open there is closed by an unfold, and stays closed when folded again", async ({
+  browser,
+}) => {
+  const b = await duoBed(browser, "466x678");
+  const { page } = b;
+  const tabbar = page.locator("nav.tabbar");
+  const more = tabbar.getByRole("button", { name: "More", exact: true });
+  const sheet = page.getByRole("dialog", { name: "More" });
+  const display = page.getByRole("dialog", { name: "Quick settings" });
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    for (const [w, h] of [
+      [470, 669],
+      [466, 678],
+    ] as const) {
+      await pose(page, w, h);
+      await expect(page.locator("html"), `${w}x${h}`).toHaveAttribute("data-size-class", "compact");
+      await expect(tabbar, `${w}x${h}`).toBeVisible();
+      await expect(page.locator("nav.rail"), `${w}x${h}`).toBeHidden();
+    }
+    // What the tab bar and More list folded is what the sidebar lists unfolded.
+    const tabs = await tabbar.locator("a.nav-link .nav-label").allInnerTexts();
+    await more.click();
+    await expect(sheet).toBeVisible();
+    const inMore = await sheet.locator(".more-row-name").allInnerTexts();
+    await pose(page, 669, 951);
+    await expect(page.locator("nav.rail")).toBeVisible();
+    await expect(sheet).toHaveCount(0);
+    expect((await sidebarRows(page)).map((r) => r.name)).toEqual([...tabs, ...inMore]);
+    await pose(page, 466, 678);
+    await expect(tabbar).toBeVisible();
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(sheet).toHaveCount(0);
+    // Display, opened from More, the same.
+    await more.click();
+    await sheet.getByRole("button", { name: "Display" }).click();
+    await expect(display).toBeVisible();
+    await pose(page, 669, 951);
+    await expect(display).toHaveCount(0);
+    await pose(page, 466, 678);
+    await expect(tabbar).toBeVisible();
+    await expect(display).toHaveCount(0);
+    await expect(sheet).toHaveCount(0);
+  } finally {
+    await b.close();
+  }
+});
+
 /** The windows with a band at one side: the outer display, a Split View half and the
  *  inner display turned; and with the phone held the other way up, the band on the left.
  *  The band is the 84 pt the system's own bars stand in beside the page (duo.ts). */
@@ -515,7 +661,11 @@ for (const [size, insets] of BANDS) {
       // The gutter is inside what the band leaves: the large title starts 16 pt from it and
       // a row's age ends 16 pt from it, where they are 16 pt from the window's edge without
       // one. (With the larger of the two for a margin, the age stood flush against the band.)
-      const [, right, , left] = insets;
+      // Where the window has room (the inner display turned) the sidebar stands beside the
+      // page and takes the band at the left: the page then begins where the sidebar ends.
+      const [, right, , band] = insets;
+      const regular = (await page.locator("html").getAttribute("data-size-class")) === "regular";
+      const left = regular ? await page.locator("nav.rail").evaluate((el) => el.getBoundingClientRect().right) : band;
       const edges = await page.evaluate(() => {
         const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
         return { title: box(".bar-large").left, age: box("article.card .card-time").right, width: innerWidth };
@@ -568,13 +718,18 @@ for (const [size, insets] of BANDS) {
       await expect(page.getByRole("menuitemradio", { name: "All machines" })).toBeVisible();
       await measure("Feed, its Filter");
 
-      // More, and Display from it.
+      // More, and Display from it; or, with room, the sidebar and Display from its foot.
       await board();
-      const more = page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "More", exact: true });
-      await more.click();
-      await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
-      await measure("More");
-      await page.getByRole("dialog", { name: "More" }).getByRole("button", { name: "Display" }).click();
+      if (regular) {
+        await measure("the sidebar");
+        await page.locator("nav.rail").getByRole("button", { name: "Display" }).click();
+      } else {
+        const more = page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "More", exact: true });
+        await more.click();
+        await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
+        await measure("More");
+        await page.getByRole("dialog", { name: "More" }).getByRole("button", { name: "Display" }).click();
+      }
       await expect(page.getByRole("dialog", { name: "Quick settings" })).toBeVisible();
       await measure("Display");
 
@@ -621,8 +776,9 @@ for (const [size, insets] of BANDS) {
       await page.goto(`${url}${DUO_SESSIONS.prompt}`);
       await expect(allow).toBeEnabled();
       await measure("a session with a prompt");
-      // Its bars are grounds from one edge of the window to the other, under the band: the
-      // page's bar, the strip the prompt and the message field stand in, the tab bar. And
+      // Its bars are grounds from one edge of the window (or the sidebar) to the other, under
+      // the band: the page's bar, the strip the prompt and the message field stand in, the
+      // tab bar. And
       // its title, too long to show whole, is in the middle of what the band leaves, cut
       // short of the way back before it and of the buttons after it.
       const sides = (sel: string) =>
@@ -631,8 +787,8 @@ for (const [size, insets] of BANDS) {
           return [r.left, r.right] as [number, number];
         });
       const width = Number(size.split("x")[0]);
-      for (const bar of [".main > .page > .bar", ".sess-ctl", ".tabbar"])
-        expect(await sides(bar), `${bar}, ${where}`).toEqual([0, width]);
+      for (const bar of [".main > .page > .bar", ".sess-ctl", ...(regular ? [] : [".tabbar"])])
+        expect(await sides(bar), `${bar}, ${where}`).toEqual([regular ? left : 0, width]);
       const [from, to] = await sides(".bar-title");
       expect((from + to) / 2, where).toBeCloseTo((left + width - right) / 2, 0);
       expect(from, where).toBeGreaterThanOrEqual((await sides(".bar-back"))[1]);

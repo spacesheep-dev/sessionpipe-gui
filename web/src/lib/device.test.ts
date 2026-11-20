@@ -2,7 +2,8 @@
 // The shell's platform as page code reads it (the <html> mark, else the flag), and the
 // phone layout and the touch keys from their media queries: one list for each query, one
 // listener on it, and every part of the page told of a change in that one call. And what
-// the system keeps at the window's sides, as the stylesheets' own words come to.
+// the system keeps at the window's sides, as the stylesheets' own words come to; and the
+// touch app's size class, from the window, as <html> and every part have it.
 import "../native/test-env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -408,5 +409,116 @@ describe("safeSides", () => {
   it("is 0 for a side the engine has no length for", () => {
     fakePage({ paddingLeft: "", paddingRight: "44.5px" });
     expect(safeSides()).toEqual({ left: 0, right: 44.5 });
+  });
+});
+
+describe("sizeClass", () => {
+  const set = (width: number, height: number) => Object.assign(g, { innerWidth: width, innerHeight: height });
+  const doc = document as unknown as { activeElement: unknown };
+  const resize = (width: number, height: number) => {
+    set(width, height);
+    dispatchEvent(new Event("resize"));
+  };
+  /** followSizeClass, stopped after the test: a module of an earlier test hears no resize. */
+  let stop = () => {};
+  afterEach(() => {
+    stop();
+    stop = () => {};
+    delete g.innerWidth;
+    delete g.innerHeight;
+    delete html.dataset.sizeClass;
+    doc.activeElement = null;
+  });
+  const sizes = (list: string) => list.split(" ").map((s) => s.split("x").map(Number) as [number, number]);
+  const follow = async () => {
+    const m = await fresh();
+    const followSizeClass = () => {
+      stop = m.followSizeClass();
+    };
+    return { ...m, followSizeClass };
+  };
+
+  it("is regular from 600 wide and 560 high on a touch screen, and compact under either", async () => {
+    const { sizeClass } = await fresh();
+    fakeMedia({ [TOUCH_QUERY]: true, [PHONE_QUERY]: true });
+    // The inner display upright and turned (and the first estimate of it), iPads, an
+    // Android tablet.
+    for (const [w, h] of sizes("669x951 951x669 626x890 890x626 820x1180 1180x820 744x1133 1280x800")) {
+      set(w, h);
+      expect(sizeClass(), `${w}x${h}`).toBe("regular");
+    }
+    // The outer display both ways, Split View, iPhones, an Android phone on its side.
+    for (const [w, h] of sizes("466x678 678x466 470x669 445x626 393x852 320x568 915x412")) {
+      set(w, h);
+      expect(sizeClass(), `${w}x${h}`).toBe("compact");
+    }
+  });
+
+  it("is none in a window with a mouse, at any size", async () => {
+    const { sizeClass } = await fresh();
+    fakeMedia({ [PHONE_QUERY]: true });
+    for (const [w, h] of sizes("1280x800 669x951 393x852 466x678")) {
+      set(w, h);
+      expect(sizeClass(), `${w}x${h}`).toBeNull();
+    }
+  });
+
+  it("is on <html> before any part is told, and each part is told once, in one call", async () => {
+    const { followSizeClass, sizeClass, onSizeClass } = await follow();
+    const media = fakeMedia({ [TOUCH_QUERY]: true, [PHONE_QUERY]: true });
+    set(466, 678);
+    followSizeClass();
+    expect(html.dataset.sizeClass).toBe("compact");
+    const told: string[] = [];
+    onSizeClass(() => told.push(`sidebar:${sizeClass()}:${html.dataset.sizeClass}`));
+    onSizeClass(() => told.push(`page:${sizeClass()}:${html.dataset.sizeClass}`));
+    // Unfolded: the mark is there in the resize itself, before either is told.
+    resize(669, 951);
+    expect(told).toEqual(["sidebar:regular:regular", "page:regular:regular"]);
+    // A turn that keeps the class tells nobody.
+    resize(951, 669);
+    expect(told).toHaveLength(2);
+    // A mouse takes over: no size class, and no mark.
+    media.turn(TOUCH_QUERY, false);
+    expect(sizeClass()).toBeNull();
+    expect(html.dataset.sizeClass).toBeUndefined();
+    expect(told.slice(2)).toEqual(["sidebar:null:undefined", "page:null:undefined"]);
+  });
+
+  it("keeps the height it had while Android's keyboard is up, and reads it again once the field is left", async () => {
+    const { followSizeClass, sizeClass } = await follow();
+    fakeMedia({ [TOUCH_QUERY]: true, [PHONE_QUERY]: true });
+    set(1280, 800);
+    followSizeClass();
+    expect(sizeClass()).toBe("regular");
+    // A field takes the focus and the shell makes the view shorter for the keys.
+    doc.activeElement = { tagName: "TEXTAREA" };
+    resize(1280, 450);
+    expect(sizeClass()).toBe("regular");
+    expect(html.dataset.sizeClass).toBe("regular");
+    // The keys go, and come back.
+    resize(1280, 800);
+    resize(1280, 450);
+    expect(sizeClass()).toBe("regular");
+    // A change of width is always read: a turn with the keys up.
+    resize(800, 450);
+    expect(sizeClass()).toBe("compact");
+    resize(1280, 800);
+    expect(sizeClass()).toBe("regular");
+    // With no field in hand, a shorter window is a shorter window.
+    doc.activeElement = null;
+    resize(1280, 450);
+    expect(sizeClass()).toBe("compact");
+    expect(html.dataset.sizeClass).toBe("compact");
+  });
+
+  it("takes a checkbox in hand for no keyboard", async () => {
+    const { followSizeClass, sizeClass } = await follow();
+    fakeMedia({ [TOUCH_QUERY]: true, [PHONE_QUERY]: true });
+    set(1280, 800);
+    followSizeClass();
+    doc.activeElement = { tagName: "INPUT", type: "checkbox" };
+    resize(1280, 450);
+    expect(sizeClass()).toBe("compact");
   });
 });

@@ -153,6 +153,9 @@ const step = (page: Page, name: string) => page.locator(`.onb[data-step='${name}
 const button = (page: Page, name: string | RegExp) => page.getByRole("button", { name });
 /** New session, wherever this width has it: the Board's bar on a phone, the sidebar's head. */
 const compose = (page: Page) => page.getByRole("button", { name: "New session", exact: true });
+/** The touch app's size class at a window (lib/device.ts): with room, New session is the
+ *  sidebar's; else the page bar's. */
+const sizeClassAt = (width: number, height: number) => (width >= 600 && height >= 560 ? "regular" : "compact");
 /** The app comes back to the front (from the browser). */
 const foreground = (page: Page) =>
   page.evaluate(() => {
@@ -1427,6 +1430,8 @@ test.describe("what else an account shows", () => {
         [820, 1180],
       ] as const) {
         await page.setViewportSize({ width, height });
+        // The sidebar's New session or the bar's, once the window has heard of its size.
+        await expect(page.locator("html")).toHaveAttribute("data-size-class", sizeClassAt(width, height));
         await compose(page).click();
         await expect(sheet.locator(".state-title")).toHaveText("This iPhone isn't approved yet");
         await expect(sheet.locator(".state-text")).toHaveCount(0);
@@ -1445,6 +1450,7 @@ test.describe("what else an account shows", () => {
         await expect(sheet).toHaveCount(0);
       }
       await page.setViewportSize({ width: W, height: H });
+      await expect(page.locator("html")).toHaveAttribute("data-size-class", sizeClassAt(W, H));
       await compose(page).click();
       await sheet.locator("[data-ns-approve]").click();
       await expect(page.locator("[data-approve='idle']")).toBeVisible();

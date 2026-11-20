@@ -17,6 +17,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   longer swaps the app under the hand: New session keeps its open list, the caret and the
   words being typed. The sidebar, the panel beside a list and "Open beside" are a window
   with a mouse's, which still changes at 720 px.
+- **A touch screen with room has a sidebar in place of the tab bar.** On a tablet, either
+  way up, and on a phone opened flat, the pages are a list down the left side of the
+  screen: Board, Inbox with its count, Search, Machines, then what More held (Usage among
+  them) and the views, with Display and Settings at the foot, each a row a finger takes.
+  New session is at its head. The tab bar stretched five tabs across such a screen; a
+  phone held upright, a folded phone, Split View and a window with a mouse keep what they
+  had.
 - **On a wide touch screen a reply reads in lines of about 70 characters.** On a tablet,
   and on a phone opened flat or turned on its side, a reply's lines ran to 90 and 115
   characters, too long for the eye to find the next one. Its paragraphs, lists, quotes and
