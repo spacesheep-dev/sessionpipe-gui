@@ -328,7 +328,18 @@ test.describe("phone: new session", () => {
         mode: "auto",
         start: { "claude-code": { permissions: ["read", "safe", "auto"], permission: "auto", any_model: true } },
       },
-      { sinkToken: await sinkToken() },
+      // Taken and delivered, and no hook events after: the page stays in its starting state
+      // for the test to read (with them it leaves it within a second, before a loaded runner
+      // has looked).
+      {
+        script: (c) => ({
+          pauseMs: 400,
+          acks: [
+            { outcome: "taken", mode: "sdk" },
+            { outcome: "delivered", mode: "sdk", session: c.session },
+          ],
+        }),
+      },
     );
     try {
       await page.goto(`${CONTROL_BASE}/?new=1&machine=${d.name}`);
