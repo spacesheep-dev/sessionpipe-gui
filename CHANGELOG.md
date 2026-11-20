@@ -58,6 +58,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   receiver runs in (SIGHUP) ended it at once and left its `run.json` behind; it now stops
   as Ctrl-C does. A receiver whose output was already gone when it was stopped (a `| tee`
   ended by the same Ctrl-C) no longer exits with an error before it has closed.
+- **Search's status line says which computer to restart.** With history search off and its
+  index still on disk, a viewer on another device read "Restarting the app tries again",
+  which could mean the app on the phone; it now reads "Restarting the app on that computer
+  tries again".
 
 ## [0.8.6] - 2026-11-19
 
