@@ -909,3 +909,17 @@ test.describe("the board's bar on a computer", () => {
       expect(Math.round((await page.locator(".page.inbox > .bar").boundingBox())!.height)).toBe(row);
     });
 });
+
+test.describe("board: on a phone", () => {
+  test.use({ viewport: { width: 393, height: 852 }, hasTouch: true, isMobile: true });
+  test("the way on to Search at a narrowed list's end is a finger's 44 px tall", async ({ page }) => {
+    await openBoard(page);
+    // A word of the first row's title, which the board keeps.
+    const title = ((await page.locator("article.card .card-title").first().textContent()) ?? "").trim();
+    const word = title.split(/\s+/).find((w) => /^[a-z]{4,}$/i.test(w)) ?? title.split(/\s+/)[0]!;
+    await page.getByRole("searchbox", { name: "Filter sessions" }).fill(word);
+    const more = page.locator(".board-more");
+    await expect(more).toBeVisible();
+    expect((await more.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  });
+});
