@@ -230,7 +230,11 @@ function Row({ action: a, keys, hint }: { action: Action; keys: string[]; hint?:
     else next.push(binding);
     setBinding(a.id, next.length === 0 ? null : [...new Set(next)]);
   };
-  const shared = keys.flatMap((k) => sharedWith(a.id, k).map((o) => o.label));
+  // Another page's action of the same name (Allow on the Board and in the Inbox) is not
+  // news on this row.
+  const shared = [...new Set(keys.flatMap((k) => sharedWith(a.id, k).map((o) => o.label)))].filter(
+    (l) => l !== a.label,
+  );
   const changed = isOverridden(a.id);
   const menu = useContextMenu(
     () => {
@@ -262,7 +266,7 @@ function Row({ action: a, keys, hint }: { action: Action; keys: string[]; hint?:
       <span className="sc-row-label">
         <span className="sc-row-name">{a.label}</span>
         {hint && <span className="sc-row-hint">{hint.charAt(0).toUpperCase() + hint.slice(1)}</span>}
-        {shared.length > 0 && <span className="sc-row-hint">Also {[...new Set(shared)].join(", ")} elsewhere</span>}
+        {shared.length > 0 && <span className="sc-row-hint">Also {shared.join(", ")} elsewhere</span>}
       </span>
       <span className="sc-row-keys">
         {keys.map((k, i) =>

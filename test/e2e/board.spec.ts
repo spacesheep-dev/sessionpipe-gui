@@ -829,6 +829,21 @@ test.describe("the board's bar on a computer", () => {
     const row = page.locator(".sc-row[data-action='search.focus']");
     await expect(row.locator(".sc-row-label")).toHaveText("Find on this page");
     await expect(row.locator(".sc-key").first()).toHaveText("/");
+    // No row's "Also … elsewhere" names the row itself (Allow is Allow on the Board and in the Inbox).
+    const rows = await page.locator(".sc-row").evaluateAll((els) =>
+      els.map((el) => ({
+        name: el.querySelector(".sc-row-name")?.textContent ?? "",
+        also: Array.from(el.querySelectorAll(".sc-row-hint"))
+          .map((h) => h.textContent ?? "")
+          .find((t) => t.startsWith("Also ")),
+      })),
+    );
+    expect(rows.length).toBeGreaterThan(20);
+    const self = rows.filter((r) => r.also?.slice(5, -" elsewhere".length).split(", ").includes(r.name));
+    expect(self).toEqual([]);
+    const allow = page.locator(".sc-row[data-action='inbox.allow']");
+    await expect(allow.locator(".sc-row-name")).toHaveText("Allow the prompt under the cursor");
+    await expect(allow).not.toContainText("Also Allow the prompt");
   });
 
   test("Tab goes along the bar in the order it is drawn on the Board, the Inbox and the Feed", async ({ page }) => {
