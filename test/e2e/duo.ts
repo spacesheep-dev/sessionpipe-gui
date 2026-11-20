@@ -3,9 +3,10 @@
 // The iPhone Duo for the end-to-end suite (duo.spec.ts and duo-continuity.spec.ts in the
 // `duo` and `duo-webkit` projects, and account-screens.spec.ts when it is given insets):
 // its shapes, what the system keeps on each side of them, a fold or a turn of a live page,
-// a software keyboard, and two measures (which controls reach under a band, how long a
-// line of prose is). The app's code names no Duo size: its layout follows the window. The
-// shapes are written here, and in the render bed that draws the same ones.
+// a software keyboard, and three measures (which controls reach under a band, how long a
+// line of prose is, how much of the page takes a finger for a control). The app's code
+// names no Duo size: its layout follows the window. The shapes are written here, and in
+// the render bed that draws the same ones.
 //
 // duoBed() is the app those are tried on: the iPhone app on a spacesheep account, on the
 // stand-ins of test/account, as account-screens.spec.ts has it.
@@ -347,6 +348,27 @@ export function firstLineChars(el: Locator): Promise<number> {
   });
 }
 
+/** How much of the page takes a finger for `el`, in pt: from the middle of its box out, to
+ *  the left, the right, up and down, for as long as what is on top there is `el`. So the
+ *  room a ::before or ::after gives it counts, and what an ancestor cuts off or another
+ *  control lies over does not. `el` is brought to the middle of the window first, clear of
+ *  the bars. */
+export function hitSize(el: Locator): Promise<{ width: number; height: number }> {
+  return el.evaluate((node) => {
+    node.scrollIntoView({ block: "center", behavior: "instant" });
+    const r = node.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const reach = (dx: number, dy: number): number => {
+      let n = 0;
+      while (n < 200 && node.contains(document.elementFromPoint(x + dx * (n + 1), y + dy * (n + 1)))) n++;
+      return n;
+    };
+    if (!node.contains(document.elementFromPoint(x, y))) return { width: 0, height: 0 };
+    return { width: reach(-1, 0) + 1 + reach(1, 0), height: reach(0, -1) + 1 + reach(0, 1) };
+  });
+}
+
 /** Whether a finger is this project's main pointer: what makes a screen the touch app's,
  *  whatever its width. A duo spec's beforeAll holds its project to it. */
 export async function coarsePointer(browser: Browser): Promise<boolean> {
@@ -417,6 +439,55 @@ function sample(): unknown[] {
     ),
     notes.ev("turn.ended", { turn_id: "t1" }, n),
   ];
+}
+
+/** One more finished session on the sample's computer, for a test that wants words of its
+ *  own: what was asked and the reply (Markdown). Before the page is opened. Its address. */
+export function duoSession(b: DuoBed, id: string, turn: { title: string; user: string; assistant: string }): string {
+  const s = new Session(id, "claude-code", Date.now() - 20 * 60_000);
+  const on = {
+    session: {
+      machine: MACHINE.name,
+      cwd: "/Users/me/code/billing",
+      title: turn.title,
+      title_source: "custom" as const,
+    },
+  };
+  b.ss.push([
+    s.ev("session.started", { source: "startup" }, on),
+    s.ev("turn.started", { turn_id: "t1" }, on),
+    s.ev("turn.transcript", { turn: 1, user: turn.user, assistant: turn.assistant }, on),
+    s.ev("turn.ended", { turn_id: "t1" }, on),
+  ]);
+  return `/s/claude-code/${id}`;
+}
+
+/** One more session on the sample's computer, waiting for its plan (Markdown) to be
+ *  approved: the plan in the call's input, as Claude Code's plan mode sends it. Before the
+ *  page is opened. Its address. */
+export function duoPlanSession(b: DuoBed, id: string, plan: string): string {
+  const asked = Date.now() - 5_000;
+  const s = new Session(id, "claude-code", asked - 2 * 60_000);
+  const on = (at?: number) => ({
+    session: {
+      machine: MACHINE.name,
+      cwd: "/Users/me/code/billing",
+      title: "Plan the export's resume",
+      title_source: "custom" as const,
+    },
+    ...(at ? { time: new Date(at).toISOString() } : {}),
+  });
+  b.ss.push([
+    s.ev("session.started", { source: "startup" }, on()),
+    s.ev("turn.started", { turn_id: "t1" }, on()),
+    s.ev("tool.started", { tool: "ExitPlanMode", call_id: "p1", turn_id: "t1", input: { plan } }, on(asked - 1_000)),
+    s.ev(
+      "attention.needed",
+      { attention_id: `att_${id}`, kind: "permission", tool: "ExitPlanMode", message: "ExitPlanMode" },
+      on(asked),
+    ),
+  ]);
+  return `/s/claude-code/${id}`;
 }
 
 export interface DuoBed {

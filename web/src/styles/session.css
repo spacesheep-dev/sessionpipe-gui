@@ -423,6 +423,18 @@ html:has(.main > .session) {
   margin: 8px 0 8px var(--tl-lead);
   color: var(--fg);
 }
+/* A touch screen with room for more (a tablet, a phone opened flat): a reply's prose keeps
+   to about 70 characters a line, where the eye still finds the next one. Its paragraphs,
+   lists, quotes and headings stop there, from the column's leading edge; its code and
+   tables keep the column. In em, so a larger text size holds the same count. The chat's
+   reply too (chat.css `.chat-card`), an agent's last word, and a reply read from the
+   search index with what was found marked in it (search.css `.hx-prose`). */
+@media (pointer: coarse) {
+  :is(.reply, .chat-card, .agent-result-text) > .md > :is(p, ul, ol, blockquote, h1, h2, h3, h4),
+  .chat-card > .hx-prose {
+    max-width: 33em;
+  }
+}
 
 /* A row: the time, a 16 px glyph, the text, the duration trailing. */
 .tool,

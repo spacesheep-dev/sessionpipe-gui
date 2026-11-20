@@ -1556,3 +1556,73 @@ test("a picture being made smaller says so in the tray's line, not only in a too
   await expect(tray(page)).toHaveAttribute("data-state", "ready", { timeout: 30_000 });
   await expect(trayLine(page)).toHaveCount(0);
 });
+
+for (const simple of [true, false])
+  test(`${simple ? "Simple" : "Advanced"}: on a wide touch screen a sent message's pictures are drawn whole, in one row inside its message, on the column's far edge`, async ({
+    context,
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, "a touch screen's column");
+    // The inner display of an opened phone, upright and turned: a reply's measure is
+    // narrower than the column there, and Simple's bubble keeps to it.
+    await page.setViewportSize({ width: 669, height: 951 });
+    await open(context, page, { takes: true, title: "Pictures on a wide touch screen" });
+    if (simple) {
+      await context.addInitScript(() =>
+        localStorage.setItem(
+          "sessionpipe-gui.settings",
+          JSON.stringify({ mode: "simple", openSessions: "page", v: 2 }),
+        ),
+      );
+      await page.reload();
+      await expect(composer(page)).toBeEnabled();
+    }
+    await picker(page).setInputFiles([
+      { name: "kiwi.png", mimeType: "image/png", buffer: KIWI },
+      { name: "birch.png", mimeType: "image/png", buffer: BIRCH },
+      { name: "onyx.png", mimeType: "image/png", buffer: ONYX },
+    ]);
+    await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(3);
+    const words = `Which of these three is the darkest, and which one would read best as the export's icon on a light page? ${tag()}`;
+    await composer(page).fill(words);
+    await send(page).click();
+    const message = page
+      .locator(simple ? ".page.session .chat-bubble" : ".page.session blockquote", { hasText: words })
+      .last();
+    for (const [width, height] of [
+      [669, 951],
+      [951, 669],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await expect(message.locator("[data-sent-picture]")).toHaveCount(3);
+      await expect.poll(() => drawn(message)).toEqual([64, 80, 96]);
+      if (SHOTS) {
+        mkdirSync(SHOTS, { recursive: true });
+        await page.screenshot({
+          path: path.join(SHOTS, `wide-sent-${simple ? "simple" : "advanced"}-${width}x${height}.png`),
+        });
+      }
+      const got = await message.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const column = el.parentElement!.getBoundingClientRect();
+        const thumbs = Array.from(el.querySelectorAll("[data-sent-picture] img")).map((i) => i.getBoundingClientRect());
+        return {
+          right: Math.round(column.right - r.right),
+          rows: [...new Set(thumbs.map((t) => Math.round(t.top + t.height / 2)))].length,
+          inside: thumbs.every((t) => t.left >= r.left && t.right <= r.right && t.bottom <= r.bottom),
+          sizes: thumbs.map((t) => [Math.round(t.width), Math.round(t.height)]),
+        };
+      });
+      expect(got, `${width}x${height}`).toEqual({
+        right: 0,
+        rows: 1,
+        inside: true,
+        sizes: [
+          [64, 48],
+          [80, 60],
+          [96, 54],
+        ],
+      });
+    }
+  });

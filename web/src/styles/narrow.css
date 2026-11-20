@@ -130,6 +130,22 @@
     position: absolute;
     inset: 0 -4px 0 -22px;
   }
+  /* Copy beside a tool's input, output or error, and on a block of code: 24 px to the eye,
+     44 to a finger. A tool's reaches 10 px out on every side. A code block cuts off what
+     leaves its well, so there the 44 start at the well's corner and reach in. */
+  .tool-io-head .icon-btn,
+  .md-pre-head .icon-btn {
+    position: relative;
+  }
+  .tool-io-head .icon-btn::before,
+  .md-pre-head .icon-btn::before {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
+  .md-pre-head .icon-btn::before {
+    inset: -2px -2px -18px -18px;
+  }
   .toast-x {
     width: 44px;
     height: 44px;

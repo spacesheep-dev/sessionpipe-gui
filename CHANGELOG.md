@@ -17,6 +17,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   longer swaps the app under the hand: New session keeps its open list, the caret and the
   words being typed. The sidebar, the panel beside a list and "Open beside" are a window
   with a mouse's, which still changes at 720 px.
+- **On a wide touch screen a reply reads in lines of about 70 characters.** On a tablet,
+  and on a phone opened flat or turned on its side, a reply's lines ran to 90 and 115
+  characters, too long for the eye to find the next one. Its paragraphs, lists, quotes and
+  headings now stop at about 70, from the column's leading edge, at any text size; its
+  code and tables keep the column, and the bubble of what you wrote is no wider than the
+  prose. A phone held upright and a window with a mouse are unchanged.
 
 ### Fixed
 
@@ -42,6 +48,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   on a phone under about 400 px wide the second one stood out of the card, and at 320 px
   Apply was off the screen. The two dates now share the card's width, with Cancel and
   Apply under them. An iPhone already drew it so.
+- **Copy beside a tool's input or output, and on a block of code, takes a finger.** On a
+  touch screen the button answered only on its 24 points; it looks the same and now takes a
+  tap 44 points across.
 
 ## [0.8.7] - 2026-11-20
 

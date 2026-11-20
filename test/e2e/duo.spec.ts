@@ -3,10 +3,10 @@
 // The iPhone app at the iPhone Duo's shapes (the `duo` project: a touch screen, 3x): the
 // outer display 466×678, the inner one upright 669×951 and turned 951×669, a Split View
 // half 470×669, each with the bands the system keeps (duo.ts). What holds at a shape is
-// said here: the first run, the keyboard, a reply's lines, and that the inner display
-// turned (wider than the width at which a window with a mouse takes the Mac's layout) is
-// still the touch app. What a page keeps as it moves from one to another is in
-// duo-continuity.spec.ts, which runs in WebKit too.
+// said here: the first run, the keyboard, a reply's lines, what a finger can copy, and that
+// the inner display turned (wider than the width at which a window with a mouse takes the
+// Mac's layout) is still the touch app. What a page keeps as it moves from one to another
+// is in duo-continuity.spec.ts, which runs in WebKit too.
 import { expect, type Page, test } from "@playwright/test";
 import {
   bandOffenders,
@@ -15,8 +15,11 @@ import {
   DUO_REPLY,
   DUO_SESSIONS,
   duoBed,
+  duoPlanSession,
+  duoSession,
   fakeKeyboard,
   firstLineChars,
+  hitSize,
   type Insets,
   insetsInit,
   pose,
@@ -27,6 +30,17 @@ const composer = (page: Page) => page.locator("textarea").first();
 /** The inner display turned on its side, as the simulator gives it and as first estimated:
  *  both wider than the width a mouse window's layout changes at (lib/device.ts). */
 const TURNED = ["951x669", "890x626"] as const;
+/** A session whose reply has every kind of block: prose, a list, code and a table. */
+const EXPORT = {
+  title: "Resume the invoice export",
+  user: "The nightly invoice export stops at batch 7 with a connection reset and then starts over from the first batch. Find out why, and make it go on from the batch that failed.",
+  assistant: [
+    "Batch 7 resets because the pooler drops a connection that sits idle for more than 30 seconds, and batch 7 is the first one large enough to spend that long building its file before it writes.",
+    "- Each batch now takes a fresh connection and writes in pages of 100 invoices, so none sits idle long enough to be dropped.\n- A run that starts again goes on from the batch after the last one that finished.",
+    "```ts\nfor (const batch of batches.slice(done + 1)) await withConnection((db) => writeBatch(db, batch));\n```",
+    "| Batch | Invoices | Seconds building |\n| --- | --- | --- |\n| 6 | 500 | 12 |\n| 7 | 2400 | 41 |",
+  ].join("\n\n"),
+};
 
 test.beforeAll(async ({ browser }) => {
   // A finger, at every width: what makes the inner display the touch app's and not a Mac's.
@@ -160,6 +174,148 @@ test("a reply on the outer display and in Split View reads in lines of at most 7
       expect(chars, `${width}x${height}`).toBeGreaterThan(20);
       expect(chars, `${width}x${height}`).toBeLessThanOrEqual(75);
     }
+  } finally {
+    await b.close();
+  }
+});
+
+test("a reply on the inner display, upright and turned, and on a tablet reads in lines of at most 75 characters", async ({
+  browser,
+}) => {
+  // The widest of them, a tablet on its side, has room for any line: there it is 65 to 75.
+  for (const [size, least] of [
+    ["669x951", 20],
+    ["951x669", 20],
+    ["1180x820", 65],
+  ] as const) {
+    const b = await duoBed(browser, size);
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}${DUO_SESSIONS.prompt}`);
+      const reply = page.getByText(DUO_REPLY, { exact: true });
+      await expect(reply).toBeVisible();
+      // In the page's own face: the one it stands in for until then is as wide only on the whole.
+      await page.evaluate(() => document.fonts.ready);
+      const chars = await firstLineChars(reply);
+      expect(chars, size).toBeGreaterThanOrEqual(least);
+      expect(chars, size).toBeLessThanOrEqual(75);
+    } finally {
+      await b.close();
+    }
+  }
+});
+
+test("on a wide touch screen a reply's prose stops at its measure from the column's leading edge, its code and its table keep the column, and the bubble stops at the same measure", async ({
+  browser,
+}) => {
+  for (const size of ["951x669", "1180x820"]) {
+    const b = await duoBed(browser, size);
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}${duoSession(b, "s-export", EXPORT)}`);
+      const card = page.locator(".chat-card");
+      await expect(card.locator(".md-table")).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      /** A box's two sides, and how many of its own em it is wide. */
+      const box = (sel: string) =>
+        page.locator(sel).evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right, em: r.width / Number.parseFloat(getComputedStyle(el).fontSize) };
+        });
+      const column = await box(".chat-card");
+      const para = await box(".chat-card .md > p");
+      const list = await box(".chat-card .md > ul");
+      // Prose: from where the column starts, to a measure that is narrower than the column.
+      expect(para.left, size).toBe(column.left);
+      expect(list.left, size).toBe(column.left);
+      expect(para.right, size).toBeLessThan(column.right - 100);
+      expect(list.right, size).toBe(para.right);
+      const chars = await firstLineChars(page.locator(".chat-card .md > p"));
+      expect(chars, size).toBeGreaterThanOrEqual(60);
+      expect(chars, size).toBeLessThanOrEqual(75);
+      // Code and a table are read across, not down: they keep the column.
+      for (const wide of [".chat-card .md-pre", ".chat-card .md-table"]) {
+        const got = await box(wide);
+        expect([got.left, got.right], `${wide} at ${size}`).toEqual([column.left, column.right]);
+      }
+      // What the person wrote: on the column's far edge, no wider than the prose.
+      const bubble = await box(".chat-bubble");
+      expect(bubble.right, size).toBe(column.right);
+      expect(bubble.em, size).toBeCloseTo(para.em, 1);
+    } finally {
+      await b.close();
+    }
+  }
+});
+
+test("on the inner display a plan waiting for its answer reads across its whole card: the reply's measure is not the plan's", async ({
+  browser,
+}) => {
+  const plan = [
+    "### Resume the export from the batch that failed",
+    "Each batch takes a fresh connection and writes in pages of 100 invoices, so none of them sits idle long enough for the pooler to drop it, and a run that starts again goes on from the batch after the last one that finished.",
+    "1. Keep the last finished batch in the export's own table.\n2. Start a run from the batch after it.",
+  ].join("\n\n");
+  for (const size of ["669x951", "951x669"]) {
+    const b = await duoBed(browser, size);
+    const { page } = b;
+    try {
+      await page.goto(`${b.server.url}${duoPlanSession(b, "s-plan-measure", plan)}`);
+      const text = page.locator(".ctl-plan-text");
+      await expect(text.locator("p").first()).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      const widths = await text.evaluate((md) => {
+        const s = getComputedStyle(md);
+        const inner = md.clientWidth - Number.parseFloat(s.paddingLeft) - Number.parseFloat(s.paddingRight);
+        return {
+          em: inner / Number.parseFloat(s.fontSize),
+          blocks: Array.from(md.children).map((el) => Math.round(el.getBoundingClientRect().width - inner)),
+        };
+      });
+      // A card wider than a reply's measure, and every block of the plan across all of it.
+      expect(widths.em, size).toBeGreaterThan(34);
+      expect(widths.blocks, size).toEqual(widths.blocks.map(() => 0));
+    } finally {
+      await b.close();
+    }
+  }
+});
+
+test("Copy beside a tool's input and on a block of code takes a finger on the outer display: 44 pt round a 24 pt glyph", async ({
+  browser,
+}) => {
+  const b = await duoBed(browser, "466x678");
+  const { page } = b;
+  /** The room a finger has round the glyph, and a tap in it that is not on the glyph: `dx`
+   *  pt out from its left edge, `dy` under its bottom one. */
+  const tapBeside = async (name: string, dx: number, dy: number) => {
+    const copy = page.getByRole("button", { name });
+    await expect(copy, name).toBeVisible();
+    const hit = await hitSize(copy);
+    expect(hit.width, `${name}: ${JSON.stringify(hit)}`).toBeGreaterThanOrEqual(44);
+    expect(hit.height, `${name}: ${JSON.stringify(hit)}`).toBeGreaterThanOrEqual(44);
+    const glyph = (await copy.boundingBox())!;
+    expect([glyph.width, glyph.height], name).toEqual([24, 24]);
+    await expect(copy, name).not.toHaveClass(/icon-btn--done/);
+    // A session keeps its end in sight while its page settles, so the button can move from
+    // under a tap: one is tried until it lands where the button is.
+    await expect(async () => {
+      const at = (await copy.boundingBox())!;
+      await page.touchscreen.tap(at.x - dx, at.y + at.height + dy);
+      // The check it shows for a moment: the tap was its own.
+      await expect(copy).toHaveClass(/icon-btn--done/, { timeout: 1_000 });
+    }, name).toPass({ timeout: 15_000 });
+  };
+  try {
+    const exported = duoSession(b, "s-export", EXPORT);
+    // A tool's input: the turn's tools opened, then the tool.
+    await page.goto(`${b.server.url}${DUO_SESSIONS.prompt}`);
+    await page.locator(".chat-tools-sum").first().click();
+    await page.locator(".tool--x > details > summary").first().click();
+    await tapBeside("Copy input", 6, 6);
+    // A block of code in a reply: its well cuts off what leaves it, so the room is inside.
+    await page.goto(`${b.server.url}${exported}`);
+    await tapBeside("Copy code", 12, 12);
   } finally {
     await b.close();
   }
