@@ -59,6 +59,11 @@ html:is([data-shell="ios"], [data-shell="android"]) :is(input, textarea, [conten
   -webkit-user-select: text;
   user-select: text;
 }
+/* The selection keeps the app's tint, as its caret and its handles do. A browser and the
+   desktop apps draw the system's own (no ::selection rule in base.css). */
+html:is([data-shell="ios"], [data-shell="android"]) ::selection {
+  background: color-mix(in oklch, var(--tint) 28%, transparent);
+}
 
 /* The bars are solid, as UIKit's opaque bar appearance is: a list stops under their hairline
    and never shows through them. The tab bar and the session's control strip are the
@@ -103,12 +108,12 @@ html[data-scanning] .onb {
 }
 
 /* The tablet (an iPad, a phone turned wide): the shell is still the app, so the status
-   bar still sits over the top. The ≥ 840 px layout (shell.css) pads nothing for it, so
+   bar still sits over the top. The desktop layout (shell.css) pads nothing for it, so
    here the rail's head and the page bar start under the safe area; and inside the rail,
    whose head is 72 px wide, the compose glyph keeps the desktop's size (the coarse-pointer
    rule in shared.css would grow it to 44 px and push the mark past the edge), its finger
    target reaching out past the glyph instead. */
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   html:is([data-shell="ios"], [data-shell="android"]) .rail-head {
     box-sizing: content-box;
     padding-top: var(--safe-top, env(safe-area-inset-top));

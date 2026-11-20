@@ -10,11 +10,13 @@ import { useSyncExternalStore } from "react";
 import { whenIdle } from "./lazy";
 
 export type SoundKind = "needsYou" | "question" | "error" | "done";
-export const SOUND_KINDS: { kind: SoundKind; label: string; hint: string }[] = [
-  { kind: "needsYou", label: "Needs you", hint: "a permission prompt waits for an answer" },
-  { kind: "question", label: "Question", hint: "a question, input wanted, an idle prompt" },
-  { kind: "error", label: "Error", hint: "a turn ended with an error" },
-  { kind: "done", label: "Done", hint: "a message you sent came back delivered" },
+/** Named as the app's own notifications name their kinds (native/AppSettings.tsx), which
+ *  sit on the same pane in the Mac app. The keys are saved on each device: they stay. */
+export const SOUND_KINDS: { kind: SoundKind; label: string; hint?: string }[] = [
+  { kind: "needsYou", label: "Permission requests" },
+  { kind: "question", label: "Questions", hint: "Also input requests and idle prompts." },
+  { kind: "error", label: "Errors" },
+  { kind: "done", label: "Delivered", hint: "A message you sent was delivered." },
 ];
 
 export type BuiltinSound = "chime" | "tick" | "thud" | "blip" | "marimba";

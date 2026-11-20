@@ -140,7 +140,7 @@
 }
 /* Beside a command block, the pair sits on the question's line, so it stays put when the
    block unfolds (only the wide bar: the narrow one and the phone put it under). */
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   @container ctl (min-width: 561px) {
     .ctl-answer:has(> .ctl-cmd-block) > .ctl-answer-btns {
       align-self: start;
@@ -232,8 +232,9 @@
 }
 
 /* The composer: one field that grows to 40 % of the view, the images to send at its
-   top, attach, stop and send on its last line; the focus halo is the field's, not the
-   textarea's. */
+   top, attach, stop and send on its last line. Focused, its edge steps to the meta ink and
+   never glows: it holds the focus the whole time a session is read, right under a prompt's
+   orange dot (as Messages and Mail). The edge is the field's, not the textarea's. */
 .ctl-field {
   border: var(--hairline) solid var(--line-2);
   border-radius: var(--radius);
@@ -243,8 +244,8 @@
     box-shadow var(--dur-fast) var(--ease-out);
 }
 .ctl-field:focus-within {
-  border-color: color-mix(in oklch, var(--focus) 70%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 22%, transparent);
+  border-color: var(--fg-3);
+  box-shadow: none;
 }
 .ctl--off .ctl-field {
   background: var(--bg);
@@ -320,6 +321,12 @@
   line-height: var(--lh);
   animation: fade-in var(--dur-fast) var(--ease-out);
 }
+/* The stream is down and Ask another agent… is not offered (ControlStrip.tsx): the line
+   keeps the button's height in a mouse window, so the field over it holds still. */
+.ctl-foot[data-ask-held] {
+  align-content: center;
+  min-height: var(--control-sm);
+}
 .ctl-context strong {
   color: var(--fg-2);
   font-weight: 500;
@@ -366,7 +373,7 @@
 }
 /* The phone: the question on its line, then Deny | Allow at equal widths, 44 px tall;
    when sending is off here, the line under the field says why, and nothing else. */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .ctl-answer {
     display: flex;
     flex-direction: column;
@@ -426,7 +433,7 @@
     font-size: max(1rem, 16px);
   }
   /* The line under the field at a footnote's size, and the way on, there and on the folded
-     card (Approve this iPhone, Retry now, Open on spacesheep.dev, How to pair), as a phone
+     card (Approve this iPhone, Unlock now, Open on spacesheep.dev, How to pair), as a phone
      draws an action: the tint, and 600 against the sentence's 400, so it reads as one
      without the colour too. Under the field it ends the line, or wraps to the end of a line
      of its own; with Ask another agent after it, that button takes the end. */
@@ -456,7 +463,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* The bar is docked over the timeline on a phone: the messages scroll inside a short box. */
   .ctl-acts {
     max-height: 25vh;

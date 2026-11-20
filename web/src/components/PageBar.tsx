@@ -6,40 +6,96 @@
 // over an iOS large title: the bar's own title fades in once the large one scrolls under
 // it, and the tools sit below the large title, scrolling with the page. The line under
 // the large title is the bar's subtitle slot: the page's meta, or, while the stream is
-// down, its state with Retry, where iOS keeps "Connecting…".
-import { Children, Fragment, isValidElement, type ReactNode, useEffect, useRef, useState } from "react";
+// down, its state with Retry, where iOS keeps "Connecting…". A desktop's bar says a
+// dropped stream in the same way, in the meta's place beside the title: the one place a
+// window says it, with the sidebar shown or hidden.
+import {
+  Children,
+  Fragment,
+  isValidElement,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { useBehind } from "../account/current";
 import { useStore } from "../data/hooks";
+import { usePhoneLayout } from "../lib/device";
 import { SearchInput } from "./bits";
 import { listBehind, useConnection } from "./Shell";
 
-const PHONE = "(max-width: 839px)";
-
-function usePhone(): boolean {
-  const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(PHONE).matches);
-  useEffect(() => {
-    const mq = matchMedia(PHONE);
-    const up = () => setOn(mq.matches);
-    up();
-    mq.addEventListener("change", up);
-    return () => mq.removeEventListener("change", up);
-  }, []);
-  return on;
+/** The phone's subtitle line under a large title: the meta, or while the stream is down
+ *  its state and Retry (ConnStatus below, in the phone's look). Its own component, so the
+ *  bar itself does not follow the stream's state. */
+function PhoneSub({ meta, connSaid }: { meta?: ReactNode; connSaid?: boolean }) {
+  const said = useConnSaid();
+  if (said && !connSaid) return <ConnStatus phone />;
+  return meta ? <div className="bar-sub">{meta}</div> : null;
 }
 
-/** The phone's subtitle line under a large title: the meta, or while the stream is down
- *  its state and Retry (the same reconnect as the pull down the page). Its own component,
- *  so only a phone's bar subscribes to the stream's state. */
-function PhoneSub({ meta }: { meta?: ReactNode }) {
+/** A desktop bar's meta slot, beside the title: the page's meta, or while the stream is
+ *  down its state and Retry. The down state takes the slot on every page ("Catching up…",
+ *  a session's machine and repo come back with the stream). */
+function BarMeta({ meta, connSaid }: { meta?: ReactNode; connSaid?: boolean }) {
+  const said = useConnSaid();
+  if (said && !connSaid) return <ConnStatus />;
+  return meta ? <span className="bar-meta">{meta}</span> : null;
+}
+
+/** How long a first connect goes unsaid: one that answers at once never shows. */
+const FIRST_CONNECT_QUIET_MS = 1000;
+
+/** Whether the bar says where the stream stands: while it is down, and before the first
+ *  snapshot while a connect takes longer than a moment ("Connecting…", nothing to press;
+ *  not while an account catches up, which its page says). */
+function useConnSaid(): boolean {
+  const { as, down, first } = useConnection();
+  const behind = useBehind();
+  const waiting = first && as === "connecting" && !behind;
+  const [long, setLong] = useState(false);
+  useEffect(() => {
+    setLong(false);
+    if (!waiting) return;
+    const t = window.setTimeout(() => setLong(true), FIRST_CONNECT_QUIET_MS);
+    return () => window.clearTimeout(t);
+  }, [waiting]);
+  return down || (waiting && long);
+}
+
+/** A dropped stream, said once: its dot (a ring while reconnecting, red when offline),
+ *  "Reconnecting…" or "Offline", and the one Retry (the same reconnect as the pull down a
+ *  phone's page). Before the first snapshot: "Can't reach studio-mac" with Retry, and a
+ *  long connect's "Connecting…" alone. One component for a desktop's bar and, as
+ *  `phone`, the phone's subtitle line: the same words, each in its own look. Not a live region: what is spoken is the
+ *  shell's (Shell.tsx ConnAnnouncer), once per change. When the stream comes back while
+ *  Retry holds the focus, the focus goes to the page rather than to nowhere. */
+function ConnStatus({ phone = false }: { phone?: boolean }) {
   const { as, label, down } = useConnection();
   const store = useStore();
-  if (!down) return meta ? <div className="bar-sub">{meta}</div> : null;
+  const retry = useRef<HTMLButtonElement>(null);
+  // A layout effect: its cleanup runs while the button is still in the document. Again
+  // when Retry comes and goes (a first connect's "Connecting…" has none).
+  useLayoutEffect(() => {
+    const button = down ? retry.current : null;
+    return () => {
+      if (button && document.activeElement === button) document.getElementById("main")?.focus({ preventScroll: true });
+    };
+  }, [down]);
   return (
-    <div className={`bar-sub phone-conn-sub phone-conn-sub--${as}`} role="status" aria-live="polite">
+    <div className={phone ? `bar-sub phone-conn-sub phone-conn-sub--${as}` : `bar-conn bar-conn--${as}`}>
       <span className="conn-dot" aria-hidden="true" />
-      <span className="phone-conn-label">{label}</span>
-      <button type="button" className="phone-conn-act" onClick={() => store.reconnect()}>
-        Retry
-      </button>
+      <span className={phone ? "phone-conn-label" : "bar-conn-label"}>{label}</span>
+      {down ? (
+        <button
+          ref={retry}
+          type="button"
+          className={phone ? "phone-conn-act" : "btn btn--ghost btn--sm"}
+          onClick={() => store.reconnect()}
+        >
+          Retry
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -83,6 +139,7 @@ export function PageBar({
   tools,
   actions,
   large = true,
+  connSaid = false,
   titleClassName = "",
   className = "",
 }: {
@@ -97,11 +154,15 @@ export function PageBar({
   actions?: ReactNode;
   /** The phone's large title; false on a detail page, whose title sits in the bar. */
   large?: boolean;
+  /** The page itself says where the stream stands (the Board and the Inbox before their
+   *  first snapshot: their loading rows, "Can't reach studio-mac" with Retry): the bar
+   *  does not say it a second time. */
+  connSaid?: boolean;
   /** Extra classes on the h1 (the session page's `sess-title`). */
   titleClassName?: string;
   className?: string;
 }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const bigTitle = phone && large;
   const big = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(!bigTitle);
@@ -132,7 +193,7 @@ export function PageBar({
         <div className="bar-lead">
           {back}
           <h1 className={`bar-title ${titleClassName}`}>{title}</h1>
-          {meta && !phone ? <span className="bar-meta">{meta}</span> : null}
+          {phone ? null : <BarMeta meta={meta} connSaid={connSaid} />}
         </div>
         {tools && !phone ? <div className="bar-tools">{tools}</div> : null}
         {actions ? <div className="bar-actions">{actions}</div> : null}
@@ -144,7 +205,11 @@ export function PageBar({
               {title}
             </div>
           ) : null}
-          {bigTitle ? <PhoneSub meta={meta} /> : meta ? <div className="bar-sub">{meta}</div> : null}
+          {bigTitle ? (
+            <PhoneSub meta={meta} connSaid={connSaid} />
+          ) : meta ? (
+            <div className="bar-sub">{meta}</div>
+          ) : null}
           {tools ? <PhoneTools tools={tools} /> : null}
         </div>
       ) : null}
@@ -166,7 +231,7 @@ const LIST_TITLE: Record<string, string> = {
  *  label is the tooltip; on a phone it stands beside the chevron in the tint, as iOS's
  *  back button does, cut with an ellipsis before it reaches the title. */
 export function BackButton({ onClick, label }: { onClick: () => void; label?: string }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const text = label ?? LIST_TITLE[listBehind()] ?? "Board";
   return (
     <button

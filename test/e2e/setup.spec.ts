@@ -46,7 +46,7 @@ test.describe("setup on the demo server (TLS off)", () => {
     page,
   }) => {
     await openPage(page, "/setup");
-    await expect(page.getByRole("heading", { name: "Set up sessionpipe gui" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible();
     const steps = page.locator("li.step");
     await expect(steps).toHaveCount(6);
     for (const [i, k] of ["sessions", "secure", "pair", "phone", "try", "remote"].entries())
@@ -69,13 +69,47 @@ test.describe("setup on the demo server (TLS off)", () => {
     await expect(steps.nth(5).locator(".step-needs")).toHaveCount(0);
     await expect(page.locator("[data-setup-done]")).toHaveCount(0);
     await expect(page.locator("[data-setup-skip]")).toBeVisible();
-    // The rail shows the entry with its dot while steps remain.
-    await expect(page.locator(".rail [data-nav=setup]")).toBeVisible();
-    await expect(page.locator(".rail [data-nav=setup] .nav-dot")).toBeVisible();
+    // The sidebar ends with "Finish setup" while steps remain, the words and no dot; the
+    // icon rail has room for no words, so it keeps the dot.
+    const entry = page.locator(".rail [data-nav=setup]");
+    await expect(entry).toHaveText("Finish setup");
+    await expect(page.locator(".rail-nav > [data-nav]").last()).toHaveAttribute("data-nav", "setup");
+    await expect(entry.locator(".nav-dot")).toBeHidden();
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await expect(entry.locator(".nav-dot")).toBeVisible();
+    await expect(entry).toHaveAttribute("data-tip", /^Finish setup {3}G S$/i);
+    await page.setViewportSize({ width: 1440, height: 900 });
     // "Why isn't this done?" folds open to the facts.
     await steps.nth(1).locator("summary").click();
     await expect(steps.nth(1).locator(".step-facts")).toContainText("TLS mode");
     await expect(steps.nth(1).locator(".step-facts")).toContainText("off");
+  });
+
+  test("the demo says it is one once, with one way out, and has no Setup entry for this machine", async ({ page }) => {
+    const hint = () => page.evaluate(() => localStorage.getItem("sessionpipe-gui.rail.setup"));
+    // This receiver has steps to go: the rail draws Setup, and remembers that it does.
+    await openPage(page, "/");
+    await expect(page.locator(".rail [data-nav=setup]")).toBeVisible();
+    await expect.poll(hint).toBe("1");
+
+    const status = page.waitForResponse((r) => new URL(r.url()).pathname === STATUS && r.ok());
+    await page.goto("/?mock=1");
+    await expect(page.locator("article.card").first()).toBeVisible({ timeout: 15_000 });
+    // The yellow bar is the one statement and the one way out: no second band on the board.
+    const bar = page.locator("[data-demo-banner]");
+    await expect(bar).toContainText("These sessions are made up.");
+    await expect(bar.getByRole("link", { name: "Leave the demo" })).toBeVisible();
+    await expect(page.getByText("Leave samples")).toHaveCount(0);
+    await expect(page.getByText(/sample sessions/)).toHaveCount(0);
+    await expect(page.locator(".page.board .notice")).toHaveCount(0);
+    // The receiver behind the demo said the same again, and the made-up board still offers
+    // no setup of it. Only the entry is held back: what the rail remembers is untouched.
+    await status;
+    await expect(page.locator(".rail")).toBeVisible();
+    await expect(page.locator("[data-nav=setup]")).toHaveCount(0);
+    expect(await hint()).toBe("1");
+    await bar.getByRole("link", { name: "Leave the demo" }).click();
+    await expect(page.locator(".rail [data-nav=setup]")).toBeVisible();
   });
 
   test("the status is this machine's: a LAN address is refused on every setup route", async ({ request }) => {
@@ -145,7 +179,7 @@ test.describe("setup on the demo server (TLS off)", () => {
     test("a device that never saw setup is sent from / to /setup once; Skip setup remembers", async ({ page }) => {
       await page.goto("/");
       await expect(page).toHaveURL(/\/setup$/, { timeout: 15_000 });
-      await expect(page.getByRole("heading", { name: "Set up sessionpipe gui" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible();
       expect(await page.evaluate((k) => localStorage.getItem(k), SETUP_SEEN_KEY)).toBe("1");
       // The second visit stays on the board.
       await page.goto("/");
@@ -195,7 +229,7 @@ test.describe("setup at the secure address, reached through this machine's netwo
       expect(status.status()).toBe(200);
       // The key went with the page: the answer holds no key of its own.
       expect(((await status.json()) as { uiKey: string }).uiKey).toBe("");
-      await expect(page.getByRole("heading", { name: "Set up sessionpipe gui" })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible({ timeout: 15_000 });
       const steps = page.locator("li.step");
       await expect(steps).toHaveCount(6);
       await expect(page.getByText("Setup acts on the computer this board runs on")).toHaveCount(0);

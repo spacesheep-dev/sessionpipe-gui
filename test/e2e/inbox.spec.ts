@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, postPrompt, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { openPage, strandedMarks } from "./helpers.js";
+import { openPage, openSessionsUnchosen, strandedMarks } from "./helpers.js";
 
 declare global {
   interface Window {
@@ -130,12 +130,12 @@ test.describe("inbox", () => {
         badge: expect.stringMatching(/^[1-9]\d*$/),
       });
     // The row leaves with the demo's attention.cleared, live, and the title drops its count
-    // once nothing answerable is left.
+    // once no session needs you: nothing is left in the Inbox.
     await expect(page.locator(`.inbox-row[data-attention="${seen!.id}"]`)).toHaveCount(0, { timeout: 20_000 });
     await expect
       .poll(
         async () => {
-          const n = await page.locator(".inbox-row--answerable").count();
+          const n = await page.locator(".inbox-row").count();
           const t = await page.title();
           return n === 0 ? t : `${n} rows: ${t}`;
         },
@@ -146,8 +146,9 @@ test.describe("inbox", () => {
     await expect(page.locator("nav.rail a[data-nav='board'] .nav-badge")).toHaveCount(0);
   });
 
-  test("a row click opens the session beside the page", async ({ page }) => {
+  test("a row click on a computer that has not chosen opens the session beside the page", async ({ page }) => {
     test.setTimeout(90_000);
+    await openSessionsUnchosen(page);
     await openPage(page, "/inbox");
     await expect.poll(() => page.locator(".inbox-row").count(), { timeout: 60_000 }).toBeGreaterThan(0);
     const row = page.locator(".inbox-row").first();
@@ -186,7 +187,7 @@ test.describe("inbox", () => {
     // section (where the header's "Sounds" link goes) shows the same switch.
     expect(await page.evaluate(() => window.__permissionRequests)).toBe(0);
     await (await bell(page)).getByRole("link", { name: "Sounds" }).click();
-    await expect(page).toHaveURL(/\/settings\?section=notifications$/);
+    await expect(page).toHaveURL(/\/inbox\?settings=notifications$/);
     const st = page.locator(".ntf").getByRole("switch", { name: "Notify me" });
     await expect(st).toHaveAttribute("aria-checked", "true");
     await st.click();
@@ -327,7 +328,8 @@ test.describe("inbox: Allow only beside a whole request", () => {
   }) => {
     test.setTimeout(60_000);
     expect(LONG_COMMAND).toHaveLength(140);
-    await seenSetupHere(context);
+    // Open opens the session the way Settings says: beside, where nothing is chosen.
+    await seenSetupHere(context, { mode: "advanced" });
     const key = await passkeyPage(context, page);
     const token = await sinkToken();
     const d = await fakeDaemon(key, { name: `whole-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
@@ -482,6 +484,187 @@ test.describe("inbox: Allow only beside a whole request", () => {
       await beside.clear();
       await long.clear();
       await question.clear();
+      await d.stop();
+    }
+  });
+
+  test("a row that shows Open, peeked beside with Space: a is the panel's, which shows the request whole", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `peek-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    // As Claude Code sends it: its first 120 characters, and the whole in the call's input.
+    const long = await postPrompt(token, {
+      machine: d.name,
+      title: "A long command",
+      agoMs: 3_000,
+      message: LONG_COMMAND.slice(0, 120),
+      input: { command: LONG_COMMAND },
+    });
+    const question = await postPrompt(token, {
+      machine: d.name,
+      title: "A question",
+      agoMs: 4_000,
+      tool: "AskUserQuestion",
+      message: "AskUserQuestion",
+    });
+    const answers = () => d.seen.filter((c) => c.kind === "permission.answer").map((c) => [c.for, c.decision]);
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
+      const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+      await expect(row(long)).toHaveClass(/inbox-row--open/);
+      await row(long).locator(".inbox-main").focus();
+      await expect(row(long)).toHaveAttribute("aria-current", "true");
+      // Not open beside yet: a answers nothing, as before.
+      await page.keyboard.press("a");
+      await page.keyboard.press("Space");
+      const shown = page.locator("aside.panel .panel-body:not(.panel-body--off)");
+      await expect(page.locator("aside.panel .panel-title")).toHaveText("A long command");
+      await expect(shown.locator(".ctl-cmd-block")).toContainText("rsync -avz --delete");
+      await expect(shown.locator(".ctl .btn--allow")).toBeEnabled({ timeout: 15_000 });
+      // The cursor is still on the row and the focus outside the panel.
+      await expect(row(long)).toHaveAttribute("aria-current", "true");
+      expect(await page.evaluate(() => !!document.activeElement?.closest("aside.panel"))).toBe(false);
+      expect(answers()).toEqual([]);
+      // On another row the keys still answer nothing, the panel's prompt included.
+      await row(question).locator(".inbox-main").focus();
+      await expect(row(question)).toHaveAttribute("aria-current", "true");
+      await page.keyboard.press("a");
+      await page.keyboard.press("d");
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
+      // Back on the row that is open beside: a is the panel's.
+      await row(long).locator(".inbox-main").focus();
+      await expect(row(long)).toHaveAttribute("aria-current", "true");
+      await page.keyboard.press("a");
+      await expect.poll(answers, { timeout: 15_000 }).toEqual([[long.attention, "allow"]]);
+    } finally {
+      await long.clear();
+      await question.clear();
+      await d.stop();
+    }
+  });
+});
+
+test.describe("inbox: under Settings", () => {
+  test("with Settings open over the Inbox, a, d, e and Enter act on no row: nothing is answered, hidden or opened", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await seenSetupHere(context, { mode: "advanced" });
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `under-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const p = await postPrompt(token, {
+      machine: d.name,
+      title: "Under Settings",
+      agoMs: 3_000,
+      message: "npm run deploy -- --target staging",
+    });
+    const answers = () => d.seen.filter((c) => c.kind === "permission.answer");
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
+      const row = page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+      await expect(row).toHaveClass(/inbox-row--answerable/, { timeout: 15_000 });
+      await row.locator(".inbox-main").focus();
+      await expect(row).toHaveAttribute("aria-current", "true");
+      await page.locator('[data-nav="settings"]').click();
+      await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+      // With the focus in Settings, and with it nowhere in particular (the body).
+      for (const where of ["settings", "body"]) {
+        if (where === "body") await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        for (const k of ["a", "d", "e", "Enter"]) await page.keyboard.press(k);
+      }
+      await page.waitForTimeout(1_000);
+      expect(answers()).toEqual([]);
+      await expect(page.locator("aside.panel")).not.toHaveClass(/panel--open/);
+      await expect(page).toHaveURL(/\/inbox\?settings/);
+      await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+      // e hides a row by taking it off the list.
+      await expect(row).toBeAttached();
+    } finally {
+      await p.clear();
+      await d.stop();
+    }
+  });
+});
+
+test.describe("inbox: one preview tab", () => {
+  test("row clicks one after another reuse one italic tab; an answer leaves it, typing and a double-click keep it", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    // A row's click opens beside, where nothing is chosen.
+    await seenSetupHere(context, { mode: "advanced" });
+    const key = await passkeyPage(context, page);
+    const token = await sinkToken();
+    const d = await fakeDaemon(key, { name: `preview-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
+    const prompts = await Promise.all(
+      ["First", "Second", "Third", "Fourth", "Fifth"].map((title, i) =>
+        postPrompt(token, {
+          machine: d.name,
+          title: `${title} preview`,
+          agoMs: 3_000 + i * 1_000,
+          message: "npm test",
+        }),
+      ),
+    );
+    const [a, b, c, e, f] = prompts;
+    if (!a || !b || !c || !e || !f) throw new Error("five prompts");
+    const answers = () => d.seen.filter((x) => x.kind === "permission.answer").map((x) => x.for);
+    const panel = page.locator("aside.panel");
+    const tabs = panel.locator("[role='tablist'] [role='tab']");
+    const italic = (l: Locator) => l.evaluate((el) => getComputedStyle(el).fontStyle);
+    const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
+    try {
+      await page.goto(`${CONTROL_BASE}/inbox`);
+      await hideBanners(page);
+      for (const p of [a, b, c]) {
+        await row(p).locator(".inbox-main").click();
+        await expect(panel).toHaveAttribute("data-split", p.key);
+      }
+      // Three clicks, one tab: the preview, in italics. Alone it is the head's title.
+      await expect(tabs).toHaveCount(1);
+      await expect(tabs.first()).toHaveClass(/tab--preview/);
+      await expect(panel.getByRole("heading", { name: "Third preview, preview" })).toBeVisible();
+      expect(await italic(panel.locator(".panel-title"))).toBe("italic");
+      // The head is the window's drag region, where a double-click zooms: it keeps nothing.
+      await panel.locator(".panel-title").dblclick();
+      await expect(tabs.first()).toHaveClass(/tab--preview/);
+      // Triage: an answer in it does not keep it, the next click still takes its place.
+      const body = panel.locator(".panel-body:not(.panel-body--off)");
+      await body.locator(".ctl .btn--allow").click();
+      await expect.poll(answers, { timeout: 15_000 }).toEqual([c.attention]);
+      await row(e).locator(".inbox-main").click();
+      await expect(panel).toHaveAttribute("data-split", e.key);
+      await expect(tabs).toHaveCount(1);
+      // Typing in its message field keeps it: upright, and the next click adds a tab.
+      await body.locator(".ctl textarea").fill("Run the tests again");
+      await expect(tabs.first()).not.toHaveClass(/tab--preview/);
+      expect(await italic(panel.locator(".panel-title"))).toBe("normal");
+      await expect(panel.getByRole("heading", { name: "Fourth preview", exact: true })).toBeVisible();
+      await row(f).locator(".inbox-main").click();
+      await expect(tabs).toHaveCount(2);
+      await expect(tabs.nth(1)).toHaveClass(/tab--preview/);
+      await expect(tabs.nth(1)).toHaveAccessibleName("Fifth preview, preview");
+      await expect(tabs.nth(0)).toHaveAccessibleName("Fourth preview");
+      expect(await italic(tabs.nth(1).locator(".tab-title"))).toBe("italic");
+      expect(await italic(tabs.nth(0).locator(".tab-title"))).toBe("normal");
+      // A double-click on the tab keeps it.
+      await tabs.nth(1).dblclick();
+      await expect(tabs.nth(1)).not.toHaveClass(/tab--preview/);
+      await row(a).locator(".inbox-main").click();
+      await expect(tabs).toHaveCount(3);
+    } finally {
+      for (const p of prompts) await p.clear();
       await d.stop();
     }
   });

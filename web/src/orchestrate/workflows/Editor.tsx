@@ -29,6 +29,7 @@ import { fixedLine, fixedPermission, permissionChoices } from "../../control/new
 import { PERMISSION_LABEL } from "../../control/words";
 import { useAppState, useListedSessions, useMachines } from "../../data/hooks";
 import "../../lib/acp";
+import { usePhoneLayout } from "../../lib/device";
 import { sessionTitle } from "../../lib/format";
 import { Link, navigate, useSearchParam } from "../../lib/router";
 import { actionById, useShortcut } from "../../lib/shortcuts";
@@ -67,7 +68,6 @@ import {
 } from "./words";
 
 const SAVE_AFTER_MS = 600;
-const PHONE = "(max-width: 839px)";
 
 type SaveState = "saved" | "saving" | "unsaved" | { error: string };
 
@@ -127,17 +127,6 @@ function EditorBody({ id }: { id: string }) {
   return <EditorForm doc={doc} setDoc={setDoc} everSaved={!!saved} runs={runs.filter((r) => r.workflowId === id)} />;
 }
 
-function usePhone(): boolean {
-  const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(PHONE).matches);
-  useEffect(() => {
-    const mq = matchMedia(PHONE);
-    const up = () => setOn(mq.matches);
-    mq.addEventListener("change", up);
-    return () => mq.removeEventListener("change", up);
-  }, []);
-  return on;
-}
-
 function EditorForm({
   doc,
   setDoc,
@@ -149,7 +138,7 @@ function EditorForm({
   everSaved: boolean;
   runs: WorkflowRun[];
 }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const machines = useMachines();
   const { sessions } = useAppState();
   const now = useNow("coarse");

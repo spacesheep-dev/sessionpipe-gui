@@ -4,11 +4,14 @@
 // Forget asks first, whether a session opens beside the page or as the page, the tier
 // lens the whole app looks through (`null` = everything), and whether the sidebar shows
 // what each account has left. The appearance, the color theme and the text size stay in
-// lib/theme.ts (the appearance popover). Reading is tolerant: an unknown or malformed
-// field falls back to its default, so a build may add fields.
+// lib/theme.ts (the appearance popover). Only what the person set is stored, so a default
+// can change under a device that never chose (as NSUserDefaults registers defaults).
+// Reading is tolerant: an unknown or malformed field falls back to its default, so a
+// build may add fields, and a field a newer build wrote is kept.
 
 import type { Tier } from "@shared/api";
 import { useSyncExternalStore } from "react";
+import { phoneLayout } from "./device";
 
 export type Mode = "simple" | "advanced";
 export type DefaultPage = "/" | "/inbox" | "/feed" | "/review" | "/machines";
@@ -39,49 +42,78 @@ export const LENSES: readonly Lens[] = [null, 0, 1, 2, 3];
 const listeners = new Set<() => void>();
 
 /** Simple is the default for every device until it chooses otherwise in Settings › General;
- *  only that explicit choice persists Advanced. */
-const defaults = (): AppSettings => ({
+ *  only that explicit choice persists Advanced. A session opens beside the page on a
+ *  computer and as its page on the phone, until the device chooses. */
+const defaults = (phone: boolean): AppSettings => ({
   mode: "simple",
   defaultPage: "/",
   confirmForget: true,
-  openSessions: "page",
+  openSessions: phone ? "page" : "beside",
   tierLens: null,
   usageInSidebar: true,
 });
 
 const isLens = (v: unknown): v is Lens => v === null || v === 0 || v === 1 || v === 2 || v === 3;
 
-function read(): AppSettings {
-  const d = defaults();
+/** The stored form's version. Before 2 every save wrote every field. */
+const VERSION = 2;
+type Stored = Partial<Record<keyof AppSettings, unknown>> & { v?: unknown };
+
+/** What the device has set, as stored. Once, on the way to version 2, a stored
+ *  openSessions "page" goes: it was the default, which every save wrote, not a choice. */
+function load(): Stored {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return d;
-    const p = JSON.parse(raw) as Partial<Record<keyof AppSettings, unknown>>;
-    return {
-      mode: p.mode === "simple" || p.mode === "advanced" ? p.mode : d.mode,
-      defaultPage: DEFAULT_PAGES.some((o) => o.value === p.defaultPage)
-        ? (p.defaultPage as DefaultPage)
-        : d.defaultPage,
-      confirmForget: typeof p.confirmForget === "boolean" ? p.confirmForget : d.confirmForget,
-      openSessions: p.openSessions === "beside" || p.openSessions === "page" ? p.openSessions : d.openSessions,
-      tierLens: isLens(p.tierLens) ? p.tierLens : d.tierLens,
-      usageInSidebar: typeof p.usageInSidebar === "boolean" ? p.usageInSidebar : d.usageInSidebar,
-    };
+    if (!raw) return {};
+    const p = JSON.parse(raw) as unknown;
+    if (!p || typeof p !== "object" || Array.isArray(p)) return {};
+    const stored = p as Stored;
+    if (stored.v !== VERSION) {
+      if (stored.openSessions === "page") delete stored.openSessions;
+      stored.v = VERSION;
+      try {
+        localStorage.setItem(KEY, JSON.stringify(stored));
+      } catch {
+        // the next save writes it
+      }
+    }
+    return stored;
   } catch {
-    return d;
+    return {};
   }
 }
 
-let settings: AppSettings = read();
-
-export function getSettings(): AppSettings {
-  return settings;
+function resolve(p: Stored, d: AppSettings): AppSettings {
+  return {
+    mode: p.mode === "simple" || p.mode === "advanced" ? p.mode : d.mode,
+    defaultPage: DEFAULT_PAGES.some((o) => o.value === p.defaultPage) ? (p.defaultPage as DefaultPage) : d.defaultPage,
+    confirmForget: typeof p.confirmForget === "boolean" ? p.confirmForget : d.confirmForget,
+    openSessions: p.openSessions === "beside" || p.openSessions === "page" ? p.openSessions : d.openSessions,
+    tierLens: isLens(p.tierLens) ? p.tierLens : d.tierLens,
+    usageInSidebar: typeof p.usageInSidebar === "boolean" ? p.usageInSidebar : d.usageInSidebar,
+  };
 }
 
+let stored: Stored = load();
+/** The settings as read, for the layout they were read in; `phone` is null once the device
+ *  has chosen how sessions open, the one default the layout decides. */
+let cache: { s: AppSettings; phone: boolean | null } | null = null;
+
+export function getSettings(): AppSettings {
+  if (cache && (cache.phone === null || cache.phone === phoneLayout())) return cache.s;
+  const chosen = stored.openSessions === "beside" || stored.openSessions === "page";
+  const phone = !chosen && phoneLayout();
+  cache = { s: resolve(stored, defaults(phone)), phone: chosen ? null : phone };
+  return cache.s;
+}
+
+/** Sets the fields in `patch` and stores what the device has set: never a default it did
+ *  not choose. */
 export function setSettings(patch: Partial<AppSettings>): void {
-  settings = { ...settings, ...patch };
+  stored = { ...stored, ...patch, v: VERSION };
+  cache = null;
   try {
-    localStorage.setItem(KEY, JSON.stringify(settings));
+    localStorage.setItem(KEY, JSON.stringify(stored));
   } catch {
     // private mode or blocked storage: the choice lasts for this page only
   }
@@ -93,6 +125,7 @@ export const setTierLens = (tierLens: Lens) => setSettings({ tierLens });
 
 /** The next lens along: all → 0 → 1 → 2 → 3 → all. Nothing in Simple mode (the lens is off there). */
 export function cycleLens(): Lens {
+  const settings = getSettings();
   if (settings.mode === "simple") return null;
   const i = LENSES.indexOf(settings.tierLens);
   const next = LENSES[(i + 1) % LENSES.length] ?? null;
@@ -116,7 +149,7 @@ export const useMode = (): Mode => useAppSettings().mode;
 export const useSimple = (): boolean => useAppSettings().mode === "simple";
 
 /** The lens the pages apply: the setting, except in Simple mode, where everything shows. */
-export const effectiveLens = (s: AppSettings = settings): Lens => (s.mode === "simple" ? null : s.tierLens);
+export const effectiveLens = (s: AppSettings = getSettings()): Lens => (s.mode === "simple" ? null : s.tierLens);
 export const useLens = (): Lens => effectiveLens(useAppSettings());
 
 /** "lens · all" / "lens · 2". */

@@ -2,7 +2,7 @@
 // Owned by: search-ui. The page's words: the result line, dates, a row's three facts.
 import type { SessionMatch } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { metaFacts, resultLine, shortDate, spanCoarse, statusWords, tildeFold } from "./words";
+import { metaFacts, resultLine, shortDate, spanCoarse, statusWords, tildeFold, toolLead, toolText } from "./words";
 
 const match = (o: Partial<SessionMatch>): SessionMatch => ({
   key: "codex:1",
@@ -65,5 +65,50 @@ describe("words", () => {
     expect(statusWords(left)).toBe(
       "History search is off, but its index could not be deleted. Restarting the app on that computer tries again.",
     );
+  });
+  it("draws a tool line under its verb: the leading name goes, by the tool's own name or its word, the marks with it", () => {
+    // files.changed is indexed as "Changed <paths>": the word, not the event's name.
+    expect(toolText({ tool: "files.changed", text: "Changed src/x.ts", marks: [[8, 12]] })).toEqual({
+      text: "src/x.ts",
+      marks: [[0, 4]],
+    });
+    expect(
+      toolText({
+        tool: "Edit",
+        text: "Edit ~/code/a.ts",
+        marks: [
+          [0, 4],
+          [12, 13],
+        ],
+      }),
+    ).toEqual({
+      text: "~/code/a.ts",
+      marks: [[7, 8]],
+    });
+    // A window cut at its start keeps its ellipsis.
+    expect(
+      toolText({
+        tool: "files.changed",
+        text: "…Changed a.ts b.ts",
+        marks: [
+          [0, 1],
+          [9, 13],
+        ],
+      }),
+    ).toEqual({
+      text: "…a.ts b.ts",
+      marks: [
+        [0, 1],
+        [1, 5],
+      ],
+    });
+    // Neither at the start: as it came.
+    expect(toolText({ tool: "files.changed", text: "src/x.ts", marks: [[0, 3]] })).toEqual({
+      text: "src/x.ts",
+      marks: [[0, 3]],
+    });
+    expect(toolLead("Changed src/x.ts", "files.changed")).toBe(8);
+    expect(toolLead("Bash ls", "Bash")).toBe(5);
+    expect(toolLead("Bash ls", undefined)).toBe(0);
   });
 });

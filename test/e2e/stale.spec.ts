@@ -15,7 +15,7 @@ import path from "node:path";
 import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { E2E_PORT } from "../../playwright.config.js";
 import { CONTROL_BASE, fakeDaemon, passkeyPage, seenSetupHere, sinkToken } from "./control-helpers.js";
-import { composer, EVENTS, INFO, sessionUrl, ulid } from "./helpers.js";
+import { composer, EVENTS, holdBoard, INFO, sessionUrl, ulid } from "./helpers.js";
 
 /** localhost, where the composer is live (the page's origin is one sending works from). */
 const BASE = `http://localhost:${E2E_PORT}`;
@@ -29,7 +29,7 @@ const SIZES = {
 
 declare global {
   interface Window {
-    __streams: { cut(): void; mute(): void; say(frame: unknown): void };
+    __streams: { cut(): void; mute(): void; say(frame: unknown): void; blip(ms: number): void };
     __firstPage?: (detail: { session: unknown; events: Record<string, unknown>[] }) => void;
   }
 }
@@ -38,8 +38,10 @@ declare global {
  *  connections and leaves an open EventSource open, so a dropped one is said the way a
  *  dead socket says it (`cut`: closed, its error handler called), and one that is open in
  *  name only by its frames no longer arriving (`mute`: the streams open now, for good; one
- *  opened afterwards hears everything). `say` is a frame arriving. A page that sets
- *  `__firstPage` is called with a session's first page in the task after it was read. */
+ *  opened afterwards hears everything). `say` is a frame arriving, and `blip` a drop that
+ *  is over `ms` later: the streams cut, then the last snapshot heard arriving again, as a
+ *  reconnect that lands at once would bring it. A page that sets `__firstPage` is called
+ *  with a session's first page in the task after it was read. */
 async function tapStreams(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {
     type Stream = EventTarget & { close(): void; onerror: ((e: Event) => void) | null };
@@ -47,6 +49,7 @@ async function tapStreams(context: BrowserContext): Promise<void> {
     const live = new Set<Stream>();
     const deaf = new WeakSet<Stream>();
     const heard = new Map<string, (e: Event) => void>();
+    let snapshot: string | null = null;
     class Tapped extends Real {
       constructor(url: string | URL, init?: EventSourceInit) {
         super(url, init);
@@ -58,7 +61,15 @@ async function tapStreams(context: BrowserContext): Promise<void> {
         o?: boolean | AddEventListenerOptions,
       ) {
         if (typeof fn === "function") heard.set(kind, fn);
-        super.addEventListener(kind, (e) => (deaf.has(this) || typeof fn !== "function" ? undefined : fn(e)), o);
+        super.addEventListener(
+          kind,
+          (e) => {
+            if (deaf.has(this) || typeof fn !== "function") return;
+            if (kind === "snapshot") snapshot = (e as MessageEvent<string>).data;
+            fn(e);
+          },
+          o,
+        );
       }
       close() {
         live.delete(this);
@@ -79,6 +90,10 @@ async function tapStreams(context: BrowserContext): Promise<void> {
       say(frame: unknown) {
         const { kind } = frame as { kind: string };
         heard.get(kind)?.(new MessageEvent(kind, { data: JSON.stringify(frame) }));
+      },
+      blip(ms: number) {
+        this.cut();
+        setTimeout(() => heard.get("snapshot")?.(new MessageEvent("snapshot", { data: snapshot })), ms);
       },
     };
     const fetched = window.fetch.bind(window);
@@ -190,6 +205,16 @@ const box = composer;
 const stop = (page: Page) => page.getByRole("button", { name: "Stop the turn" });
 const send = (page: Page) => page.locator(".ctl-send");
 const reply = (page: Page) => page.locator(".page.session li.reply").last();
+/** The dropped stream as the page bar says it, and its Retry: the one on the page. */
+const barConn = (page: Page) => page.locator(".bar .bar-conn");
+const retry = (page: Page) => page.getByRole("button", { name: "Retry", exact: true });
+/** The sidebar's foot is a dot: a drop puts no words and no button there. */
+async function footIsADot(page: Page): Promise<void> {
+  await expect(page.locator(".rail .conn-retry")).toHaveCount(0);
+  await expect(page.locator(".rail .conn-label")).toHaveCount(0);
+  await expect(page.locator(".rail .conn")).toHaveText("");
+  await expect(page.locator(".rail .conn button")).toHaveCount(0);
+}
 /** The device goes offline, and the stream with it. */
 async function offline(context: BrowserContext, page: Page): Promise<void> {
   await context.setOffline(true);
@@ -337,8 +362,13 @@ test.describe("a session page across a dropped stream", () => {
     });
 
     await offline(context, page);
-    await expect(page.locator(".conn").first()).toContainText("Offline");
-    await expect(page.locator(".conn").getByRole("button", { name: "Retry now" })).toBeVisible();
+    // Said once, in the page bar, in the place of the session's machine and repo.
+    await expect(barConn(page)).toContainText("Offline");
+    await expect(barConn(page).getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+    await expect(retry(page)).toHaveCount(1);
+    await expect(page.locator(".bar .bar-meta")).toHaveCount(0);
+    await expect(page.locator(".rail .conn")).toHaveAttribute("data-tip", "Offline");
+    await footIsADot(page);
     // Nothing is offered as if connected, and the draft is still there.
     await expect(box(page)).toBeDisabled();
     await expect(box(page)).toHaveValue(DRAFT);
@@ -364,6 +394,8 @@ test.describe("a session page across a dropped stream", () => {
     await context.setOffline(false);
     await up(page);
     await live(page);
+    await expect(barConn(page)).toHaveCount(0);
+    await expect(page.locator(".bar .bar-meta")).toHaveCount(1);
     await expect(ring(page)).toHaveClass(/dot--idle/);
     await expect(page.locator(".page.session .turn--live")).toHaveCount(0);
     await expect(page.locator(".page.session .tool-status.is-run")).toHaveCount(0);
@@ -431,10 +463,17 @@ test.describe("a session page across a dropped stream", () => {
     await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
     await page.evaluate(() => window.__streams.cut());
     await down(page);
-    await expect(page.locator(".conn").first()).toContainText("Reconnecting");
+    await expect(barConn(page)).toContainText("Reconnecting…");
+    await expect(retry(page)).toHaveCount(1);
+    await footIsADot(page);
     await expect(box(page)).toBeDisabled();
     await expect(send(page)).toBeDisabled();
     await expect(ring(page)).toHaveClass(/dot--idle/);
+    // The bar's Retry asks at once, however long the backoff has grown.
+    const again = page.waitForRequest((r) => r.url().includes("/api/ui/stream"), { timeout: 700 });
+    await barConn(page).getByRole("button", { name: "Retry", exact: true }).click();
+    await again;
+    await expect(barConn(page)).toContainText("Reconnecting…");
 
     // A whole turn happens meanwhile; one of its tools is recorded after its Stop.
     const ask = "Write the release notes for 0.7.6";
@@ -459,12 +498,13 @@ test.describe("a session page across a dropped stream", () => {
     await expect(page.locator(".page.session .turn")).toHaveCount(1);
     expect(asked.n).toBe(1);
 
-    // The receiver is back. Retry now asks at once; the transport's own backoff may get
+    // The receiver is back. Retry asks at once; the transport's own backoff may get
     // there first, and then there is no button left to press.
     await page.unroute("**/api/ui/stream");
-    await page.evaluate(() => document.querySelector<HTMLButtonElement>(".conn .conn-retry")?.click());
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>(".bar-conn button")?.click());
     await up(page);
     await live(page);
+    await expect(barConn(page)).toHaveCount(0);
     await expect(reply(page)).toContainText("docs/release-0.7.6.md");
     await expect(page.locator(".page.session .turn")).toHaveCount(2);
     await expect(ring(page)).toHaveClass(/dot--idle/);
@@ -473,6 +513,101 @@ test.describe("a session page across a dropped stream", () => {
     await expect(stop(page)).toHaveCount(0);
     await expect(box(page)).toHaveValue("next: the release notes");
     expect(asked.n).toBe(2);
+  });
+
+  test("in a column too narrow for its title and the bar's words, the title gives way: nothing is drawn over the bar's buttons, nothing is shown in part, and the bar keeps its height", async ({
+    context,
+    page,
+  }) => {
+    await tapStreams(context);
+    const token = await demoToken();
+    const s = new Feed(
+      BASE,
+      token,
+      "lab-mac",
+      "Make the webhook sender retry with backoff and say which attempt failed",
+    );
+    const beside = new Feed(BASE, token, "lab-mac", "Short one");
+    for (const f of [s, beside])
+      await f.post(f.ev("session.started", { source: "startup" }, "SessionStart"), ...f.turn(0, "Check it", "Done."));
+    // A session beside the page, in a window half a laptop's screen wide.
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await page.goto(`${s.url}?s=${encodeURIComponent(`claude-code:${beside.id}`)}`);
+    await live(page);
+    await expect(page.locator(".panel")).toBeVisible();
+    const bar = page.locator(".main .sess-bar");
+    const title = bar.locator(".bar-title");
+    const conn = bar.locator(".bar-conn");
+    const words = conn.locator(".bar-conn-label");
+    const actions = bar.locator(".bar-actions");
+    const edges = (el: Locator) =>
+      el.evaluate((e) => {
+        const b = e.getBoundingClientRect();
+        return { left: b.left, right: b.right, wide: Math.round(b.width), tall: Math.round(b.height) };
+      });
+    /** Whether the element's text is cut (an ellipsis stands in for some of it). */
+    const cut = (el: Locator) => el.evaluate((e) => e.scrollWidth > e.clientWidth);
+    /** The status ends before the bar's own buttons begin, and the bar is one row. */
+    const clear = async () => {
+      expect((await edges(conn)).right).toBeLessThanOrEqual((await edges(actions)).left);
+      expect((await edges(bar)).tall, "the bar is as tall as it was").toBe(before.bar.tall);
+    };
+    await expect(bar.locator(".bar-meta")).toBeVisible();
+    const before = { bar: await edges(bar), title: await edges(title) };
+    const cutStream = async () => {
+      await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+      await page.evaluate(() => window.__streams.cut());
+      await down(page);
+      await expect(conn).toBeVisible();
+    };
+    const back = async () => {
+      await page.unroute("**/api/ui/stream");
+      await page.evaluate(() => document.querySelector<HTMLButtonElement>(".bar-conn button")?.click());
+      await up(page);
+      await expect(conn).toHaveCount(0);
+    };
+
+    await cutStream();
+    // The words and Retry are whole and end before the bar's own buttons; the title made the room.
+    await expect(words).toHaveText("Reconnecting…");
+    expect(await cut(words), "the words are whole").toBe(false);
+    await expect(retry(page)).toBeVisible();
+    expect((await edges(conn.getByRole("button"))).right).toBeLessThanOrEqual((await edges(actions)).left);
+    await clear();
+    const narrowed = (await edges(title)).wide;
+    expect(narrowed).toBeLessThan(before.title.wide);
+    expect(narrowed).toBeGreaterThan(40);
+
+    // The narrowest window a mouse has: what is left for the title is less than its glyph
+    // and a letter, so it steps aside whole. The words and Retry are still whole.
+    await page.setViewportSize({ width: 845, height: 800 });
+    await expect.poll(async () => (await edges(title)).wide).toBe(0);
+    expect(await cut(words)).toBe(false);
+    await expect(retry(page)).toBeVisible();
+    await clear();
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await back();
+    await expect(bar.locator(".bar-meta")).toBeVisible();
+    expect((await edges(title)).wide).toBe(before.title.wide);
+
+    // The Files drawer open too, in a laptop's window: the column has no room for Retry,
+    // nor for a syllable of the words. The dot stands alone, and nothing lands on the buttons.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await bar.getByRole("button", { name: "Files" }).click();
+    await expect(page.locator(".page.session > .files")).toBeVisible();
+    await expect.poll(async () => (await edges(bar)).wide).toBeLessThan(200);
+    await cutStream();
+    await expect(conn.locator(".conn-dot")).toBeVisible();
+    await expect(conn.getByRole("button")).toHaveCount(0);
+    await expect(words).toBeHidden();
+    await clear();
+    // Room again: the words and Retry are back while it is still down.
+    await bar.getByRole("button", { name: "Files" }).click();
+    await expect(retry(page)).toBeVisible();
+    await expect(words).toBeVisible();
+    expect(await cut(words)).toBe(false);
+    await clear();
+    await back();
   });
 
   test("a stream open in name only: out of the back/forward cache, awake again, shown after a long time, the page asks", async ({
@@ -551,8 +686,14 @@ test.describe("a message across a dropped stream", () => {
     await box(page).fill("then tag the release");
 
     await offline(context, page);
+    // No prompt is open: the line under the field says what follows here, once, and holds
+    // no action (the state and its Retry are the bar's).
     const foot = page.locator(".ctl-foot[data-reason=stream]");
-    await expect(foot.locator(".ctl-hint")).toHaveText("Offline. Sending waits for the connection.");
+    await expect(foot.locator(".ctl-hint")).toHaveText("You can send once the connection is back.");
+    await expect(foot.locator("button, a")).toHaveCount(0);
+    await expect(page.getByText("connection is back")).toHaveCount(1);
+    await expect(barConn(page)).toContainText("Offline");
+    await expect(retry(page)).toHaveCount(1);
     await expect(box(page)).toBeDisabled();
     await expect(box(page)).toHaveValue("then tag the release");
     await expect(send(page)).toBeDisabled();
@@ -574,10 +715,297 @@ test.describe("a message across a dropped stream", () => {
   });
 });
 
+test.describe("a prompt across a dropped stream", () => {
+  test.use({ baseURL: CONTROL_BASE });
+
+  test("a blip changes nothing; a drop is said once: the bar's words and Retry, one sentence on the card, and nothing offered that would be refused", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    await tapStreams(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(key, {
+      name: `ask-${randomUUID().slice(0, 6)}`,
+      harnesses: ["claude-code", "codex"],
+      ask: true,
+      handoff: true,
+    });
+    const s = await askingSession(new Feed(CONTROL_BASE, await sinkToken(), d.name, "Deploy the webhook fix"));
+    await page.goto(`${CONTROL_BASE}${s.url}`);
+    await live(page);
+    const card = page.locator('.ctl-answer[data-attention="att_deploy"]');
+    const allow = card.locator(".btn--allow");
+    const deny = card.locator(".btn--deny");
+    const note = card.locator(".ctl-answer-note");
+    const ask = page.locator("[data-ctl-ask]");
+    await expect(allow).toBeEnabled();
+    await expect(deny).toBeEnabled();
+    await expect(box(page)).toBeEnabled();
+    await expect(ask).toBeVisible();
+
+    // A drop that is over in 200 ms: nothing is said and nothing turns off, at any moment.
+    await page.evaluate(() => {
+      const seen = new Set<string>();
+      (window as unknown as { __seen: Set<string> }).__seen = seen;
+      const look = () => {
+        if (document.querySelector(".bar-conn")) seen.add("the bar says it");
+        if (document.querySelector(".ctl-foot[data-reason=stream], .ctl-answer-note")) seen.add("the strip says it");
+        if (!document.querySelector("[data-ctl-ask]")) seen.add("Ask another agent went");
+        if (document.querySelector<HTMLButtonElement>(".ctl .btn--allow")?.disabled) seen.add("Allow is off");
+        if (document.querySelector<HTMLTextAreaElement>(".ctl-ask textarea")?.disabled) seen.add("the field is off");
+        if (document.documentElement.dataset.stream) seen.add("the page is marked down");
+      };
+      new MutationObserver(look).observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        characterData: true,
+      });
+      window.__streams.blip(200);
+    });
+    // The blip, the grace it stayed inside, and the transport's own reopen a second later.
+    await page.waitForTimeout(1500);
+    expect(await page.evaluate(() => [...(window as unknown as { __seen: Set<string> }).__seen])).toEqual([]);
+    await expect(page.locator("[data-conn-announcer]")).toHaveText("");
+
+    // The receiver stops answering.
+    await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+    await page.evaluate(() => window.__streams.cut());
+    await down(page);
+    // The bar says which state it is and holds the one Retry.
+    await expect(barConn(page)).toContainText("Reconnecting…");
+    await expect(retry(page)).toHaveCount(1);
+    await footIsADot(page);
+    // The card says what follows from it, once; Allow and Deny wait and are described by it.
+    await expect(note).toHaveText("You can answer once the connection is back.");
+    await expect(page.getByText("connection is back")).toHaveCount(1);
+    const noteId = (await note.getAttribute("id"))!;
+    await expect(allow).toBeDisabled();
+    await expect(deny).toBeDisabled();
+    await expect(allow).toHaveAttribute("aria-describedby", noteId);
+    await expect(deny).toHaveAttribute("aria-describedby", noteId);
+    // Nothing under the field repeats it, and nothing is offered that would only be refused.
+    await expect(page.locator(".ctl-foot[data-reason=stream]")).toHaveCount(0);
+    await expect(page.locator(".ctl-foot")).toHaveCount(0);
+    await expect(ask).toHaveCount(0);
+    await expect(box(page)).toBeDisabled();
+    // The session's menu says the same of its Allow.
+    await page.locator(".sess-bar").getByRole("button", { name: "More actions" }).click();
+    const item = page.getByRole("menuitem", { name: /^Allow/ });
+    await expect(item).toHaveAttribute("aria-disabled", "true");
+    await expect(item).toHaveAttribute("aria-description", "You can answer once the connection is back.");
+    await page.keyboard.press("Escape");
+
+    // Back: the card is the prompt's again, and so is everything under it.
+    await page.unroute("**/api/ui/stream");
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>(".bar-conn button")?.click());
+    await up(page);
+    await expect(barConn(page)).toHaveCount(0);
+    await expect(note).toHaveCount(0);
+    await expect(allow).toBeEnabled();
+    await expect(deny).toBeEnabled();
+    await expect(box(page)).toBeEnabled();
+    await expect(ask).toBeVisible();
+    await d.stop();
+  });
+
+  test("Ask another agent, open when the stream drops, waits for it and says so", async ({ context, page }) => {
+    await seenSetupHere(context);
+    await tapStreams(context);
+    const key = await passkeyPage(context, page);
+    // A machine that asks, with a folder a new session may start in.
+    const d = await fakeDaemon(key, {
+      name: `ask-${randomUUID().slice(0, 6)}`,
+      harnesses: ["claude-code", "codex"],
+      folders: ["/Users/e2e/code"],
+      mode: "auto",
+      ask: true,
+      handoff: true,
+    });
+    const s = new Feed(CONTROL_BASE, await sinkToken(), d.name, "Check the refund rounding");
+    await s.post(
+      s.ev("session.started", { source: "startup" }, "SessionStart"),
+      ...s.turn(0, "Check the rounding", "It floors."),
+    );
+    await page.goto(`${CONTROL_BASE}${s.url}`);
+    await live(page);
+    await page.locator("[data-ctl-ask]").click();
+    const sheet = page.getByRole("dialog", { name: "Ask another agent" });
+    await expect(sheet).toBeVisible();
+    await sheet.locator("[data-hs-text]").fill("Is flooring right here?");
+    const start = sheet.locator(".ns-start");
+    await expect(start).toBeEnabled();
+    await expect(sheet.locator(".ns-status")).toHaveText(`${d.name} is listening.`);
+
+    await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+    await page.evaluate(() => window.__streams.cut());
+    await down(page);
+    await expect(start).toBeDisabled();
+    await expect(sheet.locator(".ns-status")).toHaveText("You can ask once the connection is back.");
+
+    await page.unroute("**/api/ui/stream");
+    await up(page);
+    await expect(start).toBeEnabled();
+    await expect(sheet.locator(".ns-status")).toHaveText(`${d.name} is listening.`);
+    await d.stop();
+  });
+
+  test("with no prompt open, the sentence stands where Ask another agent… stood, and the field holds still", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    await tapStreams(context);
+    const key = await passkeyPage(context, page);
+    const d = await fakeDaemon(key, {
+      name: `ask-${randomUUID().slice(0, 6)}`,
+      harnesses: ["claude-code", "codex"],
+      ask: true,
+      handoff: true,
+    });
+    const s = new Feed(CONTROL_BASE, await sinkToken(), d.name, "Check the refund rounding");
+    await s.post(
+      s.ev("session.started", { source: "startup" }, "SessionStart"),
+      ...s.turn(0, "Check the rounding", "It floors."),
+    );
+    await page.goto(`${CONTROL_BASE}${s.url}`);
+    await live(page);
+    const ask = page.locator("[data-ctl-ask]");
+    const foot = page.locator(".ctl-foot");
+    await expect(ask).toBeVisible();
+    await expect(box(page)).toBeEnabled();
+    const at = async () => {
+      const field = (await box(page).boundingBox())!;
+      const line = (await foot.boundingBox())!;
+      return { field: Math.round(field.y), line: Math.round(line.height) };
+    };
+    const before = await at();
+
+    await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+    await page.evaluate(() => window.__streams.cut());
+    await down(page);
+    await expect(foot.locator(".ctl-hint")).toHaveText("You can send once the connection is back.");
+    await expect(ask).toHaveCount(0);
+    await expect(foot.locator("button, a")).toHaveCount(0);
+    expect(await at()).toEqual(before);
+
+    await page.unroute("**/api/ui/stream");
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>(".bar-conn button")?.click());
+    await up(page);
+    await expect(ask).toBeVisible();
+    await expect(page.locator(".ctl-foot[data-reason=stream]")).toHaveCount(0);
+    expect(await at()).toEqual(before);
+    await d.stop();
+  });
+});
+
+test.describe("the board across a dropped stream", () => {
+  test("the rows and the line for an offline machine keep their place and go quiet together", async ({
+    context,
+    page,
+  }) => {
+    await seenSetupHere(context);
+    await tapStreams(context);
+    const key = await passkeyPage(context, page);
+    // A paired machine that stopped polling, with a turn running on it: the board's quiet line.
+    const d = await fakeDaemon(
+      key,
+      { name: `gone-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] },
+      { offline: true },
+    );
+    const s = new Feed(CONTROL_BASE, await sinkToken(), d.name, "Run the suite", 20_000);
+    await s.post(
+      s.ev("session.started", { source: "startup" }, "SessionStart"),
+      s.ev("turn.started", { turn_id: "p0", prompt_chars: 20, submitted_by: "user" }, "UserPromptSubmit"),
+      s.ev("turn.progress", { turn: 0, user: "Run the whole suite.", assistant: "" }, "UserPromptSubmit"),
+    );
+    await page.goto(`${CONTROL_BASE}/`);
+    await live(page);
+    const line = page.locator(".offline-line");
+    const words = line.locator(".offline-line-text");
+    const row = page.locator("article.card").first();
+    await expect(line).toBeVisible();
+    await expect(row).toBeVisible();
+    // Held still under the pointer, as a board being read is (other tests' sessions land
+    // here too), and read once its rows have settled in.
+    await holdBoard(page);
+    await page.locator(".board-list").evaluate((list) =>
+      Promise.all(
+        list
+          .getAnimations({ subtree: true })
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Number.POSITIVE_INFINITY)
+          .map((a) => a.finished.catch(() => null)),
+      ).then(() => null),
+    );
+    const at = async () => ({
+      line: Math.round((await line.boundingBox())!.y),
+      row: Math.round((await row.boundingBox())!.y),
+    });
+    const before = await at();
+    const lit = await words.evaluate((el) => getComputedStyle(el).color);
+
+    await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+    await page.evaluate(() => window.__streams.cut());
+    await down(page);
+    await expect(page.locator(".page.board")).toHaveClass(/board--down/);
+    await expect(barConn(page)).toContainText("Reconnecting…");
+    // The line is the last thing known, like the rows: still there, in their quiet tier.
+    await expect(line).toBeVisible();
+    const quiet = await row.locator(".card-title").evaluate((el) => getComputedStyle(el).color);
+    expect(quiet).not.toBe(lit);
+    await expect(words).toHaveCSS("color", quiet);
+    expect(await at()).toEqual(before);
+
+    await page.unroute("**/api/ui/stream");
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>(".bar-conn button")?.click());
+    await up(page);
+    await expect(words).toHaveCSS("color", lit);
+    expect(await at()).toEqual(before);
+    await d.stop();
+  });
+
+  test("in a window too tight for the bar's words and its tools, the search gives them its room and the bar keeps its height", async ({
+    context,
+    page,
+  }) => {
+    await tapStreams(context);
+    // A window near its narrowest: the compact rail, and a bar whose search and filters fill its row.
+    await page.setViewportSize({ width: 760, height: 800 });
+    await page.goto(`${BASE}/`);
+    await live(page);
+    await expect(page.locator("section.group").first()).toBeVisible();
+    const bar = page.locator(".page.board > .bar");
+    const search = bar.locator(".bar-tools > .search");
+    await expect(bar.locator(".bar-tools .lens-chip")).toBeVisible();
+    await expect(bar.locator(".bar-tools .filter-btn")).toBeVisible();
+    const tall = async () => Math.round((await bar.boundingBox())!.height);
+    const wide = async () => Math.round((await search.boundingBox())!.width);
+    const before = { tall: await tall(), wide: await wide() };
+
+    await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+    await page.evaluate(() => window.__streams.cut());
+    await down(page);
+    await expect(barConn(page)).toBeVisible();
+    await expect(barConn(page)).toContainText("Reconnecting…");
+    expect(await tall(), "the bar is as tall as it was").toBe(before.tall);
+    expect(await wide(), "the search made the room").toBeLessThan(before.wide);
+    // Still a field: its glyph, and room to type once it has the focus.
+    expect(await wide()).toBeGreaterThanOrEqual(54);
+
+    await page.unroute("**/api/ui/stream");
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>(".bar-conn button")?.click());
+    await up(page);
+    await expect(barConn(page)).toHaveCount(0);
+    expect(await tall()).toBe(before.tall);
+    await expect.poll(wide).toBe(before.wide);
+  });
+});
+
 /** A turn whose Bash call waits on the person's Allow: Claude Code fires PreToolUse before
  *  it asks, so the call has started and has not run. */
-async function askingSession(): Promise<Feed> {
-  const s = new Feed(BASE, await demoToken(), "lab-mac", "Deploy the webhook fix");
+async function askingSession(on?: Feed): Promise<Feed> {
+  const s = on ?? new Feed(BASE, await demoToken(), "lab-mac", "Deploy the webhook fix");
   await s.post(
     s.ev("session.started", { source: "startup" }, "SessionStart"),
     s.ev("turn.started", { turn_id: "p0", prompt_chars: 30, submitted_by: "user" }, "UserPromptSubmit"),

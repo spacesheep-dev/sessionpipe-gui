@@ -161,6 +161,13 @@ button.sel:focus-visible {
 .sel-opt--active {
   background: var(--sel);
 }
+/* With a pointer that hovers, the keys' row has the list rows' cursor edge and the
+   pointer's is the plain fill. A touch screen keeps the fill alone. */
+@media (hover: hover) {
+  .sel-list[data-keys] .sel-opt--active {
+    box-shadow: var(--cursor-edge);
+  }
+}
 .sel-opt[aria-disabled="true"] {
   color: var(--fg-4);
 }

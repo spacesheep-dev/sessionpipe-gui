@@ -4,11 +4,12 @@
 // and opens at the latest). A history-only session opens
 // its transcript from the index at the exact hit (`?q=…#h-<ref>`), with the find bar on.
 // As a page (pushState, so Back returns to the results), beside (the side panel), or
-// beside in the background (focus stays on the results).
+// beside in the background (focus stays on the results); a click or ↵ asks the one rule
+// which (openResultAs).
 import type { SessionMatch, SessionSearchHit } from "@shared/api";
 import { noteHistoryTitle } from "../lib/historyTitle";
 import { hrefFor, navigate, sessionPath } from "../lib/router";
-import { openSplit } from "../lib/split";
+import { handJump, type OpenHow, openSplit, openWay, overSettings } from "../lib/split";
 
 export type OpenMode = "page" | "beside" | "background";
 
@@ -37,8 +38,8 @@ export function resultHref(m: SessionMatch, hit: SessionSearchHit | undefined, q
   return `${path}${query}${hitHash(m, hit)}`;
 }
 
-/** The best hit: the first of the shown ones the engine ranked highest is not known
- *  here, so the first in transcript order stands in, as the row's first snippet. */
+/** The best hit: Search and ⌘K ask for one, the one the engine ranked highest (under
+ *  Newest, the newest), and it is the row's moment. */
 export const bestHit = (m: SessionMatch): SessionSearchHit | undefined => m.hits[0];
 
 export function openResult(
@@ -47,22 +48,44 @@ export function openResult(
   q: string,
   mode: OpenMode,
   from?: DOMRect,
+  /** A plain open beside: the preview tab, which the next one replaces (lib/split.ts). */
+  preview = false,
 ): void {
   if (!m.summary) noteHistoryTitle(m.key, m.title);
-  if (mode === "page") {
+  // Over Settings a tab beside would open hidden: the page, in Settings' place.
+  const over = overSettings();
+  if (mode === "page" || over) {
     // The hash goes on after the router has kept its own parameters (the mock flag, the
     // panel), which it would otherwise append after it.
     const href = resultHref(m, hit, q);
     const at = href.indexOf("#");
-    navigate(at < 0 ? href : href.slice(0, at));
+    navigate(at < 0 ? href : href.slice(0, at), { replace: over });
     if (at >= 0) history.replaceState(history.state, "", `${location.pathname}${location.search}${href.slice(at)}`);
     return;
   }
-  openSplit(m.key, { from, background: mode === "background" });
-  // The panel reads the hash once (components/SessionBody.tsx, search/History.tsx), the
-  // search page's own `?q=` is the history view's query.
+  openSplit(m.key, { from, background: mode === "background", preview });
+  // A live session's row is handed to its tab alone (lib/split.ts handJump); a history
+  // transcript reads `#h-` once (search/History.tsx), the search page's own `?q=` is its
+  // query.
   const hash = hitHash(m, hit);
   if (!hash) return;
+  if (m.summary) {
+    handJump(m.key, hash);
+    return;
+  }
   history.replaceState(history.state, "", `${location.pathname}${location.search}${hash}`);
   window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+/** Opens a result the way a click or ↵ asks (lib/split.ts openWay): "primary" the way
+ *  Settings says, as the preview tab when that is beside; "other" the other way;
+ *  "background" a tab behind the panel's. */
+export function openResultAs(
+  m: SessionMatch,
+  hit: SessionSearchHit | undefined,
+  q: string,
+  how: OpenHow,
+  from?: DOMRect,
+): void {
+  openResult(m, hit, q, openWay(how), from, how === "primary");
 }

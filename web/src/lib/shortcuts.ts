@@ -7,7 +7,7 @@
 // a Mac and ctrl elsewhere. A person's overrides live in localStorage under
 // `sessionpipe-gui.shortcuts` as { [actionId]: string[] | null } (null = unbound); a view
 // plugin registers its own keys through ThemeApi.shortcuts and they join the same table.
-import { type RefObject, useEffect, useRef, useSyncExternalStore } from "react";
+import { createContext, type RefObject, useContext, useEffect, useRef, useSyncExternalStore } from "react";
 
 export const SEQUENCE_MS = 1200;
 export const STORAGE_KEY = "sessionpipe-gui.shortcuts";
@@ -159,8 +159,10 @@ export function chordOf(e: KeyboardEvent): Chord | null {
   if (!key || ["Shift", "Control", "Alt", "Meta", "CapsLock", "Dead", "Unidentified", "Process"].includes(key))
     return null;
   // With alt held a Mac types another character ("∂" for alt+d): read the physical key.
+  // A digit is read that way under mod too: shift makes it "!" (mod+shift+1 is a page in
+  // the Windows and Linux app), and an AZERTY keyboard types "&" on the key that is mod+1.
   if (e.altKey && /^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);
-  else if (e.altKey && /^Digit[0-9]$/.test(e.code)) key = e.code.slice(5);
+  else if ((e.altKey || (IS_MAC ? e.metaKey : e.ctrlKey)) && /^Digit[0-9]$/.test(e.code)) key = e.code.slice(5);
   const chord: Chord = {
     mod: IS_MAC ? e.metaKey : e.ctrlKey,
     ctrl: IS_MAC ? e.ctrlKey : false,
@@ -300,6 +302,10 @@ const nav = (id: string, label: string, key: string, hint?: string): Action => (
   hint,
 });
 
+/** Emacs' ctrl+n / ctrl+p, a Mac's alone: elsewhere ctrl is `mod`, and they are New
+ *  Session in the app's menu and the browser's new window and print. */
+const macOnly = (...keys: string[]): string[] => (IS_MAC ? keys : []);
+
 export const ACTIONS: readonly Action[] = [
   nav("nav.board", "Board", "g b"),
   nav("nav.inbox", "Inbox", "g i"),
@@ -333,7 +339,7 @@ export const ACTIONS: readonly Action[] = [
     keys: ["c"],
     hint: "the compose sheet, for the board's machine; ⌘N too in the installed app, once it reaches the page",
   },
-  { id: "search.focus", label: "Search this page", group: "Everywhere", scope: "global", keys: ["/"] },
+  { id: "search.focus", label: "Find on this page", group: "Everywhere", scope: "global", keys: ["/"] },
   {
     id: "search.global",
     label: "Search all sessions",
@@ -350,7 +356,7 @@ export const ACTIONS: readonly Action[] = [
     scope: "global",
     keys: ["esc"],
     inInputs: true,
-    hint: "leaves a text field first; then closes a popover, the panel or a confirm; on a list clears its filter, then its cursor; then goes back",
+    hint: "leaves a text field or the notifications first; then closes a popover, the panel or a confirm; on a list clears its filter, then its cursor; then goes back",
   },
   { id: "appearance.toggle", label: "Dark / light", group: "Everywhere", scope: "global", keys: ["t"] },
   { id: "colorTheme.next", label: "Next skin", group: "Everywhere", scope: "global", keys: ["shift+t"] },
@@ -376,7 +382,7 @@ export const ACTIONS: readonly Action[] = [
   { id: "list.down", label: "Next item", group: "Lists", scope: "lists", keys: ["j", "down"] },
   { id: "list.up", label: "Previous item", group: "Lists", scope: "lists", keys: ["k", "up"] },
   { id: "list.open", label: "Open the item", group: "Lists", scope: "lists", keys: ["enter"] },
-  { id: "list.beside", label: "Open beside the page", group: "Lists", scope: "lists", keys: ["shift+enter"] },
+  { id: "list.beside", label: "Open the other way", group: "Lists", scope: "lists", keys: ["shift+enter"] },
   {
     id: "list.background",
     label: "Open beside, as a background tab",
@@ -396,6 +402,10 @@ export const ACTIONS: readonly Action[] = [
   { id: "list.hide", label: "Hide or unhide", group: "Lists", scope: "lists", keys: ["e"] },
   { id: "list.hideUntil", label: "Hide until it needs you", group: "Lists", scope: "lists", keys: ["shift+e"] },
   { id: "board.peek", label: "Peek beside the page", group: "Board", scope: "board", keys: ["space"] },
+  // Before inbox.* and session.*, which share the keys: the row under the board's cursor
+  // gets them first, so they never reach a session open beside the board.
+  { id: "board.allow", label: "Allow the prompt under the cursor", group: "Board", scope: "board", keys: ["a"] },
+  { id: "board.deny", label: "Deny the prompt under the cursor", group: "Board", scope: "board", keys: ["d"] },
   { id: "search.peek", label: "Peek beside the page", group: "Search", scope: "search", keys: ["space"] },
   { id: "search.copyResume", label: "Copy resume command", group: "Search", scope: "search", keys: ["mod+c"] },
   ...Array.from({ length: 9 }, (_, i) => ({
@@ -481,7 +491,7 @@ export const ACTIONS: readonly Action[] = [
     label: "Next row",
     group: "Command palette",
     scope: "palette",
-    keys: ["down", "ctrl+n"],
+    keys: ["down", ...macOnly("ctrl+n")],
     inInputs: true,
   },
   {
@@ -489,7 +499,7 @@ export const ACTIONS: readonly Action[] = [
     label: "Previous row",
     group: "Command palette",
     scope: "palette",
-    keys: ["up", "ctrl+p"],
+    keys: ["up", ...macOnly("ctrl+p")],
     inInputs: true,
   },
   {
@@ -502,7 +512,7 @@ export const ACTIONS: readonly Action[] = [
   },
   {
     id: "palette.beside",
-    label: "Open the session beside",
+    label: "Open the other way",
     group: "Command palette",
     scope: "palette",
     keys: ["shift+enter"],
@@ -630,8 +640,8 @@ export const PRESETS: Record<string, Preset> = {
       "list.up": ["k", "up", "alt+p"],
       back: ["esc", "ctrl+g"],
       "palette.toggle": ["mod+k", "alt+x"],
-      "palette.down": ["down", "ctrl+n", "alt+n"],
-      "palette.up": ["up", "ctrl+p", "alt+p"],
+      "palette.down": ["down", ...macOnly("ctrl+n"), "alt+n"],
+      "palette.up": ["up", ...macOnly("ctrl+p"), "alt+p"],
       "palette.close": ["esc", "ctrl+g"],
     },
   },
@@ -979,6 +989,12 @@ export function registerHandler(id: string, run: Handler["run"], opts: HandlerOp
   };
 }
 
+/** Off for the part of the page it wraps: no handler attached inside it (`useShortcut`) is
+ *  live. The shell turns it on around a page the panel covers (a window too narrow for a
+ *  session beside it, components/Shell.tsx), so no key acts on a list that is not on
+ *  screen: its cursor, its Enter, an Allow under it. */
+export const KeysOff = createContext(false);
+
 /** The React form: the latest `run` always runs, the registration stays put. */
 export function useShortcut(
   id: string,
@@ -987,8 +1003,9 @@ export function useShortcut(
 ): void {
   const runRef = useRef(run);
   runRef.current = run;
-  const enabledRef = useRef(opts.enabled ?? true);
-  enabledRef.current = opts.enabled ?? true;
+  const on = !useContext(KeysOff) && (opts.enabled ?? true);
+  const enabledRef = useRef(on);
+  enabledRef.current = on;
   const withinRef = useRef(opts.within);
   withinRef.current = opts.within;
   const priority = opts.priority ?? 0;
@@ -1126,12 +1143,16 @@ export function matches(
  *  host's mod chords, its navigation sequences and Esc work everywhere. */
 function viewOwns(e: KeyboardEvent, chord: Chord): boolean {
   const host = document.querySelector<HTMLElement>("[data-theme-id]:not([hidden])");
-  if (!host) return false;
+  // Nor a view whose page is covered (inert under the panel): nobody is in it.
+  if (!host || host.closest("[inert]")) return false;
   if (chord.mod || chord.ctrl || chord.alt || chord.meta || chord.key === "esc") return false;
   // Inside the view, or on one of its ancestors (the body, <main> after a click in it).
   const t = e.target as Node | null;
   return !t || t === document || host.contains(t) || t.contains(host);
 }
+
+/** The scopes whose keys still act with the focus in a dialog. */
+const DIALOG_SCOPES: ReadonlySet<Scope> = new Set<Scope>(["global", "palette", "compose"]);
 
 function onKeyDown(e: KeyboardEvent): void {
   // A key something else already took (a view's own listener) is not ours.
@@ -1141,7 +1162,17 @@ function onKeyDown(e: KeyboardEvent): void {
   const typing = isTyping(e.target);
   const arrows = claimsArrows(e.target, chord.key);
   const inView = viewOwns(e, chord);
-  const allowed = (a: Action) => (a.inInputs || !typing) && !(arrows && !a.inInputs);
+  // In the notifications their buttons have Enter and Space: no list's, page's or panel's
+  // key reaches past them to the row under the cursor, only the global ones.
+  const inToasts = !!(e.target as Element | null)?.closest?.(".toasts");
+  // Nor past a dialog (Settings, a sheet) to the page or panel under it: there the global
+  // keys and the dialogs' own (the palette's, the New session sheet's) are in play.
+  const inDialog = !inToasts && !!(e.target as Element | null)?.closest?.('[aria-modal="true"]');
+  const allowed = (a: Action) =>
+    (a.inInputs || !typing) &&
+    !(arrows && !a.inInputs) &&
+    (!inToasts || a.scope === "global") &&
+    (!inDialog || DIALOG_SCOPES.has(a.scope));
   // On a view's page only its own actions, the host's two-key sequences and Esc are in play
   // (mod chords never count as the view's: `viewOwns` is false for them).
   const all = candidates().filter(

@@ -9,7 +9,7 @@
 // needs me or finishes" adds one notification each time it has news and is idle or done.
 import type { NotifyLevel, SessionSummary } from "@shared/api";
 import { useEffect, useSyncExternalStore } from "react";
-import { type OpenAttention, openAttentions, useAnswerableCount, useStore } from "../data/hooks";
+import { type OpenAttention, openAttentions, useNeedsYouCount, useStore } from "../data/hooks";
 import { ATTENTION_LABEL, oneLine, sessionTitle, toolLabel } from "./format";
 import { effectiveNotify } from "./marks";
 import { navigate, sessionPath } from "./router";
@@ -228,7 +228,7 @@ export function useAttentionEffects(): void {
     return store.subscribe(check);
   }, [store]);
 
-  const n = useAnswerableCount();
+  const n = useNeedsYouCount();
   useEffect(() => {
     const nav = navigator as Navigator & {
       setAppBadge?: (n?: number) => Promise<void>;
@@ -239,5 +239,5 @@ export function useAttentionEffects(): void {
   }, [n]);
 }
 
-/** "(n) " when answerable attentions are open, else nothing: the tab title's prefix. */
+/** "(n) " while n sessions need you, else nothing: the tab title's prefix. */
 export const titlePrefix = (n: number): string => (n > 0 ? `(${n}) ` : "");

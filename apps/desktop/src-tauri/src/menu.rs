@@ -1,11 +1,17 @@
 //! The app menu (NATIVE-SPEC.md §3.10). Items with an action id emit `menu { action }`
 //! to the page; the rest are native. Key equivalents follow web/src/lib/shortcuts.ts.
+//! A Mac's bar starts with the app's own menu and has a Window menu. Windows and Linux
+//! have neither: Settings and Exit are File's there, updates and About are Help's.
 
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 /// The pages' chord: ⌃⌘ on a Mac. Elsewhere Ctrl and Cmd are one key, so it would collapse
-/// to Ctrl+1 (the list's own key) and Ctrl+S: Ctrl+Alt there, as in web/src/native/menu.ts.
+/// to Ctrl+1 (the list's own key): Ctrl+Shift there, as in web/src/native/menu.ts. Not
+/// Ctrl+Alt: Windows reports AltGr as Ctrl+Alt, so it would take the characters AltGr types
+/// (² and @ on the 2, ś on the S), and Ctrl+Alt+1…7 are the colour labels. GTK 3 shows
+/// Shift+Ctrl+1 but does not answer it where Shift+1 types "!"; the page does then
+/// (menu.ts, `installKeyFilter`).
 #[cfg(target_os = "macos")]
 macro_rules! page {
     ($k:literal) => {
@@ -15,14 +21,36 @@ macro_rules! page {
 #[cfg(not(target_os = "macos"))]
 macro_rules! page {
     ($k:literal) => {
-        concat!("Ctrl+Alt+", $k)
+        concat!("CmdOrCtrl+Shift+", $k)
     };
 }
+
+/// Toggle Sidebar: ⌃⌘S on a Mac, Ctrl+B elsewhere (never Ctrl+Alt+S, which AltGr types).
+#[cfg(target_os = "macos")]
+const SIDEBAR: &str = "Ctrl+CmdOrCtrl+S";
+#[cfg(not(target_os = "macos"))]
+const SIDEBAR: &str = "CmdOrCtrl+B";
 
 /// (action id, title, accelerator), per menu, in order. None = separator.
 pub type Entry = Option<(&'static str, &'static str, Option<&'static str>)>;
 
+#[cfg(target_os = "macos")]
 pub const FILE: &[Entry] = &[Some(("new-session", "New Session", Some("CmdOrCtrl+N")))];
+#[cfg(not(target_os = "macos"))]
+pub const FILE: &[Entry] = &[
+    Some(("new-session", "New Session", Some("CmdOrCtrl+N"))),
+    None,
+    Some(("settings", "Settings…", Some("CmdOrCtrl+,"))),
+    None,
+    QUIT,
+];
+/// The way out, off a Mac: a plain item with the tray's id, which `on_menu` hands to the
+/// tray's Quit. Not the predefined Quit, which GTK 3 does not have. Windows calls it Exit
+/// and gives it no key (Alt+F4 closes the window); Linux calls it Quit, Ctrl+Q.
+#[cfg(target_os = "windows")]
+const QUIT: Entry = Some(("quit", "Exit", None));
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const QUIT: Entry = Some(("quit", "Quit", Some("CmdOrCtrl+Q")));
 pub const EDIT_FIND: Entry = Some(("find", "Find", Some("CmdOrCtrl+F")));
 pub const VIEW: &[Entry] = &[
     Some(("go-board", "Board", Some(page!("1")))),
@@ -32,29 +60,44 @@ pub const VIEW: &[Entry] = &[
     Some(("go-machines", "Machines", Some(page!("5")))),
     None,
     Some(("palette", "Command Palette", Some("CmdOrCtrl+K"))),
-    Some(("toggle-sidebar", "Toggle Sidebar", Some(page!("S")))),
+    Some(("toggle-sidebar", "Toggle Sidebar", Some(SIDEBAR))),
 ];
 pub const GO: &[Entry] = &[
     Some(("back", "Back", Some("CmdOrCtrl+["))),
     Some(("forward", "Forward", Some("CmdOrCtrl+]"))),
 ];
+#[cfg(target_os = "macos")]
 pub const HELP: &[Entry] = &[
     Some(("shortcuts", "Keyboard Shortcuts", Some("CmdOrCtrl+/"))),
     Some(("help:github", "sessionpipe on GitHub", None)),
 ];
+#[cfg(not(target_os = "macos"))]
+pub const HELP: &[Entry] = &[
+    Some(("shortcuts", "Keyboard Shortcuts", Some("CmdOrCtrl+/"))),
+    Some(("help:github", "sessionpipe on GitHub", None)),
+    None,
+    Some(("check-updates", "Check for Updates…", None)),
+];
+/// The bar off a Mac, in order. The letter after & is a menu's access key: Alt+F opens File.
+#[cfg(not(target_os = "macos"))]
+pub const BAR: [&str; 5] = ["&File", "&Edit", "&View", "&Go", "&Help"];
 
-/// Every action id the page may receive from the menu.
-pub fn action_ids() -> Vec<&'static str> {
-    let mut v = vec!["settings", "check-updates"];
-    for e in FILE
-        .iter()
+/// Every item the tables hold, whichever menu it is in.
+fn entries() -> impl Iterator<Item = &'static (&'static str, &'static str, Option<&'static str>)> {
+    FILE.iter()
         .chain(VIEW)
         .chain(GO)
         .chain(HELP)
         .chain(std::iter::once(&EDIT_FIND))
         .flatten()
-    {
-        if !e.0.contains(':') {
+}
+
+/// Every action id the page may receive from the menu. Not a link (`help:…`), and not
+/// `quit`, which is the tray's.
+pub fn action_ids() -> Vec<&'static str> {
+    let mut v = vec!["settings", "check-updates"];
+    for e in entries() {
+        if !e.0.contains(':') && e.0 != "quit" && !v.contains(&e.0) {
             v.push(e.0);
         }
     }
@@ -73,19 +116,45 @@ fn add<R: Runtime>(app: &AppHandle<R>, m: &Submenu<R>, entries: &[Entry]) -> tau
     Ok(())
 }
 
-pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let name = "sessionpipe";
-    let about = AboutMetadata {
-        name: Some(name.into()),
+/// About, with the app's version: the app's own menu has it on a Mac, Help elsewhere.
+fn about<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<PredefinedMenuItem<R>> {
+    let meta = AboutMetadata {
+        name: Some("sessionpipe".into()),
         version: Some(app.package_info().version.to_string()),
         ..Default::default()
     };
-    let app_menu = Submenu::with_items(
+    PredefinedMenuItem::about(app, Some("About sessionpipe"), Some(meta))
+}
+
+/// Edit is the same everywhere: the system's own items, then Find.
+fn edit<R: Runtime>(app: &AppHandle<R>, title: &str) -> tauri::Result<Submenu<R>> {
+    let m = Submenu::with_items(
         app,
-        name,
+        title,
         true,
         &[
-            &PredefinedMenuItem::about(app, Some("About sessionpipe"), Some(about))?,
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+        ],
+    )?;
+    add(app, &m, &[EDIT_FIND])?;
+    Ok(m)
+}
+
+#[cfg(target_os = "macos")]
+pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let app_menu = Submenu::with_items(
+        app,
+        "sessionpipe",
+        true,
+        &[
+            &about(app)?,
             &MenuItem::with_id(
                 app,
                 "check-updates",
@@ -109,22 +178,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     add(app, &file, FILE)?;
     file.append(&PredefinedMenuItem::separator(app)?)?;
     file.append(&PredefinedMenuItem::close_window(app, None)?)?;
-    let edit = Submenu::with_items(
-        app,
-        "Edit",
-        true,
-        &[
-            &PredefinedMenuItem::undo(app, None)?,
-            &PredefinedMenuItem::redo(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::cut(app, None)?,
-            &PredefinedMenuItem::copy(app, None)?,
-            &PredefinedMenuItem::paste(app, None)?,
-            &PredefinedMenuItem::select_all(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-        ],
-    )?;
-    add(app, &edit, &[EDIT_FIND])?;
+    let edit = edit(app, "Edit")?;
     let view = Submenu::new(app, "View", true)?;
     add(app, &view, VIEW)?;
     view.append(&PredefinedMenuItem::separator(app)?)?;
@@ -147,6 +201,26 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     Menu::with_items(app, &[&app_menu, &file, &edit, &view, &go, &window, &help])
 }
 
+/// Windows' and Linux's bar. No menu named after the app (Services, Hide, Hide Others and
+/// Show All are a Mac's), no Window menu, no Full Screen, and no Close Window: the title
+/// bar and Alt+F4 close the window, and Ctrl+W stays the side panel's "Close the tab".
+#[cfg(not(target_os = "macos"))]
+pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let [file, edit_title, view, go, help] = BAR;
+    let file = Submenu::new(app, file, true)?;
+    add(app, &file, FILE)?;
+    let edit = edit(app, edit_title)?;
+    let view = Submenu::new(app, view, true)?;
+    add(app, &view, VIEW)?;
+    let go = Submenu::new(app, go, true)?;
+    add(app, &go, GO)?;
+    let help = Submenu::new(app, help, true)?;
+    add(app, &help, HELP)?;
+    help.append(&PredefinedMenuItem::separator(app)?)?;
+    help.append(&about(app)?)?;
+    Menu::with_items(app, &[&file, &edit, &view, &go, &help])
+}
+
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let menu = build(app)?;
     app.set_menu(menu)?;
@@ -154,12 +228,38 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The update item's title, in whichever menu holds it (the app's own on a Mac, Help
+/// elsewhere): updater.rs calls this as an update becomes ready or stops being.
+pub fn retitle_update<R: Runtime>(app: &AppHandle<R>, title: &str) {
+    let Some(menu) = app.menu() else { return };
+    let item = menu
+        .items()
+        .unwrap_or_default()
+        .iter()
+        .find_map(|m| m.as_submenu()?.get("check-updates"));
+    if let Some(item) = item.as_ref().and_then(|i| i.as_menuitem()) {
+        let _ = item.set_text(title);
+    }
+}
+
 pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
     match id {
         "help:github" => {
             crate::actions::open_external("https://github.com/spacesheep-dev/sessionpipe-gui")
         }
-        "check-updates" => crate::updater::check_from_menu(app.clone()),
+        // The item reads "Install 0.8.5 and Relaunch" while an update is ready, and does it.
+        "check-updates" => {
+            let ready = app
+                .state::<crate::Shell>()
+                .update
+                .lock()
+                .unwrap()
+                .ready_version();
+            match ready {
+                Some(_) => crate::updater::restart(app.clone()),
+                None => crate::updater::check_from_menu(app.clone()),
+            }
+        }
         "new-session" => crate::actions::new_session(app, None),
         a if action_ids().contains(&a) => crate::actions::menu_action(app, a),
         // Tray items share the global menu-event stream on some platforms.
@@ -192,32 +292,66 @@ mod tests {
             assert!(ids.contains(&a), "{a}");
         }
         assert!(!ids.iter().any(|a| a.contains(':')));
+        // Exit is the tray's Quit, never an event for the page.
+        assert!(!ids.contains(&"quit"));
     }
 
     #[test]
     fn no_accelerator_twice() {
         let mut seen = std::collections::HashSet::new();
-        for e in FILE
-            .iter()
-            .chain(VIEW)
-            .chain(GO)
-            .chain(HELP)
-            .chain(std::iter::once(&EDIT_FIND))
-            .flatten()
-        {
-            if let Some(a) = e.2 {
-                assert!(seen.insert(a), "{a} twice");
-            }
+        for a in entries().filter_map(|e| e.2) {
+            assert!(seen.insert(a), "{a} twice");
+        }
+    }
+
+    /// Windows reports AltGr as Ctrl+Alt, so a menu key with both would take the characters
+    /// AltGr types; Ctrl+Alt+1…7 and 0 are also the web's colour labels.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn no_ctrl_alt_off_mac() {
+        for a in entries().filter_map(|e| e.2) {
+            let keys: Vec<&str> = a.split('+').collect();
+            let ctrl = keys
+                .iter()
+                .any(|k| matches!(*k, "Ctrl" | "Control" | "CmdOrCtrl"));
+            assert!(!(ctrl && keys.contains(&"Alt")), "{a}");
+        }
+    }
+
+    /// Off a Mac the app has no menu of its own: File holds Settings and the way out, Help
+    /// holds the update check, and every title has an access key.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn off_mac_file_ends_with_the_way_out() {
+        assert_eq!(BAR, ["&File", "&Edit", "&View", "&Go", "&Help"]);
+        let ids = |m: &[Entry]| m.iter().map(|e| e.map(|e| e.0)).collect::<Vec<_>>();
+        assert_eq!(
+            ids(FILE),
+            [
+                Some("new-session"),
+                None,
+                Some("settings"),
+                None,
+                Some("quit")
+            ]
+        );
+        assert_eq!(ids(HELP).last(), Some(&Some("check-updates")));
+        let quit = QUIT.unwrap();
+        if cfg!(target_os = "windows") {
+            assert_eq!((quit.1, quit.2), ("Exit", None));
+        } else {
+            assert_eq!((quit.1, quit.2), ("Quit", Some("CmdOrCtrl+Q")));
         }
     }
 
     /// ⌘1…⌘9 are the web's list.jump / panel.tab keys, so the pages take ⌃⌘1…5 on a Mac and
-    /// Ctrl+Alt+1…5 elsewhere (web/src/native/menu.ts); the menu must claim the same chords.
+    /// Ctrl+Shift+1…5 elsewhere (web/src/native/menu.ts); the menu must claim the same
+    /// chords. Not Ctrl+Alt there: Windows reports AltGr as Ctrl+Alt.
     fn page_chord(n: usize) -> String {
         if cfg!(target_os = "macos") {
             format!("Ctrl+CmdOrCtrl+{n}")
         } else {
-            format!("Ctrl+Alt+{n}")
+            format!("CmdOrCtrl+Shift+{n}")
         }
     }
 
@@ -236,14 +370,8 @@ mod tests {
             let e = VIEW.iter().flatten().find(|e| e.0 == *id).unwrap();
             assert_eq!(e.2, Some(page_chord(i + 1).as_str()), "{id}");
         }
-        assert!(!FILE
-            .iter()
-            .chain(VIEW)
-            .chain(GO)
-            .chain(HELP)
-            .flatten()
-            .any(|e| e
-                .2
-                .is_some_and(|a| a.starts_with("CmdOrCtrl+") && a[10..].parse::<u8>().is_ok())));
+        assert!(!entries().any(|e| e
+            .2
+            .is_some_and(|a| a.starts_with("CmdOrCtrl+") && a[10..].parse::<u8>().is_ok())));
     }
 }

@@ -25,7 +25,7 @@ export interface CompletionOption {
 }
 
 const KEY_HINT: Record<SearchFilterKey, string> = {
-  agent: "harness",
+  agent: "agent",
   machine: "machine name",
   repo: "repo or folder",
   label: "colour label",

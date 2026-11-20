@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { Attention, SessionSummary } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import {
   askCut,
@@ -8,8 +9,11 @@ import {
   CC_COMMAND_MAX,
   isPlanReview,
   isQuestion,
+  plainTitle,
   ROW_ASK_MAX,
+  rowTime,
   saidCommand,
+  sessionTitle,
   toolLabel,
 } from "./format";
 
@@ -36,6 +40,9 @@ describe("toolLabel", () => {
   });
   it("names Claude Code's question to the person Question", () => {
     expect(toolLabel("AskUserQuestion")).toBe("Question");
+  });
+  it("names the files a write changed Changed, never by the event's own name", () => {
+    expect(toolLabel("files.changed")).toBe("Changed");
   });
 });
 
@@ -175,5 +182,118 @@ describe("harnessMark", () => {
     expect(harnessMark("devin").label).toBe("Devin");
     expect(harnessMark("claude-code").glyph).toBe("Cl");
     expect(harnessMark("brand-new").label).toBe("brand-new");
+  });
+});
+
+describe("rowTime", () => {
+  // Noon on a fixed day, so "today" and "before today" are the same whatever the clock.
+  const now = new Date(2026, 10, 18, 12, 0, 0).getTime();
+  const iso = (minsAgo: number) => new Date(now - minsAgo * 60_000).toISOString();
+  const hm = (at: string) => new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const row = (o: Partial<SessionSummary>): SessionSummary =>
+    ({ state: "idle", stateSince: iso(5), lastAt: iso(5), openAttentions: [], ...o }) as SessionSummary;
+
+  it("needs you: since the prompt", () => {
+    const at = iso(2);
+    const s = row({
+      state: "needs_you",
+      stateSince: iso(1),
+      openAttentions: [{ attentionId: "a1", kind: "permission", at } as Attention],
+    });
+    expect(rowTime(s, now)).toEqual({ iso: at, tip: `Needs you since ${hm(at)}` });
+    expect(rowTime(row({ state: "needs_you", stateSince: iso(3) }), now).iso).toBe(iso(3));
+  });
+
+  it("working: the server's since, with or without a tool, never the tool's or the turn's", () => {
+    const since = iso(40);
+    const s = row({
+      state: "working",
+      stateSince: since,
+      lastAt: iso(0),
+      currentTurn: { turnId: "t1", since: iso(30) } as SessionSummary["currentTurn"],
+    });
+    expect(rowTime(s, now)).toEqual({ iso: since, tip: `Working since ${hm(since)}` });
+    const withTool = { ...s, currentTool: { tool: "Bash", callId: "c1", since: iso(0) } } as SessionSummary;
+    expect(rowTime(withTool, now).iso).toBe(since);
+  });
+
+  it("stale: since the last word, not ten minutes after it", () => {
+    const last = iso(49);
+    const s = row({ state: "stale", lastAt: last, stateSince: iso(39) });
+    expect(rowTime(s, now)).toEqual({ iso: last, tip: `No word since ${hm(last)}` });
+  });
+
+  it("idle: since the last word", () => {
+    const last = iso(20);
+    expect(rowTime(row({ state: "idle", lastAt: last, stateSince: iso(20) }), now)).toEqual({
+      iso: last,
+      tip: `Idle since ${hm(last)}`,
+    });
+  });
+
+  it("done: when it ended, else the last word, not a day after it", () => {
+    const ended = iso(90);
+    expect(rowTime(row({ state: "done", endedAt: ended, lastAt: iso(95) }), now)).toEqual({
+      iso: ended,
+      tip: `Ended ${hm(ended)}`,
+    });
+    const last = iso(30 * 60);
+    const silent = row({ state: "done", lastAt: last, stateSince: iso(6 * 60) });
+    expect(rowTime(silent, now).iso).toBe(last);
+    // Thirty hours back is yesterday: the day goes before the clock.
+    const day = new Date(last).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    expect(rowTime(silent, now).tip).toBe(`Last heard ${day} ${hm(last)}`);
+  });
+});
+
+describe("plainTitle", () => {
+  it("keeps a code span's text and drops its ticks", () => {
+    expect(plainTitle("the old `--sink` flag?")).toBe("the old --sink flag?");
+    expect(plainTitle("`__init__` cleanup")).toBe("__init__ cleanup");
+  });
+  it("drops the tick a cut left open", () => {
+    expect(plainTitle("Rename `formatMo…")).toBe("Rename formatMo…");
+  });
+  it("keeps a mark mid-title: only a leading one goes", () => {
+    expect(plainTitle("Fix `a` - then `b`")).toBe("Fix a - then b");
+    expect(plainTitle("- refactor the store")).toBe("refactor the store");
+    expect(plainTitle("> why is it slow")).toBe("why is it slow");
+  });
+  it("reads inline Markdown as its words", () => {
+    expect(plainTitle("# Plan the **release**")).toBe("Plan the release");
+    expect(plainTitle("See [the guide](https://x.test) and ~~old~~ *new* notes")).toBe(
+      "See the guide and old new notes",
+    );
+  });
+  it("leaves code written without ticks as it is", () => {
+    for (const t of ["Fix __init__.py imports", "Why is __main__ slow", "Parse a[0](x) call", "rename snake_case_name"])
+      expect(plainTitle(t)).toBe(t);
+  });
+  it("drops marks around or across a code span, never inside one", () => {
+    expect(plainTitle("Use **`npm ci`** now")).toBe("Use npm ci now");
+    expect(plainTitle("**Run `npm ci` first**")).toBe("Run npm ci first");
+    expect(plainTitle("Why does `a*b*c` fail")).toBe("Why does a*b*c fail");
+    expect(plainTitle("`*a b*` stays")).toBe("*a b* stays");
+  });
+  it("keeps text that is nothing but marks", () => {
+    expect(plainTitle("``")).toBe("``");
+  });
+});
+
+describe("sessionTitle", () => {
+  const base = { cwd: "/w/app", id: "abcdef123456" };
+  it("is plain words", () => {
+    expect(sessionTitle({ ...base, title: "Which docs pages still mention the old `--sink` flag?" })).toBe(
+      "Which docs pages still mention the old --sink flag?",
+    );
+  });
+  it("matches the uncut ask on the raw strings, then reads it as words", () => {
+    const s = {
+      ...base,
+      title: "Rename `formatMo...",
+      lastUser: "Rename `formatMoney` to `formatAmount` everywhere",
+    };
+    expect(sessionTitle(s)).toBe("Rename formatMoney to formatAmount everywhere");
+    expect(sessionTitle({ ...s, lastUser: "something else" })).toBe("Rename formatMo…");
   });
 });

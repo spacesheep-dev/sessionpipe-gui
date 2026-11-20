@@ -591,15 +591,17 @@ export interface AttachmentsHandle {
 /** `mode`: how this session's machine takes pictures (`pictureMode`); `machineId`: the
  *  machine an upload is for; `remote`: it is reached through spacesheep. `onRefused`: a
  *  picture was pasted or dropped where none can be sent ("off"), so the composer says why
- *  (`picturesOffWords`); nothing is swallowed. `initial`: the pictures the tray opens with
- *  (a session's draft); `land`: where a picture still uploading as a file when the
- *  composer closes goes once it is in (that draft). */
+ *  (`picturesOffWords`); nothing is swallowed. `onAdded`: a picture went into the tray
+ *  (pasted, dropped or picked). `initial`: the pictures the tray opens with (a session's
+ *  draft); `land`: where a picture still uploading as a file when the composer closes
+ *  goes once it is in (that draft). */
 export function useAttachments(o: {
   machineId?: string;
   remote?: boolean;
   enabled?: boolean;
   mode?: PictureMode;
   onRefused?: () => void;
+  onAdded?: () => void;
   initial?: () => readonly KeptPicture[];
   land?: (p: KeptPicture) => void;
 }): AttachmentsHandle {
@@ -645,6 +647,8 @@ export function useAttachments(o: {
   itemsRef.current = items;
   const onRefused = useRef(o.onRefused);
   onRefused.current = o.onRefused;
+  const onAdded = useRef(o.onAdded);
+  onAdded.current = o.onAdded;
   const landing = useRef(o.land);
   landing.current = o.land;
 
@@ -849,6 +853,7 @@ export function useAttachments(o: {
           },
         );
       }
+      if (added.length > 0) onAdded.current?.();
     },
     [enabled, takes, machineId, remote, shrunk, patchNow],
   );

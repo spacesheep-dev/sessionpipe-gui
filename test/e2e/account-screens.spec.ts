@@ -638,6 +638,13 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await shot(page, "settings");
     await page.goto(`${b.server.url}/settings?section=data`);
     await expect(page.getByText(/Connected as/)).toHaveCount(0);
+    // An account keeps no folder: Storage says what it holds instead of an empty line.
+    await expect(
+      page
+        .locator(".settings-row")
+        .filter({ has: page.locator(".settings-label", { hasText: /^Storage$/ }) })
+        .locator(".settings-hint"),
+    ).toHaveText("The events this receiver holds, one file per session.");
   });
 
   test("Approve this iPhone: the ask, then the number and the two things to do on spacesheep", async () => {
@@ -2298,7 +2305,7 @@ test.describe("what else an account shows", () => {
     }
   });
 
-  test("a question from the agent, at every width: its words and options on its card, where to answer it, and nothing to press, count or answer anywhere", async ({
+  test("a question from the agent, at every width: its words and options on its card, where to answer it, nothing to press or answer anywhere, and the badge counts it", async ({
     browser,
   }) => {
     test.setTimeout(180_000);
@@ -2370,7 +2377,8 @@ test.describe("what else an account shows", () => {
         await expect(page.getByRole("menuitem", { name: "Hide", exact: true }), at).toBeVisible();
         await expect(page.getByRole("menuitem", { name: /^(Allow|Deny)/ }), at).toHaveCount(0);
         await page.keyboard.press("Escape");
-        await expect(badge, at).toHaveCount(0);
+        // Both sessions need you: the badge counts them, as Needs you does.
+        await expect(badge, at).toHaveText("2");
         // The Inbox: with the prompts waiting in a terminal, the question beside its chip,
         // nothing to press, and nothing that needs an answer from here.
         await page.goto(`${b.server.url}/inbox`);
@@ -2384,7 +2392,7 @@ test.describe("what else an account shows", () => {
         );
         await expect(page.getByRole("button", { name: /^(Allow|Deny|Open)$/ }), at).toHaveCount(0);
         await expect(page.getByText(/needs? an answer/), at).toHaveCount(0);
-        await expect(badge, at).toHaveCount(0);
+        await expect(badge, at).toHaveText("2");
         expect(await wide(), at).toBe(0);
         // Its card: the question, its options to read, how many more, and where to answer it;
         // no Allow, no Deny, not even a's key, and the field as it is.
@@ -2570,7 +2578,8 @@ test.describe("what else an account shows", () => {
       await expect(rows).toHaveAttribute("aria-hidden", "true");
       // Past the wait after which a receiver would be said to be slow: still the loading rows.
       await page.waitForTimeout(6500);
-      await expect(page.getByText("Still connecting to the receiver…")).toHaveCount(0);
+      await expect(page.getByText("Connecting to spacesheep…")).toHaveCount(0);
+      await expect(page.getByText("Connecting…")).toHaveCount(0);
       await expect(catching).toBeVisible();
       await expect(page.locator(".nav-badge")).toHaveCount(0);
       expect(await page.title()).not.toMatch(/^\(/);

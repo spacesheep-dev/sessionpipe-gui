@@ -65,6 +65,14 @@
 .menu-item--active {
   background: var(--sel);
 }
+/* With a pointer that hovers, the keys' item has the list rows' cursor edge and the
+   pointer's is the plain fill. A row whose submenu has the keys is the path, not the
+   cursor. A touch screen keeps the fill alone. */
+@media (hover: hover) {
+  .menu[data-keys] .menu-item--active:not([aria-expanded="true"]) {
+    box-shadow: var(--cursor-edge);
+  }
+}
 .menu-item[aria-disabled="true"] {
   color: var(--fg-4);
 }

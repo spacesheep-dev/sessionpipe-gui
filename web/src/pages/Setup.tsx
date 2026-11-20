@@ -8,5 +8,5 @@ const chunk = routeChunk(() => import("./SetupPage"), !setupSeen());
 
 export function Setup() {
   const m = chunk.use();
-  return m ? <m.Setup /> : <PageStandIn className="page--grouped setup" title="Set up sessionpipe gui" />;
+  return m ? <m.Setup /> : <PageStandIn className="page--grouped setup" title="Setup" />;
 }

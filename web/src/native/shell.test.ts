@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { followInsets, parseShell, safePath, useLocalReceiver } from "./shell";
 
 vi.mock("../lib/router", () => ({ navigate: vi.fn(), back: vi.fn() }));
+// The navigate event's way in (it reads the router and the panel when it loads).
+vi.mock("../lib/split", () => ({ openAsked: vi.fn() }));
 const invoke = vi.fn();
 vi.mock("./bridge", () => ({ invoke: (...a: unknown[]) => invoke(...a), listen: vi.fn(), channel: vi.fn() }));
 

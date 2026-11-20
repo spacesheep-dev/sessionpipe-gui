@@ -38,14 +38,15 @@ import { fixedLine, fixedPermission, permissionChoices, permissionToSend } from 
 import { canSign, isCancel, setupLabel, signerKind, signHint, tapWords } from "../../control/signer";
 import { startGate } from "../../control/startGate";
 import { notSentWords, PERMISSION_LABEL } from "../../control/words";
-import { useListedSessions, useMachinesMap, useSession, useStore } from "../../data/hooks";
+import { useListedSessions, useMachinesMap, useSession, useStore, useStreamDown } from "../../data/hooks";
+import { usePhoneLayout } from "../../lib/device";
 import { useFocusTrap } from "../../lib/focus";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../../lib/format";
 import { useSheetDrag } from "../../lib/motion";
 import { navigate } from "../../lib/router";
 import { hintFor, matches, useShortcut } from "../../lib/shortcuts";
 import { ago, useNow } from "../../lib/time";
-import { START, ThisPhone } from "../../native/accountWords";
+import { NEW_WORDS, START, ThisPhone } from "../../native/accountWords";
 import {
   askableSessions,
   defaultTarget,
@@ -68,22 +69,10 @@ import {
 import "../../control/newSessionSheet.css";
 import "./handoff.css";
 
-const PHONE = "(max-width: 839px)";
 const TEXT_MAX = 20_000;
 const COUNTER_AT = 18_000;
 /** The default on an `inherit` machine, as New session's Permission pop-up names it. */
 const INHERIT_DEFAULT = "As your own sessions on this machine";
-
-function usePhone(): boolean {
-  const [on, setOn] = useState(() => typeof matchMedia === "function" && matchMedia(PHONE).matches);
-  useEffect(() => {
-    const mq = matchMedia(PHONE);
-    const up = () => setOn(mq.matches);
-    mq.addEventListener("change", up);
-    return () => mq.removeEventListener("change", up);
-  }, []);
-  return on;
-}
 
 /** What an ask was when it was pressed: all its "asked" needs after a confirm. */
 interface AskSent extends HeldMeta {
@@ -92,7 +81,7 @@ interface AskSent extends HeldMeta {
 }
 
 export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean }) {
-  const phone = usePhone();
+  const phone = usePhoneLayout();
   const session = useSession(open.session);
   const machines = useMachinesMap();
   // The agents to ask and the recent folders: the sessions the board lists.
@@ -104,6 +93,8 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   const wrong = wrongOriginHere();
   const sendTo = useSendStates(rp);
   const now = useNow("coarse");
+  // The app's stream is down (as the page bar says it): an ask waits for it, as a message does.
+  const down = useStreamDown() !== null;
   const ref = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
@@ -288,6 +279,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     !!text.trim() &&
     text.length <= TEXT_MAX &&
     modelOk &&
+    !down &&
     !busy;
 
   // Sent: the sheet closes and the asking session's page says the rest (its row). What it
@@ -383,6 +375,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     if (busy) return { text: `Sending to ${name}…` };
     if (!c) return { text: `Pair ${name} to ask from here.` };
     if (gate?.kind === "machine") return { text: gate.long, approve: gate.approve };
+    if (down) return { text: NEW_WORDS.streamAsk };
     if (nobody) return { text: `${name} hasn't said which agents it runs.` };
     if (target?.kind === "new" && folderCheck && !folderCheck.ok)
       return {

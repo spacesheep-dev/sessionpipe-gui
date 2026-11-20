@@ -77,7 +77,8 @@ export function ComposeButton({ className = "" }: { className?: string }) {
 }
 
 /** `?new=1` on any route (with `machine=`, `harness=`, `cwd=`; the PWA's manifest shortcut
- *  uses `/?new=1`) opens the sheet over the page, and the parameters leave the address. */
+ *  uses `/?new=1`) opens the sheet over the page, and the parameters leave the address.
+ *  The four ask for no page: lib/landing.ts leaves the same ones out. */
 export function useNewFromUrl(path: string): void {
   useEffect(() => {
     const q = new URLSearchParams(location.search);

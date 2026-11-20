@@ -9,7 +9,8 @@
 // own element (`scrollRef`). The view sticks to the bottom while the person is within
 // 48 px of it; scrolled up, nothing moves and an "n new" pill offers the way back. A
 // session with several answers since the person last looked opens on a New line above
-// the first of them instead (lib/newLine.ts). In
+// the first of them instead (lib/newLine.ts), and one asking to start on a long plan on
+// the plan's first line (PlanPanel). In
 // Simple mode (lib/settings.ts) the same view is a chat: the person's prompts as bubbles
 // on the right, the assistant's replies as plain prose under its name, the tools of a
 // turn folded into one line. A message sent from here is drawn where its turn is or will
@@ -75,6 +76,8 @@ import "../lib/acp";
 import { FilesButton } from "../files/FilesButton";
 import { BESIDE, FilesDrawer } from "../files/FilesDrawer";
 import { closeDrawer, FILE_PARAM, openDrawer, toggleDrawer, useDrawer } from "../files/state";
+import { useAskedInput } from "../lib/askedInput";
+import { usePhoneLayout, wideLayout } from "../lib/device";
 import {
   ATTENTION_LABEL,
   attentionMessage,
@@ -102,7 +105,8 @@ import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, setSearchParam
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit } from "../lib/split";
+import { JUMP_EVENT, openSplit, takeJump } from "../lib/split";
+import { agentTabKey } from "../lib/splitState";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { ago, ClockHold, clock, dur, ms, useNow } from "../lib/time";
 import {
@@ -126,9 +130,11 @@ import { HistoryOrMissing } from "../search/HistoryEntry";
 import { AgentGlyph, AgentNow, AgentText } from "./AgentRow";
 import { CopyIconButton, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateDot } from "./bits";
 import { confirmAction, type MenuItem, type MenuList, MoreButton, openMenu, tidy, useContextMenu } from "./ContextMenu";
+import { answerable } from "./ControlStrip";
 import { LabelDot, useLabelKeys } from "./LabelDot";
 import { CodeFrame, Markdown } from "./Markdown";
 import { BackButton, PageBar } from "./PageBar";
+import { foldPlan } from "./PlanText";
 import { askingFact } from "./SessionCard";
 import { answerItems, SessionLoading, type SessionViewProps } from "./SessionView";
 import { openUsage } from "./UsageGlance";
@@ -246,6 +252,12 @@ interface Timeline {
    *  following the bottom (the person is reading). Returns the let-go for a change that
    *  did not come (a read that failed), so no later change is held to it. */
   anchorOn: (el: HTMLElement) => () => void;
+  /** The plan review open now, on a computer read in the conversation (PlanPanel): its
+   *  prompt, the key of the call it is about, and its plan once read whole from the call's
+   *  input (lib/askedInput.ts, the strip's own read), `read` once that read is over. */
+  plan?: { id: string; item: string; text?: string; read: boolean };
+  /** The open plan's panel has its plan: the view opens on it, once per prompt. */
+  planShown: (id: string) => void;
 }
 /** A message sent from here that carried files (SentFilesRows). */
 const carriedFiles = (a: ControlActivity): boolean => !!a.files?.length;
@@ -586,13 +598,14 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     }
   }, [store, harness, id, olderBusy, scrollHeight, scrollY, sc]);
 
-  /** Scroll to the row of a seq when it is loaded (centred, marked for a moment) and drop
-   *  the hash either way; true when the row was there. */
+  /** Scroll to the row of a seq when it is loaded (centred, marked for a moment), and then
+   *  drop the hash that asked for it (the entry's state stays: a Settings mark, the split's);
+   *  true when the row was there. */
   const jumpTo = useCallback((seq: number | null): boolean => {
     if (seq === null) return false;
-    history.replaceState(null, "", location.pathname + location.search);
     const row = rootRef.current?.querySelector<HTMLElement>(`[data-seq="${seq}"]`);
     if (!row) return false;
+    if (location.hash === `#seq-${seq}`) history.replaceState(history.state, "", location.pathname + location.search);
     followRef.current = false;
     pinned.current = false;
     setFollow(false);
@@ -622,25 +635,64 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     },
     [jumpToAgent],
   );
+  // The address's #seq is the page's own; a tab beside is handed its row (lib/split.ts
+  // handJump), on its first paint below or here when it is already open.
+  const tabKey = mode === "panel" && agent ? agentTabKey(key, agent) : key;
   useEffect(() => {
-    const onHash = () => jumpTo(hashSeq());
+    const onHash = () => mode === "page" && jumpTo(hashSeq());
+    const onJump = () => {
+      if (firstPaint.current) return;
+      const seq = takeJump(tabKey);
+      if (seq !== null) jumpTo(seq);
+    };
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, [jumpTo]);
+    window.addEventListener(JUMP_EVENT, onJump);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener(JUMP_EVENT, onJump);
+    };
+  }, [jumpTo, mode, tabKey]);
 
-  /** Open on the New line when what came since it is taller than two thirds of the view:
-   *  the line a third of the way down, so the first new answer reads from its start. */
+  /** Open on a row when what comes from it on is taller than two thirds of the view: the
+   *  row a third of the way down, so it reads from its start. */
+  const landOn = useCallback(
+    (el: HTMLElement): boolean => {
+      const top = el.getBoundingClientRect().top - (sc()?.getBoundingClientRect().top ?? 0) + scrollY();
+      if (scrollHeight() - top <= (viewHeight() * 2) / 3) return false;
+      followRef.current = false;
+      pinned.current = false;
+      setFollow(false);
+      scrollTo(top - viewHeight() / 3);
+      return true;
+    },
+    [sc, scrollY, scrollHeight, viewHeight, scrollTo],
+  );
+  /** Open on the New line, so the first new answer reads from its start. */
   const toNewLine = useCallback((): boolean => {
     const line = rootRef.current?.querySelector<HTMLElement>(".new-line");
-    if (!line) return false;
-    const top = line.getBoundingClientRect().top - (sc()?.getBoundingClientRect().top ?? 0) + scrollY();
-    if (scrollHeight() - top <= (viewHeight() * 2) / 3) return false;
-    followRef.current = false;
-    pinned.current = false;
-    setFollow(false);
-    scrollTo(top - viewHeight() / 3);
-    return true;
-  }, [sc, scrollY, scrollHeight, viewHeight, scrollTo]);
+    return !!line && landOn(line);
+  }, [landOn]);
+  /** The plan reviews the view has opened on, or let be: each is landed on once, so its
+   *  growth later, or a reread, never moves the view again. */
+  const landedPlans = useRef(new Set<string>());
+  /** Open on the open plan's first line (a computer's PlanPanel), once per prompt. */
+  const toPlan = useCallback((): boolean => {
+    const el = rootRef.current?.querySelector<HTMLElement>(".turn-plan[data-plan-open]");
+    const id = el?.dataset.planOpen;
+    if (!el || !id || landedPlans.current.has(id)) return false;
+    landedPlans.current.add(id);
+    return landOn(el);
+  }, [landOn]);
+  /** The open plan came in after the first paint (its read is the strip's): open on it
+   *  then, the same way, unless the person has already scrolled away from the bottom. */
+  const planShown = useCallback(
+    (id: string) => {
+      if (firstPaint.current || landedPlans.current.has(id)) return;
+      if (followRef.current && pinned.current) toPlan();
+      else landedPlans.current.add(id);
+    },
+    [toPlan],
+  );
 
   // Bottom-anchored first paint (the newest turn is what a session opens on, unless the
   // URL names a row or there is a New line to open on), before the browser paints, and a
@@ -650,7 +702,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     if (events.length === 0) return;
     if (firstPaint.current) {
       firstPaint.current = false;
-      if (!jumpTo(hashSeq()) && !jumpToAgent(focusAgent) && !toNewLine()) toBottom();
+      const seq = takeJump(tabKey) ?? (mode === "page" ? hashSeq() : null);
+      if (!jumpTo(seq) && !jumpToAgent(focusAgent) && !toNewLine() && !toPlan()) toBottom();
       return;
     }
     const a = anchor.current;
@@ -665,7 +718,21 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         if (Math.abs(scrollY() - want) > 1) scrollTo(want);
       }
     }
-  }, [events, scrollTo, scrollBy, scrollHeight, scrollY, jumpTo, jumpToAgent, focusAgent, toNewLine, toBottom]);
+  }, [
+    events,
+    scrollTo,
+    scrollBy,
+    scrollHeight,
+    scrollY,
+    jumpTo,
+    jumpToAgent,
+    focusAgent,
+    toNewLine,
+    toPlan,
+    toBottom,
+    tabKey,
+    mode,
+  ]);
   // Asked for another agent while open (a second "Open beside" on the same tab, the URL).
   const lastFocus = useRef(focusAgent);
   useEffect(() => {
@@ -1105,6 +1172,31 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const prompts = s?.openAttentions ?? NO_PROMPTS;
   const out = useAnswersOut(prompts);
   const unanswered = useMemo(() => prompts.filter((a) => out[a.attentionId]?.status !== "sent"), [prompts, out]);
+  // The open plan review and the call it is about: the newest of its tool with no end, or
+  // the one named by its id (lib/askedInput.ts reads the same call's input).
+  const planAsk = prompts.find((a) => isPlanReview(a) && answerable(a));
+  const planItem = useMemo(() => {
+    if (!planAsk) return undefined;
+    let newest: string | undefined;
+    for (let t = turns.length - 1; t >= 0 && !newest; t--)
+      for (let i = turns[t]!.items.length - 1; i >= 0; i--) {
+        const it = turns[t]!.items[i]!;
+        if (it.kind !== "tool" || toolOf(it) !== planAsk.tool) continue;
+        if (it.started?.data.call_id === planAsk.attentionId) return it.key;
+        if (!it.ended && !newest) newest = it.key;
+      }
+    return newest;
+  }, [planAsk, turns]);
+  const planRead = useAskedInput(s, planAsk);
+  const planWords = planRead.input?.plan;
+  const planText = typeof planWords === "string" && planWords.trim() ? planWords : undefined;
+  const plan = useMemo(
+    () =>
+      planAsk && planItem
+        ? { id: planAsk.attentionId, item: planItem, text: planText, read: planRead.read }
+        : undefined,
+    [planAsk, planItem, planText, planRead.read],
+  );
   const timeline = useMemo<Timeline>(
     () => ({
       path,
@@ -1125,6 +1217,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       control,
       compose,
       anchorOn,
+      plan,
+      planShown,
     }),
     [
       path,
@@ -1141,6 +1235,8 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
       control,
       compose,
       anchorOn,
+      plan,
+      planShown,
     ],
   );
   // While its computer is offline nothing says how long a turn or a tool has run: the
@@ -1904,8 +2000,20 @@ function TurnBlock({
       <ol className="turn-items">
         {items.length === 0 && status && <StatusRow {...status} chat={false} />}
         {items.map((it) => {
-          if (it.kind === "tool")
-            return <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} look={look} />;
+          if (it.kind === "tool") {
+            const plan = isPlanCall(it);
+            // A plan's call is its name alone: the panel under it draws the plan (the raw
+            // input stays under the chevron).
+            const row = <ToolRow key={it.key} item={it} lens={lens} now={now} fill={fill} look={look} bare={plan} />;
+            if (!plan) return row;
+            // A plan review's plan, right under its own call: the turn goes on under it.
+            return (
+              <Fragment key={it.key}>
+                {row}
+                <PlanPanel item={it} lens={lens} fill={fill} live={live} as="li" />
+              </Fragment>
+            );
+          }
           if (it.kind === "agent")
             return <AgentBlock key={it.key} item={it} lens={lens} now={now} fill={fill} stoppedAt={stoppedAt} />;
           if (it.kind === "delegation") return <AskRow key={it.key} item={it} as="li" />;
@@ -2443,6 +2551,8 @@ function ChatTurn({
 }) {
   const { open, working } = useTimeline();
   const tools = turn.items.filter((i): i is ToolItem => i.kind === "tool");
+  // One plan a turn: the newest call's. One it sent back is in its tools, under Plan.
+  const planCall = [...tools].reverse().find(isPlanCall);
   const agentItems = turn.items.filter((i): i is AgentItem => i.kind === "agent");
   const asks = turn.items.filter((i): i is DelegationItem => i.kind === "delegation");
   // An ask the agent made while it worked sits with its tools; one made after the turn
@@ -2528,6 +2638,9 @@ function ChatTurn({
             {harnessMark(harness).label}
           </span>
           {tools.length > 0 && <ChatTools tools={tools} lens={lens} now={now} fill={fill} look={look} />}
+          {planCall && (
+            <PlanPanel key={planCall.key} item={planCall} lens={lens} fill={fill} live={liveTurn} as="div" />
+          )}
           {agentItems.length > 0 && (
             <ol className="turn-items chat-agents">
               {agentItems.map((it) => (
@@ -2608,6 +2721,122 @@ type ToolLook = "run" | "ask" | "quiet";
 
 /** A call's tool, by its own name ("Bash", "AskUserQuestion"). */
 const toolOf = (t: ToolItem): string => String((t.started ?? t.ended)?.data.tool ?? "");
+
+/** A plan review's call (ExitPlanMode, Codex's exit_plan_mode). */
+const isPlanCall = (t: ToolItem): boolean => isPlanReview({ kind: "permission", tool: toolOf(t) });
+
+/** The plan in a call's input, whole: none where the input holds no plan. */
+function planOf(input: unknown): string | undefined {
+  let v = input;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return undefined;
+    }
+  }
+  const plan = v && typeof v === "object" ? (v as { plan?: unknown }).plan : undefined;
+  return typeof plan === "string" && plan.trim() ? plan : undefined;
+}
+
+/** A plan review's plan, on a computer read in the conversation, whole, at the column's
+ *  width, right under its call (the dock asks the one question; the phone keeps the plan
+ *  on its card, ControlStrip's PlanText). No head: the plan's own heading leads. An open
+ *  plan is the strip's read of its call's input (the timeline's events are cut to a
+ *  preview); any other, its call read whole. One already answered when the page opened
+ *  shows its first eight lines and "Show all"; one answered while the page is open stays
+ *  as it was. None where the input has no plan (tier 2, or a lens under 3). */
+function PlanPanel({
+  item,
+  lens,
+  fill,
+  live,
+  as: Tag,
+}: {
+  item: ToolItem;
+  lens: Tier;
+  fill: Fill;
+  /** Its turn is the session's live one: a call there with no end is the one asking. */
+  live: boolean;
+  as: "li" | "div";
+}) {
+  const phone = usePhoneLayout();
+  const { plan: asking, planShown, anchorOn } = useTimeline();
+  const ev = item.ended?.data.input !== undefined ? item.ended : item.started;
+  const input = lens >= 3 ? ev?.data.input : undefined;
+  const cut = ev?.preview?.input !== undefined;
+  const mine = asking?.item === item.key ? asking : undefined;
+  // The open plan's words stay once its prompt goes: answered here, it reads on as it was.
+  const [kept, setKept] = useState<string>();
+  if (mine?.text && mine.text !== kept) setKept(mine.text);
+  const text = mine?.text ?? kept ?? (cut ? undefined : planOf(input));
+  // Folded only where it was over when the page opened, once: approving it here moves nothing.
+  const [folds] = useState(() => !!item.ended || !live);
+  const [all, setAll] = useState(false);
+  const [long, setLong] = useState(false);
+  const box = useRef<HTMLElement>(null);
+  const whole = useWhole(ev, fill);
+  const tried = useRef(false);
+  // The open plan is the strip's read; anything else is its call, read once.
+  const waits = !!mine && !mine.read;
+  const load = whole.load;
+  useEffect(() => {
+    if (phone || input === undefined || text !== undefined || !cut || waits || tried.current) return;
+    tried.current = true;
+    void load();
+  }, [phone, input, text, cut, waits, load]);
+  const folded = folds && !all;
+  useLayoutEffect(() => {
+    const el = box.current?.querySelector<HTMLElement>(".turn-plan-text");
+    if (!el) return;
+    if (!folded) {
+      el.style.maxHeight = "";
+      return;
+    }
+    const measure = () => setLong(foldPlan(el));
+    measure();
+    if (typeof ResizeObserver !== "function") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, folded]);
+  const openId = mine && text ? mine.id : undefined;
+  useLayoutEffect(() => {
+    if (openId && !phone) planShown(openId);
+  }, [openId, phone, planShown]);
+  const menu = useContextMenu(() => (text ? [copyItem("Copy plan", text)] : null));
+  if (phone || input === undefined || (text === undefined && !cut)) return null;
+  return (
+    <Tag className="turn-plan" ref={box as RefObject<HTMLLIElement & HTMLDivElement>} data-plan-open={openId} {...menu}>
+      {text ? (
+        <>
+          <Markdown text={text} className={folded ? "turn-plan-text is-clamped" : "turn-plan-text"} />
+          {folds && long && (
+            <button
+              type="button"
+              className="cut-btn prompt-more"
+              aria-expanded={all}
+              onClick={(e) => {
+                // Opened, its top stays put; folded again, its button stays under the pointer.
+                const keep = all ? e.currentTarget : box.current;
+                if (keep) anchorOn(keep);
+                setAll(!all);
+              }}
+            >
+              {all ? "Show less" : "Show all"}
+            </button>
+          )}
+        </>
+      ) : whole.state === "failed" ? (
+        <button type="button" className="cut-btn" onClick={() => void load()}>
+          {NEW_WORDS.sessionLoadFailed}
+        </button>
+      ) : (
+        <p className="turn-plan-wait">Loading…</p>
+      )}
+    </Tag>
+  );
+}
 
 /** The tools line while a call has no end: "Running Bash", "Asking to run Bash" (a
  *  question or a plan as what it is), "Bash · quiet for 12 m". */
@@ -2776,6 +3005,7 @@ function ToolRow({
   now,
   fill,
   look,
+  bare = false,
 }: {
   item: ToolItem;
   lens: Tier;
@@ -2784,6 +3014,8 @@ function ToolRow({
   /** How it shows while it has no end (its turn's look, a subagent's own state); none, it
    *  was cut off with its turn and is not running. */
   look?: ToolLook;
+  /** No subject after its name: what is drawn under it shows the input (a plan's panel). */
+  bare?: boolean;
 }) {
   const e = item.ended ?? item.started!;
   const tool = String(e.data.tool);
@@ -2802,7 +3034,7 @@ function ToolRow({
   const output = lens >= 3 ? item.ended?.data.output : undefined;
   const error = item.ended?.data.error as string | undefined;
   const expandable = input !== undefined || output !== undefined || !!error;
-  const subject = toolSubject(input);
+  const subject = bare ? "" : toolSubject(input);
   const details = useRef<HTMLDetailsElement>(null);
   const inputEvent = item.ended?.data.input !== undefined ? item.ended : item.started;
   const cutIn = inputEvent?.preview?.input !== undefined;
@@ -3294,8 +3526,6 @@ function askState(
   return { text: `answered in ${took}${relay}`, glyph: "ok" };
 }
 
-const isWide = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
-
 /** One agent this session asked, where the ask happened (UX-SPEC §3.1): one line in the
  *  agent's column, a glyph, "Asked Codex · <its title> · <state>", the whole row a link to
  *  the asked session; the answer folded under it only when it was not relayed here. */
@@ -3316,7 +3546,7 @@ function AskRow({ item, ask: given, as }: { item?: DelegationItem; ask?: Ask; as
   const menu = useContextMenu(
     () => [
       path && { label: "Open the asked session", run: () => navigate(path) },
-      path && isWide() && { label: "Open beside", run: () => openSplit(a.to!) },
+      path && wideLayout() && { label: "Open beside", run: () => openSplit(a.to!) },
       copyItem("Copy the answer", a.reply ?? null),
       target && copyItem("Copy session ID", target.id),
       { sep: true },

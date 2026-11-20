@@ -1,16 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference lib="dom" />
-// The custom select (web/src/components/Select.tsx) on the board's harness filter: the
-// trigger is a combobox and opens a listbox; arrows and Enter pick "Codex" and the board
-// filters to it; typing jumps to a row; Esc closes and gives focus back; axe finds nothing
-// new with the list open. On the phone project the same list is a bottom sheet.
+// The custom select (web/src/components/Select.tsx) on an Agent filter: Search's on a
+// computer (the board's is in its Filter menu there), the board's on a phone. The trigger
+// is a combobox and opens a listbox; arrows and Enter pick "Codex" and the page filters to
+// it; typing jumps to a row; Esc closes and gives focus back; axe finds nothing new with
+// Search's Date list open. On the phone project the same list is a bottom sheet.
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { openBoard } from "./helpers.js";
+import { openBoard, openPage } from "./helpers.js";
 
-const trigger = (page: Page) => page.getByRole("combobox", { name: "Harness" });
-const list = (page: Page) => page.getByRole("listbox", { name: "Harness" });
+const trigger = (page: Page) => page.getByRole("combobox", { name: "Agent" });
+const list = (page: Page) => page.getByRole("listbox", { name: "Agent" });
 const active = (page: Page) => page.locator("[role=option].sel-opt--active");
+/** The meta ink (--fg-3) as getComputedStyle writes it: the cursor edge's colour. */
+const meta = (page: Page) =>
+  page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement("i"));
+    probe.style.color = "var(--fg-3)";
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    return c;
+  });
 
 /** The harnesses of the cards on view, by the glyph's title; empty while none is on view. */
 const cardHarnesses = (page: Page) =>
@@ -23,13 +33,22 @@ const onlyCards = async (page: Page, name: string) => {
   await expect.poll(() => cardHarnesses(page).then((hs) => hs.filter((h) => h !== name))).toEqual([]);
 };
 
+/** Search with its index read: the chips come with the facets, which are asked for again
+ *  each time the count of sessions changes, so they can be a while on a busy machine. */
+async function searchSettled(page: Page): Promise<void> {
+  await openPage(page, "/search");
+  await expect(page.getByRole("status").filter({ hasText: "up to date" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("combobox", { name: "Date" })).toBeVisible({ timeout: 30_000 });
+}
+
 test.describe("select", () => {
-  test.beforeEach(async ({ page }) => {
-    await openBoard(page);
+  test.beforeEach(async ({ page, isMobile }) => {
+    if (isMobile) await openBoard(page);
+    else await searchSettled(page);
     await expect(trigger(page)).toBeVisible();
   });
 
-  test("the harness filter is a combobox over a listbox; arrows and Enter pick Codex and the board follows", async ({
+  test("the agent filter is a combobox over a listbox; arrows and Enter pick Codex and the page follows", async ({
     page,
     isMobile,
   }) => {
@@ -43,7 +62,7 @@ test.describe("select", () => {
     await expect(t).toHaveAttribute("aria-expanded", "true");
     const l = list(page);
     await expect(l).toBeVisible();
-    await expect(l.locator("[aria-selected=true]")).toHaveText("All harnesses");
+    await expect(l.locator("[aria-selected=true]")).toHaveText("All agents");
     // The list sits under the trigger and is a hairline popover, not a sheet.
     const tb = (await t.boundingBox())!;
     const lb = (await l.boundingBox())!;
@@ -65,7 +84,7 @@ test.describe("select", () => {
     await expect(t).toHaveAttribute("data-value", "codex");
     await expect(t).toContainText("Codex");
     await expect(t).toBeFocused();
-    await onlyCards(page, "Codex");
+    await expect(page.locator("input[data-search]")).toHaveValue(/agent:codex/);
 
     // Open again: the current option carries the check, and Home/End reach the edges.
     await page.keyboard.press(" ");
@@ -85,7 +104,7 @@ test.describe("select", () => {
     test.skip(!!isMobile, "desktop project only");
     const t = trigger(page);
     await t.click();
-    const names = (await list(page).getByRole("option").allInnerTexts()).slice(1); // past "All harnesses"
+    const names = (await list(page).getByRole("option").allInnerTexts()).slice(1); // past "All agents"
     // A prefix that names exactly one row.
     let target = "";
     let prefix = "";
@@ -119,6 +138,33 @@ test.describe("select", () => {
     await expect(list(page)).toHaveCount(0);
   });
 
+  test("the row the keys moved to has the cursor edge; the pointer's has the fill alone", async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!!isMobile, "desktop project only");
+    const edge = `${await meta(page)} 0px 0px 0px 1px inset`;
+    // Date's rows are fixed; the Agent list's can grow while the index reads.
+    const date = page.getByRole("combobox", { name: "Date" });
+    const options = page.getByRole("listbox", { name: "Date" }).getByRole("option");
+    await date.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(active(page)).toHaveCSS("box-shadow", edge);
+    await page.keyboard.press("ArrowDown");
+    await expect(options.nth(1)).toHaveClass(/sel-opt--active/);
+    await expect(active(page)).toHaveCSS("box-shadow", edge);
+    // The mouse onto another row: it takes the cursor, as the fill alone.
+    await options.nth(3).hover();
+    await expect(options.nth(3)).toHaveClass(/sel-opt--active/);
+    await expect(active(page)).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("Escape");
+    // Opened by a click: the fill alone, until a key moves it.
+    await date.click();
+    await expect(active(page)).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("ArrowDown");
+    await expect(active(page)).toHaveCSS("box-shadow", edge);
+  });
+
   test("axe: nothing new with the list open", async ({ page, isMobile }) => {
     test.skip(!!isMobile, "desktop project only");
     // The list and a demo toast fade in; axe must sample text at full opacity, not mid-animation.
@@ -129,10 +175,15 @@ test.describe("select", () => {
         .analyze();
       return r.violations.flatMap((v) => v.nodes.map((n) => `${v.impact}:${v.id} ${n.target.join(" ")}`));
     };
-    // The board's own findings (a card footer's contrast, say) are not the select's.
+    // The page's own findings (a card footer's contrast, say) are not the select's.
     const before = new Set(await scan());
-    await trigger(page).click();
-    await expect(list(page)).toBeVisible();
+    // Date's rows are fixed. The Agent list's come from the index, and gain a row when a
+    // session of a new agent is read, which can land while axe is reading the list.
+    const date = page.getByRole("combobox", { name: "Date" });
+    const dates = page.getByRole("listbox", { name: "Date" });
+    await date.click();
+    // Placed: the list is drawn where it opens (it waits one frame, hidden, to measure).
+    await expect(dates.getByRole("option", { name: "Past 7 days" })).toBeVisible();
     const after = await scan();
     const fresh = after.filter((v) => !before.has(v) && !/\.card/.test(v));
     expect(fresh, "axe findings that appear only with the select open").toEqual([]);
@@ -145,6 +196,12 @@ test.describe("select", () => {
   test("phone: the list is a bottom sheet with 44 px rows, still a listbox", async ({ page, isMobile }) => {
     test.skip(!isMobile, "phone project only");
     const t = trigger(page);
+    // Even a key's cursor is the fill alone on a touch screen.
+    await t.focus();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await expect(active(page)).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("Escape");
     await t.click();
     const sheet = page.locator(".sel-sheet");
     await expect(sheet).toBeVisible();

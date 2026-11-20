@@ -102,7 +102,6 @@ test.describe("phone", () => {
       inbox: ".inbox",
       feed: "ol.rows",
       machines: "section.machine",
-      connect: ".sect--phone",
     };
     const bar = page.locator("nav.tabbar");
     const onBar = (
@@ -117,7 +116,7 @@ test.describe("phone", () => {
       await expect(bar.locator("a[aria-current='page']")).toHaveAttribute("data-nav", key);
     }
     // The pages past the fourth sit behind More, which then carries the current mark.
-    const behindMore = ["inbox", "feed", "review", "machines", "connect"].filter((k) => !onBar.includes(k));
+    const behindMore = ["inbox", "feed", "review", "machines"].filter((k) => !onBar.includes(k));
     for (const key of behindMore) {
       await bar.getByRole("button", { name: "More" }).click();
       await page.getByRole("dialog", { name: "More" }).locator(`a[data-nav='${key}']`).click();
@@ -166,6 +165,44 @@ test.describe("phone", () => {
     await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: "More" })).toHaveCount(0);
+  });
+
+  test("a switch is drawn as iOS draws it: on in the tint, off with no edge", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openPage(page, "/settings");
+    await page.getByRole("dialog", { name: "Settings" }).getByRole("tab", { name: "General" }).click();
+    const flip = page.getByRole("switch", { name: "Usage in the sidebar" });
+    await expect(flip).toHaveAttribute("aria-checked", "true");
+    await flip.click();
+    await expect(flip).toHaveAttribute("aria-checked", "false");
+    const look = await page.locator(".toggle").evaluateAll(async (els) => {
+      await Promise.all(els.flatMap((el) => el.getAnimations().map((a) => a.finished)));
+      const probe = document.body.appendChild(document.createElement("i"));
+      probe.style.backgroundColor = "var(--tint)";
+      const tint = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return els.map((el) => {
+        const s = getComputedStyle(el);
+        return { on: el.getAttribute("aria-checked") === "true", bg: s.backgroundColor, shadow: s.boxShadow, tint };
+      });
+    });
+    expect(look.some((s) => s.on) && look.some((s) => !s.on)).toBe(true);
+    for (const s of look) {
+      expect(s.shadow, "no edge").toBe("none");
+      if (s.on) expect(s.bg, "on is the tint").toBe(s.tint);
+    }
+  });
+
+  test("the palette's cursor row is the fill alone, even moved by a key", async ({ page }) => {
+    await openBoard(page);
+    await page.keyboard.press("ControlOrMeta+k");
+    const dialog = page.getByRole("dialog", { name: "Command palette" });
+    await expect(dialog).toBeVisible();
+    const selected = dialog.locator(".pal-row[aria-selected='true']");
+    await expect(selected).toHaveCSS("box-shadow", "none");
+    await page.keyboard.press("ArrowDown");
+    await expect(dialog.locator(".pal-row").nth(1)).toHaveAttribute("aria-selected", "true");
+    await expect(selected).toHaveCSS("box-shadow", "none");
   });
 
   test("the session page keeps its control strip above the tab bar", async ({ page }) => {
@@ -291,7 +328,18 @@ test.describe("phone: new session", () => {
         mode: "auto",
         start: { "claude-code": { permissions: ["read", "safe", "auto"], permission: "auto", any_model: true } },
       },
-      { sinkToken: await sinkToken() },
+      // Taken and delivered, and no hook events after: the page stays in its starting state
+      // for the test to read (with them it leaves it within a second, before a loaded runner
+      // has looked).
+      {
+        script: (c) => ({
+          pauseMs: 400,
+          acks: [
+            { outcome: "taken", mode: "sdk" },
+            { outcome: "delivered", mode: "sdk", session: c.session },
+          ],
+        }),
+      },
     );
     try {
       await page.goto(`${CONTROL_BASE}/?new=1&machine=${d.name}`);
@@ -384,6 +432,9 @@ test.describe("phone: the composer", () => {
       await page.goto(`${CONTROL_BASE}${sessionUrl(s.harness, s.id)}`);
       const box = composer(page);
       await expect(box).toBeEnabled();
+      // Focused, the field never glows.
+      await box.focus();
+      await expect(page.locator(".ctl-field")).toHaveCSS("box-shadow", "none");
       // No grant yet today, in a browser: the line offers Unlock now.
       const foot = page.locator(".ctl-foot[data-reason=passkey]");
       const link = foot.getByRole("button", { name: "Unlock now" });
@@ -766,7 +817,7 @@ test.describe("phone: a request shown whole", () => {
     }
   });
 
-  test("a board row's long-press menu answers a command only where the row's one line shows it whole: not at 320, at 820", async ({
+  test("a board row's long-press menu answers a command only where the row's one line shows it whole: not at 320, at 820; the sheet keeps its order, the pair after New session here", async ({
     context,
     page,
   }) => {
@@ -775,16 +826,19 @@ test.describe("phone: a request shown whole", () => {
     const token = await sinkToken();
     const d = await fakeDaemon(key, { name: `menu-${randomUUID().slice(0, 6)}`, harnesses: ["claude-code"] });
     const asked = await postPrompt(token, { machine: d.name, title: "Deploy", agoMs: 3_000, message: SHORT });
+    // One a 390 wide row shows whole.
+    const brief = await postPrompt(token, { machine: d.name, title: "Tests", agoMs: 3_000, message: "npm test" });
     try {
-      for (const [w, h, cut] of [
-        [320, 568, true],
-        [820, 1180, false],
+      for (const [w, h, cut, p] of [
+        [320, 568, true, asked],
+        [820, 1180, false, asked],
+        [390, 844, false, brief],
       ] as const) {
         await page.setViewportSize({ width: w, height: h });
         await page.goto(CONTROL_BASE);
-        const card = page.locator(`article.card[data-flip="${asked.key}"]`);
+        const card = page.locator(`article.card[data-flip="${p.key}"]`);
         const line = card.locator(".card-attn");
-        await expect(line, `${w}`).toHaveText(SHORT);
+        await expect(line, `${w}`).toHaveText(p === asked ? SHORT : "npm test");
         expect(await line.evaluate((el) => el.scrollWidth > el.clientWidth), `${w}`).toBe(cut);
         // Held still, then a finger down for the long-press.
         await card.scrollIntoViewIfNeeded();
@@ -803,9 +857,14 @@ test.describe("phone: a request shown whole", () => {
         const sheet = page.locator(".menu-sheet");
         await expect(sheet.getByRole("menuitem", { name: "Hide", exact: true }), `${w}`).toBeVisible();
         await expect(sheet.getByRole("menuitem", { name: /^(Allow|Deny) Bash$/ }), `${w}`).toHaveCount(cut ? 0 : 2);
+        // Open leads, as ever (a computer's menu leads with the pair; the phone's does not).
+        const names = await sheet.getByRole("menuitem").allTextContents();
+        expect(names.slice(0, 3), `${w}`).toEqual(["Open as page", "Preview", "New session here"]);
+        if (!cut) expect(names.indexOf("Allow Bash"), `${w}`).toBeGreaterThan(names.indexOf("New session here"));
       }
     } finally {
       await asked.clear();
+      await brief.clear();
       await d.stop();
     }
   });

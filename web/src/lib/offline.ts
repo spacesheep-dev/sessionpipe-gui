@@ -8,7 +8,7 @@
 // machine is back, and returns when the machine drops again (a new last poll). Machines
 // counts and marks a machine online by the same rule (`machineOnline`).
 import type { MachineControl, MachineSummary, SessionSummary } from "@shared/api";
-import { ms } from "./time";
+import { heard, ms } from "./time";
 
 /** Whether a machine is online, the one rule every page reads: a paired machine by its
  *  heartbeat alone (the receiver's `online`, spacesheep's on an account), since its
@@ -96,15 +96,6 @@ export function writeAcks(seen: readonly string[]): void {
   } catch {
     // a private window: hidden for this page only
   }
-}
-
-/** "14:02" today, "3 Oct 14:02" before, in the person's own clock ("2:02 PM"). */
-function heard(iso: string, now: number): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const hm = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  if (d.toDateString() === new Date(now).toDateString()) return hm;
-  return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${hm}`;
 }
 
 const waits = (n: number, back: string) =>

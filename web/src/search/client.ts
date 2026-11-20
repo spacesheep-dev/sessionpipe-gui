@@ -158,7 +158,7 @@ export function useSessionSearch(
     setError(null);
     const t = shownOnce.current ? 0 : window.setTimeout(() => setSkeleton(true), SKELETON_MS);
     client
-      .sessions({ q, sort, live: true, limit: PAGE_SIZE, tz: tz(), hits: 3 }, ac.signal)
+      .sessions({ q, sort, live: true, limit: PAGE_SIZE, tz: tz(), hits: 1 }, ac.signal)
       .then((p) => {
         remember(key, p);
         if (mine !== seq.current) return;
@@ -200,7 +200,7 @@ export function useSessionSearch(
     setLoadingMore(true);
     const base = page;
     client
-      .sessions({ q, sort, live: true, limit: PAGE_SIZE, tz: tz(), hits: 3, cursor: page.cursor })
+      .sessions({ q, sort, live: true, limit: PAGE_SIZE, tz: tz(), hits: 1, cursor: page.cursor })
       .then((next) => {
         const seen = new Set(base.sessions.map((s) => s.key));
         const merged: SessionSearchPage = {
@@ -223,7 +223,7 @@ export function useSessionSearch(
     const ac = new AbortController();
     const base = page;
     client
-      .sessions({ q, sort, live: true, limit: PAGE_SIZE, tz: tz(), hits: 3 }, ac.signal)
+      .sessions({ q, sort, live: true, limit: PAGE_SIZE, tz: tz(), hits: 1 }, ac.signal)
       .then((p) => {
         if (!sameRows(base, p)) setNewer(p);
       })

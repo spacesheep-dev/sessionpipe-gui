@@ -14,7 +14,7 @@
   /* The tab bar is fixed at the bottom on phones; the rail is a column on wide screens. */
   height: calc(100dvh - var(--tabbar) - var(--safe-bottom, env(safe-area-inset-bottom)));
 }
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .theme-page {
     height: 100dvh;
   }
@@ -86,16 +86,6 @@
   text-decoration-color: var(--line-2);
   text-underline-offset: 3px;
   cursor: pointer;
-}
-
-/* The divider on the rail above the first experimental view: a hairline, nothing else
-   (the word is in the tooltip; a label here ate the narrow rail). */
-.rail-group {
-  display: block;
-  height: 0;
-  margin: 12px 12px;
-  border: 0;
-  border-top: var(--hairline) solid var(--line);
 }
 
 /* A theme's own icon on the rail: the manifest's inline SVG, sized like ours. */
@@ -202,7 +192,21 @@
 .extras-log.is-err {
   color: var(--err);
 }
-@media (max-width: 839px) {
+/* On a desktop a row keeps the panel's trailing inset, and the add line stands clear of
+   the panel above it. */
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+  .form-row.themes-row {
+    padding-right: 12px;
+  }
+  .themes-tools .sect-note {
+    padding: 8px 12px 0;
+  }
+  .form-group > .form-list ~ .well-row {
+    margin-top: 8px;
+  }
+}
+
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .themes-row {
     flex-wrap: wrap;
   }

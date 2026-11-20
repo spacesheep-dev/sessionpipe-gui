@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // The context-menu items more than one surface shows, built once so a session's menu
 // reads the same on a board row, an inbox row, a panel tab, a toast and the session's own
-// "⋯": open (as a page, beside, in the background, in a new window), New session here,
-// Ask another agent (the Handoff sheet), whatever the surface can answer, its colour label, go to the parent or a subagent, copy,
-// forget. Only actions that exist; a surface adds its own groups around these. Builders run when a menu opens, so
-// they read the current URL and settings, never a stale render.
+// "⋯": whatever the surface can answer, first; open (as a page, beside, in the background,
+// in a new window), New session here, Ask another agent (the Handoff sheet), its colour
+// label, go to the parent or a subagent, copy, forget. Only actions that exist, and none
+// that would only be refused; a key beside an item only where pressing it there does that
+// to this session. A surface adds its own groups around these. Builders run when a menu
+// opens, so they read the current URL and settings, never a stale render.
 import { type AgentRun, type SessionSummary, splitKey } from "@shared/api";
 import type { MenuItem, MenuList } from "../components/ContextMenu";
 import { confirmAction, tidy } from "../components/ContextMenu";
 import { openNewSession } from "../control/newSessionState";
 import type { Store } from "../data/store";
-import { askOff } from "../orchestrate/handoff/handoff";
+import { canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { copyText } from "./clipboard";
+import { phoneLayout, wideLayout } from "./device";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
 import { canHideUntilNeeded, hiddenNow, hide, hideUntilNeeded, unhide } from "./hidden";
 import { labelMenu } from "./labels";
@@ -21,7 +24,7 @@ import { canMark, isUnread, notifyMenu, setUnread } from "./marks";
 import { accountMode, accountSessionUrl, receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
-import { closeTab, openSplit, parseSplit } from "./split";
+import { closeTab, openSplit, openWay, parseSplit } from "./split";
 
 export { copyText };
 
@@ -49,14 +52,12 @@ export const openOutside = (path: string): void => {
   if (url) window.open(url, "_blank", "noopener");
 };
 
-const desktop = () => typeof matchMedia === "function" && matchMedia("(min-width: 840px)").matches;
-
 /** Open in a new window and Copy link, for anything that is a page of the app. */
 export function linkItems(path: string): MenuList {
   const url = absoluteUrl(path);
   if (!url) return [];
   return [
-    desktop() && { label: "Open in new window", run: () => openOutside(path) },
+    wideLayout() && { label: "Open in new window", run: () => openOutside(path) },
     { label: "Copy link", run: () => copyText(url) },
   ];
 }
@@ -71,7 +72,7 @@ export interface SessionMenuContext {
   store: Store;
   /** Where the menu is: decides the shortcuts shown and what "here" means. */
   surface: "list" | "panel" | "page" | "tab" | "toast" | "palette";
-  /** The surface's own answer items (Allow / Deny with its signed send), put after Open. */
+  /** The surface's own answer items (Allow / Deny with its signed send), put first. */
   answer?: MenuList;
   /** More items for the surface, before Copy (Follow, Close panel, Show only…). */
   extra?: MenuList;
@@ -93,20 +94,26 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
   const hidden = hideHere && hiddenNow(s);
   // e and ⇧E are the board's (useHideKeys); another list shows Hide without them.
   const onBoard = location.pathname === "/";
-  const phone = !desktop();
-  const beside = getSettings().openSessions === "beside";
+  const phone = phoneLayout();
+  // On a list ↵ and ⇧↵ go the two ways (lib/split.ts openWay): the item ↵ does comes first
+  // and carries ↵, the other ⇧↵. The phone keeps the order Settings says.
+  const primary = openWay("primary");
+  const other = openWay("other");
+  const keyFor = (way: "page" | "beside") =>
+    !list ? undefined : primary === way ? "list.open" : other === way ? "list.beside" : undefined;
+  const besideFirst = phone ? getSettings().openSessions === "beside" : primary === "beside";
   const openPage: MenuItem | null = onItsPage
     ? null
-    : { label: "Open as page", action: list && !beside ? "list.open" : undefined, run: () => navigate(path) };
+    : { label: "Open as page", action: keyFor("page"), run: () => navigate(path) };
   const openBeside: MenuItem | null =
     isActiveTab || onItsPage
       ? null
       : {
           label: phone ? "Preview" : "Open beside",
-          action: list ? (beside ? "list.open" : "list.beside") : undefined,
+          action: keyFor("beside"),
           run: () => openSplit(s.key),
         };
-  const open: MenuList = beside ? [openBeside, openPage] : [openPage, openBeside];
+  const open: MenuList = besideFirst ? [openBeside, openPage] : [openPage, openBeside];
   const kids = ctx.children ?? [];
   const repo = repoBranch(s);
   const forget = async () => {
@@ -127,7 +134,11 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
   };
   // "New session here": its machine, agent and folder, when that machine is paired here.
   const paired = !!(s.machine && ctx.store.get().machines.get(s.machine)?.control);
+  // A computer's menu leads with the answer; the phone's sheet keeps it after Ask, as it was.
+  const answer = ctx.answer ?? [];
   const items: MenuList = [
+    ...(phone ? [] : answer),
+    { sep: true },
     ...open,
     !phone &&
       tabIndex < 0 &&
@@ -138,14 +149,15 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
       },
     !phone && !!absoluteUrl(path) && { label: "Open in new window", run: () => openOutside(path) },
     { sep: true },
+    // No key beside it: C opens New session for the board's machine, never for this one's.
     paired && {
       label: "New session here",
-      action: "newSession.open",
       run: () => openNewSession({ machine: s.machine, harness: s.harness, ...(s.cwd ? { cwd: s.cwd } : {}) }),
     },
-    askItem(s, ctx.store),
+    // ⇧A is the session view's: it shows where that view is this session's.
+    askItem(s, ctx.store, { hint: ctx.surface === "page" || ctx.surface === "panel" }),
     { sep: true },
-    ...(ctx.answer ?? []),
+    ...(phone ? answer : []),
     { sep: true },
     labelMenu(ctx.store, [s.key]),
     notifyMenu(ctx.store, s),
@@ -228,21 +240,23 @@ function unreadItem(store: Store, s: SessionSummary, list: boolean): MenuItem | 
   };
 }
 
-/** "Ask another agent…": the Handoff sheet for this session (orchestrate/handoff), with the
- *  reason it is off when its machine is not paired or its daemon predates asking. A reply's
- *  own menu passes that reply (`reply`, `turnSeq`) and its own words ("Ask another agent
- *  about this…"); the sheet is then prefilled with that turn, not the last one. */
+/** "Ask another agent…": the Handoff sheet for this session (orchestrate/handoff), where
+ *  the session's strip has the button (`canAskFrom`): hidden, never disabled, where its
+ *  machine is not paired, its daemon predates asking or there is nobody to ask. `hint`:
+ *  ⇧A beside it, for a menu of the session view the key presses the strip's button in. A
+ *  reply's own menu passes that reply (`reply`, `turnSeq`) and its own words ("Ask another
+ *  agent about this…"); the sheet is then prefilled with that turn, not the last one. */
 export function askItem(
   s: SessionSummary,
   store: Store,
-  o: { label?: string; reply?: string; turnSeq?: number } = {},
-): MenuItem {
-  const control = s.machine ? store.get().machines.get(s.machine)?.control : undefined;
-  const off = askOff(s, control);
+  o: { label?: string; reply?: string; turnSeq?: number; hint?: boolean } = {},
+): MenuItem | null {
+  const { machines, sessions } = store.get();
+  const control = s.machine ? machines.get(s.machine)?.control : undefined;
+  if (!canAskFrom(s, control, sessions.values(), Date.now())) return null;
   return {
     label: o.label ?? "Ask another agent…",
-    action: "session.ask",
-    ...(off ? { disabled: off } : {}),
+    action: o.hint ? "session.ask" : undefined,
     run: () =>
       openHandoffFor(s, {
         ...(o.reply !== undefined ? { reply: o.reply } : {}),
@@ -266,7 +280,7 @@ export function agentItems(
 ): MenuItem[] {
   return tidy([
     // A phone opens an agent as the page on it: one item, not two that do the same.
-    desktop() && { label: "Open beside", run: () => openAgent(s, a, "beside") },
+    wideLayout() && { label: "Open beside", run: () => openAgent(s, a, "beside") },
     { label: "Open as page", run: () => openAgent(s, a, "page") },
     { sep: true },
     opts.parent && { label: "Open parent session", run: () => navigate(sessionPath(s.harness, s.id)) },

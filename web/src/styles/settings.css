@@ -3,8 +3,8 @@
 /* The one form grammar of the document pages (Connect, Machines, Setup, Your phone,
    Views, pairing) and the Settings window: a quiet section label, then rows; each row is
    a label (with at most one caption line under it) at the left and its value or control
-   on one trailing edge, hairlines between the rows. A desktop page draws no box; on a
-   phone the rows sit in an inset group on the grouped ground, as iOS Settings does. */
+   on one trailing edge, hairlines between the rows. Each group is an inset panel on the
+   grouped ground at every width; a phone makes the rows touch-sized and the insets 16 px. */
 
 .form-group {
   display: flex;
@@ -160,15 +160,66 @@
   user-select: text;
 }
 
-@media (max-width: 839px) {
+/* A document page is a grouped form, as the Settings window's pane is: the page and its
+   bar on the grouped ground, each group's rows one inset panel under its head, the
+   group's one caption under the panel. No panel inside a panel: a list in a panel, in a
+   step or beside the Connect QR is plain rows. The page's own stylesheet wins over these
+   (:where), and so does the phone's block below. */
+body:has(.page--grouped),
+.page--grouped > .bar {
+  background: var(--grouped-ground);
+}
+:where(.page--grouped) .form-list {
+  padding-left: 12px;
+  border-radius: var(--radius-pop);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+:where(.page--grouped) :is(.form-list, .steps) .form-list {
+  padding-left: 0;
+  border-radius: 0;
+  background: none;
+}
+/* A well straight on the grouped ground reads as a cell. */
+:where(.page--grouped > .form-group) > .well-row {
+  background: var(--bg-2);
+}
+/* On a desktop the panel has an edge, as a macOS grouped form's does, and its text sits
+   12 px in from it, on the head's and the note's line. */
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+  :where(.page--grouped) .form-list {
+    padding-left: calc(12px - var(--hairline));
+    border: var(--hairline) solid var(--line);
+  }
+  :where(.page--grouped) .form-list:empty {
+    display: none;
+  }
+  :where(.page--grouped) .form-row {
+    padding-right: calc(12px - var(--hairline));
+  }
+  :where(.page--grouped) :is(.form-list, .steps, .connect-phone) .form-list {
+    padding-left: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  :where(.page--grouped) :is(.form-list, .steps, .connect-phone) .form-list .form-row {
+    padding-right: 0;
+  }
+  :where(.page--grouped) .form-head {
+    padding: 0 12px 6px;
+  }
+  :where(.page--grouped) .form-group > :is(.caption, .page-note) {
+    padding-inline: 12px;
+  }
+  :where(.page--grouped > .form-group) > .well-row {
+    box-shadow: inset 0 0 0 var(--hairline) var(--line);
+  }
+}
+
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* The document pages read as iOS grouped lists: the page on the grouped ground, each
      group an inset of cells, separators inset to the text. */
-  body:has(.page--grouped) {
-    background: var(--grouped-ground);
-  }
-  .page--grouped > .bar {
-    background: var(--grouped-ground);
-  }
   /* A text button in a navigation bar, as iOS draws one: the words in the tint, no bezel. */
   .page--grouped > .bar .bar-actions .btn {
     border-color: transparent;
@@ -205,18 +256,17 @@
   .form-row--stack .well-row {
     background: var(--bg-3);
   }
-  /* A well straight on the grouped ground reads as a cell. */
-  .page--grouped > .form-group > .well-row {
-    background: var(--bg-2);
-  }
 }
 
-/* ---------- settings window (/settings) ---------- */
+/* ---------- settings window (?settings=) ---------- */
 
-/* A fixed-size window over a real scrim: the section list on the chrome ground at the
-   left, the pane at the right under a 44 px title bar with the section's name and the
-   close button. The pane is the macOS grouped form: inset groups on the grouped ground.
-   On a phone it is a full-screen sheet with the iOS Settings stack. */
+/* A fixed-size window over a light scrim, over the page you are on: the section list on
+   the chrome ground at the left, the pane at the right under a 44 px title bar with the
+   section's name and the close button. One height per window, so a section switched
+   never makes it jump: up to 720 px, clear of the title band, and in a window under
+   600 px tall all of it but a 16 px margin. The pane is the macOS grouped form: inset
+   groups on the grouped ground. On a phone it is a full-screen sheet with the iOS
+   Settings stack (the phone's block below comes later, and wins). */
 .settings-wrap {
   position: fixed;
   inset: 0;
@@ -235,7 +285,7 @@
 .settings {
   position: relative;
   width: min(800px, 100%);
-  height: min(600px, calc(100dvh - 32px));
+  height: min(720px, calc(100dvh - 104px));
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -246,8 +296,13 @@
   overflow: hidden;
   animation: zoom-in var(--dur) var(--ease-out) both;
 }
+@media (max-height: 600px) {
+  .settings {
+    height: calc(100dvh - 32px);
+  }
+}
 /* The exit: the window zooms out, the scrim fades, both quicker than they came, and
-   neither takes a click meanwhile (Settings.tsx plays it before it navigates away). */
+   neither takes a click meanwhile (SettingsWindow.tsx plays it before it closes). */
 .settings-wrap[data-closing] {
   pointer-events: none;
 }
@@ -287,8 +342,8 @@
   border-radius: var(--radius);
   text-align: left;
   color: var(--fg);
-  font-size: var(--text-md);
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: 400;
   white-space: nowrap;
   transition: background-color var(--dur-fast) var(--ease-out);
 }
@@ -448,7 +503,8 @@
   line-height: var(--lh);
   overflow-wrap: anywhere;
 }
-.settings-hint a {
+.settings-hint a,
+.settings-group-note a {
   color: var(--fg-2);
   text-decoration: underline;
   text-decoration-color: var(--line-2);
@@ -507,7 +563,7 @@ a.settings-row:focus-visible {
 }
 
 /* ----- the phone: a full-screen sheet and a navigation stack ----- */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .settings-wrap {
     padding: 0;
     place-items: stretch;
@@ -731,12 +787,6 @@ a.settings-row:focus-visible {
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 12'%3E%3Cpath d='M1.5 1.5 6 6l-4.5 4.5' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
-.settings-picks {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-width: 0;
-}
 .settings-pick {
   width: 100%;
   text-align: left;
@@ -768,10 +818,6 @@ a.settings-row:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-width: 0;
 }
 .tiles:disabled {
   opacity: 0.55;
@@ -970,21 +1016,81 @@ a.settings-row:focus-visible {
   font-size: var(--text-xs);
   text-align: center;
 }
-@media (min-width: 840px) {
+@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
   .settings-nav-bar,
   .settings-nav-large {
     display: none;
   }
 }
 
-/* The older-receiver notice's failure (components/OlderReceiverNotice.tsx): the sentence,
-   and the installer's line or the log's path small under it. */
-.older-failure {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* A row's folded detail (Settings › About's background service, Settings › Data's older
+   receiver notice): a quiet "Details" or "Run it yourself" with a chevron; open, the
+   failure line small in mono, then the command to copy. */
+.settings-details {
+  font-size: var(--text-sm);
 }
-.older-detail {
+.settings-details > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  list-style: none;
+  color: var(--fg-2);
+  line-height: var(--lh);
+  cursor: pointer;
+}
+.settings-details > summary::-webkit-details-marker {
+  display: none;
+}
+.settings-details > summary::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--fg-3);
+  -webkit-mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.settings-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+@media (hover: hover) {
+  .settings-details > summary:hover {
+    color: var(--fg);
+  }
+}
+.settings-details > summary:focus-visible {
+  border-radius: var(--radius-inner);
+}
+.settings-details-line {
+  margin: 6px 0 0;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
+  line-height: var(--lh);
   overflow-wrap: anywhere;
+}
+.settings-details-say {
+  margin: 6px 0 4px;
+  color: var(--fg-3);
+  line-height: var(--lh);
+}
+.settings-details > .cmdwell {
+  margin-top: 6px;
+}
+/* The background service's row: its button stays level with the label while Details is
+   open under the hint. At work its Update, and the older-receiver notice's, is dimmed as a
+   disabled one is (aria-disabled keeps the focus a disabled button would drop). */
+.service-row:has(.settings-details[open]) {
+  align-items: flex-start;
+}
+.service-row-text {
+  flex: 1 1 auto;
+}
+.settings-row .btn[aria-disabled="true"] {
+  opacity: 0.45;
 }

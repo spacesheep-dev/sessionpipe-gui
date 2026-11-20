@@ -290,8 +290,8 @@ pairing).
 
 ![Canvas: sessions as windows, grouped by machine](https://raw.githubusercontent.com/spacesheep-dev/sessionpipe-gui/main/docs/screenshots/canvas.png)
 
-Two views that ship with the GUI, under *Experimental* in the sidebar. **Canvas** puts every
-live session in a window on an infinite canvas, laid out in one click by state, machine,
+Two views that ship with the GUI, under *Experimental* in Advanced mode's sidebar. **Canvas**
+puts every live session in a window on an infinite canvas, laid out in one click by state, machine,
 harness, repo or label, or in your own areas and notes, the same on every device; its Map
 draws the machines, accounts and repos around them. **Office** makes every machine a room and
 every session a person at a desk.

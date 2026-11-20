@@ -226,6 +226,14 @@
   background: var(--sel);
   color: var(--fg);
 }
+/* With a pointer that hovers, the keys' row (and the first row, ↵'s, until the pointer
+   moves the cursor) has the list rows' cursor edge; the pointer's is the plain fill. A
+   touch screen keeps the fill alone. */
+@media (hover: hover) {
+  .pal-list[data-keys] .pal-row[aria-selected="true"] {
+    box-shadow: var(--cursor-edge);
+  }
+}
 .pal-row--busy {
   opacity: 0.6;
 }
@@ -274,12 +282,11 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
-/* A session's "machine · repo": the machine is never cut, so the detail is at least its
-   width and only the repo after it truncates. */
+/* A session's "machine · repo": the machine is never cut. Neither is the repo: a flex
+   box's automatic minimum is its parts' whole text, so the title gives way to both. */
 .pal-detail:has(> .pal-machine) {
   display: flex;
-  /* Visible, so its automatic minimum is the machine's width (a clipping box's is 0);
-     the repo inside clips itself. */
+  /* Visible, so it has that automatic minimum (a clipping box's is 0). */
   overflow: visible;
   min-width: auto;
 }
@@ -291,6 +298,45 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: pre;
+}
+/* The branch or the model a word of the query matched, after the repo: a long one is cut
+   at 20ch (PaletteDialog's whyText starts it later when the match is past that). */
+.pal-why {
+  max-width: 20ch;
+}
+/* A session's row with that third part leaves its title room. The least its detail takes
+   is the machine and the part, and never more than 60% of the row: the title gives way
+   to that much only, and past it the part does. `width` is only that bound (a flex item's
+   automatic minimum is the smaller of its width and its least content); what the detail
+   takes is the room the title leaves. */
+.pal-detail:has(> .pal-tail) {
+  flex: 1 1 0;
+  width: 60%;
+}
+/* The repo and the part, in the room the machine leaves. The repo is shown with at least
+   " · " and a few of its letters, or not at all: it is the tail's last item to place (the
+   row runs from the right, the parts first), so with less room it wraps to a second line,
+   which is cut off, and no gap or stray "…" is left where it was. */
+.pal-tail {
+  display: flex;
+  flex: 1 1 0;
+  flex-flow: row-reverse wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  height: calc(var(--lh) * 1em);
+  overflow: hidden;
+}
+.pal-whys {
+  order: -1;
+  display: flex;
+  min-width: 0;
+}
+/* It counts for nothing in the detail's least (`width: 0`), and has the room left, up to its
+   own text. */
+.pal-tail > .pal-repo {
+  flex: 1 0 4em;
+  width: 0;
+  max-width: max-content;
 }
 .pal-age {
   min-width: var(--meta-col);
@@ -379,7 +425,7 @@
 }
 
 /* ----- the phone: a full-screen sheet ----- */
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .pal {
     inset: 0;
     top: 0;
@@ -430,6 +476,24 @@
   }
   .pal-keys {
     display: none;
+  }
+  /* A row here stays "machine · repo", laid out as it was: a third part would leave the
+     title no room. */
+  .pal-why,
+  .pal-whys {
+    display: none;
+  }
+  .pal-detail:has(> .pal-tail) {
+    flex: 0 10 auto;
+    width: auto;
+  }
+  .pal-tail {
+    display: contents;
+  }
+  .pal-tail > .pal-repo {
+    flex: 0 1 auto;
+    width: auto;
+    max-width: none;
   }
   .pal-section {
     padding: 14px 18px 6px;
@@ -502,8 +566,9 @@
 /* ----- the preview (a wide window): the row under the cursor, read beside the list -----
    The panel takes a fixed height while it is up, so typing never resizes it; the list
    keeps its whole-row fold inside. The preview is the sheet's own ground on a hairline,
-   one column of quiet text: the state and its timer, the title, where it runs, the last
-   ask and the latest reply, each clamped. It changes with the cursor and never animates. */
+   one column of quiet text: the state and its timer, the title, where it runs, what it
+   waits on or the last ask, and the latest reply, each clamped. It changes with the cursor
+   and never animates. */
 .pal[data-peek] {
   width: min(920px, calc(100vw - 64px));
   max-height: none;
@@ -574,6 +639,12 @@
 }
 .pal-peek-text--reply {
   -webkit-line-clamp: 7;
+}
+/* What a session waits on leads the preview: in the ink, and five lines of it, the most
+   of a command the palette shows before Allow. */
+.pal-peek-text--wait {
+  -webkit-line-clamp: 5;
+  color: var(--fg);
 }
 .pal-peek-text code {
   font-family: var(--font-mono);

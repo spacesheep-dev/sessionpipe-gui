@@ -37,7 +37,8 @@ export interface UpdateStatus {
   version?: string;
   /** ISO time the last check finished. */
   lastChecked?: string;
-  /** Why the last check or install failed, in plain words. */
+  /** Why the last check, download or install failed, in plain words. A failed download or
+   *  install keeps `version`; a failed check has none. */
   error?: string;
   /** Percent downloaded, while downloading. */
   progress?: number;
@@ -128,8 +129,11 @@ export async function requestNotify(): Promise<NotifyStatus | null> {
 }
 
 type On = <T>(event: string, fn: (p: T) => void) => Promise<unknown>;
-/** The shell's events for these stores (shell.ts calls it once). */
-export function wire(on: On): void {
+/** The shell's events for these stores (shell.ts calls it once). In an app that updates
+ *  itself (`updater`) the update is asked for too: an `update` event sent while no window
+ *  was open is gone, and a window opened after the download must know of it. */
+export function wire(on: On, updater = false): void {
   void on<UpdateStatus>("update", (p) => p?.state && update.set(p));
   void on<{ list?: Receiver[] }>("receivers", (p) => Array.isArray(p?.list) && receivers.set(p.list));
+  if (updater) void loadUpdate();
 }

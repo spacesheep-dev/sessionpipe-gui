@@ -19,7 +19,7 @@ import {
   openAgent,
   subscribeAgentsChoice,
 } from "../lib/agents";
-import { sessionTitle } from "../lib/format";
+import { plainTitle, sessionTitle } from "../lib/format";
 import { agentItems, sessionItems, sessionMenuSubtitle } from "../lib/menus";
 import { agentPath, Link, sessionPath } from "../lib/router";
 import { useNow } from "../lib/time";
@@ -53,9 +53,11 @@ export function AgentNow({ a, className = "agent-now" }: { a: AgentRun; classNam
   );
 }
 
-/** "Type · description", the type in the row's weight and the description a tier down. */
-export function AgentText({ a }: { a: Pick<AgentRun, "type" | "description"> }) {
-  const d = a.description?.trim();
+/** "Type · description", the type in the row's weight and the description a tier down.
+ *  `title` stands in for a missing description with words already plain (a child's own
+ *  title), so they are not read for marks a second time. */
+export function AgentText({ a, title }: { a: Pick<AgentRun, "type" | "description">; title?: string }) {
+  const d = a.description?.trim() ? plainTitle(a.description.trim()) : (title ?? "");
   return (
     <span className="agent-text ellipsis">
       <span className="agent-type">{agentType(a)}</span>
@@ -115,9 +117,12 @@ export function AgentRow({
         modClick={(o) => openAgent(s, a, "beside", { background: o.background })}
       >
         <AgentGlyph a={a} />
-        {a.session && <LabelDot session={a.session} />}
-        {/* A child session's own title says what it was asked, when its launch did not. */}
-        <AgentText a={child && !a.description ? { type: a.type, description: sessionTitle(child) } : a} />
+        {/* A child session's own title says what it was asked, when its launch did not; its
+            label follows it, as a board row's does. */}
+        <span className="kid-head">
+          <AgentText a={a} title={child ? sessionTitle(child) : undefined} />
+          {a.session && <LabelDot session={a.session} />}
+        </span>
         <span className="sr-only">, {a.state === "running" ? "running" : a.state === "stale" ? "quiet" : "done"}</span>
         {child && <NotifyOff s={child} under />}
         <AgentNow a={a} />

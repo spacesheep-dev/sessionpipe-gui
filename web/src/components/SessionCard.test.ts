@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// The row menu's Allow and Deny name the tool as the strip and the Inbox do; a working
-// row's preview starts where the reply's newest thought does.
+// The row menu's Allow and Deny name the tool as the strip and the Inbox do, and show the
+// keys of the surface that has them; a working row's preview starts where the reply's
+// newest thought does.
 import { describe, expect, it, vi } from "vitest";
 
 // The menus this file imports listen on the window when they load; node has none.
@@ -8,7 +9,10 @@ vi.hoisted(() => {
   Object.assign(globalThis, { window: new EventTarget() });
 });
 
-import { answerItems, newest } from "./SessionCard";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AgentText } from "./AgentRow";
+import { answerItems, askRest, Inline, newest } from "./SessionCard";
 
 describe("answerItems", () => {
   it("names the tool by its label", () => {
@@ -32,6 +36,29 @@ describe("answerItems", () => {
     const st = { off: true, reason: "too late to answer from here; answer it on studio-mac", tag: "late" };
     expect(answerItems("Bash", st, () => {})).toEqual([]);
     expect(answerItems("Bash", { ...st, tag: "blocked" }, () => {})).toHaveLength(2);
+  });
+  it("carries the keys of the surface that answers by key, and none where no key does", () => {
+    const st = { off: false, reason: null };
+    const board = { allow: "board.allow", deny: "board.deny" };
+    expect(answerItems("Bash", st, () => {}, board).map((i) => [i.label, i.action])).toEqual([
+      ["Allow Bash", "board.allow"],
+      ["Deny Bash", "board.deny"],
+    ]);
+    // A plan review's pair is answered by the same two keys.
+    expect(answerItems("ExitPlanMode", st, () => {}, board).map((i) => [i.label, i.action])).toEqual([
+      ["Approve plan", "board.allow"],
+      ["Keep planning", "board.deny"],
+    ]);
+    const inbox = { allow: "inbox.allow", deny: "inbox.deny" };
+    expect(answerItems("Bash", st, () => {}, inbox).map((i) => i.action)).toEqual(["inbox.allow", "inbox.deny"]);
+    // A toast: a and d do nothing on it, so its menu shows no key.
+    expect(answerItems("Bash", st, () => {}).map((i) => i.action)).toEqual([undefined, undefined]);
+    // Off, the items keep their keys and say why.
+    const off = answerItems("Bash", { off: true, reason: "pair build-box to send messages" }, () => {}, board);
+    expect(off.map((i) => [i.action, i.disabled])).toEqual([
+      ["board.allow", "pair build-box to send messages"],
+      ["board.deny", "pair build-box to send messages"],
+    ]);
   });
 });
 
@@ -83,5 +110,38 @@ describe("newest", () => {
       const at = cut.length - rest.length;
       expect(at === 0 || /\s/.test(cut[at - 1]!), `${n}: ${out}`).toBe(true);
     }
+  });
+});
+
+describe("Inline", () => {
+  const html = (text: string) => renderToStaticMarkup(createElement(Inline, { text }));
+  it("keeps the words between code spans, a dash after one too", () => {
+    expect(html("Fix `a.ts` - then `b`")).toBe(
+      'Fix <code class="inline-code">a.ts</code> - then <code class="inline-code">b</code>',
+    );
+  });
+  it("drops a leading mark once and reads emphasis as words", () => {
+    expect(html("- **Done**: `x` moved")).toBe('Done: <code class="inline-code">x</code> moved');
+  });
+});
+
+describe("askRest", () => {
+  it("shows no preview when the prompt's one line is the plain title", () => {
+    expect(askRest("Fix `foo` in bar", "Fix foo in bar")).toBe("");
+    expect(askRest("Fix `foo` in bar\nand **then** the docs", "Fix foo in bar")).toBe("and **then** the docs");
+  });
+  it("shows the whole prompt under a title that is not its first line", () => {
+    expect(askRest("Fix `foo` in bar", "Rename the store")).toBe("Fix `foo` in bar");
+  });
+});
+
+describe("AgentText", () => {
+  const html = (a: { type?: string; description?: string }, title?: string) =>
+    renderToStaticMarkup(createElement(AgentText, { a, title }));
+  it("reads a description as plain words", () => {
+    expect(html({ type: "Explore", description: "Find `formatMoney` calls" })).toContain("Find formatMoney calls");
+  });
+  it("shows a child's title, already plain, as it is", () => {
+    expect(html({ type: "Explore" }, "*a b*")).toContain(" · *a b*");
   });
 });

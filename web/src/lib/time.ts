@@ -142,6 +142,15 @@ export function clock(iso: string | undefined, withMs = false): string {
   return withMs ? `${hh}:${mm}:${ss}.${String(d.getMilliseconds()).padStart(3, "0")}` : `${hh}:${mm}:${ss}`;
 }
 
+/** "14:02" today, "3 Oct 14:02" before, in the person's own clock ("2:02 PM"). */
+export function heard(iso: string, now: number): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const hm = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (d.toDateString() === new Date(now).toDateString()) return hm;
+  return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${hm}`;
+}
+
 export function dayLabel(iso: string | undefined, at: number): string {
   const t = ms(iso);
   if (Number.isNaN(t)) return "";

@@ -12,7 +12,7 @@
 import type { Attention, ControlActivity, MachineControl, SessionSummary } from "@shared/api";
 import { useEffect, useState } from "react";
 import { COMPOSER_SENT, ControlStrip } from "../components/ControlStrip";
-import { useAppState, useListedSessions, useStore } from "../data/hooks";
+import { useAppState, useListedSessions, useStreamDown } from "../data/hooks";
 import { accountMode, accountSessionUrl, receiverOrigin } from "../lib/net";
 import { HandoffHost } from "../orchestrate/handoff/HandoffHost";
 import { canAskFrom } from "../orchestrate/handoff/handoff";
@@ -85,9 +85,8 @@ export function SessionControl({
   // The app signs only for a machine whose daemon takes device keys (CONTROL.md §2).
   const old = device && control && !machineTakes(control) ? updateWords(session.machine) : null;
   const secure = canSignHere && !old;
-  const { connection, suggestions: all } = useAppState();
+  const { suggestions: all } = useAppState();
   const sessions = useListedSessions();
-  const store = useStore();
   // "Unlock now": take the day grant ahead of the first send (one passkey tap). A prompt
   // the person closes leaves the line as it was, with Unlock now; a refusal is said until a
   // grant is held, so a send that takes one ends it too.
@@ -114,7 +113,9 @@ export function SessionControl({
   // The line's one live fact: a refusal, the prompt being up, or the unlock under way (or
   // why it failed, while no grant is held). All but the prompt's own line are refusals.
   const note = error ?? (tap ? tapWords() : grant.exp === null && unlock ? unlock : undefined);
-  const down = connection === "reconnecting" || connection === "offline" ? connection : null;
+  // The stream is down, from the instant the page bar and the board say so (after the
+  // first snapshot and the grace): a blip turns nothing off here.
+  const down = useStreamDown() !== null;
   // Someone to ask on its machine: another session there, or a harness its hello lists.
   const askable = canAskFrom(session, control, sessions.values(), Date.now());
   return (
@@ -140,7 +141,7 @@ export function SessionControl({
         send={secure && rp ? send : undefined}
         approval={secure && rp ? approval : undefined}
         catching={catching}
-        stream={down ? { state: down, retry: () => store.reconnect() } : undefined}
+        stream={down}
         unlock={!device && control && secure && grant.exp === null ? () => void unlockNow() : undefined}
         ask={askable ? () => openHandoff({ session: session.key }) : undefined}
         onDraft={setDraft}

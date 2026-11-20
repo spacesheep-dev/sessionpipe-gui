@@ -6,7 +6,8 @@
 // guesses: a fact the events did not carry is left out.
 import type { AgentRun, SessionKey, SessionState, SessionSummary } from "@shared/api";
 import { splitKey } from "@shared/api";
-import { toolLabel } from "./format";
+import { phoneLayout } from "./device";
+import { plainTitle, toolLabel } from "./format";
 import { agentPath, navigate, sessionPath } from "./router";
 import { agentTabKey, type OpenSplitOptions, openSplit } from "./split";
 import { dur } from "./time";
@@ -22,7 +23,7 @@ export const agentType = (a: Pick<AgentRun, "type">): string => a.type?.trim() |
 
 /** "Explore · Find ad-hoc money formatting", or the type alone when nothing described it. */
 export function agentLabel(a: Pick<AgentRun, "type" | "description">): string {
-  const d = a.description?.trim();
+  const d = a.description ? plainTitle(a.description.trim()) : "";
   return d ? `${agentType(a)} · ${d}` : agentType(a);
 }
 
@@ -85,8 +86,6 @@ export function agentFound(a: AgentRun, q: string): boolean {
   return words.length > 0 && words.every((w) => agentMatches(a, w));
 }
 
-const phone = () => typeof matchMedia === "function" && matchMedia("(max-width: 839px)").matches;
-
 /** Open an agent: beside, as the panel's agent tab (a phone opens the page, which is how
  *  a phone opens one); as a page, the parent's page on the agent. An agent that came as a
  *  session of its own (`parent_id`) opens that session. */
@@ -98,11 +97,11 @@ export function openAgent(
 ): void {
   if (a.session) {
     const { harness, id } = splitKey(a.session);
-    if (how === "beside" && !phone()) openSplit(a.session, opts);
+    if (how === "beside" && !phoneLayout()) openSplit(a.session, opts);
     else navigate(sessionPath(harness, id));
     return;
   }
-  if (how === "beside" && !phone()) openSplit(agentTabKey(s.key, a.id), opts);
+  if (how === "beside" && !phoneLayout()) openSplit(agentTabKey(s.key, a.id), opts);
   else navigate(agentPath(s.harness, s.id, a.id));
 }
 

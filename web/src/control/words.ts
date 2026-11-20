@@ -112,7 +112,7 @@ export function outcomeWords(a: ControlActivity, o: { machine?: string; online?:
     case "expired":
       return `expired · ${a.detail ?? "nobody took it in time"}`;
     case "unsupported":
-      return `unsupported · ${who} has no way to ${KIND_LABEL[a.kind]} on this harness${a.detail ? `: ${a.detail}` : ""}`;
+      return `unsupported · ${who} has no way to ${KIND_LABEL[a.kind]} with this agent${a.detail ? `: ${a.detail}` : ""}`;
     case "failed":
       // A send through spacesheep this app can no longer follow (server/control/state.ts).
       if (a.code === "untracked") return "not followed · sent through an account that's no longer connected";
@@ -361,7 +361,9 @@ const COMMAND: Record<string, string> = {
   kiro: "kiro",
   opencode: "opencode",
 };
-export const harnessCommand = (harness: string, label: string): string => COMMAND[harness] ?? label;
+/** What to type in a terminal to start a harness; none for one that is an app (Antigravity). */
+export const cliCommand = (harness: string): string | undefined => COMMAND[harness];
+export const harnessCommand = (harness: string, label: string): string => cliCommand(harness) ?? label;
 
 /** The one status row under a message sent from here, in the timeline where its turn
  *  will be (STEER-SPEC B.5): where it is, in a person's words, as the machine's acks

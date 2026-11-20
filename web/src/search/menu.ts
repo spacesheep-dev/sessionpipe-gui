@@ -10,10 +10,12 @@ import { setFilter } from "@shared/searchQuery";
 import type { MenuItem, MenuList } from "../components/ContextMenu";
 import type { Store } from "../data/store";
 import { copyText } from "../lib/clipboard";
+import { phoneLayout } from "../lib/device";
 import { labelMenu } from "../lib/labels";
 import { absoluteUrl } from "../lib/menus";
 import { receiverOrigin } from "../lib/net";
 import { sessionPath } from "../lib/router";
+import { openWay } from "../lib/split";
 import { pushToast } from "../lib/toasts";
 import { type OpenMode, openResult, resultLink } from "./open";
 import type { SearchClient } from "./types";
@@ -41,8 +43,6 @@ function revealWords(what: "folder" | "transcript"): string {
   if (/Win/.test(p)) return what === "folder" ? "Show folder in Explorer" : "Show transcript in Explorer";
   return what === "folder" ? "Show folder" : "Show transcript";
 }
-
-const phone = () => typeof matchMedia === "function" && matchMedia("(max-width: 839px)").matches;
 
 export interface RowMenuContext {
   store: Store;
@@ -88,12 +88,21 @@ export function rowMenu(m: SessionMatch, ctx: RowMenuContext): MenuList {
     if (m.summary) openResult(m, undefined, ctx.q, "page");
     else openResult(m, m.hits[m.hits.length - 1], ctx.q, "page");
   };
-  const canReveal = !phone() && ctx.status?.local === true && m.thisMachine;
+  const besideFirst = openWay("primary") === "beside";
+  const canReveal = !phoneLayout() && ctx.status?.local === true && m.thisMachine;
   const repo = repoShortName(m.repo);
   const withToken = (key: "repo" | "machine", value: string) => ctx.setQuery(setFilter(ctx.q, key, value));
   const items: (MenuItem | null | false)[] = [
-    { label: "Open", keys: "↵", run: open("page") },
-    !phone() && { label: "Open beside", keys: "⇧↵", run: open("beside") },
+    // ↵'s way first, with ↵; the other way with ⇧↵ (lib/split.ts openWay).
+    ...(besideFirst
+      ? [
+          { label: "Open beside", keys: "↵", run: open("beside") },
+          { label: "Open as page", keys: "⇧↵", run: open("page") },
+        ]
+      : [
+          { label: "Open as page", keys: "↵", run: open("page") },
+          !phoneLayout() && { label: "Open beside", keys: "⇧↵", run: open("beside") },
+        ]),
     { label: "Open at the latest", run: latest },
     { sep: true },
     m.resume
@@ -104,7 +113,7 @@ export function rowMenu(m: SessionMatch, ctx: RowMenuContext): MenuList {
       run: () => void copyAs("link", new URL(resultLink(m, m.hits[0], ctx.q), receiverOrigin()).href),
     },
     m.resume ? { label: `Copy ${idWord(m.harness)}`, run: () => void copyAs(idWord(m.harness), m.id) } : null,
-    !phone() && m.transcriptPath
+    !phoneLayout() && m.transcriptPath
       ? { label: "Copy transcript path", run: () => void copyAs("transcript path", m.transcriptPath!) }
       : null,
     { sep: true },
@@ -136,7 +145,10 @@ export function snippetMenu(
 ): MenuList {
   return [
     { label: "Open at this match", run: () => openResult(m, hit, ctx.q, "page") },
-    !phone() && { label: "Open beside at this match", run: () => openResult(m, hit, ctx.q, "beside", ctx.from()) },
+    !phoneLayout() && {
+      label: "Open beside at this match",
+      run: () => openResult(m, hit, ctx.q, "beside", ctx.from()),
+    },
     { sep: true },
     { label: "Copy text", run: () => void wholeText().then((t) => copyAs("text", t)) },
   ];

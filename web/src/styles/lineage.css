@@ -97,7 +97,7 @@ a.ask-link:active {
 .ask-fold > .chat-card {
   margin: 4px 0 4px 24px;
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .ask-link {
     min-height: var(--tap);
   }
@@ -165,7 +165,7 @@ a.ask-link:active {
     text-underline-offset: 2px;
   }
 }
-@media (max-width: 839px) {
+@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .sess-for {
     max-width: 60%;
   }

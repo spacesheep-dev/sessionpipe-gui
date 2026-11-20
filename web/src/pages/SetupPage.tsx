@@ -94,7 +94,7 @@ export function Setup() {
   return (
     <div className="page page--doc page--grouped setup">
       <PageBar
-        title="Set up sessionpipe gui"
+        title="Setup"
         meta={done ? `${doneCount} of ${REQUIRED_STEPS.length} done` : undefined}
         actions={
           s && !allDone ? (
@@ -162,7 +162,7 @@ export function Setup() {
       )}
       {s && done && (
         <p className="caption setup-extras" data-setup-extras>
-          Canvas and Office are already in; the ping-a-human plugin is one click on the{" "}
+          Canvas, Office and more are on the{" "}
           <Link to="/themes" className="setup-extras-link">
             Views page
           </Link>
@@ -292,7 +292,7 @@ function SessionsStep({ s, mark, open, onToggle }: { s: SetupStatus; mark: Mark 
       }
     >
       {installed.length > 0 && (
-        <ul className="form-list step-harnesses" aria-label="Harnesses on this machine">
+        <ul className="form-list step-harnesses" aria-label="Agents on this machine">
           {installed.map((h) => (
             <HarnessRow key={h.name} h={h} />
           ))}

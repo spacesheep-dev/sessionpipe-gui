@@ -4,13 +4,15 @@
 // Sessions (fuzzy over title, repo, branch, machine, model; the ones that need you or work
 // first), the open permissions ("Allow Read in …"), actions on the session in view (a
 // message, open beside, open as page, forget) and the places to go. Enter runs the row
-// under the cursor, shift+Enter opens a session beside, `>` keeps only actions, `#` only
-// places. A row with › pushes a second list in place (the machines to start on, the
-// appearance, the skin); Esc or Backspace on an empty field steps back. Typing a paired
-// machine or a repo offers "New session on studio-mac in acme/billing" first. On a wide
-// window the session under the cursor is previewed beside the list. Messages and answers
-// leave the way the control strip sends them (web/src/control/command.ts).
-import type { AgentRun, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
+// under the cursor (a session the way Settings says), shift+Enter opens a session the
+// other way, `>` keeps only actions, `#` only places. A row with › pushes a second list
+// in place (the machines to start on, the appearance, the skin); Esc or Backspace on an
+// empty field steps back. Typing a paired machine or a repo offers "New session on
+// studio-mac in acme/billing" first. On a wide window the session under the cursor is
+// previewed beside the list. Messages and answers leave the way the control strip sends
+// them (web/src/control/command.ts), and are listed only where they would be sent
+// (control/useSend.ts answerState).
+import type { AgentRun, Attention, MachineSummary, SessionMatch, SessionSummary } from "@shared/api";
 import { isEmptySession, LABEL_COLORS, SNIPPET_CHARS, sessionKey, splitKey } from "@shared/api";
 import { promptWords } from "@shared/attachments";
 import {
@@ -23,19 +25,30 @@ import {
   useRef,
   useState,
 } from "react";
+import { sendWords } from "../account/sendable";
 import { sendCommand } from "../control/command";
 import { useRpId } from "../control/hooks";
 import { type NewSessionTarget, openNewSession } from "../control/newSessionState";
-import { canSign, isCancel, signHint, tapWords } from "../control/signer";
+import { canSign, isCancel, machineTakes, setupWords, signHint, tapWords, updateWords } from "../control/signer";
+import { useAnswerOff, useSendGate } from "../control/useSend";
 import { notSentWords } from "../control/words";
-import { byStateThenRecent, useAppState, useLabels, useStore } from "../data/hooks";
+import {
+  byStateThenRecent,
+  type OpenAttention,
+  useAppState,
+  useLabels,
+  useOpenAttentions,
+  useStore,
+} from "../data/hooks";
 import { openDrawer, toggleDrawer } from "../files/state";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
+import { phoneLayout } from "../lib/device";
 import {
   attentionMessage,
   isPlanReview,
   isQuestion,
   modelShort,
+  plainTitle,
   repoShort,
   STATE_LABEL,
   sessionTitle,
@@ -44,17 +57,16 @@ import {
 import { type FieldsMatch, fuzzyFields } from "../lib/fuzzy";
 import { labelName, labelQuery, setLabel } from "../lib/labels";
 import { accountMode } from "../lib/net";
-import { navigate, parseRoute, sessionPath, useRoute } from "../lib/router";
+import { navigate, openSettings, parseRoute, searchAll, sessionPath, useRoute } from "../lib/router";
 import { useSimple } from "../lib/settings";
 import { hintFor, IS_MAC, matches, useShortcutMap } from "../lib/shortcuts";
-import { openSplit, useSplitKey } from "../lib/split";
+import { openSession, openSplit, openWay, useSplitKey } from "../lib/split";
 import { setSkin, setTextSize, setTheme, TEXT_SIZES, type Theme, useSettings } from "../lib/theme";
 import { askOff } from "../orchestrate/handoff/handoff";
 import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import {
   openTranscriptRow,
   PALETTE_MIN,
-  searchAll,
   TxDetail,
   TxMark,
   TxPeek,
@@ -65,12 +77,11 @@ import {
 import { FileMark, type FileRow, looksLikePath, matchFiles, usePaletteFiles } from "../search/paletteFiles";
 import { useThemes } from "../themes/host/registry";
 import { AgentGlyph } from "./AgentRow";
-import { Ago, Kbd, Since, StateDot } from "./bits";
-import { answerable } from "./ControlStrip";
+import { Ago, Kbd, Redacted, Since, StateDot } from "./bits";
 import { LabelDot, LabelSwatch } from "./LabelDot";
 import { closePalette, takeEarlyQuery } from "./Palette";
 import { APPEARANCE, noContextMenu, SIZE_NAME, SkinSwatch, useListedSkins } from "./QuickSettings";
-import { Inline } from "./SessionCard";
+import { AskedLine, Inline, literalAsk } from "./SessionCard";
 import "../styles/palette.css";
 
 /** The quick settings: on the rail its own button, on a phone the row in the More sheet. */
@@ -103,6 +114,8 @@ interface Item {
   session?: SessionSummary;
   /** A subagent row's agent, for the preview. */
   agent?: AgentRun;
+  /** The prompt an Allow or Deny row answers, for the preview. */
+  attention?: Attention;
   /** The action's own key, as caps at the row's right ("C", "G B"). */
   keys?: string;
   /** It pushes a second list (a › at the right). */
@@ -214,6 +227,85 @@ function Hit({ text, at }: { text: string; at: number[] | undefined }) {
   return <>{out}</>;
 }
 
+/** What a session's row is matched on, the fields it always shows first (the title, the
+ *  machine, the repo), then the ones it shows only where a word landed: the branch, and
+ *  the model as it reads ("fable 5.1") and as it is named ("claude-fable-5-1"). */
+const sessionFields = (s: SessionSummary): string[] => [
+  sessionTitle(s),
+  s.machine ?? "",
+  repoShort(s.repo),
+  s.branch ?? "",
+  modelShort(s.model),
+  s.model ?? "",
+];
+
+/** A session against the query. A row shows its model once, so where words landed on both
+ *  forms of it ("claude fable") they are tried on its name alone, which holds both. */
+export function sessionMatch(query: string, s: SessionSummary): FieldsMatch | null {
+  const fields = sessionFields(s);
+  const m = fuzzyFields(query, fields);
+  if (!m?.positions[4]?.length || !m.positions[5]?.length) return m;
+  const named = fuzzyFields(
+    query,
+    fields.map((f, i) => (i === 4 ? "" : f)),
+  );
+  return named ? { score: m.score, positions: named.positions } : m;
+}
+
+/** The letters of a branch or a model a row has room for: palette.css cuts the part at
+ *  20ch. */
+const WHY_CH = 20;
+
+/** A branch or a model as a row shows it. One whose match starts past the cut is cut from
+ *  the front instead, at the start of a word where it can be ("…retry-backoff" of
+ *  "feature/webhook-retry-backoff"), so the bold letters are in what is drawn. */
+export function whyText(text: string, at: number[]): { text: string; at: number[] } {
+  const first = at[0] ?? 0;
+  if (first < WHY_CH) return { text, at };
+  // As late as the match, and no later than fills the part (the "…" is one of its letters).
+  let from = Math.min(first, text.length - (WHY_CH - 1));
+  for (let i = from; i <= first; i++)
+    if (!/[\p{L}\p{N}]/u.test(text[i - 1] as string)) {
+      from = i;
+      break;
+    }
+  return { text: `…${text.slice(from)}`, at: at.map((p) => p - from + 1) };
+}
+
+/** A session row's detail, "lab-mac · acme/billing", and after it the branch or the model
+ *  when a word of the query matched there ("· demo/webhook-backoff"), so every row shows
+ *  why it is listed. The model is there once: by its name where a word landed on that,
+ *  else as it reads. */
+function sessionDetail(s: SessionSummary, m: FieldsMatch | null): ReactNode {
+  const fields = sessionFields(s);
+  const hit = (f: number) => !!m?.positions[f]?.length;
+  // The branch, then one form of the model.
+  const why = [3, hit(5) ? 5 : 4].filter(hit);
+  const shown = [1, 2, ...why].filter((f) => fields[f]);
+  if (shown.length === 0) return undefined;
+  const spans = shown.map((f, i) => {
+    const part = { text: fields[f] as string, at: m?.positions[f] };
+    const { text, at } = part.at && why.includes(f) ? whyText(part.text, part.at) : part;
+    return (
+      <span key={f} className={f === 1 ? "pal-machine" : f === 2 ? "pal-repo" : "pal-repo pal-why"}>
+        {i > 0 ? " · " : ""}
+        <Hit text={text} at={at} />
+      </span>
+    );
+  });
+  // With a machine and a part after the repo, the repo and the parts are one "tail", which
+  // the stylesheet lets drop the repo whole where it has no room for a few of its letters.
+  const whys = spans.filter((_, i) => why.includes(shown[i] as number));
+  if (shown[0] !== 1 || whys.length === 0) return spans;
+  return [
+    spans[0],
+    <span key="tail" className="pal-tail">
+      {shown[1] === 2 ? spans[1] : null}
+      <span className="pal-whys">{whys}</span>
+    </span>,
+  ];
+}
+
 const Glyph = ({ children }: { children: string }) => (
   <span className="pal-glyph" aria-hidden="true">
     {children}
@@ -292,7 +384,7 @@ function startSuggestion(
 /** The fixed rows a list ends on, so a long list shows whole rows at its fold. */
 function snapToRows(list: HTMLElement): void {
   list.style.maxHeight = "";
-  if (matchMedia("(max-width: 839px)").matches) return;
+  if (phoneLayout()) return;
   const cap = list.clientHeight;
   if (list.scrollHeight <= cap + 1) return;
   let bottom = 0;
@@ -311,6 +403,35 @@ export function answerWords(a: { kind?: string; tool?: string }, allow: boolean)
   return { verb: allow ? "Allow" : "Deny", tool: a.tool ? toolLabel(a.tool) : "this" };
 }
 
+/** The prompts the palette offers Allow and Deny for: the ones an answer can reach (not a
+ *  question, not past its two minutes: data/hooks.ts) whose Inbox row would have working
+ *  buttons (`isOff`: control/useSend.ts answerState). A palette row is never shown
+ *  disabled, so a prompt the Inbox would turn off has no row here. */
+export function askableIds(rows: readonly OpenAttention[], isOff: (r: OpenAttention) => boolean): Set<string> {
+  const ids = new Set<string>();
+  for (const r of rows) if (r.answerable && !isOff(r)) ids.add(r.attention.attentionId);
+  return ids;
+}
+
+/** Where the cursor goes when the row it was on (at `was.at`, about `was.session`) has
+ *  left the list, as a prompt does when its two minutes run out or its answer goes from a
+ *  toast: to that session's row; where none is listed, to the row now in its place, or
+ *  the nearest one (the rows before it first), that is not another prompt's Allow or
+ *  Deny. -1: no such row. So an Enter already on its way opens the session, and never
+ *  answers a prompt the cursor was not on. */
+export function cursorAfter(
+  rows: readonly { id: string; section: string }[],
+  was: { at: number; session?: string },
+): number {
+  const home = was.session ? rows.findIndex((r) => r.id === `s:${was.session}`) : -1;
+  if (home >= 0) return home;
+  const at = Math.min(was.at, rows.length - 1);
+  const free = (i: number) => rows[i]?.section !== "Needs you";
+  for (let i = at; i >= 0; i--) if (free(i)) return i;
+  for (let i = at + 1; i < rows.length; i++) if (free(i)) return i;
+  return -1;
+}
+
 export function PaletteDialog({ closing = false }: { closing?: boolean }) {
   const store = useStore();
   const { sessions, machines } = useAppState();
@@ -323,13 +444,11 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
   const simple = useSimple();
   // Keys typed while this module was still loading are the query's start.
   const [q, setQ] = useState(takeEarlyQuery);
-  const [cursor, setCursorRaw] = useState(0);
+  /** The cursor is on a row, not at a place: the id of the row the keys or the pointer put
+   *  it on. null: nobody has moved it, and it is on the first row. */
+  const [cursor, setCursorRaw] = useState<string | null>(null);
   /** Who moved the cursor last: the keys scroll the list to it, the pointer never does. */
   const by = useRef<"key" | "pointer">("key");
-  const setCursor = useCallback((next: number | ((c: number) => number), source: "key" | "pointer" = "key") => {
-    by.current = source;
-    setCursorRaw(next);
-  }, []);
   /** Where the pointer last was: a row only takes the cursor when the pointer really
    *  moves, not when the list scrolls or reorders under a resting one. */
   const lastPointer = useRef<{ x: number; y: number } | null>(null);
@@ -365,16 +484,43 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     [route],
   );
 
-  /** Whether a command can leave for this session's machine from this page. */
+  const gate = useSendGate();
+  /** Whether a command can leave for this session's machine from this page. What turns its
+   *  own composer off turns it off here too (a sessionpipe too old for the app's key, the
+   *  hour a new device waits, a machine that does not trust this device yet), so nothing
+   *  is signed only to be refused. */
   const sendable = useCallback(
     (s: SessionSummary): { ok: true; machineId: string } | { ok: false; why: string } => {
       const control = s.machine ? machines.get(s.machine)?.control : undefined;
       if (!control) return { ok: false, why: `pair ${s.machine ?? "this machine"} to send from here` };
       if (!rp || !canSign(rp)) return { ok: false, why: signHint(rp) };
+      const name = s.machine ?? undefined;
+      if (!machineTakes(control)) return { ok: false, why: updateWords(name) };
+      const g = gate(control);
+      if (g.cooling) return { ok: false, why: g.cooling };
+      if (g.approval !== "ok")
+        return { ok: false, why: sendWords(g.sendable, name ?? "its computer")?.long ?? setupWords(name) };
       return { ok: true, machineId: control.machineId };
     },
-    [machines, rp],
+    [machines, rp, gate],
   );
+  // Allow and Deny are listed only where they would be sent: the gate the Inbox, the toasts
+  // and a row's menu read (control/useSend.ts answerState), with the prompts past their two
+  // minutes and the answers already out. The same set until a prompt joins or leaves it.
+  const open = useOpenAttentions();
+  const asks = useMemo(() => open.map((r) => r.attention), [open]);
+  const answerOff = useAnswerOff(asks);
+  const askKey = JSON.stringify([
+    ...askableIds(open, (r) =>
+      answerOff(
+        r.session,
+        r.attention,
+        r.session.machine ? machines.get(r.session.machine)?.control : undefined,
+        Date.now(),
+      ),
+    ),
+  ]);
+  const askable = useMemo(() => new Set(JSON.parse(askKey) as string[]), [askKey]);
 
   const act = useCallback(async (id: string, fn: () => Promise<void>) => {
     setBusy(id);
@@ -462,7 +608,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         </>
       ),
       // Under its session's row the guide says whose it is; alone, the title does.
-      detail: !tree && (agentsOnly || m) ? sessionTitle(s) : undefined,
+      detail: !tree && (agentsOnly || m) ? <Hit text={sessionTitle(s)} at={m?.positions[1]} /> : undefined,
       hit: !!m,
       at: a.endedAt ?? a.lastAt,
       session: s,
@@ -492,30 +638,17 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           <Hit text={sessionTitle(s)} at={m?.positions[0]} />
         </>
       ),
-      // The machine never truncates (the repo, then the title, give way first).
-      detail:
-        s.machine || repoShort(s.repo) ? (
-          <>
-            {s.machine ? (
-              <span className="pal-machine">
-                <Hit text={s.machine} at={m?.positions[1]} />
-              </span>
-            ) : null}
-            {repoShort(s.repo) ? (
-              <span className="pal-repo">
-                {s.machine ? " · " : ""}
-                <Hit text={repoShort(s.repo)} at={m?.positions[2]} />
-              </span>
-            ) : null}
-          </>
-        ) : undefined,
+      // "machine · repo", whole: the title gives way to it. A word that fits only the branch
+      // or the model brings that one in after the repo, so the row shows why it is here;
+      // such a row leaves its title room, and its repo gives way first (palette.css).
+      detail: sessionDetail(s, m),
       at: s.lastAt,
       session: s,
       score: (m?.score ?? 0) + (ACTIVE.has(s.state) ? 1.5 : 0),
+      // ↵ the way Settings says, ⇧↵ the other way (lib/split.ts openSession).
       run: ({ beside }) => {
         closePalette();
-        if (beside) openSplit(s.key);
-        else navigate(sessionPath(s.harness, s.id));
+        openSession(s.key, beside ? "other" : "primary");
       },
     });
 
@@ -545,13 +678,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
       else {
         const rows: Item[][] = [];
         for (const s of sorted) {
-          const m = fuzzyFields(text, [
-            sessionTitle(s),
-            s.machine ?? "",
-            repoShort(s.repo),
-            s.branch ?? "",
-            `${modelShort(s.model)} ${s.model ?? ""}`,
-          ]);
+          const m = sessionMatch(text, s);
           const kids = agentsOf(s, m, true).filter((r) => !m || r.score > 1 || r.hit);
           if (m || kids.length) rows.push(tree([sessionRow(s, m ?? { score: 0, positions: [] }), ...kids]));
         }
@@ -585,7 +712,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         id: "t:all",
         section: "In transcripts",
         mark: <TxSearchMark />,
-        label: `Search all sessions for “${q.trim()}”`,
+        label: `Search every session for “${q.trim()}”`,
         keys: IS_MAC ? "⌘↵" : "Ctrl ↵",
         score: -2,
         run: () => {
@@ -605,8 +732,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     if (want("Needs you")) {
       for (const s of sorted) {
         for (const a of s.openAttentions) {
-          // A question is answered on its computer: Allow cannot carry the option chosen.
-          if (a.kind !== "permission" || !answerable(a) || isQuestion(a) || answered.has(a.attentionId)) continue;
+          // Only a prompt this page can answer right now (`askable`): a question is answered
+          // on its computer, and an Allow that would only be refused is not offered.
+          if (a.kind !== "permission" || !askable.has(a.attentionId) || answered.has(a.attentionId)) continue;
           const title = sessionTitle(s);
           for (const allow of [true, false]) {
             const verb = allow ? "Allow" : "Deny";
@@ -614,16 +742,22 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             const label = words.tool ? `${words.verb} ${words.tool}` : words.verb;
             const m = text ? fuzzyFields(text, [label, title, s.machine ?? ""]) : null;
             if (text && !m) continue;
+            // The label's hits, on the verb and on the tool after it.
+            const cut = words.verb.length;
+            const onVerb = m?.positions[0]?.filter((i) => i < cut);
+            const onTool = m?.positions[0]?.filter((i) => i > cut).map((i) => i - cut - 1);
             out.push({
               id: `a:${a.attentionId}:${verb}`,
               section: "Needs you",
               mark: <StateDot state="needs_you" decorative />,
               label: (
                 <>
-                  {words.verb}{" "}
+                  <Hit text={words.verb} at={onVerb} />{" "}
                   {words.tool && (
                     <>
-                      <code>{words.tool}</code>{" "}
+                      <code>
+                        <Hit text={words.tool} at={onTool} />
+                      </code>{" "}
                     </>
                   )}
                   in <Hit text={title} at={m?.positions[1]} />
@@ -632,6 +766,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               detail: attentionMessage(a),
               at: a.at,
               session: s,
+              attention: a,
               score: (m?.score ?? 0) + 2,
               run: () => {
                 const can = sendable(s);
@@ -684,17 +819,19 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             ...more,
           });
         };
-        add(
-          "Send a message…",
-          () => {
-            setMode({ kind: "prompt", session: s });
-            setQ("");
-            setNote(null);
-            const can = sendable(s);
-            if (!can.ok) setNote({ text: can.why, err: true });
-          },
-          onItsPage(s) ? hintFor("session.prompt") : undefined,
-        );
+        // Only where a message can go: the session's page says why it cannot.
+        if (sendable(s).ok)
+          add(
+            "Send a message…",
+            () => {
+              setMode({ kind: "prompt", session: s });
+              setQ("");
+              setNote(null);
+              const can = sendable(s);
+              if (!can.ok) setNote({ text: can.why, err: true });
+            },
+            onItsPage(s) ? hintFor("session.prompt") : undefined,
+          );
         // The Handoff sheet (orchestrate/handoff): the row runs when its machine can take
         // an ask; else it says why, the way a message that cannot be sent does.
         add(
@@ -710,6 +847,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           },
           hintFor("session.ask") || undefined,
         );
+        // ⇧↵ on a session's row opens it the other way (lib/split.ts openWay): its key goes
+        // on that item.
+        const otherWay = openWay("other");
         if (!simple && !(isCtx && splitActive === s.key && !onItsPage(s)))
           add(
             "Open beside",
@@ -717,7 +857,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               closePalette();
               openSplit(s.key);
             },
-            hintFor("palette.beside"),
+            otherWay === "beside" ? hintFor("palette.beside") : undefined,
           );
         if (!onItsPage(s))
           add(
@@ -726,7 +866,11 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               closePalette();
               navigate(sessionPath(s.harness, s.id));
             },
-            splitActive === s.key ? hintFor("session.openPage") : undefined,
+            splitActive === s.key
+              ? hintFor("session.openPage")
+              : otherWay === "page" && openWay("primary") === "beside"
+                ? hintFor("palette.beside")
+                : undefined,
           );
         if (isCtx) add("Label…", () => push({ id: "label", session: s.key }), undefined, { sub: true });
         if (isCtx && !simple)
@@ -901,7 +1045,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
         run: () => navigate("/shortcuts"),
       });
       places.push({ label: "Display settings", detail: "appearance, skin, text size", run: openDisplaySettings });
-      places.push({ label: "Settings", detail: "mode · tier lens · data", run: () => navigate("/settings") });
+      places.push({ label: "Settings", detail: "mode · tier lens · data", run: () => openSettings() });
       const rows: Item[] = [];
       for (const p of places) {
         const m = text ? fuzzyFields(text, [p.label, p.words ?? ""]) : null;
@@ -1108,7 +1252,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
           row({
             id: `sub:f:${fs.key}`,
             mark: live ? <StateDot state={live.state} decorative /> : <Glyph> </Glyph>,
-            label: live ? sessionTitle(live) : fs.title,
+            label: live ? sessionTitle(live) : plainTitle(fs.title),
             detail:
               [live?.machine, fs.count > 1 ? `${fs.count} changes` : undefined].filter(Boolean).join(" · ") ||
               undefined,
@@ -1122,20 +1266,23 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
       return rows;
     }
 
-    /** The newest session that touched the file, opened on it: as the page (`?file=`), or
-     *  beside, where the panel's drawer takes the file. */
-    function openFileIn(key: string, path: string, beside: boolean): void {
+    /** The newest session that touched the file, opened on it the way ↵ or ⇧↵ asks
+     *  (lib/split.ts openWay): as the page (`?file=`), or beside, where the panel's drawer
+     *  takes the file. */
+    function openFileIn(key: string, path: string, other: boolean): void {
       closePalette();
       const { harness, id } = splitKey(key);
-      if (beside) {
-        openSplit(key);
+      if (openWay(other ? "other" : "primary") === "beside") {
+        openSplit(key, { preview: !other });
         openDrawer(key, path, "panel");
       } else navigate(`${sessionPath(harness, id)}?file=${encodeURIComponent(path)}`);
     }
     function fileRow(f: FileRow, at: number[], score: number): Item {
       const latest = f.sessions[0];
       const live = latest ? sessions.get(latest.key) : undefined;
-      const where = [repoShort(f.repo), live ? sessionTitle(live) : latest?.title].filter(Boolean).join(" · ");
+      const where = [repoShort(f.repo), live ? sessionTitle(live) : latest && plainTitle(latest.title)]
+        .filter(Boolean)
+        .join(" · ");
       return {
         id: `f:${f.repo}:${f.path}`,
         section: "Files",
@@ -1170,6 +1317,7 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     ctxKey,
     splitActive,
     themes,
+    askable,
     answered,
     rp,
     sendable,
@@ -1182,16 +1330,40 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     fileList,
   ]);
 
-  // A new query (or a pushed list) starts at the top, in this same render; a shorter list
-  // pulls the cursor in.
+  // A new query (or a pushed list) starts at the top, in this same render.
   const listId = `${stack.length}:${q}`;
   const [seenList, setSeenList] = useState(listId);
   if (seenList !== listId) {
     setSeenList(listId);
     by.current = "key";
-    setCursorRaw(0);
+    setCursorRaw(null);
   }
-  const at = Math.min(cursor, Math.max(0, items.length - 1));
+  /** The row the cursor was last drawn on, in which list. */
+  const drawn = useRef<{ list: string; id: string; at: number; session?: string } | null>(null);
+  const where = (id: string) => items.findIndex((it) => it.id === id);
+  let at = cursor === null ? 0 : where(cursor);
+  // The row under the cursor left this list (a prompt past its two minutes, an answer that
+  // went from a toast): the cursor never slides onto the row that took its place, which may
+  // be another prompt's Allow. It goes to that row's session (cursorAfter) and stays there.
+  const was = drawn.current?.list === listId ? drawn.current : null;
+  if (was && where(was.id) < 0 && (cursor === null || at < 0)) {
+    at = cursorAfter(items, was);
+    // Still the first row of a list nobody moved in (or no row at all): the first row, as
+    // before. No row to go to but another prompt's answer: on none (""), until a key moves it.
+    const to = (cursor === null && at === 0) || !items.length ? null : (items[at]?.id ?? "");
+    if (to !== cursor) {
+      by.current = "key";
+      setCursorRaw(to);
+    }
+  }
+  useLayoutEffect(() => {
+    const it = items[at];
+    drawn.current = it ? { list: listId, id: it.id, at, session: it.session?.key } : null;
+  });
+  const setCursor = (to: number, source: "key" | "pointer" = "key") => {
+    by.current = source;
+    setCursorRaw(items[to]?.id ?? null);
+  };
   // The list scrolls only when the keys take the cursor past its edge: one row's worth,
   // and to the very top (its section's label too) for the first row. The pointer never
   // scrolls it.
@@ -1354,6 +1526,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
   };
 
   const { only, text } = parseQuery(q);
+  // The foot's ⇧↵ says the way it opens a session, the other one from ↵'s (lib/split.ts).
+  const primaryWay = openWay("primary");
+  const otherWay = openWay("other");
   const placeholder =
     mode.kind === "prompt"
       ? `Message for ${sessionTitle(mode.session)} · Enter sends`
@@ -1480,6 +1655,8 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
               aria-label={sub ? SUB_TITLE(sub) : "Results"}
               key={stack.length}
               data-pushed={stack.length ? "" : undefined}
+              // The keys put the cursor where it is: its row gets the cursor edge.
+              data-keys={by.current === "key" || undefined}
             >
               {noResults && (
                 <div className="pal-empty" role="status">
@@ -1560,7 +1737,9 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
             <>
               <FootKey keys="↑↓">Move</FootKey>
               <FootKey keys="↵">{items[at]?.sub ? "Choose" : "Open"}</FootKey>
-              {!sub && <FootKey keys="⇧↵">Beside</FootKey>}
+              {!sub && otherWay !== primaryWay && (
+                <FootKey keys="⇧↵">{otherWay === "beside" ? "Beside" : "As a page"}</FootKey>
+              )}
               {txOn && q.trim().length >= PALETTE_MIN && <FootKey keys={IS_MAC ? "⌘↵" : "Ctrl ↵"}>Search all</FootKey>}
               <span className="pal-foot-spring" />
               {sub ? (
@@ -1606,10 +1785,25 @@ function flat(t: string | undefined): string {
   return `${f.replace(/\s+\S*$/, "").replace(/[\s,;:–—-]+$/, "")}…`;
 }
 
+/** What a row's session waits on, for the preview: the prompt an Allow or Deny row answers
+ *  (its own, not the session's first), else the one the board's row shows for a session
+ *  that needs you. A question too: it is answered on its computer and read here. Nothing
+ *  for a subagent's row. */
+export function peekAttention(item: {
+  session?: Pick<SessionSummary, "state" | "openAttentions">;
+  agent?: unknown;
+  attention?: Attention;
+}): Attention | undefined {
+  const s = item.session;
+  if (!s || item.agent) return undefined;
+  return item.attention ?? (s.state === "needs_you" ? s.openAttentions[0] : undefined);
+}
+
 /** The row under the cursor, previewed beside the list: for a session (or its subagent,
- *  or a permission it waits on) its state and timer, its title, where it runs, the last
- *  ask and the latest reply; for anything else what the row does. Read only, so a screen
- *  reader keeps to the list; the row itself says the same in short. */
+ *  or a permission it waits on) its state and timer, its title, where it runs, then what
+ *  it waits on (a session that needs you) or the last ask, and the latest reply; for
+ *  anything else what the row does. Read only, so a screen reader keeps to the list; the
+ *  row itself says the same in short. */
 function Peek({ item }: { item: Item | undefined }) {
   if (!item) return <aside className="pal-peek" aria-hidden="true" />;
   const s = item.session;
@@ -1627,12 +1821,14 @@ function Peek({ item }: { item: Item | undefined }) {
     );
   const a = item.agent;
   const where = [s.machine, repoShort(s.repo) || undefined, s.branch].filter(Boolean).join(" · ");
-  // A turn the harness opened itself (a `<task-notification>`, a `<command-name>`) is not
-  // what the person asked: its markup is never shown as the ask. Nor is a block of pictures.
-  const asked = item.section === "Needs you" ? undefined : flat(promptWords(s.progress?.user ?? s.lastUser ?? ""));
+  const waiting = peekAttention(item);
+  const said = waiting?.tool ? attentionMessage(waiting) : undefined;
+  // A session that needs you says that, not the old ask. A turn the harness opened itself
+  // (a `<task-notification>`, a `<command-name>`) is not what the person asked: its markup
+  // is never shown as the ask. Nor is a block of pictures.
+  const asked = s.state === "needs_you" ? undefined : flat(promptWords(s.progress?.user ?? s.lastUser ?? ""));
   const ask = asked && !HARNESS_TURN.test(asked) ? asked : undefined;
   const reply = flat(s.progress?.assistant ?? s.lastAssistant);
-  const waiting = item.section === "Needs you" ? s.openAttentions[0] : undefined;
   return (
     <aside className="pal-peek" aria-hidden="true">
       <p className="pal-peek-state">
@@ -1659,10 +1855,20 @@ function Peek({ item }: { item: Item | undefined }) {
       <p className="pal-peek-title">{a ? agentLabel(a) : sessionTitle(s)}</p>
       <p className="pal-peek-where">{a ? sessionTitle(s) : where}</p>
       {!a && s.model ? <p className="pal-peek-where">{modelShort(s.model)}</p> : null}
-      {waiting ? (
-        <p className="pal-peek-text">{attentionMessage(waiting) ?? (waiting.tool ? toolLabel(waiting.tool) : null)}</p>
-      ) : a?.currentTool ? (
-        <p className="pal-peek-text">{toolLabel(a.currentTool.tool)}</p>
+      {a?.currentTool ? <p className="pal-peek-text">{toolLabel(a.currentTool.tool)}</p> : null}
+      {/* The board row's words: the tool as its chip says it, then the request (a command
+          or a path in mono, a question as it was asked); a plan review is its chip alone. */}
+      {waiting?.tool ? (
+        <div className="pal-peek-block">
+          <p className="pal-peek-label">{toolLabel(waiting.tool)}</p>
+          {isQuestion(waiting) ? (
+            <AskedLine s={s} a={waiting} className="pal-peek-text pal-peek-text--wait" />
+          ) : said ? (
+            <p className={`pal-peek-text pal-peek-text--wait${literalAsk(waiting.tool) ? " mono" : ""}`}>
+              <Redacted text={said} />
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {!a && ask ? (
         <div className="pal-peek-block">

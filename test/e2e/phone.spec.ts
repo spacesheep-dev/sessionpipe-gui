@@ -98,6 +98,26 @@ test.describe("the phone page", () => {
     await axe(page, "phone/tailscale");
   });
 
+  test("at a phone's width the two ways span the column, in two equal segments", async ({ page }) => {
+    await page.setViewportSize({ width: 393, height: 852 });
+    await stub(page, "tailscale");
+    await openPage(page, "/phone");
+    const lanes = page.locator(".ph-lanes");
+    const track = lanes.locator("fieldset.seg");
+    await expect(track).toBeVisible();
+    const [column, box, first, last] = await Promise.all([
+      lanes.boundingBox(),
+      track.boundingBox(),
+      track.locator("label.seg-opt").first().boundingBox(),
+      track.locator("label.seg-opt").last().boundingBox(),
+    ]);
+    expect(Math.abs(box!.width - column!.width), "the track is as wide as its column").toBeLessThanOrEqual(1);
+    // The segments fill it between the track's 2 px insets, and neither is the wider.
+    expect(first!.x - box!.x).toBeLessThanOrEqual(3);
+    expect(box!.x + box!.width - (last!.x + last!.width)).toBeLessThanOrEqual(3);
+    expect(Math.abs(first!.width - last!.width)).toBeLessThanOrEqual(1);
+  });
+
   test("falls back to the same Wi-Fi with the trust QR and both phones' steps, iPhone first", async ({ page }) => {
     await stub(page, "wifi");
     await openPage(page, "/phone");

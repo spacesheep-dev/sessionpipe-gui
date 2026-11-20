@@ -15,14 +15,16 @@ import { back, navigate, parseRoute, usePath } from "./router";
 import { cycleLens } from "./settings";
 import { installDispatcher, isTyping, registerHandler, useShortcut } from "./shortcuts";
 import { isPlain, useSkins } from "./skins";
-import { openSplit } from "./split";
+import { openSplit, openWay } from "./split";
 import { setSkin, setTheme, useSettings } from "./theme";
+import { rememberToastReturn, returnFromToasts } from "./toasts";
 
 export { isTyping };
 
 export function focusSearch(): boolean {
   const el = document.querySelector<HTMLInputElement>("[data-search]");
-  if (!el) return false;
+  // Not the field of a page that is covered (inert under the panel): it cannot take the caret.
+  if (!el || el.closest("[inert]")) return false;
   el.focus();
   el.select();
   return true;
@@ -90,6 +92,11 @@ export function useGlobalKeys(onBack: () => void = () => back("/")) {
       (e.target as HTMLElement).blur();
       return;
     }
+    // In the notifications, Esc leaves them for where ⌘⇧T came from; it closes nothing.
+    if ((e.target as HTMLElement | null)?.closest?.(".toasts")) {
+      returnFromToasts();
+      return;
+    }
     // Only one that is drawn: the panel keeps its Close in the DOM while it is shut.
     const open = [...document.querySelectorAll<HTMLElement>("[data-dismiss]")].find(drawn);
     if (open) {
@@ -124,8 +131,14 @@ export function useGlobalKeys(onBack: () => void = () => back("/")) {
   useShortcut("toasts.focus", () => {
     const stack = document.querySelector<HTMLElement>('.toasts, [role="region"][aria-label="Notifications"]');
     if (!stack) return false;
-    const target = stack.querySelector<HTMLElement>("button:not([disabled])") ?? stack;
+    // Not a card on its way out (inert): it cannot take focus.
+    const target =
+      stack.querySelector<HTMLElement>(".toast-slot:not([data-closing]) button:not([disabled])") ??
+      stack.querySelector<HTMLElement>("button:not([disabled])") ??
+      stack;
     if (target === stack && !stack.hasAttribute("tabindex")) stack.tabIndex = -1;
+    // Where focus goes back to when the cards go, or on Esc.
+    if (!stack.contains(document.activeElement)) rememberToastReturn(document.activeElement);
     target.focus();
   });
 }
@@ -159,10 +172,11 @@ export interface ListNavOptions {
   open?: (index: number) => boolean;
 }
 
-/** A cursor over a list of hrefs, moved by the list actions; Enter opens the one under it,
- *  shift+Enter opens it beside the page when `keys` (session keys, same order) are given,
- *  mod+Enter beside as a background tab. The list's items carry `data-nav-item` (one tab
- *  stop; the arrows walk them) and the cursor item `data-cursor`. */
+/** A cursor over a list of hrefs, moved by the list actions; Enter opens the one under it
+ *  the way Settings says, shift+Enter the other way, mod+Enter as a background tab (beside
+ *  needs `keys`, session keys in the same order; without them it is the page). The list's
+ *  items carry `data-nav-item` (one tab stop; the arrows walk them) and the cursor item
+ *  `data-cursor`. */
 export function useListNav(hrefs: string[], enabled = true, keys?: string[], opts: ListNavOptions = {}) {
   const path = usePath().split("?")[0] ?? "/";
   const [cursor, setCursor] = useState(() => {
@@ -220,24 +234,31 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   };
   useShortcut("list.down", () => (hrefs.length ? move(1) : false), { enabled });
   useShortcut("list.up", () => (hrefs.length ? move(-1) : false), { enabled });
-  const open = (mode: "page" | "beside" | "background") => {
-    const href = hrefs[cursor];
+  /** `preview`: a plain open (↵, Space, ⌘1–9), whose tab the next one replaces (lib/split.ts). */
+  const open = (mode: "page" | "beside" | "background", at = cursor, preview = false) => {
+    const href = hrefs[at];
     if (!href) return false;
-    if (opts.open) return opts.open(cursor);
-    const key = keys?.[cursor];
+    if (opts.open) return opts.open(at);
+    const key = keys?.[at];
     if (mode !== "page" && key) {
       openSplit(key, {
-        from: document.querySelector(`[data-cursor="${cursor}"]`)?.getBoundingClientRect(),
+        // The row grows from where it is: the cursor row, or (⌘1–9) the nth item.
+        from: (
+          document.querySelector(`[data-cursor="${at}"]`) ?? root().querySelectorAll("[data-nav-item]")[at]
+        )?.getBoundingClientRect(),
         background: mode === "background",
+        preview,
       });
     } else navigate(href);
     return true;
   };
-  useShortcut("list.open", () => open("page"), { enabled });
-  useShortcut("list.beside", () => open("beside"), { enabled });
-  useShortcut("list.background", () => open("background"), { enabled });
+  // ↵ opens the way Settings says, ⇧↵ the other way, ⌘↵ in a background tab (lib/split.ts
+  // openWay), so each does what the row's menu shows beside it.
+  useShortcut("list.open", () => open(openWay("primary"), cursor, true), { enabled });
+  useShortcut("list.beside", () => open(openWay("other")), { enabled });
+  useShortcut("list.background", () => open(openWay("background")), { enabled });
   // Space: the row beside the page, the focus staying on the list (Quick Look).
-  useShortcut(opts.peek ?? "board.peek", () => (opts.peek && keys?.[cursor] ? open("beside") : false), {
+  useShortcut(opts.peek ?? "board.peek", () => (opts.peek && keys?.[cursor] ? open("beside", cursor, true) : false), {
     enabled: enabled && !!opts.peek,
   });
   // `.`: the row's own right-click menu, under the row, the keyboard's way in.
@@ -276,8 +297,7 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
   // ⌘1–9, the installed app only: the nth row of the list as it stands.
   const jump = (i: number) => () => {
     if (!installedApp() || inPanel() || !hrefs[i]) return false;
-    if (opts.open) return opts.open(i);
-    navigate(hrefs[i]!);
+    return open(openWay("primary"), i, true);
   };
   useShortcut("list.jump1", jump(0), { enabled });
   useShortcut("list.jump2", jump(1), { enabled });
@@ -361,9 +381,10 @@ export function useListNav(hrefs: string[], enabled = true, keys?: string[], opt
 
 /** Something open that Esc closes first (a popover, a confirm, the panel): a
  *  `[data-dismiss]` that is drawn, not one kept in the DOM while closed. */
-/** Drawn and not on its way out: an overlay fading through its exit is already closed. */
+/** Drawn and not on its way out: an overlay fading through its exit is already closed.
+ *  Nor one under something that covers it (inert): Esc closes what is on top. */
 const drawn = (el: HTMLElement): boolean =>
-  !el.closest("[data-closing]") &&
+  !el.closest("[data-closing], [inert]") &&
   (typeof el.checkVisibility === "function" ? el.checkVisibility({ visibilityProperty: true }) : !!el.offsetParent);
 const openDismiss = (): boolean => [...document.querySelectorAll<HTMLElement>("[data-dismiss]")].some(drawn);
 
@@ -371,6 +392,16 @@ const openDismiss = (): boolean => [...document.querySelectorAll<HTMLElement>("[
 /** Focus is inside the panel beside the page: a list's bare keys (its menu, the jumps,
  *  e and ⇧E) leave the row under the cursor alone, since the person is working there. */
 export const inPanel = (): boolean => !!document.activeElement?.closest?.("aside.panel");
+
+/** `a` (`allow`) or `d` passed on to the panel would answer this prompt there: the key
+ *  clicks the active tab's first Allow or Deny that is on (SessionBody's session.allow),
+ *  and that one is this prompt's. With two prompts open in one session it may be the
+ *  other's, and a question, or a prompt whose answer is out, has none. */
+export const panelAnswers = (attentionId: string, allow: boolean): boolean =>
+  document
+    .querySelector("aside.panel .panel-body:not(.panel-body--off)")
+    ?.querySelector(`.ctl .btn--${allow ? "allow" : "deny"}:not(:disabled)`)
+    ?.closest<HTMLElement>("[data-attention]")?.dataset.attention === attentionId;
 
 /** Holding ⌘ (ctrl elsewhere) for 600 ms in the installed app marks the document
  *  `data-jump-hints`, so the first nine rows show their number (board.css); letting go

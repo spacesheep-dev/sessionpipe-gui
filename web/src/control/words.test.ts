@@ -7,6 +7,7 @@ import { ControlError, UNHEARD_CODE } from "./api";
 import { noteMachineControl } from "./remoteRp";
 import {
   answerEndWords,
+  cliCommand,
   handoffEndWords,
   harnessCommand,
   notSentLine,
@@ -173,6 +174,13 @@ describe("sentLine", () => {
   it("names the command a harness runs as, and keeps the label of one without", () => {
     expect(harnessCommand("claude-code", "Claude Code")).toBe("claude");
     expect(harnessCommand("antigravity", "Antigravity")).toBe("Antigravity");
+  });
+
+  it("has a command to type for a harness that runs in a terminal, and none for an app", () => {
+    expect(cliCommand("claude-code")).toBe("claude");
+    expect(cliCommand("codex")).toBe("codex");
+    expect(cliCommand("gemini-cli")).toBe("gemini");
+    expect(cliCommand("antigravity")).toBeUndefined();
   });
 });
 

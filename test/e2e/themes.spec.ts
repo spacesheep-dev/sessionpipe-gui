@@ -42,7 +42,8 @@ test.describe("themes", () => {
     await expect(counter.locator(".nav-glyph--svg svg")).toBeVisible();
     const broken = rail.locator("a[data-nav='t:e2e-broken']");
     await expect(broken).toBeVisible();
-    // Order on the rail: builtins, the counter, the divider, then the experimental ones.
+    // Order on the rail (Advanced, the suite's mode): builtins, the counter, the divider,
+    // then the experimental ones.
     const keys = await rail
       .locator(".rail-nav > a, .rail-nav > .rail-group")
       .evaluateAll((els) => els.map((el) => el.getAttribute("data-nav") ?? el.textContent));
@@ -51,6 +52,26 @@ test.describe("themes", () => {
     await counter.click();
     await expect(page).toHaveURL(/\/t\/e2e-counter$/);
     await expect(counter).toHaveAttribute("aria-current", "page");
+  });
+
+  test("Simple leaves the experimental views off the rail, and their g keys still open them", async ({ page }) => {
+    await openPage(page, "/");
+    const views = await page
+      .locator("nav.rail .rail-nav > a[data-nav^='t:']")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-nav")));
+    const nth = views.indexOf("t:e2e-broken") + 1;
+    expect(nth).toBeGreaterThan(0);
+    await page.evaluate(() => localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "simple" })));
+    await openPage(page, "/");
+    const rail = page.locator("nav.rail");
+    await expect(rail.locator("a[data-nav='t:e2e-counter']")).toBeVisible();
+    await expect(rail.locator("a[data-nav='t:e2e-broken']")).toHaveCount(0);
+    await expect(rail.locator("[data-nav='experimental']")).toHaveCount(0);
+    // The numbers are Advanced's in either mode.
+    await page.locator("main#main").focus();
+    await page.keyboard.press("g");
+    await page.keyboard.press(String(nth));
+    await expect(page).toHaveURL(/\/t\/e2e-broken$/);
   });
 
   test("/t/<id> mounts the theme full-bleed with the ThemeApi, and counts update live", async ({ page }) => {

@@ -29,8 +29,10 @@ import {
 import { useBehind, useCatchingUp } from "../account/current";
 import { ActionButton, Ago, EmptyState, HarnessGlyph, Notice, Redacted, StateDot, WithName } from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
+import { FilterMenu, labelFilterMenu, labelFilterName } from "../components/FilterMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
+import { NoConnection } from "../components/NoConnection";
 import { NotifyBlocked, NotifyMenu, notifyBlocked, useAppNotify } from "../components/NotifyToggle";
 import { BarStatus, PageBar } from "../components/PageBar";
 import {
@@ -49,7 +51,7 @@ import { setupLabel } from "../control/signer";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useFirstLoad, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
-import { phoneLayout, usePhoneLayout } from "../lib/device";
+import { usePhoneLayout } from "../lib/device";
 import {
   ATTENTION_LABEL,
   askFitsRow,
@@ -61,15 +63,15 @@ import {
   toolLabel,
 } from "../lib/format";
 import { attentionKey, hide, isHidden, useHidden } from "../lib/hidden";
-import { inPanel, useListNav } from "../lib/keys";
-import { type LabelFilter, labelItems, labelPasses } from "../lib/labels";
+import { inPanel, panelAnswers, useListNav } from "../lib/keys";
+import { anyLabel, type LabelFilter, labelItems, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
-import { Link, navigate, sessionPath } from "../lib/router";
+import { Link, openSettings, sessionPath } from "../lib/router";
 import { type Lens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
-import { openSplit } from "../lib/split";
+import { howOf, type OpenHow, openSession, useSplitKey } from "../lib/split";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 
 const rowKey = (r: OpenAttention) => `${r.session.key}|${r.attention.attentionId}`;
@@ -89,6 +91,8 @@ const reasonId = (r: string): string => {
   return `inbox-reason-${(h >>> 0).toString(36)}`;
 };
 const groupOf = (r: OpenAttention) => (r.answerable ? "answer" : "terminal");
+/** The keys a row's Allow and Deny answer to, shown beside them in its menu. */
+const INBOX_KEYS = { allow: "inbox.allow", deny: "inbox.deny" };
 
 export function Inbox() {
   const store = useStore();
@@ -137,12 +141,13 @@ export function Inbox() {
     return true;
   };
   const { cursor } = useListNav(hrefs, true, keys, { peek: "inbox.peek", clear: () => clearRef.current(), store });
-  // `a` and `d` with no row of the Inbox to take them (none under the cursor): taken and
-  // dropped, so they never answer a session open beside it; with the focus in that panel
-  // they are the panel's.
+  const openKey = useSplitKey();
+  // `a` and `d` with no row of the Inbox to take them (none under the cursor; the row under
+  // it has its own, useRowKeys): taken and dropped, so they never answer a session open
+  // beside it; with the focus in that panel they are the panel's.
   const drop = () => (inPanel() ? false : undefined);
-  useShortcut("inbox.allow", drop, { priority: 1 });
-  useShortcut("inbox.deny", drop, { priority: 1 });
+  useShortcut("inbox.allow", drop, { enabled: !keys[cursor], priority: 1 });
+  useShortcut("inbox.deny", drop, { enabled: !keys[cursor], priority: 1 });
   // ⌥⌘1 … ⌥⌘7 label the session under the cursor, ⌥⌘0 clears it.
   useLabelKeys(() => (keys[cursor] ? [keys[cursor]!] : []));
   // The tier lens: attention messages and tool names travel at tier 1 (lib/tier.ts).
@@ -186,7 +191,7 @@ export function Inbox() {
         ? {
             label: "Notify me",
             checked: app.enabled && app.status === "granted",
-            disabled: app.status === "denied" ? "Off for sessionpipe in Settings" : undefined,
+            disabled: app.status === "denied" ? `Off for sessionpipe in ${app.where}` : undefined,
             run: () => void (app.enabled && app.status === "granted" ? app.turnOff() : app.turnOn()),
           }
         : {
@@ -200,7 +205,7 @@ export function Inbox() {
                   : undefined,
             run: () => void setNotifyPref(!notify.on),
           },
-      { label: "Notification sounds…", run: () => navigate("/settings?section=notifications") },
+      { label: "Notification sounds…", run: () => openSettings("notifications") },
       { sep: true },
       ...lensMenu(lens, simple),
     ],
@@ -238,6 +243,7 @@ export function Inbox() {
               gone={h.gone}
               control={h.item.session.machine ? machines.get(h.item.session.machine)?.control : undefined}
               cursor={offset + i === cursor ? cursor : undefined}
+              open={h.item.session.key === openKey}
               lens={lens}
               report={report}
             />
@@ -254,12 +260,33 @@ export function Inbox() {
         title="Inbox"
         className="inbox-head"
         meta={catchingUp ? <BarStatus>{NEW_WORDS.catchingUp}</BarStatus> : meta || undefined}
-        tools={<LabelChip value={label} onChange={setLabelFilter} />}
+        connSaid={
+          // Before the first snapshot the page itself says where the connection stands
+          // (its loading rows, or the state below with its own Retry).
+          firstLoad !== null
+        }
+        tools={
+          phone ? (
+            <LabelChip value={label} onChange={setLabelFilter} />
+          ) : (
+            (label || anyLabel(labels)) && (
+              <FilterMenu
+                on={!!label}
+                summary={labelFilterName(labels, label)}
+                hint="Filter by label"
+                build={() => labelFilterMenu(labels, label, setLabelFilter)}
+              />
+            )
+          )
+        }
         actions={
+          // In the order drawn: on a computer the lens beside the filter, then the bell;
+          // the phone keeps its lens at the bar's trailing edge.
           <>
-            <LensChip />
+            {!phone && <LensChip />}
             <NotifyMenu />
             <ComposeButton className="compose-btn--phone" />
+            {phone && <LensChip />}
           </>
         }
       />
@@ -308,17 +335,7 @@ export function Inbox() {
           ))}
         </div>
       ) : firstLoad ? (
-        <EmptyState
-          center
-          title={firstLoad === "slow" ? "Still connecting to the receiver…" : "No connection to the receiver"}
-          actions={
-            <button type="button" className="btn btn--sm" onClick={() => store.reconnect()}>
-              Retry now
-            </button>
-          }
-        >
-          Prompts show up here as soon as the {firstLoad === "slow" ? "first update arrives" : "stream is back"}.
-        </EmptyState>
+        <NoConnection slow={firstLoad === "slow"} />
       ) : held.length === 0 && label ? (
         <EmptyState
           center
@@ -348,13 +365,17 @@ export function Inbox() {
 }
 
 /** `a` and `d` while the list cursor is on a row: they are that row's, answered by `answer`
- *  or, where it is null, taken and dropped, so they never fall through to the keys of a
- *  session open beside the page (lib/shortcuts.ts tries inbox.* before session.*). With
- *  focus inside the panel they are the panel's. */
-function useRowKeys(focused: boolean, answer: ((allow: boolean) => void) | null): void {
+ *  or, where it is null, taken and dropped, so they never fall through to the keys of
+ *  another session open beside the page (lib/shortcuts.ts tries inbox.* before session.*).
+ *  A row that is not answered here passes them to the panel only where the panel's key
+ *  would answer this row's own prompt (`open`, its id, with its session open beside),
+ *  shown whole there; never another prompt of that session. With focus inside the panel
+ *  they are the panel's. */
+function useRowKeys(focused: boolean, answer: ((allow: boolean) => void) | null, open: string | null = null): void {
   const run = (allow: boolean) => () => {
     if (inPanel()) return false;
-    answer?.(allow);
+    if (answer) return void answer(allow);
+    if (open && panelAnswers(open, allow)) return false;
   };
   useShortcut("inbox.allow", run(true), { enabled: focused, priority: 2 });
   useShortcut("inbox.deny", run(false), { enabled: focused, priority: 2 });
@@ -365,6 +386,7 @@ function InboxRow({
   gone = false,
   control,
   cursor,
+  open: beside = false,
   lens = null,
   report,
 }: {
@@ -373,6 +395,8 @@ function InboxRow({
   gone?: boolean;
   control?: MachineControl;
   cursor?: number;
+  /** Its session is the panel's active tab. */
+  open?: boolean;
   lens?: Lens;
   report: (id: string, off: Off | null) => void;
 }) {
@@ -381,7 +405,9 @@ function InboxRow({
   // Below tier 1 the message and the tool stay on the sending machine.
   const a = lens === 0 ? { ...raw, message: undefined, tool: undefined } : raw;
   const ref = useRef<HTMLLIElement>(null);
-  const open = (background = false) => openSplit(s.key, { from: ref.current?.getBoundingClientRect(), background });
+  // A click opens the way Settings says (beside, a preview tab the next one replaces), ⇧-click
+  // the other way, ⌘-click a kept background tab (lib/split.ts openSession).
+  const open = (how: OpenHow) => openSession(s.key, how, { from: ref.current?.getBoundingClientRect() });
   const answerMenu = useRef<MenuList>([]);
   const menu = useContextMenu(
     () => [
@@ -407,8 +433,8 @@ function InboxRow({
   // Allow and Deny only beside a request the row shows whole (lib/format.ts askFitsRow);
   // any other, a plan or a long command, offers Open, to the session that shows it whole.
   const whole = askFitsRow(a, s.harness);
-  // A prompt in a terminal is answered there: `a` and `d` on its row do nothing (Answer has
-  // the answerable rows' keys).
+  // A prompt in a terminal is answered there: `a` and `d` on its row do nothing here (Answer
+  // has the answerable rows' keys), and the panel has no Allow for it to pass them to.
   useRowKeys(cursor !== undefined && !row.answerable, null);
   const titleId = useId();
   // With an answer out the orange glyph is the working ring, or a still hollow one while
@@ -437,8 +463,8 @@ function InboxRow({
         type="button"
         className="inbox-main"
         data-nav-item=""
-        onClick={(e) => open(e.metaKey || e.ctrlKey)}
-        title={phoneLayout() ? "Open the session" : "Open the session beside this page"}
+        onClick={(e) => open(howOf(e))}
+        title="Open the session"
         {...prefetchProps(store, s)}
       >
         <span className="inbox-lead">
@@ -447,10 +473,12 @@ function InboxRow({
           ) : (
             <StateDot state={out === "going" ? "working" : row.answerable ? "needs_you" : s.state} decorative />
           )}
-          <LabelDot session={s.key} />
         </span>
-        <span className="inbox-title" id={titleId}>
-          {sessionTitle(s)}
+        <span className="inbox-row-head">
+          <span className="inbox-title" id={titleId}>
+            {sessionTitle(s)}
+          </span>
+          <LabelDot session={s.key} />
         </span>
         <span className="inbox-age">
           <Ago iso={a.at} />
@@ -488,6 +516,7 @@ function InboxRow({
           titleId={titleId}
           control={control}
           focused={cursor !== undefined}
+          beside={beside}
           into={answerMenu}
           report={report}
           onOut={setOut}
@@ -515,6 +544,7 @@ function Answer({
   titleId,
   control,
   focused = false,
+  beside = false,
   into,
   report,
   onOut,
@@ -523,12 +553,15 @@ function Answer({
   /** The row shows the whole request (lib/format.ts askFitsRow): Allow and Deny, else Open. */
   whole: boolean;
   /** What a tap on the row does: the session beside the page, or pushed on a phone. */
-  onOpen: (background?: boolean) => void;
+  onOpen: (how: OpenHow) => void;
   /** The id of the row's title, which Open is described by. */
   titleId: string;
   control?: MachineControl;
   /** The row under the list cursor: it takes `a` and `d` (useRowKeys). */
   focused?: boolean;
+  /** Its session is open beside the page: what the row does not answer, the panel does,
+   *  where its key would answer this prompt (useRowKeys). */
+  beside?: boolean;
   into: MutableRefObject<MenuList>;
   report: (id: string, off: Off | null) => void;
   /** An answer is out ("going"), to a computer that is offline ("held"), or none is. */
@@ -572,7 +605,12 @@ function Answer({
   const lead = status === "sent" ? (control?.online === false ? "held" : "going") : null;
   useEffect(() => onOut(lead), [lead, onOut]);
   useEffect(() => () => onOut(null), [onOut]);
-  useRowKeys(focused, whole && !off && chosen === null ? answer : null);
+  // The row's own answer on its way is nobody else's to send again.
+  useRowKeys(
+    focused,
+    whole && !off && chosen === null ? answer : null,
+    beside && chosen === null ? a.attentionId : null,
+  );
   // Off for a standing reason (not paired, no passkeys here, not approved): the page says
   // it once, for the rows that show Allow and Deny. A moment's state (sent, a passkey
   // prompt, closed) stays on the row. Not approved, an Open row has no Open either, and
@@ -592,7 +630,7 @@ function Answer({
   }, [id, standing, tag, approve, sentence, s.machine, report]);
   useEffect(() => () => report(id, null), [id, report]);
   useLayoutEffect(() => {
-    into.current = whole ? answerItems(a.tool, st, answer) : [];
+    into.current = whole ? answerItems(a.tool, st, answer, INBOX_KEYS) : [];
   });
   const noteId = useId();
   const note = send.error ? (
@@ -649,7 +687,7 @@ function Answer({
           type="button"
           className="btn btn--sm inbox-open"
           aria-describedby={titleId}
-          onClick={(e) => onOpen(e.metaKey || e.ctrlKey)}
+          onClick={(e) => onOpen(howOf(e))}
         >
           {NEW_WORDS.inboxOpen}
         </button>

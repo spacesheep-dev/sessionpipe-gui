@@ -13,7 +13,6 @@ import { haptic } from "../lib/haptics";
 import { NEW_WORDS, REUSED } from "./accountWords";
 import { invoke } from "./bridge";
 import { ConnectAccount, Disconnected } from "./ConnectAccount";
-import { INSTALL_COMMAND } from "./logic";
 import { Primary, Quiet, Screen, Secondary } from "./OnbParts";
 import { INITIAL, isScanning, parsePayload, type Step, step, trustBrowser, WORDS } from "./onboarding";
 import { cameraPermission, cancelScan, hasScanner, openCameraSettings, requestCamera, scanQr } from "./scanner";
@@ -315,14 +314,14 @@ export function Onboarding({ info, start }: { info: ShellInfo; start?: Step }) {
 }
 
 /** The step card under "No sessionpipe on your computer yet?": three numbered rows in
- *  the grouped-form grammar, the install command in a well that wraps (nothing to copy
- *  from on a phone: it is typed on the computer). */
+ *  the grouped-form grammar; the first names the site the computer's app is downloaded
+ *  from, as a link. */
 function InstallSteps() {
   return (
     <section className="form-group onb-install" id="onb-install" aria-label={WORDS.install.title}>
       <ol className="form-list onb-steps">
         {WORDS.install.steps.map((st, i) => (
-          <li key={st.label} className={`form-row ${i === 0 ? "form-row--stack" : ""}`}>
+          <li key={st.label} className="form-row">
             <span className="form-row-text onb-step-text">
               <span className="onb-step-n" aria-hidden="true">
                 {i + 1}
@@ -343,7 +342,7 @@ function InstallSteps() {
                       >
                         {WORDS.install.siteLabel}
                       </a>
-                      , or with Node 22.12 or later in a terminal:
+                      .
                     </>
                   ) : (
                     st.caption
@@ -351,11 +350,6 @@ function InstallSteps() {
                 </span>
               </span>
             </span>
-            {i === 0 && (
-              <div className="cmdwell onb-cmd">
-                <code className="cmdwell-text">{INSTALL_COMMAND}</code>
-              </div>
-            )}
           </li>
         ))}
       </ol>

@@ -194,8 +194,8 @@ online by Gatekeeper on first open.
 - `latest.json` is on the release, and its `version` is the tag without `v`.
 - The macOS dmg is under 10 MB (the budget: 17 MB universal at most), opens without a
   Gatekeeper warning, and holds only the app and an Applications link.
-- An installed older version finds the update within a minute of launch (Settings › App
-  says "Restart to Update"), and restarts into the new one.
+- An installed older version finds the update within a minute of launch (Settings › About
+  says "X.Y.Z is ready", with Install and relaunch), and restarts into the new one.
 - `apps/desktop/scripts/measure.sh` against the built app stays inside NATIVE-SPEC §8.
 
 ## The iOS app
