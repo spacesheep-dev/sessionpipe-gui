@@ -35,7 +35,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   system leaves, on every page and in every sheet and menu; the bars keep their ground to
   the screen's edge. A session's title stands between its bar's buttons; the
   "Reconnecting…" pill and the pull-to-refresh ring stand in the middle of what is left,
-  and a list opened from a field never opens under the band. A screen with nothing at its
+  and a list opened from a field never opens under the band. A picture opened whole keeps
+  its picture, × and arrows clear of the band too, and of the status bar and the home
+  indicator in the Android app, where they ran under them. A screen with nothing at its
   sides is as it was.
 - **A window dragged across 720 px wide changes its layout all at once, and keeps nothing
   of the layout it left.** Each part of the page watched the width by itself, so for a

@@ -28,6 +28,7 @@ import {
   pose,
   shapeOf,
 } from "./duo.js";
+import { png } from "./pictures.js";
 
 const composer = (page: Page) => page.locator("textarea").first();
 /** The inner display turned on its side, as the simulator gives it and as first estimated:
@@ -490,6 +491,23 @@ for (const [size, insets] of BANDS) {
     try {
       // The computer's agents can be asked by one another, so a session offers it.
       Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+      // A session on a second computer, older than the sample's: the Board then has a
+      // filter to offer.
+      const other = new Session("s-other", "claude-code", Date.now() - 3 * 60 * 60_000);
+      const elsewhere = {
+        session: {
+          machine: "build-box",
+          cwd: "/srv/ci",
+          title: "Warm the build cache",
+          title_source: "custom" as const,
+        },
+      };
+      b.ss.push([
+        other.ev("session.started", { source: "startup" }, elsewhere),
+        other.ev("turn.started", { turn_id: "t1" }, elsewhere),
+        other.ev("turn.transcript", { turn: 1, user: "Warm the cache.", assistant: "Warmed." }, elsewhere),
+        other.ev("turn.ended", { turn_id: "t1" }, elsewhere),
+      ]);
       await board();
       await b.approve();
       expect(await shapeOf(page)).toEqual({ size, insets });
@@ -536,6 +554,19 @@ for (const [size, insets] of BANDS) {
       await page.getByRole("menuitem", { name: "Edit labels…" }).click();
       await expect(page.getByRole("dialog", { name: "Labels" })).toBeVisible();
       await measure("Labels");
+
+      // The board's filters: on a touch screen a chip for each, here the computers', with
+      // its list open (a sheet on a narrow window, a pop-up from 600 pt).
+      await board();
+      await page.getByRole("combobox", { name: "Machine", exact: true }).click();
+      await expect(page.getByRole("option", { name: "build-box" })).toBeVisible();
+      await measure("Board, a filter's list");
+
+      // The Feed's Filter: its menu, the phone's action sheet.
+      await page.goto(`${url}/feed`);
+      await page.getByRole("button", { name: "Filter", exact: true }).click();
+      await expect(page.getByRole("menuitemradio", { name: "All machines" })).toBeVisible();
+      await measure("Feed, its Filter");
 
       // More, and Display from it.
       await board();
@@ -712,7 +743,7 @@ for (const [size, insets] of BANDS) {
       b.hub.down = false;
 
       expect(held, where).toEqual(Object.fromEntries(Object.keys(held).map((state) => [state, []])));
-      expect(Object.keys(held), where).toHaveLength(20);
+      expect(Object.keys(held), where).toHaveLength(22);
     } finally {
       await b.close();
     }
@@ -731,6 +762,107 @@ for (const [size, insets] of BANDS) {
       await expect.poll(() => underBands(fresh.page), `You're in, ${where}`).toEqual([]);
     } finally {
       await fresh.close();
+    }
+  });
+}
+
+for (const [size, insets] of BANDS) {
+  const where = `${size}, the band on the ${insets[3] ? "left" : "right"}`;
+  test(`pictures beside the band at ${where}: the message box's tray and a sent picture opened whole keep their buttons clear of it`, {
+    tag: "@webkit",
+  }, async ({ browser }) => {
+    test.setTimeout(90_000);
+    const b = await duoBed(browser, size, { insets });
+    const { page } = b;
+    const [, right, , left] = insets;
+    const width = Number(size.split("x")[0]);
+    /** Each control's two sides, by its name. */
+    const sides = (sel: string) =>
+      page.locator(sel).evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return [el.getAttribute("aria-label") ?? el.className, Math.round(r.left), Math.round(r.right)] as const;
+        }),
+      );
+    const clear = async (sel: string, state: string) => {
+      const found = await sides(sel);
+      expect(found.length, `${state}, ${where}`).toBeGreaterThan(0);
+      for (const [name, from, to] of found) {
+        expect(from, `${name}, ${state}, ${where}`).toBeGreaterThanOrEqual(left);
+        expect(to, `${name}, ${state}, ${where}`).toBeLessThanOrEqual(width - right);
+      }
+    };
+    // The computer takes pictures with a message (sessionpipe 0.10 and later) and answers
+    // each one, naming the files it saved as a computer does.
+    Object.assign(b.ss.machines[0]!, { cli_version: "sessionpipe 0.17.0", files: true, prompt_files: true });
+    const pics = new Session("s-pics", "claude-code", Date.now() - 30 * 60_000);
+    const on = {
+      session: {
+        machine: "studio-mac",
+        cwd: "/Users/me/code/site",
+        title: "Match the hero colours",
+        title_source: "custom" as const,
+      },
+    };
+    b.ss.push([
+      pics.ev("session.started", { source: "startup" }, on),
+      pics.ev("turn.started", { turn_id: "t1" }, on),
+      pics.ev("turn.transcript", { turn: 1, user: "Find the hero's colours.", assistant: "Found two." }, on),
+      pics.ev("turn.ended", { turn_id: "t1" }, on),
+    ]);
+    let turn = 2;
+    const answer = setInterval(() => {
+      for (const job of b.ss.jobs) {
+        if (job.status !== "queued") continue;
+        const cmd = JSON.parse(String(job.sent.cmd)) as Record<string, unknown>;
+        b.ss.settle(job.id, "running");
+        const files = (cmd.files ?? []) as { name: string; type: string; size: number }[];
+        const list = files
+          .map((f) => `- .sessionpipe/files/s-pics/${String(cmd.nonce)}/${f.name} (${f.type}, ${f.size} B)`)
+          .join("\n");
+        const id = `t${turn}`;
+        b.ss.push([
+          pics.ev("turn.started", { turn_id: id }, on),
+          pics.ev(
+            "turn.transcript",
+            {
+              turn: turn++,
+              user: `${cmd.text}\n\nAttached files (saved in this folder):\n${list}`,
+              assistant: "Both red.",
+            },
+            on,
+          ),
+          pics.ev("turn.ended", { turn_id: id }, on),
+        ]);
+        b.ss.settle(job.id, "done");
+      }
+    }, 100);
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+      await b.approve();
+      await page.goto(`${b.server.url}/s/claude-code/s-pics`);
+      await expect(composer(page)).toBeEnabled();
+      // Two pictures in the message box: the tray, each with its ×.
+      await page.locator("input[data-attach-input]").setInputFiles([
+        { name: "brick.png", mimeType: "image/png", buffer: png(64, 48, [0xb0, 0x3a, 0x2e]) },
+        { name: "coral.png", mimeType: "image/png", buffer: png(80, 60, [0xf0, 0x80, 0x70]) },
+      ]);
+      await expect(page.locator(".att-item[data-state=ready]")).toHaveCount(2);
+      expect(await underBands(page), `the tray, ${where}`).toEqual([]);
+      await clear(".att-x", "the tray");
+      // Sent, and the second one opened whole: ×, and a chevron at each side.
+      await composer(page).fill("Are these the same red?");
+      await page.locator(".ctl-send").click();
+      await expect(page.locator("[data-sent-picture] img")).toHaveCount(2, { timeout: 20_000 });
+      await page.locator("[data-sent-picture='coral.png']").last().click();
+      await expect(page.locator("[data-lightbox]")).toBeVisible();
+      expect(await underBands(page), `the lightbox, ${where}`).toEqual([]);
+      await clear(".lb-btn", "the lightbox");
+      await expect(page.locator(".lb-btn")).toHaveCount(3);
+    } finally {
+      clearInterval(answer);
+      await b.close();
     }
   });
 }

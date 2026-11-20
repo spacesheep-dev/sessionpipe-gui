@@ -296,8 +296,8 @@
   }
   .toasts--phone .toast-unlock {
     position: absolute;
-    left: 16px;
-    right: 16px;
+    left: calc(16px + var(--safe-left, env(safe-area-inset-left)));
+    right: calc(16px + var(--safe-right, env(safe-area-inset-right)));
     bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)) + 60px);
     text-align: center;
   }
