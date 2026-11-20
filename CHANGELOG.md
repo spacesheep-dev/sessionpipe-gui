@@ -16,7 +16,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   offers its list of receivers. Senders keep their sink token: rotating it is what stops a
   sender. The command prints no key and asks the receiver serving the state folder when
   there is one; in a folder with no board, or when the receiver on the port serves another
-  folder or does not take the new key, it changes nothing and says so.
+  folder or does not take the new key, it changes nothing and says so. A folder it cannot
+  write is said in one line, not Node's error stack.
 
 ### Changed
 
