@@ -910,11 +910,11 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     },
     [poolAccounts, logins],
   );
-  const served = s ? (s.servedBy ?? servedBy(events, s)) : null;
+  const served = s ? (s.servedBy ?? servedBy(events, s, { fromStart: !hasOlder })) : null;
   const swapRows = useMemo(() => {
     if (!s) return [];
     const reports = events.filter((e) => e.type === "limits.observed");
-    return swaps(events, s).map((sw) => {
+    return swaps(events, s, { fromStart: !hasOlder }).map((sw) => {
       // Why it left: the last report of the account it left, read at that report's time;
       // failing that, what the hello says of that account now.
       const prior = reports
@@ -931,7 +931,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
           : null);
       return { seq: sw.seq, text: swapWords(nameFor(sw.to) ?? "another account", nameFor(sw.from), because) };
     });
-  }, [events, s, poolAccounts, limits, nameFor]);
+  }, [events, s, hasOlder, poolAccounts, limits, nameFor]);
   // Each switch goes to the turn it fell in: the last turn whose start precedes it.
   const swapNotes = useMemo(() => {
     const by = new Map<number, string[]>();
