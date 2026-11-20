@@ -4,7 +4,7 @@
 // happened and where, the session, the detail; Allow and Deny right on it when a control
 // answer can reach it (control/useSend.ts) and the banner shows the request whole (the
 // Inbox's rule, lib/format.ts askFitsRow), else one Open. A shell command stands on its
-// own line under "Bash wants to run:". A click opens the session beside the page, a
+// own line under "Bash wants to run:". A click opens the session the way Settings says, a
 // right-click has the rest.
 import type { MachineControl, SessionSummary } from "@shared/api";
 import { type MutableRefObject, useEffect, useLayoutEffect, useMemo, useRef } from "react";
@@ -12,7 +12,9 @@ import { answerState, useSessionSend } from "../control/useSend";
 import { useAnswerClock } from "../lib/answerWindow";
 import { askFitsRow } from "../lib/format";
 import { copyItem } from "../lib/menus";
-import { openSession, openSplit } from "../lib/split";
+import { usePath } from "../lib/router";
+import { useAppSettings } from "../lib/settings";
+import { openSession, openSplit, openWay } from "../lib/split";
 import { dismissToast, type Toast } from "../lib/toasts";
 import { NEW_WORDS } from "../native/accountWords";
 import { Redacted } from "./bits";
@@ -42,6 +44,11 @@ export function ToastCard({
     else openSplit(t.session, { from });
     dismissToast(t.id);
   };
+  // The tooltip says where the click goes (openWay reads the address and Settings: these
+  // two keep it current).
+  usePath();
+  useAppSettings();
+  const openTitle = openWay("primary") === "beside" ? "Open the session beside this page" : "Open the session";
   const attention = t.attentionId ? session?.openAttentions.find((a) => a.attentionId === t.attentionId) : undefined;
   const answerMenu = useRef<MenuList>([]);
   const menu = useContextMenu(
@@ -82,7 +89,7 @@ export function ToastCard({
         className="toast-main"
         onClick={() => open()}
         disabled={!t.session}
-        title={t.session ? "Open the session beside this page" : undefined}
+        title={t.session ? openTitle : undefined}
       >
         <span className="toast-head">
           {t.verb ?? t.label}

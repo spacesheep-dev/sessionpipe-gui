@@ -9,7 +9,7 @@
 import type { SessionMatch, SessionSearchHit } from "@shared/api";
 import { noteHistoryTitle } from "../lib/historyTitle";
 import { hrefFor, navigate, sessionPath } from "../lib/router";
-import { handJump, type OpenHow, openSplit, openWay } from "../lib/split";
+import { handJump, type OpenHow, openSplit, openWay, overSettings } from "../lib/split";
 
 export type OpenMode = "page" | "beside" | "background";
 
@@ -52,12 +52,14 @@ export function openResult(
   preview = false,
 ): void {
   if (!m.summary) noteHistoryTitle(m.key, m.title);
-  if (mode === "page") {
+  // Over Settings a tab beside would open hidden: the page, in Settings' place.
+  const over = overSettings();
+  if (mode === "page" || over) {
     // The hash goes on after the router has kept its own parameters (the mock flag, the
     // panel), which it would otherwise append after it.
     const href = resultHref(m, hit, q);
     const at = href.indexOf("#");
-    navigate(at < 0 ? href : href.slice(0, at));
+    navigate(at < 0 ? href : href.slice(0, at), { replace: over });
     if (at >= 0) history.replaceState(history.state, "", `${location.pathname}${location.search}${href.slice(at)}`);
     return;
   }

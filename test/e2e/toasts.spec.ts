@@ -191,6 +191,47 @@ test.describe("toasts", () => {
     await s.done();
   });
 
+  test("its tooltip says where a click goes: with As a page chosen, the session's page", async ({ page, request }) => {
+    const s = sink(request, await token(request), `Toast page ${randomUUID().slice(0, 6)}`);
+    await openPage(page, "/feed");
+    await s.start();
+    const card = page.locator(`.toast[data-session="${s.key}"]`);
+    await s.permission("Bash", "git status");
+    await expect(card).toBeVisible();
+    await expect(card.locator(".toast-main")).toHaveAttribute("title", "Open the session");
+    await card.locator(".toast-main").click();
+    const [harness, id] = s.key.split(":");
+    await expect(page).toHaveURL((u) => u.pathname === `/s/${harness}/${id}`);
+    await expect(page.locator("aside.panel")).not.toHaveClass(/panel--open/);
+    await s.done();
+  });
+
+  test("over Settings a click shows the session in Settings' place, and Back is the page it was over", async ({
+    page,
+    request,
+  }) => {
+    const s = sink(request, await token(request), `Toast over ${randomUUID().slice(0, 6)}`);
+    // Beside, where nothing is chosen: a tab beside would open hidden under Settings.
+    await openSessionsUnchosen(page);
+    await openPage(page, "/feed");
+    await s.start();
+    await page.locator('[data-nav="settings"]').click();
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    await expect(settings).toBeVisible();
+    const card = page.locator(`.toast[data-session="${s.key}"]`);
+    await s.permission("Bash", "git status");
+    await expect(card).toBeVisible();
+    await expect(card.locator(".toast-main")).toHaveAttribute("title", "Open the session");
+    await card.locator(".toast-main").click();
+    const [harness, id] = s.key.split(":");
+    await expect(page).toHaveURL((u) => u.pathname === `/s/${harness}/${id}` && !u.searchParams.has("settings"));
+    await expect(settings).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL((u) => u.pathname === "/feed" && !u.searchParams.has("settings"));
+    await expect(settings).toHaveCount(0);
+    await s.done();
+  });
+
   test("on a phone the banner fits the screen, 8 px from each edge, its lines cut inside it", async ({
     page,
     request,

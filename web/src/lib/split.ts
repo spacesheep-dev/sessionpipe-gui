@@ -373,15 +373,20 @@ export type OpenHow = "primary" | "other" | "background";
 
 /** The one rule for where a session opens: "primary" goes the way Settings › Open sessions
  *  says, "other" the other way, and "background" is a tab that does not take the panel.
- *  Where the panel cannot show (the phone, Usage, Workflows, Shortcuts…) every way is the
- *  page, so no tab opens out of sight. Callers keep their own extras (where it animates
- *  from, a #seq, a file) and only ask which way. */
+ *  Where the panel cannot show (the phone, Usage, Workflows, Shortcuts…, under Settings)
+ *  every way is the page, so no tab opens out of sight. Callers keep their own extras
+ *  (where it animates from, a #seq, a file) and only ask which way. */
 export function openWay(how: OpenHow): "page" | "beside" | "background" {
-  if (phoneLayout() || !panelBeside(location.pathname)) return "page";
+  if (phoneLayout() || !panelBeside(location.pathname) || settingsOpen()) return "page";
   if (how === "background") return "background";
   const beside = getSettings().openSessions === "beside";
   return (how === "primary") === beside ? "beside" : "page";
 }
+
+/** On a computer, Settings is over the page: a session opened now takes Settings' place in
+ *  the history (navigate's `replace`), so it shows and Back is the page Settings was over.
+ *  The phone's sheet keeps its stack. */
+export const overSettings = (): boolean => settingsOpen() && !phoneLayout();
 
 /** How a click asked: ⌘ (Ctrl) a background tab, ⇧ (or ⌥) the other way, else plain. */
 export const howOf = (e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): OpenHow =>
@@ -410,7 +415,8 @@ export function openSession(
   const here = ownPageKey() === key;
   const way = here ? "page" : openWay(how);
   if (way === "page") {
-    if (!here) navigate(tabPath(key));
+    const over = overSettings();
+    if (!here || over) navigate(tabPath(key), { replace: over });
     if (!opts.hash) return;
     history.replaceState(history.state, "", `${location.pathname}${location.search}${opts.hash}`);
     // The page already open reads the hash as it moves; a page just opened reads it on arrival.
@@ -423,14 +429,14 @@ export function openSession(
 
 /** A page the app asks for while its window is up (a notification's click, the menu bar's
  *  session): a session's own page opens by the one rule, as a plain open, so the page and
- *  its tabs stay; any other address is navigated to, and so is a session asked for over
- *  Settings, which would hide it (the address drops Settings, as before). A cold start is
- *  not asked here: the window opens on the address. */
+ *  its tabs stay, and over Settings it takes Settings' place (openSession); any other
+ *  address is navigated to, and so is a session asked for over the phone's Settings. A
+ *  cold start is not asked here: the window opens on the address. */
 export function openAsked(to: string): void {
   const at = to.indexOf("#");
   const bare = at < 0 ? to : to.slice(0, at);
   const r = parseRoute(bare);
-  if (r.name !== "session" || bare.includes("?") || settingsOpen()) {
+  if (r.name !== "session" || bare.includes("?") || (settingsOpen() && phoneLayout())) {
     navigate(to);
     return;
   }

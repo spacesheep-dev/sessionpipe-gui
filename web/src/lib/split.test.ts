@@ -363,8 +363,21 @@ describe("openAsked: a page the app asks for while its window is up (a notificat
 
   it("over Settings the session's page opens and Settings goes, so the click shows it", () => {
     at("/inbox?settings=general&s=claude-code%3Ax");
+    const pushed = vi.spyOn(g.history as History, "pushState");
     openAsked("/s/claude-code/z");
     expect(where()).toBe("/s/claude-code/z?s=claude-code%3Ax");
+    // In Settings' place: Back is the page it was over, not Settings again.
+    expect(pushed).not.toHaveBeenCalled();
+    // A session opened from the toasts or ⌘K too, and the one whose page is under it.
+    for (const how of ["primary", "other", "background"] as const) {
+      at("/inbox?settings=general");
+      openSession("claude-code:z", how);
+      expect(where()).toBe("/s/claude-code/z");
+      at("/s/claude-code/z?settings=general");
+      openSession("claude-code:z", how, { hash: "#seq-3" });
+      expect(`${where()}${(g.location as URL).hash}`).toBe("/s/claude-code/z#seq-3");
+    }
+    expect(previewTab()).toBeNull();
   });
 
   it("on the phone it is the page", () => {
