@@ -10,6 +10,8 @@
 // with the band at either side: those tests are tagged @webkit, and the `duo-webkit`
 // project runs them in the iPhone's engine as well. What a page keeps as it moves from one
 // shape to another is in duo-continuity.spec.ts, which runs in WebKit whole.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { Session } from "../events.js";
 import {
@@ -1419,6 +1421,46 @@ test(UNFOLDED, { tag: "@webkit" }, async ({ browser }) => {
       await pose(page, width, height);
       expect(await shapeOf(page), size).toEqual({ size, insets: DUO[size]!.insets });
       expect(await under(), size).toEqual(none);
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+/** What the iOS app's probe (apps/mobile/src-tauri/src/probe.js) says of the page, run as
+ *  the shell runs it on a probe launch: mobile.yml's iPhone Duo step prints it from the
+ *  simulator, and the real insets come from there. */
+const PROBE = readFileSync(fileURLToPath(new URL("../../apps/mobile/src-tauri/src/probe.js", import.meta.url)), "utf8");
+async function probe(page: Page): Promise<Record<string, unknown>> {
+  await page.evaluate(() => history.replaceState(history.state, "", location.pathname + location.search));
+  await page.evaluate(PROBE);
+  // A state, not a time: the probe has put what it saw in the address.
+  await page.waitForFunction(() => location.hash.startsWith("#probe="));
+  return page.evaluate(() => JSON.parse(decodeURIComponent(location.hash.slice("#probe=".length))));
+}
+
+test("the iOS app's probe says the window's size, the system's insets, the size class, the pointer and the screen, folded and unfolded", {
+  tag: "@webkit",
+}, async ({ browser }) => {
+  const b = await duoBed(browser, "466x678");
+  const { page } = b;
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    for (const [width, height, sizeClass] of [
+      [466, 678, "compact"],
+      [669, 951, "regular"],
+    ] as const) {
+      await pose(page, width, height);
+      const seen = await probe(page);
+      const size = `${width}x${height}`;
+      expect(seen, size).toMatchObject({ w: width, h: height, sizeClass, coarse: true, vv: [width, height], dpr: 3 });
+      // env(safe-area-inset-*), not the --safe-* this bed stands in for them with: a browser
+      // has no band of its own, the simulator has.
+      expect(await shapeOf(page), size).toEqual({ size, insets: DUO[size]!.insets });
+      expect(seen.insets, size).toEqual([0, 0, 0, 0]);
+      expect(seen.screen, size).toEqual([expect.any(Number), expect.any(Number)]);
+      expect(seen.errors, size).toEqual([]);
     }
   } finally {
     await b.close();

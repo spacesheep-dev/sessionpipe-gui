@@ -185,6 +185,10 @@ fn open_main<R: Runtime>(app: &AppHandle<R>, path: Option<&str>) -> tauri::Resul
         contract::Os::Android => contract::live_init_script(),
     };
     app.state::<contract::Injected>().renew(&script);
+    // Never ask tao for a monitor on iOS (current_monitor, available_monitors, or anything
+    // that reads them, such as restoring a window's place): on iPhone Duo's inner display
+    // UIScreen.mainScreen is still the outer one, and tao aborts the app (tao#1373). So the
+    // mobile capability (capabilities/main.json) never grants core:window either.
     let win = WebviewWindowBuilder::new(app, "main", start_url(path))
         .initialization_script(script)
         .initialization_script(if probe { PROBE_ERRORS } else { "" })
@@ -311,9 +315,9 @@ pub(crate) fn sync_contract<R: Runtime>(app: &AppHandle<R>) {
 const PROBE_ERRORS: &str = "window.__probeErrors = []; addEventListener('error', (e) => __probeErrors.push(String(e.message || e.target?.src || e.target?.href || e) + ' @ ' + String(e.error?.stack || e.filename + ':' + e.lineno + ':' + e.colno).slice(0, 400))); addEventListener('unhandledrejection', (e) => __probeErrors.push('rej ' + String(e.reason && (e.reason.stack || e.reason)))); addEventListener('securitypolicyviolation', (e) => __probeErrors.push('csp ' + e.violatedDirective + ' ' + e.blockedURI)); const ce = console.error; console.error = (...a) => { __probeErrors.push('ce ' + a.map(String).join(' ').slice(0, 300)); ce(...a); };";
 
 /// Dev launches with `SP_PROBE` set (`SIMCTL_CHILD_SP_PROBE=1`; iOS apps get no env
-/// otherwise): what the page shows 3 s after load, written to `<app data>/probe.txt` (the
-/// simulator has no scriptable inspector). The result rides in the URL hash, which needs
-/// no IPC permission.
+/// otherwise): what the page shows 2.5 s after load (probe.js), written to
+/// `<app data>/probe.txt` (the simulator has no scriptable inspector). The result rides in
+/// the URL hash, which needs no IPC permission. mobile.yml's iPhone Duo step reads it.
 fn probe<R: Runtime>(webview: &tauri::Webview<R>) {
     if std::env::var_os("SP_PROBE").is_none() {
         return;
@@ -324,13 +328,25 @@ fn probe<R: Runtime>(webview: &tauri::Webview<R>) {
     if let Ok(js) = std::env::var("SP_EVAL") {
         let _ = webview.eval(format!("setTimeout(() => {{ try {{ {js} }} catch (e) {{ (window.__probeErrors || []).push('eval ' + e); }} }}, 1200);"));
     }
-    let _ = webview.eval(
-        "setTimeout(() => { const d = document.documentElement; history.replaceState(history.state, '', location.pathname + location.search + '#probe=' + encodeURIComponent(JSON.stringify({ href: location.href, shell: d.dataset.shell, theme: d.dataset.theme, sp: window.sessionpipeShell && { receiver: window.sessionpipeShell.receiver, rxBase: window.sessionpipeShell.rxBase }, font: getComputedStyle(d).fontSize, text: document.body.innerText.slice(0, 600), w: innerWidth, h: innerHeight, errors: window.__probeErrors || [] }))); }, 2500);",
-    );
+    // Its size, the system's insets, the size class, the pointer, the visual viewport, the
+    // screen and the page's errors.
+    let _ = webview.eval(include_str!("probe.js"));
     let wv = webview.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(3500));
-        if let (Ok(u), Ok(dir)) = (wv.url(), wv.app_handle().path().app_data_dir()) {
+        // Written once the page has put what it saw in the hash, or as it is after 15 s.
+        let mut url = None;
+        for _ in 0..60 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            url = wv.url().ok();
+            if url
+                .as_ref()
+                .and_then(|u| u.fragment())
+                .is_some_and(|f| f.starts_with("probe="))
+            {
+                break;
+            }
+        }
+        if let (Some(u), Ok(dir)) = (url, wv.app_handle().path().app_data_dir()) {
             let _ = std::fs::create_dir_all(&dir);
             let _ = std::fs::write(dir.join("probe.txt"), u.as_str());
         }

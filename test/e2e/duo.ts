@@ -32,9 +32,11 @@ export interface Shape {
 }
 
 /** The Duo's windows, "WxH" in pt. The sizes are what the iOS 27.1 simulator gives a
- *  WKWebView. The insets and the keyboards are estimates until the iPhone Duo simulator
- *  probe (the iOS build's CI step) prints env(safe-area-inset-*) in each pose: one band of
- *  about 84 pt where the system keeps its bars beside the page (466 less the 382 Safari
+ *  WKWebView. The insets and the keyboards are estimates until they are measured: the
+ *  outer display's by mobile.yml's "iPhone Duo simulator launch" step, which prints what
+ *  the app's probe (apps/mobile/src-tauri/src/probe.js) reads of env(safe-area-inset-*),
+ *  and the other poses' with the same probe in Xcode's Device Hub. The estimates: one band
+ *  of about 84 pt where the system keeps its bars beside the page (466 less the 382 Safari
  *  lays a page out in), 32 on top of the inner display upright, 20 for the home indicator. */
 export const DUO: Record<string, Shape> = {
   // The outer display, upright; and on its side, which the app's portrait lock keeps it from.

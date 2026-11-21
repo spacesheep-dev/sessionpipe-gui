@@ -37,6 +37,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   headings now stop at about 70, from the column's leading edge, at any text size; its
   code and tables keep the column, and the bubble of what you wrote is no wider than the
   prose. A phone held upright and a window with a mouse are unchanged.
+- **The iPhone app fills iPhone Duo's screens.** Built with Xcode 26, it showed in a box
+  with black bars round it, folded and opened. It is now built with Xcode 27.1 and reaches
+  the edges of both screens, with its controls clear of the status bar at the side.
 
 ### Fixed
 
