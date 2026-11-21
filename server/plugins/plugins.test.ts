@@ -696,6 +696,124 @@ describe("a plugin or view the CLI turns on or off while the server runs", () =>
   });
 });
 
+describe("a plugin turned off while it is still starting", () => {
+  let app: App;
+  let tmp: { dir: string; cleanup: () => void };
+  let local: { dir: string; cleanup: () => void };
+  /** activate() takes `ms` (and throws without a token when `needsToken`); counts per id. */
+  const slow = (id: string, ms: number, needsToken = false) => `
+const g = globalThis;
+export default {
+  async activate(api) {
+    if (${needsToken} && !api.settings.get().token) throw new Error("no token");
+    const c = ((g.__slowStart ??= {})[${JSON.stringify(id)}] ??= { activations: 0, deactivations: 0 });
+    c.activations++;
+    api.settings.onChange((v) => (g.__slowSaved ??= []).push({ id: ${JSON.stringify(id)}, ...v }));
+    await new Promise((r) => setTimeout(r, ${ms}));
+    return { deactivate() { c.deactivations++; } };
+  },
+};`;
+  const counts = (id: string) =>
+    (globalThis as { __slowStart?: Record<string, { activations: number; deactivations: number }> }).__slowStart?.[id];
+
+  beforeAll(async () => {
+    tmp = tempDir();
+    local = inRepoTempDir();
+    const token = [{ key: "token", label: "Token", type: "secret" }];
+    makePlugin(
+      path.join(local.dir, "bundled", "plugins", "shipped"),
+      { name: "Shipped", settings: [] },
+      slow("shipped", 400),
+    );
+    makePlugin(path.join(local.dir, "plugins", "late"), { name: "Late", settings: token }, slow("late", 300));
+    makePlugin(path.join(local.dir, "plugins", "mine"), { name: "Mine", settings: token }, slow("mine", 300, true));
+    app = await createApp({
+      port: 0,
+      stateDir: tmp.dir,
+      pluginsDir: path.join(local.dir, "plugins"),
+      outbox: false,
+      quiet: true,
+      webDir: tmp.dir,
+      bundledDir: path.join(local.dir, "bundled", "views"),
+    });
+  });
+  afterAll(async () => {
+    await app.close();
+    tmp.cleanup();
+    local.cleanup();
+  });
+
+  const url = (p: string) => `${app.url}${p}`;
+  const listed = async (id: string) =>
+    ((await (await fetch(url(PLUGIN_ROUTES.list))).json()) as { plugins: InstalledPlugin[] }).plugins.find(
+      (p) => p.id === id,
+    )!;
+  const toggle = (id: string, on: boolean) =>
+    fetch(url(`${PLUGIN_ROUTES.toggle}/${id}/${on ? "enable" : "disable"}`), { method: "POST" });
+
+  it("two enables at once start it once, and Disable stops it", async () => {
+    const both = Promise.all([toggle("shipped", true), toggle("shipped", true)]);
+    // The first is inside activate() (400 ms); the second has 100 ms to arrive before Disable.
+    while (!counts("shipped")) await new Promise((r) => setTimeout(r, 5));
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await toggle("shipped", false)).status).toBe(200);
+    await both;
+    expect(await listed("shipped")).toMatchObject({ status: "inactive", disabled: true });
+    expect(counts("shipped")).toEqual({ activations: 1, deactivations: 1 });
+  });
+
+  it("a settings save that starts it, then Disable before activate() returns: it is stopped, not left running", async () => {
+    expect(await listed("mine")).toMatchObject({ status: "error", error: "no token" });
+    const saved = fetch(url(`${PLUGIN_ROUTES.settings}/mine/settings`), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "x" }),
+    });
+    // It is inside activate() (300 ms) once it has counted itself.
+    while (!counts("mine")) await new Promise((r) => setTimeout(r, 5));
+    expect((await toggle("mine", false)).status).toBe(200);
+    expect((await saved).status).toBe(200);
+    const mine = await listed("mine");
+    expect(mine).toMatchObject({ status: "inactive", disabled: true });
+    expect(mine.error).toBeUndefined();
+    expect(counts("mine")).toEqual({ activations: 1, deactivations: 1 });
+    // Turned on again, it starts as usual.
+    expect((await toggle("mine", true)).status).toBe(200);
+    expect(await listed("mine")).toMatchObject({ status: "active" });
+    expect(counts("mine")).toEqual({ activations: 2, deactivations: 1 });
+  });
+
+  it("a settings save while it is starting reaches it once it is up, without a second start", async () => {
+    // Enabled by default, so started with the app: off, then on again and inside activate().
+    await toggle("late", false);
+    expect(counts("late")).toEqual({ activations: 1, deactivations: 1 });
+    const enabled = toggle("late", true);
+    while (counts("late")!.activations < 2) await new Promise((r) => setTimeout(r, 5));
+    const saved = await fetch(url(`${PLUGIN_ROUTES.settings}/late/settings`), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "y" }),
+    });
+    expect(saved.status).toBe(200);
+    expect((await enabled).status).toBe(200);
+    expect(await listed("late")).toMatchObject({ status: "active" });
+    expect(counts("late")).toEqual({ activations: 2, deactivations: 1 });
+    expect((globalThis as { __slowSaved?: unknown[] }).__slowSaved).toEqual([{ id: "late", token: "y" }]);
+  });
+
+  it("Reload plugins while one is starting leaves one instance running, not two", async () => {
+    await toggle("late", false);
+    const { activations } = counts("late")!;
+    const enabled = toggle("late", true);
+    while (counts("late")!.activations === activations) await new Promise((r) => setTimeout(r, 5));
+    expect((await fetch(url(PLUGIN_ROUTES.reload), { method: "POST" })).status).toBe(200);
+    await enabled;
+    expect(await listed("late")).toMatchObject({ status: "active" });
+    const c = counts("late")!;
+    expect(c.activations - c.deactivations).toBe(1);
+  });
+});
+
 describe("plugin install (the shared installer, bound to plugin.json)", () => {
   let tmp: { dir: string; cleanup: () => void };
   let plugins: string;
