@@ -12,7 +12,7 @@
 // shape to another is in duo-continuity.spec.ts, which runs in WebKit whole.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 import { Session } from "../events.js";
 import {
   bandOffenders,
@@ -20,6 +20,7 @@ import {
   DUO,
   DUO_REPLY,
   DUO_SESSIONS,
+  type DuoBed,
   duoBed,
   duoPlanSession,
   duoSession,
@@ -424,6 +425,169 @@ test("the inner display turned: the message field rides on the keyboard, as on t
     } finally {
       await b.close();
     }
+  }
+});
+
+/** The bottom of `el` in the window, and whether it is drawn. */
+const bottomOf = (el: Locator) => el.evaluate((node) => Math.round(node.getBoundingClientRect().bottom));
+
+/** The outer display's bed with Ask another agent… offered on its computer, and the
+ *  keyboard down. */
+async function outerBed(browser: Browser): Promise<DuoBed> {
+  const b = await duoBed(browser, "466x678");
+  Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+  return b;
+}
+const OUTER_ABOVE = 678 - DUO["466x678"]!.kb;
+
+test("the keyboard up on the outer display: the composer and Send stay above it, and Ask another agent… folds away until it goes", {
+  tag: "@webkit",
+}, async ({ browser }) => {
+  const b = await outerBed(browser);
+  const { page } = b;
+  const ask = page.getByRole("button", { name: "Ask another agent…" });
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await b.approve();
+    await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+    await expect(composer(page)).toBeEnabled();
+    await expect(ask).toBeVisible();
+    await composer(page).focus();
+    await fakeKeyboard(page, DUO["466x678"]!.kb);
+    await expect(ask).toBeHidden();
+    expect(await bottomOf(composer(page))).toBeLessThanOrEqual(OUTER_ABOVE);
+    expect(await bottomOf(page.getByRole("button", { name: "Send" }))).toBeLessThanOrEqual(OUTER_ABOVE);
+    await composer(page).blur();
+    await fakeKeyboard(page, 0);
+    await expect(ask).toBeVisible();
+  } finally {
+    await b.close();
+  }
+});
+
+test("the keyboard up on the outer display: Search folds its large title and chips away, says Search in its bar, and shows three results whole above the keys", {
+  tag: "@webkit",
+}, async ({ browser }) => {
+  const b = await outerBed(browser);
+  const { page } = b;
+  // Three sessions a search finds by a word of their own, and nothing else does.
+  for (const n of [1, 2, 3])
+    duoSession(b, `s-kumquat-${n}`, {
+      title: `Kumquat import ${n}`,
+      user: `Fix the kumquat import, part ${n}.`,
+      assistant: `Done with part ${n}.`,
+    });
+  const rows = page.locator(".sx-list .sx-item");
+  const large = page.locator(".sx--phone .bar-large");
+  const chips = page.locator(".sx--phone .sx-filters");
+  try {
+    await page.goto(`${b.server.url}/search`);
+    await page.getByRole("combobox", { name: /^Search prompts/ }).fill("kumquat");
+    await expect(rows).toHaveCount(3);
+    await fakeKeyboard(page, DUO["466x678"]!.kb);
+    await expect(large).toBeHidden();
+    await expect(chips).toBeHidden();
+    await expect(page.locator(".sx--phone .bar-title")).toHaveCSS("opacity", "1");
+    await expect
+      .poll(() =>
+        rows.evaluateAll((all, at) => all.filter((r) => r.getBoundingClientRect().bottom <= at).length, OUTER_ABOVE),
+      )
+      .toBeGreaterThanOrEqual(3);
+    await fakeKeyboard(page, 0);
+    await expect(large).toBeVisible();
+    await expect(chips).toBeVisible();
+  } finally {
+    await b.close();
+  }
+});
+
+test("the keyboard up on the outer display: New session's message and the sentence its status line says come up above the keys, under the sheet's bar", {
+  tag: "@webkit",
+}, async ({ browser }) => {
+  const b = await outerBed(browser);
+  const { page } = b;
+  const ns = page.locator("[data-new-session]");
+  const text = ns.locator("[data-ns-text]");
+  const status = ns.locator(".ns-status");
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await b.approve();
+    // Its computer is away: the status line has a sentence to keep in sight.
+    b.ss.machines[0]!.online = false;
+    await page.reload();
+    await page.getByRole("button", { name: "New session" }).click();
+    await expect(status).toContainText("is offline");
+    await settled(page);
+    expect(await bottomOf(status)).toBeGreaterThan(OUTER_ABOVE);
+    await text.click();
+    await fakeKeyboard(page, DUO["466x678"]!.kb);
+    await expect.poll(() => bottomOf(status)).toBeLessThanOrEqual(OUTER_ABOVE);
+    expect(await bottomOf(text)).toBeLessThanOrEqual(OUTER_ABOVE);
+    const bar = await bottomOf(ns.locator(".ns-bar"));
+    expect(await text.evaluate((el) => el.getBoundingClientRect().top)).toBeGreaterThanOrEqual(bar);
+  } finally {
+    await b.close();
+  }
+});
+
+test("the keyboard up on the inner display turned: the strip stands on the keys, and New session's form sheet ends above them with Start in sight", {
+  tag: "@webkit",
+}, async ({ browser }) => {
+  const b = await duoBed(browser, "951x669");
+  const { page } = b;
+  const kb = DUO["951x669"]!.kb;
+  const above = 669 - kb;
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await b.approve();
+    await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+    await expect(composer(page)).toBeEnabled();
+    await composer(page).focus();
+    await fakeKeyboard(page, kb);
+    await expect.poll(() => bottomOf(page.locator(".sess-ctl"))).toBe(above);
+    await composer(page).blur();
+    await fakeKeyboard(page, 0);
+
+    // From the Board, with no session page under it.
+    await page.goto(b.server.url);
+    await page.locator("nav.rail .rail-compose").click();
+    const ns = page.locator("[data-new-session]");
+    await settled(page);
+    await ns.locator("[data-ns-text]").click();
+    await fakeKeyboard(page, kb);
+    await expect.poll(() => bottomOf(ns)).toBeLessThanOrEqual(above);
+    const start = ns.getByRole("button", { name: "Start" });
+    await expect(start).toBeVisible();
+    expect(await bottomOf(start)).toBeLessThanOrEqual(above);
+    await fakeKeyboard(page, 0);
+  } finally {
+    await b.close();
+  }
+});
+
+test("on a taller phone the keyboard folds nothing away: Ask another agent… stays under the composer", {
+  tag: "@webkit",
+}, async ({ browser }) => {
+  const b = await duoBed(browser, "393x852");
+  const { page } = b;
+  const ask = page.getByRole("button", { name: "Ask another agent…" });
+  try {
+    Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await b.approve();
+    await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+    await expect(composer(page)).toBeEnabled();
+    await composer(page).focus();
+    await fakeKeyboard(page, 336);
+    await expect(page.locator("html")).toHaveAttribute("data-kb", "");
+    await expect(ask).toBeVisible();
+    expect(await bottomOf(ask)).toBeLessThanOrEqual(852 - 336);
+  } finally {
+    await b.close();
   }
 });
 

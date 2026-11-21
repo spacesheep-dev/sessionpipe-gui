@@ -246,6 +246,10 @@ html[data-size-class="regular"] .ns-sheet--phone .ns-bar {
   height: var(--bar);
   padding: 0 8px;
 }
+/* It ends above the keys already: a field brought into view keeps clear of its bar alone. */
+html[data-size-class="regular"] .ns-sheet--phone {
+  scroll-padding: var(--bar) 0 0;
+}
 html[data-size-class="regular"] .ns-sheet--phone .ns-scroll {
   padding: 16px;
 }

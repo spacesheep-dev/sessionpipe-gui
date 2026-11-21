@@ -28,6 +28,7 @@ import { refusalWords } from "../control/words";
 import { useMachines } from "../data/hooks";
 import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
+import { useFieldAboveKeys } from "../lib/keyboardInset";
 import { usePresence } from "../lib/motion";
 import {
   CODE_INCOMPLETE,
@@ -63,6 +64,8 @@ export function PoolAddSheet({ target, closing }: { target: PoolAddTarget; closi
   const pool = m.control?.pool;
   const send = usePoolSend(m);
   const ref = useRef<HTMLDivElement>(null);
+  // The keyboard up: the field being typed in stays above it, its status line too.
+  useFieldAboveKeys(ref);
   const codeRef = useRef<HTMLInputElement>(null);
   const close = useCallback(() => closePoolAdd(), []);
 

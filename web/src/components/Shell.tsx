@@ -19,6 +19,7 @@ import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } fro
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
 import { useAppState, useNeedsYouCount, useStore, useStreamMark } from "../data/hooks";
 import { onPhoneLayout, phoneLayout, reachName, usePanelCovers, usePhoneLayout, useRegular } from "../lib/device";
+import { useKeyboardInset } from "../lib/keyboardInset";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
@@ -621,6 +622,10 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     if (!regular) setDisplay(false);
   }, [regular]);
   useResize();
+  // The phone's keyboard, wherever a field has the focus: --kb and data-kb on <html>
+  // (lib/keyboardInset.ts), so a session's docked composer rides on the keys, a sheet makes
+  // room under its fields, and a short screen folds its extras away while typing.
+  useKeyboardInset();
   useThemeColor();
   useStreamMark();
   // Boot: the last visit's tabs when the URL carries none.

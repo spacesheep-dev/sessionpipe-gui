@@ -405,6 +405,9 @@
   /* The sheet is its own scroller, so a pull down from its top dismisses it (lib/motion
      useSheetDrag reads its scroll), and the bar sticks over the rows. */
   overflow: auto;
+  /* What a field brought into view keeps clear of: the bar over the rows, and the keys
+     while they are up (lib/keyboardInset.ts useFieldAboveKeys). */
+  scroll-padding: calc(var(--bar) + var(--safe-top, env(safe-area-inset-top))) 0 var(--kb, 0px);
   animation: ns-up var(--dur-slow) var(--ease-out) both;
 }
 .ns-sheet--phone[data-closing] {
@@ -472,8 +475,10 @@
 }
 .ns-scroll {
   flex: none;
+  /* With the keyboard up the rows end above it, so the last of them can be scrolled clear
+     of the keys. */
   padding: 16px calc(16px + var(--safe-right, env(safe-area-inset-right)))
-    calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 24px)
+    calc(max(var(--safe-bottom, env(safe-area-inset-bottom)), var(--kb, 0px)) + 24px)
     calc(16px + var(--safe-left, env(safe-area-inset-left)));
 }
 .ns-group {

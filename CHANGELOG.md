@@ -40,6 +40,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **The iPhone app fills iPhone Duo's screens.** Built with Xcode 26, it showed in a box
   with black bars round it, folded and opened. It is now built with Xcode 27.1 and reaches
   the edges of both screens, with its controls clear of the status bar at the side.
+- **The keyboard no longer covers what is being typed.** In New session, Ask another agent
+  and adding an account on a phone, the field being typed in, and the line under it that
+  says why Start waits, now move up above the keys; on a tablet the sheet ends above them
+  wherever it was opened from. On a short screen, such as a folded phone or Split View,
+  "Ask another agent…" under the message field, and Search's large title and its filters,
+  fold away while the keyboard is up, so the field, Send and a few results fit above it;
+  they come back when it goes. A taller phone keeps them.
 
 ### Fixed
 

@@ -991,3 +991,24 @@
     border-radius: var(--radius-sheet);
   }
 }
+/* A short touch screen with the keyboard up (data-kb: lib/keyboardInset.ts): the large
+   title and the filter chips fold away and the bar's own title shows, as iOS's search does,
+   so the field and the results have the room above the keys. They come back with it down. */
+@media (pointer: coarse) and (max-height: 760px) {
+  html[data-kb] .sx--phone :is(.bar-large, .sx-filters) {
+    display: none;
+  }
+  html[data-kb] .sx--phone > .bar-below:not(:has(> :not(.bar-large))) {
+    display: none;
+  }
+  html[data-kb] .sx--phone > .bar--large {
+    border-bottom-color: var(--line);
+  }
+  /* The field then stands under the bar itself, 8 pt clear of its line. */
+  html[data-kb] .sx--phone .sx-phonefield {
+    margin-top: -8px;
+  }
+  html[data-kb] .sx--phone > .bar--large .bar-title {
+    opacity: 1;
+  }
+}

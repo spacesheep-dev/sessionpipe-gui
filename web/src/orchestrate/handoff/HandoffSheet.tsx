@@ -42,6 +42,7 @@ import { useListedSessions, useMachinesMap, useSession, useStore, useStreamDown 
 import { usePhoneLayout } from "../../lib/device";
 import { useFocusTrap } from "../../lib/focus";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../../lib/format";
+import { useFieldAboveKeys } from "../../lib/keyboardInset";
 import { useSheetDrag } from "../../lib/motion";
 import { navigate } from "../../lib/router";
 import { hintFor, matches, useShortcut } from "../../lib/shortcuts";
@@ -96,6 +97,8 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   // The app's stream is down (as the page bar says it): an ask waits for it, as a message does.
   const down = useStreamDown() !== null;
   const ref = useRef<HTMLDivElement>(null);
+  // The keyboard up: the field being typed in stays above it, its status line too.
+  useFieldAboveKeys(ref);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   const name = session?.machine ?? "this machine";

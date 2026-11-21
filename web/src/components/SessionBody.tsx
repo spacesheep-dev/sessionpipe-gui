@@ -92,7 +92,6 @@ import {
   sessionTitle,
   toolLabel,
 } from "../lib/format";
-import { useKeyboardInset } from "../lib/keyboardInset";
 import { labelMenu } from "../lib/labels";
 import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
@@ -898,11 +897,6 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   useEffect(() => {
     if (s) onSession?.(s);
   }, [s, onSession]);
-
-  // The phone's keyboard: the docked composer rides on it (lib/keyboardInset.ts sets --kb
-  // from visualViewport; styles/session.css reads it), so the field and Send are never
-  // under the keys.
-  useKeyboardInset(mode === "page");
 
   // The docked bar's height, so a row scrolled into view (a jump, the focused prompt) is
   // never left under it (styles/session.css: scroll-padding-bottom).
