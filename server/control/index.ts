@@ -117,6 +117,8 @@ export interface Control {
   /** Demo mode's machines (server/demo/machine.ts), in the rows a paired daemon fills. */
   demo: {
     machine(id: string, hello: Hello): void;
+    /** Its hello again (state.ts demoHello). */
+    hello(id: string, hello: Hello): void;
     poll(id: string): void;
     start(id: string, run: DemoStart): void;
     /** How many there were. */
@@ -240,6 +242,7 @@ export function createControl(deps: ControlDeps): Control {
     },
     demo: {
       machine: (id, hello) => state.demoMachine(id, hello),
+      hello: (id, hello) => state.demoHello(id, hello),
       poll: (id) => state.demoPoll(id),
       start: (id, run) => state.demoStart(id, run),
       remove: () => state.removeDemoMachines(),
