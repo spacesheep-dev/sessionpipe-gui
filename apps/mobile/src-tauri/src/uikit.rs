@@ -1,6 +1,7 @@
 //! UIKit and WebKit touches Tauri doesn't make for us (arch-mobile §3.4). iOS only.
 
 use crate::contract::{Haptic, Scheme};
+use objc2::encode::{Encode, Encoding};
 use objc2::{class, msg_send, runtime::AnyObject, runtime::Bool};
 use std::cell::RefCell;
 use std::ffi::CString;
@@ -38,6 +39,64 @@ pub unsafe fn fit(wk: *mut AnyObject) {
         let _: () = msg_send![wk, setOpaque: false];
         let _: () = msg_send![wk, setBackgroundColor: color];
         let _: () = msg_send![sv, setBackgroundColor: color];
+    }
+}
+
+/// A rectangle as UIKit hands it over (CGRect: doubles on every 64-bit device).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGRect {
+    origin: CGPair,
+    size: CGPair,
+}
+
+/// CGPoint and CGSize: two doubles each.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGPair(f64, f64);
+
+const PAIR: [Encoding; 2] = [Encoding::Double, Encoding::Double];
+
+unsafe impl Encode for CGRect {
+    const ENCODING: Encoding = Encoding::Struct(
+        "CGRect",
+        &[
+            Encoding::Struct("CGPoint", &PAIR),
+            Encoding::Struct("CGSize", &PAIR),
+        ],
+    );
+}
+
+/// The QR scanner's camera fills the window. tauri-plugin-barcode-scanner 2.5 makes its
+/// camera view as big as `UIScreen.main` (BarcodeScannerPlugin.swift, `loadCamera`) and
+/// puts it beside the webview while a scan runs. On iPhone Duo the main screen stays the
+/// outer display while the app is on the inner one (tao#1373), so the camera filled only
+/// part of the open device. Every view beside the webview whose class name ends in
+/// `CameraView` is given the webview's superview's bounds, and follows it from then on.
+/// When nothing matches (no scan, or a plugin release that renamed the view) nothing is
+/// done. Remove this once a plugin release sizes the view from the superview.
+///
+/// # Safety
+/// `wk` must be the live WKWebView, on the main thread.
+pub unsafe fn fit_camera(wk: *mut AnyObject) {
+    if wk.is_null() {
+        return;
+    }
+    let sup: *mut AnyObject = msg_send![wk, superview];
+    if sup.is_null() {
+        return;
+    }
+    let bounds: CGRect = msg_send![sup, bounds];
+    let views: *mut AnyObject = msg_send![sup, subviews];
+    let n: usize = msg_send![views, count];
+    for i in 0..n {
+        let v: *mut AnyObject = msg_send![views, objectAtIndex: i];
+        if v.is_null() || !(*v).class().name().to_bytes().ends_with(b"CameraView") {
+            continue;
+        }
+        let _: () = msg_send![v, setFrame: bounds];
+        // UIViewAutoresizingFlexibleWidth (2) | UIViewAutoresizingFlexibleHeight (16).
+        let _: () = msg_send![v, setAutoresizingMask: 18usize];
     }
 }
 

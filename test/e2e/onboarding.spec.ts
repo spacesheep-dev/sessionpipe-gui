@@ -241,6 +241,36 @@ test.describe("the phone's first run", () => {
     expect(await shellCalls(page)).toContain("plugin:barcode-scanner|cancel");
   });
 
+  test("while a scan runs the iPhone's camera is fitted to the window, and on a resize; not after", async ({
+    page,
+  }) => {
+    await openInPhone(page, "/", { scan: { hold: true } });
+    const fits = async () => (await shellCalls(page)).filter((c) => c === "app_fit_camera").length;
+    await button(page, "Scan the code on your computer").click();
+    await expect(page.locator("html")).toHaveAttribute("data-scanning", "");
+    await expect.poll(fits).toBe(1);
+    // Turned: asked again.
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(fits).toBeGreaterThan(1);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(welcome(page)).toBeVisible();
+    const after = await fits();
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    expect(await fits()).toBe(after);
+  });
+
+  test("Android sizes its own camera: the shell is never asked to fit it", async ({ page }) => {
+    await openInPhone(page, "/", { platform: "android", scan: { hold: true } });
+    await button(page, "Scan the code on your computer").click();
+    await expect(page.locator("html")).toHaveAttribute("data-scanning", "");
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(welcome(page)).toBeVisible();
+    expect(await shellCalls(page)).not.toContain("app_fit_camera");
+  });
+
   test("the camera refused: a plain reason, Open Settings, the address instead", async ({ page }) => {
     await openInPhone(page, "/", { camera: "prompt", grant: "denied" });
     await button(page, "Scan the code on your computer").click();

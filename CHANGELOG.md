@@ -50,6 +50,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **The camera fills the screen when you scan a computer's code with iPhone Duo open.**
+  It was the size of the outer screen, so on the opened phone it covered only part of the
+  screen, upright and turned. It now fills the window either way up, and follows a turn
+  and Split View.
 - **A sheet dragged down no longer takes the dim from the next one.** After New session
   was put away with a drag, Display, More and the next New session opened over a page
   that was not dimmed.

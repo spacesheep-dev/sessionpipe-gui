@@ -154,6 +154,24 @@ fn app_appearance<R: Runtime>(app: AppHandle<R>, scheme: String) -> Result<(), S
     Ok(())
 }
 
+/// The QR scanner's camera fills the window (uikit.rs `fit_camera`): the page asks once a
+/// scan has started, and on every resize while it runs. Only iOS sizes the camera wrong
+/// (on iPhone Duo's inner display); elsewhere there is nothing to do.
+#[tauri::command]
+fn app_fit_camera<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    {
+        let win = app.get_webview_window("main").ok_or("no main window")?;
+        win.with_webview(|pv| unsafe {
+            uikit::fit_camera(pv.inner() as *mut objc2::runtime::AnyObject)
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "ios"))]
+    let _ = app;
+    Ok(())
+}
+
 fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -531,6 +549,7 @@ pub fn run() {
             app_notify_open_settings,
             app_haptic,
             app_appearance,
+            app_fit_camera,
             net::rx_list,
             net::rx_add,
             net::rx_select,
