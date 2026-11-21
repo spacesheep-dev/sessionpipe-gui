@@ -220,7 +220,12 @@ const typing = (): boolean => {
   if (el.isContentEditable || el.tagName === "TEXTAREA") return true;
   return el.tagName === "INPUT" && !NO_KEYS.has((el as HTMLInputElement).type);
 };
+/** A page pinched larger in a phone's or a tablet's browser keeps the size it had:
+ *  innerWidth and innerHeight are then only the part of it in view (as windowSize() in
+ *  lib/resizeAnchor.ts has it). */
+const pinched = (): boolean => Math.abs((globalThis.visualViewport?.scale ?? 1) - 1) >= 0.01;
 const measured = (): { width: number; height: number } => {
+  if (steady && pinched()) return steady;
   const now = { width: innerWidth, height: innerHeight };
   if (steady && now.width === steady.width && now.height < steady.height && typing()) return steady;
   return now;

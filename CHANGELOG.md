@@ -23,7 +23,7 @@ All notable changes to `sessionpipe-gui`. The format follows
   them) and the views, with Display and Settings at the foot, each a row a finger takes.
   New session is at its head. The tab bar stretched five tabs across such a screen; a
   phone held upright, a folded phone, Split View and a window with a mouse keep what they
-  had.
+  had. A page pinched larger in a tablet's browser keeps its sidebar.
 - **With room, sheets and menus float in the middle, and each page reads down one
   column.** On a tablet and on a phone opened flat, New session, Ask another agent and
   adding an account are a sheet of at most 540 pt in the middle, over a dimmed page; a

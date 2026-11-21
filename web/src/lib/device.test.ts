@@ -557,6 +557,29 @@ describe("sizeClass", () => {
     expect(html.dataset.sizeClass).toBe("regular");
   });
 
+  it("keeps the size it had while the page is pinched larger in a browser", async () => {
+    const { followSizeClass, sizeClass } = await follow();
+    fakeMedia({ [TOUCH_QUERY]: true, [PHONE_QUERY]: true });
+    try {
+      g.visualViewport = { scale: 1 };
+      set(820, 1180);
+      followSizeClass();
+      expect(html.dataset.sizeClass).toBe("regular");
+      // Pinched to twice the size: innerWidth and innerHeight are only the part in view.
+      g.visualViewport = { scale: 2 };
+      resize(410, 590);
+      expect(sizeClass()).toBe("regular");
+      expect(html.dataset.sizeClass).toBe("regular");
+      // Back to its size, and a real change is read again.
+      g.visualViewport = { scale: 1 };
+      resize(466, 678);
+      expect(sizeClass()).toBe("compact");
+      expect(html.dataset.sizeClass).toBe("compact");
+    } finally {
+      delete g.visualViewport;
+    }
+  });
+
   it("takes a checkbox in hand for no keyboard", async () => {
     const { followSizeClass, sizeClass } = await follow();
     fakeMedia({ [TOUCH_QUERY]: true, [PHONE_QUERY]: true });
