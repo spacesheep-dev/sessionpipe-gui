@@ -165,6 +165,48 @@ test("the keyboard up on the outer display: the page hears of it as WKWebView te
   }
 });
 
+test("the message field keeps every key of a run typed faster than the page draws between them", {
+  tag: "@webkit",
+}, async ({ browser }) => {
+  const b = await duoBed(browser, "466x678");
+  const { page } = b;
+  const typed = "Open a PR for the fix. Ask Sam to review it. Then deploy to production. ".repeat(3).trim();
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeVisible();
+    await b.approve();
+    await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+    await expect(composer(page)).toBeEnabled();
+    await composer(page).focus();
+    // Each key as the engine gives it to the page (the field's text one letter longer, then
+    // "input"), all of them in one task: no frame and no task of the page's comes between
+    // two of them, as when keys come faster than the page gets a turn (a key held down, a
+    // hardware keyboard, a run of input from a test). The state to read is the end of it.
+    const said = await composer(page).evaluate((field: HTMLTextAreaElement, text) => {
+      const errors: string[] = [];
+      const heard = (e: ErrorEvent) => errors.push(e.message);
+      addEventListener("error", heard);
+      const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      try {
+        for (const ch of text) {
+          set.call(field, field.value + ch);
+          field.setSelectionRange(field.value.length, field.value.length);
+          field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: ch }));
+        }
+      } finally {
+        removeEventListener("error", heard);
+      }
+      return { value: field.value, errors };
+    }, typed);
+    expect(said).toEqual({ value: typed, errors: [] });
+    // And the page has every one of them: drawn again, the field is still what was typed.
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    await expect(composer(page)).toHaveValue(typed);
+  } finally {
+    await b.close();
+  }
+});
+
 test("a reply on the outer display and in Split View reads in lines of at most 75 characters", async ({ browser }) => {
   const b = await duoBed(browser, "466x678");
   const { page } = b;

@@ -51,6 +51,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **The message field no longer loses a letter when keys come quickly.** In a session's
+  message field, a run of keys that came faster than the page could draw lost one letter
+  after some fifty, and one in every fifty after that: "deploy" came out as "deloy".
+  Every key now lands.
 - **The camera fills the screen when you scan a computer's code with iPhone Duo open.**
   It was the size of the outer screen, so on the opened phone it covered only part of the
   screen, upright and turned. It now fills the window either way up, and follows a turn
