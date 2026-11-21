@@ -3,9 +3,9 @@
 // kept 30 days for the page to draw, while machines fetch it only until its own expiry;
 // an upload that needs room makes it among the pictures only the page keeps, oldest
 // first, before it is refused. And the page's own door to them, GET …/control/files/:sha.
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ROUTES, UI_KEY_COOKIE } from "../../shared/api.js";
 import { tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
@@ -112,15 +112,16 @@ describe("FileStore: making room", () => {
       // A file a queued message still needs: never made room from.
       const needed = fs.put(bytes(100, 7), "text/plain", now).sha256;
       // 1000 held, of them 900 only the page keeps: 950 more can't be had.
-      expect(() => fs.put(bytes(950, 6), "image/png", now)).toThrow("full");
+      expect(() => fs.put(bytes(950, 6), "image/png", now)).toThrow(new RangeError("full"));
       // Nothing went for an upload that was refused anyway.
       expect(shas.every((s) => fs.picture(s, now) !== "gone")).toBe(true);
       // 900 can: every picture only the page keeps goes, the needed file stays.
       fs.put(bytes(900, 5), "image/png", now);
       expect(shas.every((s) => fs.picture(s, now) === "gone")).toBe(true);
       expect(fs.has(needed, now)).toBe(true);
-      // Now it is full of files machines may fetch: the next upload is refused.
-      expect(() => fs.put(bytes(10, 4), "image/png", now)).toThrow("full");
+      // Now it is full of files machines may fetch: the next upload is refused. (Exactly
+      // RangeError("full"): the upload route answers 507 for that one and no other.)
+      expect(() => fs.put(bytes(10, 4), "image/png", now)).toThrow(new RangeError("full"));
     } finally {
       tmp.cleanup();
     }
@@ -242,4 +243,38 @@ describe("GET /api/ui/control/files/:sha", () => {
     const goneCtx = { ...ctxFor({ cookie: key }), params: { sha: "A".repeat(43) } } as Ctx;
     expect(await status(goneCtx)).toBe(404);
   });
+});
+
+describe("POST /api/ui/control/files", () => {
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "a files folder it cannot write is a 500 the page says as not saved, never full",
+    async () => {
+      const tmp = tempDir();
+      const web = path.join(tmp.dir, "web");
+      mkdirSync(web, { recursive: true });
+      writeFileSync(path.join(web, "index.html"), "<!doctype html><title>board</title>");
+      const app = await createApp({ port: 0, stateDir: tmp.dir, outbox: false, quiet: true, webDir: web });
+      const files = path.join(tmp.dir, "control", "files");
+      mkdirSync(files, { recursive: true });
+      const logged = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        chmodSync(files, 0o500);
+        const res = await fetch(`${app.url}${ROUTES.ui.control}/files?name=notes.txt`, {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: "notes",
+        });
+        expect(res.status).toBe(500);
+        expect(await res.json()).toEqual({ reason: "internal" });
+        // The cause is in the receiver's log, not in the answer.
+        expect(logged.mock.calls.map(([s]) => String(s)).join("")).toMatch(/EACCES/);
+      } finally {
+        logged.mockRestore();
+        chmodSync(files, 0o700);
+        await app.close();
+        tmp.cleanup();
+      }
+    },
+    60_000,
+  );
 });
