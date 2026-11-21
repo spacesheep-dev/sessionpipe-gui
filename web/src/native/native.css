@@ -668,12 +668,13 @@ html[data-size-class="regular"] .onb-body--step {
   margin: auto;
 }
 html[data-size-class="regular"] .first-run--phone {
-  left: 50%;
+  /* Centred on what the system leaves of the width, as the form sheet is (styles/regular.css). */
+  left: var(--float-mid);
   top: 50%;
   right: auto;
   bottom: auto;
   translate: -50% -50%;
-  width: min(440px, calc(100vw - 48px));
+  width: min(440px, var(--float-room));
   padding: 20px 24px 24px;
   border-radius: var(--radius-sheet);
   animation: rise var(--dur) var(--ease-out) both;

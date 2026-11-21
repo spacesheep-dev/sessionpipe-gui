@@ -257,6 +257,18 @@ html[data-size-class="regular"] .ns-sheet--phone {
 html[data-size-class="regular"] .ns-sheet--phone .ns-scroll {
   padding: 16px;
 }
+/* The card ends at its last group, the scroll's padding under it: a foot with nothing to
+   say (its live lines are kept in place, empty) takes back the group's margin and its own
+   gaps. */
+html[data-size-class="regular"] .ns-sheet--phone .ns-group-foot:not(:has(> :not(:empty))) {
+  gap: 0;
+  margin-top: -16px;
+}
+/* A sheet with nothing to fill in (this phone not approved yet) is its sentence and its one
+   button at the top of the card, not the phone's screen centred 22% down. */
+html[data-size-class="regular"] .ns-sheet--phone .ns-empty {
+  padding: 32px 24px 28px;
+}
 html[data-size-class="regular"] :is(.ns-grab, .menu-grab, .qs-grab) {
   display: none;
 }

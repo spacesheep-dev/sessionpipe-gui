@@ -853,6 +853,14 @@ for (const [size, insets] of ROOM) {
       expect([dim.left, dim.right, dim.top, dim.bottom], what).toEqual([0, width, 0, height]);
       expect(await grabbers(page), what).toBe(0);
       if (top || right || left) expect(await underBands(page), what).toEqual([]);
+      // The card ends 16 pt under the last thing it shows: no empty band under it.
+      const foot = await sheet.evaluate((el) => {
+        const shown = Array.from(el.querySelectorAll(".ns-scroll > .ns-group, .ns-group-foot > *")).filter(
+          (c) => c.getBoundingClientRect().height > 0,
+        );
+        return el.getBoundingClientRect().bottom - shown.at(-1)!.getBoundingClientRect().bottom;
+      });
+      expect(foot, what).toBe(16);
     };
     const card = async (el: Locator, what: string) => {
       await settled(page);
@@ -867,6 +875,23 @@ for (const [size, insets] of ROOM) {
       Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
       await page.goto(b.server.url);
       await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
+      // Not approved yet: New session is its sentence and its one button at the top of the
+      // card, and the card ends under the button.
+      await page.locator("nav.rail .rail-compose").click();
+      const unapproved = page.locator("[data-new-session]");
+      await expect(unapproved.locator(".ns-empty [data-ns-approve]")).toBeVisible();
+      await settled(page);
+      const gaps = await unapproved.evaluate((el) => {
+        const r = (sel: string) => el.querySelector(sel)!.getBoundingClientRect();
+        return {
+          above: r(".ns-empty .state-title").top - r(".ns-bar").bottom,
+          below: el.getBoundingClientRect().bottom - r(".ns-empty [data-ns-approve]").bottom,
+        };
+      });
+      expect(gaps.above, `unapproved, ${where}`).toBeLessThanOrEqual(48);
+      expect(gaps.below, `unapproved, ${where}`).toBeLessThanOrEqual(48);
+      await unapproved.locator("[data-ns-cancel]").click();
+      await expect(unapproved).toHaveCount(0);
       await b.approve();
       await page.reload();
       await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
@@ -939,7 +964,8 @@ for (const [size, insets] of ROOM) {
       await b.close();
     }
 
-    // "You're in": a card of at most 440 pt in the middle of the window.
+    // "You're in": a card of at most 440 pt in the middle of what the system leaves of the
+    // width, as the form sheet is.
     const fresh = await duoBed(browser, size, { fresh: true, insets });
     try {
       fresh.hub.add("me@example.com", fresh.ss.key, Date.parse("2026-11-03T09:00:00Z"));
@@ -949,7 +975,7 @@ for (const [size, insets] of ROOM) {
       await expect
         .poll(async () => {
           const box = await boxOf(sheet);
-          return box.width <= 440 && Math.abs((box.left + box.right) / 2 - width / 2) <= 1;
+          return box.width <= 440 && Math.abs((box.left + box.right) / 2 - middle) <= 1;
         }, `You're in, ${where}`)
         .toBe(true);
       expect(await grabbers(fresh.page), where).toBe(0);
