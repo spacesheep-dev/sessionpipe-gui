@@ -21,7 +21,12 @@
 // the browser fitting the page to its new window. WebKit sends it first, before the
 // "resize" (which there can come after a frame's ResizeObservers), so the first sign is
 // whichever comes first: that scroll, the "resize", or a ResizeObserver on the document.
-import { useEffect, useRef } from "react";
+// What follows the window in script (the touch app's size class, lib/device.ts) changes
+// the layout only at the "resize", a frame or two after that first sign in WebKit: the page
+// is settling until the frames after the "resize" too, and the scroll the browser makes as
+// that layout shortens the page (to its end, as a folded phone's narrower sidebar-less page
+// can be) is no more the person's than the first.
+import { useCallback, useEffect, useRef } from "react";
 import { drawnY } from "./drawn";
 
 /** Frames after a change of size in which the place is put back again and none is read:
@@ -76,8 +81,10 @@ export interface PlaceKeeper {
    *  anew, their box another size): the place is written down again if its row moved. */
   changed(): void;
   /** At anything that may be the first sign of another window size; true while the page
-   *  settles in it. */
-  sized(): boolean;
+   *  settles in it. `resize`: this is the browser's "resize", which brings what follows
+   *  the window in script; heard while the page settles, the frames to settle in are
+   *  counted from it again. */
+  sized(resize?: boolean): boolean;
   /** The page is left: nothing more is read, put back or told. */
   stop(): void;
 }
@@ -122,7 +129,7 @@ export function placeKeeper<Place>(view: AnchorView<Place>): PlaceKeeper {
     step(settling === 0);
     if (settling > 0) view.frame(tick);
   };
-  const sized = (): boolean => {
+  const sized = (resize = false): boolean => {
     const [w, h] = view.size();
     if (w !== seen[0] || h !== seen[1]) {
       if (w !== seen[0]) wrapped = true;
@@ -131,6 +138,9 @@ export function placeKeeper<Place>(view: AnchorView<Place>): PlaceKeeper {
       settling = SETTLE_FRAMES;
       step(false);
       if (!began) view.frame(tick);
+    } else if (resize && settling > 0) {
+      settling = SETTLE_FRAMES;
+      step(false);
     }
     return settling > 0;
   };
@@ -160,7 +170,7 @@ export function placeKeeper<Place>(view: AnchorView<Place>): PlaceKeeper {
     view.frame(look);
   };
   return {
-    sized: () => !stopped && sized(),
+    sized: (resize) => !stopped && sized(resize),
     scrolled() {
       if (stopped || sized()) return;
       if (left !== null && Math.abs(view.scrollY() - left) < 1) return;
@@ -268,13 +278,16 @@ function lastBoxed(els: ArrayLike<Element>, end: number): number {
  *  width: the row at the reading line, a third of the way down the view under the bar
  *  (the last row that starts at or above it; near the page's top, the first under it), or
  *  the one of its `blocks` at that line. The rows next to it are written down with it and
- *  vouch for it (`believed`). Nothing is put back while `enabled()` is false. */
-export function useResizeAnchor(o: ResizeAnchorOptions): void {
+ *  vouch for it (`believed`). Nothing is put back while `enabled()` is false. Returns
+ *  whether the page is settling in another window size now (`PlaceKeeper.sized`): a scroll
+ *  heard then is the browser's, not the person's, for what the page reads of scrolls. */
+export function useResizeAnchor(o: ResizeAnchorOptions): () => boolean {
   const opts = useRef(o);
   opts.current = o;
   const { scroller } = o;
   /** Told after each commit of the page: its rows may be others, or in another place. */
   const committed = useRef<(() => void) | null>(null);
+  const keeping = useRef<PlaceKeeper | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const box = scroller?.() ?? null;
@@ -340,8 +353,9 @@ export function useResizeAnchor(o: ResizeAnchorOptions): void {
         return i < 0 ? null : tops[i]! - bar - marks[i]!.offset;
       },
     });
+    keeping.current = keeper;
     const target: EventTarget = box ?? window;
-    const onSized = () => void keeper.sized();
+    const onSized = () => void keeper.sized(true);
     target.addEventListener("scroll", keeper.scrolled, { passive: true });
     window.addEventListener("resize", onSized);
     // The document's box, before the frame is painted: another width, where the "resize"
@@ -362,6 +376,7 @@ export function useResizeAnchor(o: ResizeAnchorOptions): void {
     };
     return () => {
       committed.current = null;
+      if (keeping.current === keeper) keeping.current = null;
       keeper.stop();
       target.removeEventListener("scroll", keeper.scrolled);
       window.removeEventListener("resize", onSized);
@@ -371,4 +386,5 @@ export function useResizeAnchor(o: ResizeAnchorOptions): void {
   // After every commit of the page that draws the rows: one that moves them leaves their
   // box the size it was (a list sorted anew).
   useEffect(() => committed.current?.());
+  return useCallback(() => keeping.current?.sized() ?? false, []);
 }

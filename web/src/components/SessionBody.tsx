@@ -787,18 +787,39 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     ro.observe(root);
     return () => ro.disconnect();
   }, [shape, scrollTo, scrollBy, scrollHeight, resized]);
+  // A phone unfolded, folded or turned, a window dragged narrower: the row being read
+  // stays where it was under the bar (lib/resizeAnchor.ts), by the paragraph inside a reply
+  // longer than the screen. Followed at its end, the end is the place.
+  const settlingInSize = useResizeAnchor({
+    rows: "[data-seq]:not(.turn-head)",
+    key: "data-seq",
+    blocks: ".md > *",
+    of: key,
+    root: () => rootRef.current,
+    scroller: sc,
+    barBottom: () => barBottom(rootRef.current, sc()),
+    enabled: () => !pinnedAtResize.current && !(followRef.current && pinned.current),
+    settle: (last) => {
+      resized();
+      if (!pinnedAtResize.current) return;
+      scrollTo(scrollHeight());
+      if (last) pinnedAtResize.current = false;
+    },
+  });
   // Where the person is: following resumes when they come back down to the end, and
   // stops the moment they scroll up away from it. A scroll that comes with another window
   // size is not theirs: the browser is fitting the page to its new window, and WebKit
   // sends it first, with the end already out of reach. Nor is any scroll while the end is
-  // kept through that change.
+  // kept through that change, or while the page settles in the new size: in WebKit the
+  // layout the size class decides comes a frame or two later, and a folded phone's page,
+  // shorter for it, is clamped to its end, which is not the reader coming down to it.
   useEffect(() => {
     const target: EventTarget = sc() ?? window;
     let lastY = scrollY();
     resized();
     const onScroll = () => {
       const y = scrollY();
-      if (resized() || pinnedAtResize.current) {
+      if (resized() || pinnedAtResize.current || settlingInSize()) {
         lastY = y;
         return;
       }
@@ -819,26 +840,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     };
     target.addEventListener("scroll", onScroll, { passive: true });
     return () => target.removeEventListener("scroll", onScroll);
-  }, [sc, scrollY, viewHeight, scrollHeight, resized]);
-  // A phone unfolded, folded or turned, a window dragged narrower: the row being read
-  // stays where it was under the bar (lib/resizeAnchor.ts), by the paragraph inside a reply
-  // longer than the screen. Followed at its end, the end is the place.
-  useResizeAnchor({
-    rows: "[data-seq]:not(.turn-head)",
-    key: "data-seq",
-    blocks: ".md > *",
-    of: key,
-    root: () => rootRef.current,
-    scroller: sc,
-    barBottom: () => barBottom(rootRef.current, sc()),
-    enabled: () => !pinnedAtResize.current && !(followRef.current && pinned.current),
-    settle: (last) => {
-      resized();
-      if (!pinnedAtResize.current) return;
-      scrollTo(scrollHeight());
-      if (last) pinnedAtResize.current = false;
-    },
-  });
+  }, [sc, scrollY, viewHeight, scrollHeight, resized, settlingInSize]);
   const anchorOn = useCallback((el: HTMLElement) => {
     followRef.current = false;
     pinned.current = false;

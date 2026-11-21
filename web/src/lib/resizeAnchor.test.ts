@@ -118,6 +118,41 @@ describe("placeKeeper", () => {
     expect(t.p.reads).toBe(2);
   });
 
+  it("settles from the browser's resize again when it comes after the first sign, as in WebKit", () => {
+    const t = page();
+    scrollTo(t, 870);
+    // Folded: the document's box tells first, and the row is put back in the layout the
+    // page has then, the wider one's, longer at this width.
+    t.p.size = [800, 900];
+    t.p.above = 2000;
+    expect(t.keeper.sized()).toBe(true);
+    expect(t.p.top(9)).toBe(30);
+    t.p.frame();
+    t.p.frame();
+    // Two frames on, the "resize" brings the layout the new size decides (the touch app's
+    // size class): the page is shorter, and the browser holds it at its end.
+    t.p.above = 0;
+    t.p.end = 600;
+    t.p.y = 600;
+    expect(t.keeper.sized(true)).toBe(true);
+    t.p.end = Number.POSITIVE_INFINITY;
+    // The row is put back at once, before the scroll the clamp makes is heard,
+    expect(t.p.top(9)).toBe(30);
+    // and that scroll, and the next frames', are still the page settling, not the person:
+    // three frames are counted from the "resize".
+    t.keeper.scrolled();
+    t.p.frame();
+    t.p.frame();
+    expect(t.keeper.sized()).toBe(true);
+    t.p.frame();
+    expect(t.keeper.sized()).toBe(false);
+    expect(t.p.reads).toBe(1);
+    expect(t.p.top(9)).toBe(30);
+    expect(t.p.settled).toEqual([false, false, false, false, false, false, true]);
+    // A "resize" heard once the page has settled, with no other size, is nothing.
+    expect(t.keeper.sized(true)).toBe(false);
+  });
+
   it("keeps the first place through folds that come faster than the page settles", () => {
     const t = page();
     scrollTo(t, 870);
