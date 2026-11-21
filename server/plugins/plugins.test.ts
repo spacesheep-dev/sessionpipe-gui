@@ -812,6 +812,28 @@ export default {
     const c = counts("late")!;
     expect(c.activations - c.deactivations).toBe(1);
   });
+
+  it("a settings save waiting on a start, then Disable: the save does not start it again", async () => {
+    await toggle("late", false);
+    const { activations } = counts("late")!;
+    const enabled = toggle("late", true);
+    while (counts("late")!.activations === activations) await new Promise((r) => setTimeout(r, 5));
+    const saved = fetch(url(`${PLUGIN_ROUTES.settings}/late/settings`), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "save-9876" }),
+    });
+    // The save is written (the listing shows its last four characters) and waits for the start.
+    while (!String((await listed("late")).values?.token).endsWith("9876")) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect((await toggle("late", false)).status).toBe(200);
+    expect((await saved).status).toBe(200);
+    await enabled;
+    expect(await listed("late")).toMatchObject({ status: "inactive", disabled: true });
+    const c = counts("late")!;
+    expect(c.activations).toBe(c.deactivations);
+  });
 });
 
 describe("plugin install (the shared installer, bound to plugin.json)", () => {

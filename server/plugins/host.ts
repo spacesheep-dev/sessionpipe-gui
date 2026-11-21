@@ -197,15 +197,17 @@ export class PluginHost {
 
   // ---------- lifecycle ----------
 
-  private async activate(entry: PluginEntry): Promise<void> {
-    if (!this.started || !entry.manifest || entry.disabled || this.running.has(entry.id)) return;
+  private async activate(given: PluginEntry): Promise<void> {
+    // The registry's entry, not the caller's: a caller that awaited first (a settings save
+    // waiting for a start, the setEnabled loop) may hold one from before a Disable's rescan.
+    const entry = this.deps.registry.get(given.id);
+    if (!this.started || !entry?.manifest || entry.disabled || this.running.has(entry.id)) return;
     const under = this.starting.get(entry.id);
     if (under) {
       // Already starting: wait for it, then look again, as it may have been turned off (or
       // stopped by deactivate) meanwhile. One that failed is not tried a second time.
       await under;
-      const now = this.deps.registry.get(entry.id);
-      if (now && !this.errors.has(entry.id)) await this.activate(now);
+      if (!this.errors.has(entry.id)) await this.activate(entry);
       return;
     }
     const token = {};
