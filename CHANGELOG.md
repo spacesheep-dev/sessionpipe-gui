@@ -26,13 +26,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   had.
 - **With room, sheets and menus float in the middle, and each page reads down one
   column.** On a tablet and on a phone opened flat, New session, Ask another agent and
-  adding an account are a sheet of at most 540 pt in the middle of the screen, over a dim
-  that puts it away when tapped; a row's menu, Labels and Display are a card of at most
-  400 pt floating over the bottom edge; a choice in a sheet opens as a list under its
-  button; "You're in" is a card in the middle. They stretched from one side of the screen
-  to the other. On a wide screen, the Board, the Inbox, Search, Machines and Settings
-  keep to a column of 672 pt in the middle. A phone held upright, a folded phone, Split
-  View and a window with a mouse are unchanged.
+  adding an account are a sheet of at most 540 pt in the middle, over a dimmed page; a
+  tap beside it closes it. A row's menu, Labels and Display are a card of at most 400 pt,
+  and a choice in a sheet opens as a list under its button. The Board, the Inbox, Search,
+  Machines and Settings keep to a column of 672 pt. A phone held upright, a folded phone,
+  Split View and a window with a mouse are unchanged.
 - **On a wide touch screen a reply reads in lines of about 70 characters.** On a tablet,
   and on a phone opened flat or turned on its side, a reply's lines ran to 90 and 115
   characters, too long for the eye to find the next one. Its paragraphs, lists, quotes and
@@ -42,6 +40,9 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A sheet dragged down no longer takes the dim from the next one.** After New session
+  was put away with a drag, Display, More and the next New session opened over a page
+  that was not dimmed.
 - **Nothing to tap sits under what the system keeps at the side of the screen.** Where a
   phone's own bars stand in a band beside the page (a folding phone closed, in Split View
   or turned on its side) or a notch does, the page kept only the wider of its margin and

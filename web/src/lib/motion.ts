@@ -292,7 +292,9 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
  *  inside the sheet; the whole sheet while it is scrolled to its top): it follows the
  *  finger 1:1, rubber-bands upward, and on release dismisses past 40 % of its height or
  *  above 500 px/s downward, else springs back. The scrim behind reads `--sheet-drag`
- *  (0 → 1) from the sheet's parent to fade with the drag. */
+ *  (0 → 1) from the sheet's parent to fade with the drag. The mark stays through the
+ *  sheet's exit (a scrim's fade-out starts from it) and goes with the sheet: a parent that
+ *  outlives it (the shell) would otherwise take the dim from every sheet after it. */
 export function useSheetDrag(
   ref: RefObject<HTMLElement | null>,
   onDismiss: () => void,
@@ -303,7 +305,15 @@ export function useSheetDrag(
   dismiss.current = onDismiss;
   useEffect(() => {
     const sheet = ref.current;
-    if (!sheet || !enabled) return;
+    if (!sheet) return;
+    // Read now: on unmount the sheet is already out of the page, with no parent.
+    const parent = sheet.parentElement;
+    const unmark = () => {
+      if (!sheet.isConnected) parent?.style.removeProperty("--sheet-drag");
+    };
+    if (!enabled) return unmark;
+    // Each opening starts undragged.
+    parent?.style.removeProperty("--sheet-drag");
     let startY = 0;
     let dy = 0;
     let samples: { y: number; t: number }[] = [];
@@ -315,7 +325,7 @@ export function useSheetDrag(
       sheet.style.transition = animate ? `transform ${tokenMs("--dur", 200)}ms cubic-bezier(0.22, 1, 0.36, 1)` : "none";
       sheet.style.transform = y ? `translateY(${y}px)` : "";
       const p = Math.max(0, Math.min(1, y / Math.max(1, sheet.offsetHeight)));
-      sheet.parentElement?.style.setProperty("--sheet-drag", String(p));
+      parent?.style.setProperty("--sheet-drag", String(p));
     };
     const down = (e: PointerEvent) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -374,6 +384,7 @@ export function useSheetDrag(
       sheet.removeEventListener("pointermove", move);
       sheet.removeEventListener("pointerup", up);
       sheet.removeEventListener("pointercancel", up);
+      unmark();
     };
   }, [ref, handle, enabled]);
 }

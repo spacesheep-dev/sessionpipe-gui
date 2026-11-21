@@ -789,6 +789,78 @@ for (const [size, insets] of ROOM) {
   });
 }
 
+test("with room, New session dragged down by its bar goes, its dim fading with it, and the next New session has its dim whole", {
+  tag: "@webkit",
+}, async ({ browser }) => {
+  const b = await duoBed(browser, "951x669", { insets: [0, 84, 20, 0] });
+  const { page } = b;
+  const ns = page.locator("[data-new-session]");
+  const dim = page.locator(".ns-scrim--form");
+  const opacity = () => dim.evaluate((el) => Number(getComputedStyle(el).opacity));
+  /** Every element that carries the drag's mark (lib/motion.ts useSheetDrag). */
+  const marked = () =>
+    page.evaluate(
+      () =>
+        Array.from(document.querySelectorAll<HTMLElement>("*")).filter(
+          (el) => el.style.getPropertyValue("--sheet-drag") !== "",
+        ).length,
+    );
+  const open = async () => {
+    await page.locator("nav.rail .rail-compose").click();
+    await expect(ns.locator("[data-ns-text]")).toBeVisible();
+    await settled(page);
+  };
+  try {
+    await page.goto(b.server.url);
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
+    await b.approve();
+    await page.reload();
+    await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
+    await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular");
+
+    await open();
+    expect(await opacity()).toBe(1);
+    // By its title, past the two fifths of its height that let it go; the dim fades as
+    // the sheet goes down.
+    const bar = await boxOf(ns.locator(".ns-bar-title"));
+    const from = { x: (bar.left + bar.right) / 2, y: (bar.top + bar.bottom) / 2 };
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 12; i++) await page.mouse.move(from.x, from.y + 40 * i);
+    const held = await opacity();
+    expect(held).toBeLessThan(0.5);
+    // From the lift until it is gone, the dim never comes back.
+    await dim.evaluate((el) => {
+      const seen: number[] = [];
+      (window as unknown as { dimSeen: number[] }).dimSeen = seen;
+      const look = () => {
+        if (!el.isConnected) return;
+        seen.push(Number(getComputedStyle(el).opacity));
+        requestAnimationFrame(look);
+      };
+      look();
+    });
+    await page.mouse.up();
+    await expect(ns).toHaveCount(0);
+    await expect(dim).toHaveCount(0);
+    const seen = await page.evaluate(() => (window as unknown as { dimSeen: number[] }).dimSeen);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(held + 0.01);
+    expect(await marked()).toBe(0);
+
+    // Open again: the dim is whole once it has come in; and Display's, after it.
+    await open();
+    expect(await opacity()).toBe(1);
+    await ns.getByRole("button", { name: "Cancel" }).click();
+    await expect(ns).toHaveCount(0);
+    await page.locator("nav.rail").getByRole("button", { name: "Display" }).click();
+    await expect(page.getByRole("dialog", { name: "Quick settings" })).toBeVisible();
+    await settled(page);
+    await expect(page.locator(".qs-scrim")).toHaveCSS("opacity", "1");
+  } finally {
+    await b.close();
+  }
+});
+
 test("on a tablet on its side each page reads down one column: its title starts where its first row does, in the middle of what is beside the sidebar", async ({
   browser,
 }) => {
