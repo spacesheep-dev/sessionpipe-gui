@@ -86,6 +86,20 @@ const EDGE = 8;
 
 const defaultKey = (v: unknown) => String(v);
 
+/** Whether `el` is being carried somewhere now: an animation or a transition that ends
+ *  (a sheet's entrance, a page pushed in) is under way on it or on what it is in. */
+function carried(el: Element): boolean {
+  if (typeof document.getAnimations !== "function") return false;
+  return document.getAnimations().some((a) => {
+    const target = (a.effect as KeyframeEffect | null)?.target;
+    return (
+      a.playState === "running" &&
+      !!target?.contains(el) &&
+      a.effect?.getComputedTiming().endTime !== Number.POSITIVE_INFINITY
+    );
+  });
+}
+
 export function Select<T>(p: SelectProps<T>) {
   const { value, onChange, ...rest } = p;
   const chosen = useMemo(() => (value === null || value === undefined ? [] : [value]), [value]);
@@ -117,6 +131,14 @@ interface Place {
   maxHeight: number;
   above: boolean;
 }
+const samePlace = (a: Place, b: Place): boolean =>
+  a.top === b.top &&
+  a.bottom === b.bottom &&
+  a.left === b.left &&
+  a.minWidth === b.minWidth &&
+  a.maxWidth === b.maxWidth &&
+  a.maxHeight === b.maxHeight &&
+  a.above === b.above;
 
 function Picker<T>({
   options,
@@ -246,14 +268,15 @@ function Picker<T>({
     const w = Math.min(Math.max(el.offsetWidth, r.width), maxWidth);
     let left = align === "end" ? r.right - w : r.left;
     left = Math.max(lo, Math.min(left, hi - w));
-    setPlace({
+    const next: Place = {
       left,
       minWidth: r.width,
       maxWidth,
       maxHeight,
       above,
       ...(above ? { bottom: vh - r.top + GAP } : { top: r.bottom + GAP }),
-    });
+    };
+    setPlace((was) => (was && samePlace(was, next) ? was : next));
   }, [align]);
 
   // As a sheet the list has no place; turned back into a pop-up it is measured afresh.
@@ -262,16 +285,37 @@ function Picker<T>({
   }, [phone]);
   useLayoutEffect(() => {
     if (!open || phone) return;
+    // While what the button is in moves (a sheet still rising, as a tap in its first
+    // moment opens the list), the list is measured each frame, so it rides with the button
+    // and stands under it once the move has ended; then not at all.
+    let frame = 0;
+    const follow = () => {
+      frame = 0;
+      measure();
+      const t = trigger.current;
+      if (t && carried(t)) frame = requestAnimationFrame(follow);
+    };
+    const moved = (e: Event) => {
+      const t = trigger.current;
+      if (!frame && t && e.target instanceof Node && e.target.contains(t)) frame = requestAnimationFrame(follow);
+    };
     const fit = () => {
       sides.current = safeSides();
       measure();
+      const t = trigger.current;
+      if (!frame && t && carried(t)) frame = requestAnimationFrame(follow);
     };
     fit();
     window.addEventListener("scroll", measure, true);
     window.addEventListener("resize", fit);
+    document.addEventListener("animationstart", moved, true);
+    document.addEventListener("transitionrun", moved, true);
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("scroll", measure, true);
       window.removeEventListener("resize", fit);
+      document.removeEventListener("animationstart", moved, true);
+      document.removeEventListener("transitionrun", moved, true);
     };
   }, [open, phone, measure, shown.length]);
 

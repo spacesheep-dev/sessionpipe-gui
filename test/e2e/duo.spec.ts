@@ -985,6 +985,75 @@ for (const [size, insets] of ROOM) {
   });
 }
 
+/** The entrance of the sheet `sheet` held still `part` of the way up (its animation running
+ *  at no speed): a tap in its first moment, made a state to wait in. */
+const holdRise = (sheet: Locator, part: number) =>
+  sheet.evaluate((el, at) => {
+    const rise = el.getAnimations().find((a) => a.effect?.getComputedTiming().endTime !== Number.POSITIVE_INFINITY);
+    if (!rise) throw new Error("the sheet has no entrance");
+    rise.playbackRate = 0;
+    rise.currentTime = Number(rise.effect!.getComputedTiming().endTime) * at;
+    return el.getBoundingClientRect().top;
+  }, part);
+/** The entrance of `sheet` goes on at its own speed. */
+const letRise = (sheet: Locator) =>
+  sheet.evaluate((el) => {
+    for (const a of el.getAnimations()) a.playbackRate = 1;
+  });
+/** How far under its button the open pop-up list stands, in pt (6: where it opens). */
+const listUnder = (button: Locator) =>
+  button.evaluate((b) => {
+    const pop = document.querySelector(".sel-pop:not(.sel-pop--above)");
+    return pop ? Math.round(pop.getBoundingClientRect().top - b.getBoundingClientRect().bottom) : null;
+  });
+
+for (const [size, insets] of [
+  ["669x951", DUO["669x951"]!.insets],
+  ["820x1180", [24, 0, 20, 0]],
+] as [string, Insets][]) {
+  test(`with room, at ${size}, a Select opened while its sheet still rises stands under its button once the sheet is up`, {
+    tag: "@webkit",
+  }, async ({ browser }) => {
+    test.setTimeout(60_000);
+    const b = await duoBed(browser, size, { insets });
+    const { page } = b;
+    const opened = async (sheet: Locator, button: Locator, what: string) => {
+      // Held a tenth of the way through its entrance, the sheet is half its height below
+      // where it stays: the list opened now is placed under the button there, as a tap is.
+      const held = await holdRise(sheet, 0.1);
+      await button.click();
+      await expect(page.getByRole("listbox"), what).toBeVisible();
+      await expect.poll(() => listUnder(button), `${what}, the sheet held`).toBe(6);
+      await letRise(sheet);
+      await settled(page);
+      expect((await boxOf(sheet)).top, `${what}: the sheet rose`).toBeLessThan(held - 200);
+      // Up, the list stands under its button where the sheet came to rest, not where the
+      // button was when it opened.
+      await expect.poll(() => listUnder(button), `${what}, the sheet up`).toBe(6);
+      await expect(page.getByRole("listbox").getByRole("option").first(), what).toBeInViewport();
+    };
+    try {
+      Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
+      await page.goto(b.server.url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
+      await b.approve();
+      await page.reload();
+      await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular");
+
+      await page.locator("nav.rail .rail-compose").click();
+      const ns = page.locator("[data-new-session]");
+      await opened(ns, ns.locator("[data-ns-row=machine] button"), `New session, ${size}`);
+
+      await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+      await page.getByRole("button", { name: "Ask another agent…" }).click();
+      const hs = page.locator("[data-handoff]");
+      await opened(hs, hs.locator("[data-hs-row=agent] button"), `Ask another agent, ${size}`);
+    } finally {
+      await b.close();
+    }
+  });
+}
+
 test("with room, New session dragged down by its bar goes, its dim fading with it, and the next New session has its dim whole", {
   tag: "@webkit",
 }, async ({ browser }) => {

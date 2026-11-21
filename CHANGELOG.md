@@ -28,7 +28,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   column.** On a tablet and on a phone opened flat, New session, Ask another agent and
   adding an account are a sheet of at most 540 pt in the middle, over a dimmed page; a
   tap beside it closes it. A row's menu, Labels and Display are a card of at most 400 pt,
-  and a choice in a sheet opens as a list under its button. The Board, the Inbox, Search,
+  and a choice in a sheet opens as a list under its button, also one tapped while the
+  sheet is still coming up, which rides up with it. The Board, the Inbox, Search,
   Machines and Settings keep to a column of 672 pt. A phone held upright, a folded phone,
   Split View and a window with a mouse are unchanged.
 - **On a wide touch screen a reply reads in lines of about 70 characters.** On a tablet,
