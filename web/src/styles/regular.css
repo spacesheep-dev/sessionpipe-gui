@@ -54,10 +54,14 @@ html[data-size-class="regular"] .rail-head {
   height: var(--bar);
   padding: var(--safe-top, env(safe-area-inset-top)) 0 0 12px;
 }
+/* The mark is a link to the Board: a finger's 44 pt, the mark drawn where it was. */
 html[data-size-class="regular"] .rail-brand {
   display: flex;
   align-items: center;
+  justify-content: center;
+  min-width: 44px;
   height: 100%;
+  margin-inline: -8px;
 }
 html[data-size-class="regular"] .rail-brand .mark {
   display: block;

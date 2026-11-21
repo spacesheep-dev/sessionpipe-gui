@@ -682,6 +682,10 @@ for (const [size, insets] of REGULAR) {
       const compose = page.locator("nav.rail .rail-compose");
       expect((await compose.boundingBox())!.y, where).toBeGreaterThanOrEqual(top);
       expect(await hitSize(compose), where).toEqual({ width: 44, height: 44 });
+      // The mark is a link to the Board, and a finger's too.
+      const brand = await hitSize(page.locator("nav.rail .rail-brand"));
+      expect(brand.width, where).toBeGreaterThanOrEqual(44);
+      expect(brand.height, where).toBeGreaterThanOrEqual(44);
       await expect(page.locator(".compose-btn--phone"), where).toBeHidden();
       // The sidebar keeps clear of the band at the left, and the page beside it has its gutter.
       // The head's mark stands over the rows' glyphs.
