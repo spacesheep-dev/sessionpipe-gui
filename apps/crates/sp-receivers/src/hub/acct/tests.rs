@@ -981,10 +981,12 @@ fn counted(home: &Path) -> (usize, usize) {
     (n("starts"), n("device_asks"))
 }
 
-/// An address on this machine where nothing listens: no connection can be made to it.
+/// An address on this machine no connection can be made to: port 0, which nothing can
+/// listen on. A port that was listened on and let go would do on macOS and Linux, which
+/// refuse it at once, but Windows tries it again for about two seconds, longer than a
+/// request's time limit here, and the request is then cut off instead of not connecting.
 fn nowhere() -> String {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("http://127.0.0.1:{}", l.local_addr().unwrap().port())
+    "http://127.0.0.1:0".into()
 }
 
 /// A server that takes a connection, reads what is sent, and hangs up without a word:
@@ -1033,7 +1035,7 @@ async fn a_start_that_never_left_the_phone_is_not_one_of_the_few() {
     let person = Script::saying(true);
     let h = hub_asking(t.path(), true, true, Some(person.clone()));
     h.0.acct.start_limit.store(2, Ordering::Relaxed);
-    // spacesheep.dev, which in a test is a port where nothing listens.
+    // spacesheep.dev, which in a test is an address no connection can be made to.
     for round in 0..5 {
         let e = h.account_connect_start(None).await.unwrap_err();
         assert_eq!(e.code, "unreachable", "try {round}: {}", e.message);
@@ -1272,14 +1274,7 @@ async fn a_connect_that_cannot_start_says_why_and_asks_nobody() {
 
     let h = hub_in(t.path());
     // Nobody there.
-    let closed = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
-    let e = h
-        .account_connect_start(Some(&format!("http://127.0.0.1:{closed}")))
-        .await
-        .unwrap_err();
+    let e = h.account_connect_start(Some(&nowhere())).await.unwrap_err();
     assert_eq!(e.code, "unreachable");
     assert!(
         e.message.starts_with("Couldn't reach 127.0.0.1"),
@@ -2751,10 +2746,7 @@ async fn a_send_that_never_left_says_so_and_one_whose_answer_stopped_does_not() 
     );
 
     // An account at an address where nothing listens: the same key, the same doors.
-    let dead = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        format!("http://127.0.0.1:{}", l.local_addr().unwrap().port())
-    };
+    let dead = nowhere();
     let rx = Receiver::account(&dead, "nobody@example.com", &iso_now()).unwrap();
     h.account_keys()
         .set(
@@ -2857,7 +2849,7 @@ async fn h2_refusing(
 
 /// One send to `port`, as the Hub makes one, over HTTP/2 without TLS (over https the same
 /// HTTP/2 is what spacesheep's edge negotiates); its error.
-async fn h2_send(client: reqwest::ClientBuilder, port: u16) -> reqwest::Error {
+async fn h2_send(client: reqwest::ClientBuilder, port: u16, limit: Duration) -> reqwest::Error {
     crate::ensure_crypto();
     client
         .http2_prior_knowledge()
@@ -2869,7 +2861,7 @@ async fn h2_send(client: reqwest::ClientBuilder, port: u16) -> reqwest::Error {
         .header(AUTHORIZATION, "Bearer ss_KEY-h2-refused")
         .header(CONTENT_TYPE, JSON)
         .body(SEND)
-        .timeout(request_timeout())
+        .timeout(limit)
         .send()
         .await
         .unwrap_err()
@@ -2886,7 +2878,7 @@ async fn a_send_the_server_read_whole_and_refused_is_never_a_connect_error() {
     let h = hub_in(t.path());
     for nack in ["goaway", "refused"] {
         let (port, got, task) = h2_refusing(nack).await;
-        let e = h2_send(Accounts::client_builder(&h.0.cfg), port).await;
+        let e = h2_send(Accounts::client_builder(&h.0.cfg), port, request_timeout()).await;
         task.await.unwrap();
         assert_eq!(
             got.lock().unwrap().as_slice(),
@@ -2908,7 +2900,9 @@ async fn with_reqwests_own_retry_a_connect_error_follows_a_request_the_server_re
         let as_reqwest_comes = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none());
-        let e = h2_send(as_reqwest_comes, port).await;
+        // The second try goes to a port let go of, which Windows tries again for about
+        // two seconds before it gives up: longer than a request's time limit here.
+        let e = h2_send(as_reqwest_comes, port, Duration::from_secs(10)).await;
         task.await.unwrap();
         assert_eq!(got.lock().unwrap().as_slice(), SEND, "{nack}");
         assert!(
