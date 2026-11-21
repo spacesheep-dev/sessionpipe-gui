@@ -97,6 +97,16 @@ describe("hello.pool", () => {
     });
   });
 
+  it("drops an account's until on a day the month does not have, or at hour 24, and keeps the account", () => {
+    const until = (t: string) =>
+      parsePool({ on: true, harness: "claude-code", accounts: [account({ until: t })] })?.accounts[0];
+    for (const t of ["2026-02-30T10:00:00Z", "2026-11-31T10:00:00Z", "2026-11-20T24:00:00Z"]) {
+      expect(until(t)).toMatchObject({ id: A });
+      expect(until(t)?.until).toBeUndefined();
+    }
+    expect(until("2028-02-29T10:00:00Z")?.until).toBe("2028-02-29T10:00:00.000Z");
+  });
+
   it("drops a malformed pool, never the hello, and keeps an empty one", () => {
     for (const bad of [
       null,
