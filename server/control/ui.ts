@@ -525,8 +525,12 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       let held: { sha256: string; size: number };
       try {
         held = state.files.put(bytes, type);
-      } catch {
-        throw new HttpError(507, { reason: "full", error: "Too many files are held here; try again tomorrow." });
+      } catch (e) {
+        // Only a store with no room left is "full"; a write the system refused (a folder
+        // it cannot write, a full disk) is the router's 500, logged with its cause.
+        if (e instanceof RangeError && e.message === "full")
+          throw new HttpError(507, { reason: "full", error: "Too many files are held here; try again tomorrow." });
+        throw e;
       }
       const entry: UploadedFile = { name, type, size: held.size, sha256: held.sha256 };
       if (picture) Object.assign(entry, { width: picture.width, height: picture.height });
