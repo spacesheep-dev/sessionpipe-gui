@@ -752,12 +752,13 @@ export default {
     fetch(url(`${PLUGIN_ROUTES.toggle}/${id}/${on ? "enable" : "disable"}`), { method: "POST" });
 
   it("two enables at once start it once, and Disable stops it", async () => {
-    const both = Promise.all([toggle("shipped", true), toggle("shipped", true)]);
-    // The first is inside activate() (400 ms); the second has 100 ms to arrive before Disable.
+    const first = toggle("shipped", true);
+    // The first is inside activate() (400 ms) when the second arrives.
     while (!counts("shipped")) await new Promise((r) => setTimeout(r, 5));
-    await new Promise((r) => setTimeout(r, 100));
+    expect((await toggle("shipped", true)).status).toBe(200);
+    await first;
+    expect(counts("shipped")).toEqual({ activations: 1, deactivations: 0 });
     expect((await toggle("shipped", false)).status).toBe(200);
-    await both;
     expect(await listed("shipped")).toMatchObject({ status: "inactive", disabled: true });
     expect(counts("shipped")).toEqual({ activations: 1, deactivations: 1 });
   });
