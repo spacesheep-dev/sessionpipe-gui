@@ -810,7 +810,15 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         </div>
         {glance && <UsageGlance here={route.name === "usage"} />}
         <div className="rail-foot">
-          {regular && <SideFoot display={display} setDisplay={setDisplay} settings={settingsShown} path={fullPath} />}
+          {regular && (
+            <SideFoot
+              display={display}
+              setDisplay={setDisplay}
+              settings={settingsShown}
+              path={fullPath}
+              update={update}
+            />
+          )}
           <ConnectionPill />
           {!account && (
             <Link
@@ -882,18 +890,22 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
 }
 
 /** The touch app's sidebar ends as the More sheet does: Display, which opens its sheet,
- *  and Settings, in rows like the pages', with the sheet's glyphs. */
+ *  and Settings, in rows like the pages', with the sheet's glyphs. Settings carries the
+ *  rail's dot for an update that waits, and leads to its row. */
 function SideFoot({
   display,
   setDisplay,
   settings,
   path,
+  update,
 }: {
   display: boolean;
   setDisplay: (open: boolean) => void;
   /** Settings is open over the page. */
   settings: boolean;
   path: string;
+  /** The app's update, downloaded and waiting ("0.8.5 is ready"), or null. */
+  update: string | null;
 }) {
   return (
     <>
@@ -911,9 +923,10 @@ function SideFoot({
         <span className="nav-label">Display</span>
       </button>
       <Link
-        to={settingsHref(null, path)}
-        plainClick={() => openSettings()}
+        to={settingsHref(update ? "about" : null, path)}
+        plainClick={() => openSettings(update ? "about" : null)}
         className={`nav-link ${settings ? "nav-link--on" : ""}`}
+        aria-label={update ? `Settings, ${update}` : undefined}
         aria-haspopup="dialog"
         aria-expanded={settings}
         data-nav="settings"
@@ -922,6 +935,7 @@ function SideFoot({
           <SlidersIcon size={20} />
         </span>
         <span className="nav-label">Settings</span>
+        {update ? <span className="nav-dot" aria-hidden="true" /> : null}
       </Link>
       <QuickSettings placement="tabbar" trigger={false} open={display} onOpenChange={setDisplay} />
     </>

@@ -1733,6 +1733,32 @@ test.describe("a touch screen 760 px wide", () => {
         await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bar").trim()),
       ).toBe("44px");
     });
+
+  test("in the desktop app, a downloaded update puts its dot on the sidebar's Settings row, which opens About", async ({
+    page,
+  }) => {
+    await openInShell(page, "/", { update: READY });
+    await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular", { timeout: 15_000 });
+    const settings = page.locator("nav.rail .rail-foot a.nav-link[data-nav='settings']");
+    await expect(settings).toBeVisible();
+    await expect(settings).toHaveAttribute("aria-label", "Settings, 0.3.1 is ready");
+    await expect(settings).toHaveAttribute("href", "/?settings=about");
+    const dot = settings.locator(".nav-dot");
+    await expect(dot).toBeVisible();
+    // At the row's trailing edge, beside its label.
+    const b = (await settings.boundingBox())!;
+    const d = (await dot.boundingBox())!;
+    const label = (await settings.locator(".nav-label").boundingBox())!;
+    expect(d.x).toBeGreaterThan(label.x);
+    expect(d.x + d.width).toBeLessThanOrEqual(b.x + b.width);
+    await settings.click();
+    await expect(page).toHaveURL(/\/\?settings=about$/);
+    await expect(page.getByRole("tabpanel", { name: "About" })).toBeVisible();
+    // Installed, or checked again: the dot goes with it.
+    await emit(page, "update", { state: "checking" });
+    await expect(dot).toHaveCount(0);
+    await expect(settings).not.toHaveAttribute("aria-label");
+  });
 });
 
 // The phone app (phone-shell.ts) at a phone's width: its bars are solid, so a list that runs
