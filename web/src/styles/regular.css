@@ -247,7 +247,7 @@ html[data-size-class="regular"] .ns-sheet--phone .ns-bar {
   padding: 0 8px;
 }
 html[data-size-class="regular"] .ns-sheet--phone .ns-scroll {
-  padding: 16px 16px 24px;
+  padding: 16px;
 }
 html[data-size-class="regular"] :is(.ns-grab, .menu-grab, .qs-grab) {
   display: none;
@@ -281,31 +281,38 @@ html[data-size-class="regular"] .sel-pop .sel-search input {
 }
 
 /* ---------- one column ---------- */
-/* A page reads down one column of at most 672 pt, centred in what is beside the sidebar,
-   and its parts stand in it as they stand in a phone's page: one that runs a gutter past
-   its column (the Board's list, Search's filters) still does. The bar's ground runs on
-   to the window's edges, its words over the column; 100% there is the page's width, which
-   the bar runs past by --edge at either side. A session already keeps to the same
-   measure, and its bar does the same. */
+/* A page reads down one column of at most 672 pt, centred in what is beside the sidebar:
+   the page stands in from either side by --column-in and is the phone's page inside it,
+   a column still, so an empty list's sentence centres in what is left under the bar, and
+   a part that runs a gutter past its column (the Board's list, Search's filters) still
+   does. The bar's ground runs on to the window's edges, its words over the column. What
+   the pages stand in (.main) is a container, so --column-in is one length in the page and
+   in its bar (100cqi is the page's width; a percentage in the bar would be the column's).
+   It is a container of its inline size alone: a sheet fixed inside it still stands on the
+   window, and it stacks as before. A session already keeps to the same measure: its bar
+   stands its words in the same way. */
 html[data-size-class="regular"] {
   --measure-read: 672px;
-  --column-in: max(0px, (100% - var(--measure-read)) / 2);
+}
+html[data-size-class="regular"] .main {
+  container-type: inline-size;
+  --column-in: max(0px, (100cqi - var(--measure-read)) / 2);
+}
+html[data-size-class="regular"] .main > .page:not(.session) {
+  padding-inline: var(--column-in);
 }
 html[data-size-class="regular"] .main > .page > .bar {
   padding-left: calc(var(--edge-l) + var(--column-in));
   padding-right: calc(var(--edge-r) + var(--column-in));
 }
-html[data-size-class="regular"] .main > .page:not(.session) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, var(--measure-read)) minmax(0, 1fr);
-  align-content: start;
-  column-gap: 0;
-}
-html[data-size-class="regular"] .main > .page:not(.session) > * {
-  grid-column: 2;
-}
 html[data-size-class="regular"] .main > .page:not(.session) > .bar {
-  grid-column: 1 / -1;
+  margin-left: calc(-1 * (var(--edge-l) + var(--column-in)));
+  margin-right: calc(-1 * (var(--edge-r) + var(--column-in)));
+}
+/* And a session's line under its bar (its machine and folder) starts where Back and the
+   messages do. */
+html[data-size-class="regular"] .main > .session > .bar-below {
+  padding-inline: var(--column-in);
 }
 /* Settings covers the window: its list and each section keep to the same column, with
    their gutter of 16 pt. */

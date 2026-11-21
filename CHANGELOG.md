@@ -24,15 +24,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   New session is at its head. The tab bar stretched five tabs across such a screen; a
   phone held upright, a folded phone, Split View and a window with a mouse keep what they
   had.
-- **With room, sheets and menus sit as a tablet's do, and each page reads down one
+- **With room, sheets and menus float in the middle, and each page reads down one
   column.** On a tablet and on a phone opened flat, New session, Ask another agent and
   adding an account are a sheet of at most 540 pt in the middle of the screen, over a dim
   that puts it away when tapped; a row's menu, Labels and Display are a card of at most
   400 pt floating over the bottom edge; a choice in a sheet opens as a list under its
   button; "You're in" is a card in the middle. They stretched from one side of the screen
-  to the other. On a tablet on its side, the Board, the Inbox, Search, Machines and
-  Settings keep to a column of 672 pt in the middle. A phone held upright, a folded phone,
-  Split View and a window with a mouse are unchanged.
+  to the other. On a wide screen, the Board, the Inbox, Search, Machines and Settings
+  keep to a column of 672 pt in the middle. A phone held upright, a folded phone, Split
+  View and a window with a mouse are unchanged.
 - **On a wide touch screen a reply reads in lines of about 70 characters.** On a tablet,
   and on a phone opened flat or turned on its side, a reply's lines ran to 90 and 115
   characters, too long for the eye to find the next one. Its paragraphs, lists, quotes and

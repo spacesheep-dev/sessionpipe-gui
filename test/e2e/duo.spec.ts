@@ -818,6 +818,15 @@ test("on a tablet on its side each page reads down one column: its title starts 
       const bar = await boxOf(page.locator(".main > .page > .bar"));
       expect([bar.left, bar.right], path).toEqual([220, 1180]);
     }
+    // A session: its bar, the line under it (machine and folder) and its messages start at
+    // one edge, the column's.
+    await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
+    const timeline = page.locator(".main > .session > .timeline");
+    await expect(timeline).toBeVisible();
+    const lead = (await boxOf(timeline)).left;
+    expect(Math.abs(lead - column), "a session").toBeLessThanOrEqual(1);
+    expect((await boxOf(page.locator(".main > .session > .bar .bar-lead"))).left, "a session's bar").toBe(lead);
+    expect((await boxOf(page.locator(".main > .session > .bar-below .bar-sub"))).left, "its meta").toBe(lead);
     // Settings covers the window: its title and its list, and a section's groups, keep to
     // a column of the same width in the middle of it.
     await page.locator("nav.rail").getByRole("link", { name: "Settings" }).click();
@@ -835,6 +844,43 @@ test("on a tablet on its side each page reads down one column: its title starts 
     await b.close();
   }
 });
+
+for (const [size, insets] of ROOM) {
+  const where = `${size} [${insets}]`;
+  test(`with room, at ${where}, a list that shows nothing says so in the middle of what is left under its bar, in the page's column`, async ({
+    browser,
+  }) => {
+    const b = await duoBed(browser, size, { insets });
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
+      await b.approve();
+      await expect(page.locator("html"), where).toHaveAttribute("data-size-class", "regular");
+      await page.getByRole("searchbox", { name: "Filter sessions" }).fill("zzzz-nothing");
+      const state = page.locator(".main > .page.board > .board-nomatch");
+      await expect(state.locator(".state-title")).toHaveText("No sessions match “zzzz-nothing”");
+      const room = await state.evaluate((el) => {
+        const s = getComputedStyle(el);
+        const page = el.parentElement!.getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        return {
+          above: Number.parseFloat(s.marginTop),
+          below: Number.parseFloat(s.marginBottom),
+          middle: (r.left + r.right) / 2,
+          page: (page.left + page.right) / 2,
+        };
+      });
+      // The room the page has under its last row is shared out above and below it, as on a
+      // phone, and there is room to share: it does not sit under the filter.
+      expect(room.above, where).toBeGreaterThan(48);
+      expect(Math.abs(room.above - room.below), where).toBeLessThanOrEqual(1);
+      expect(Math.abs(room.middle - room.page), where).toBeLessThanOrEqual(1);
+    } finally {
+      await b.close();
+    }
+  });
+}
 
 /** The windows with a band at one side: the outer display, a Split View half and the
  *  inner display turned; and with the phone held the other way up, the band on the left.
