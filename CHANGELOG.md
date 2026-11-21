@@ -6,6 +6,14 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A limit's reset time and a pooled account's "until" on a day the month does not have, or
+  at hour 24, are left out.** A `limits.observed` window or a hello's pooled window with
+  `resets_at` `2026-02-30`, `2026-11-31` or `T24:00:00Z` was kept and shown as resetting on
+  March 2, December 1 or the next day, and a pooled account's `until` the same; the window or
+  the `until` is now dropped, as `2026-13-01` already was. `2028-02-29` still reads.
+
 ## [0.8.7] - 2026-11-20
 
 A round on the desktop app: on a computer a session opens beside the page, Settings opens
