@@ -5,7 +5,7 @@
 // one that is let through would start a receiver, so each spawn has a short timeout and a
 // refusal is checked by its exit code.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -159,4 +159,87 @@ describe("sessionpipe-gui flag values", () => {
     });
     expect(r.status).toBe(0);
   }, 20_000);
+
+  // `search` and `index` take a flag written before them, as every other verb does. An
+  // empty config.json is one the search CLI refuses by its path, so the message shows which
+  // state folder it read, without indexing anything.
+  describe("a flag before search or index", () => {
+    const bare = (...args: string[]) =>
+      spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", timeout: 15_000, cwd: tmp.dir });
+    const brokenState = (name: string): string => {
+      const dir = path.join(tmp.dir, name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "config.json"), "");
+      return dir;
+    };
+
+    it.each([
+      ["search", "q"],
+      ["index", "--status"],
+    ])(
+      "--state DIR %s is read from DIR",
+      (verb, arg) => {
+        const dir = brokenState(`before-${verb}`);
+        const r = bare("--state", dir, verb, arg);
+        expect(r.stderr).not.toContain("unknown option");
+        expect(r.stderr).toContain(path.join(dir, "config.json"));
+        expect(r.status).toBe(2);
+      },
+      20_000,
+    );
+
+    it("a state folder named search is still a value", () => {
+      brokenState("search");
+      const r = bare("--state", "search", "index", "--status");
+      expect(r.stderr).not.toContain("unknown option");
+      expect(r.stderr).toMatch(/search[\\/]config\.json is empty/);
+      expect(r.status).toBe(2);
+    }, 20_000);
+
+    it("index --status after --state and --search-home answers", () => {
+      const dir = path.join(tmp.dir, "fresh");
+      const r = bare("--state", dir, "--search-home", path.join(tmp.dir, "home"), "index", "--status");
+      expect(r.stderr).toBe("");
+      expect(r.stdout).toMatch(/^(No search index yet|0 sessions · 0 messages)/);
+      expect(r.status).toBe(0);
+    }, 20_000);
+
+    it.each([
+      ["--port", "7000", "search", "q"],
+      ["-q", "search", "q"],
+      ["--demo", "index", "--ipc"],
+    ])(
+      "a flag search and index do not take is refused by name: %s",
+      (...args) => {
+        const r = bare(...args);
+        const verb = args.includes("search") ? "search" : "index";
+        expect(r.stderr).toBe(`sessionpipe-gui: unknown option ${args[0]} (try ${verb} --help)\n`);
+        expect(r.status).toBe(2);
+      },
+      20_000,
+    );
+
+    it.each([
+      [["--state", "@other", "--state", "@dir", "search", "q"]],
+      [["--state", "@other", "search", "q", "--state", "@dir"]],
+      [["--state", "@other", "index", "--status", "--state", "@dir"]],
+    ])(
+      "the last --state given is the one read: %j",
+      (args) => {
+        const dir = brokenState("last");
+        const other = brokenState("other");
+        const r = bare(...args.map((v) => (v === "@dir" ? dir : v === "@other" ? other : v)));
+        expect(r.stderr).toContain(path.join(dir, "config.json"));
+        expect(r.stderr).not.toContain(other);
+        expect(r.status).toBe(2);
+      },
+      20_000,
+    );
+
+    it("after another command it stays an unknown word", () => {
+      const r = bare("tls", "status", "search");
+      expect(r.stderr).toBe("sessionpipe-gui: unknown option search (try --help)\n");
+      expect(r.status).toBe(2);
+    }, 20_000);
+  });
 });
