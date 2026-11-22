@@ -155,7 +155,6 @@ export function compileFilters(p: ParsedSearch, ctx: FilterContext): CompiledFil
   if (posF.length || negF.length) {
     const base = posF.length ? posF : [...FIELDS];
     fields = base.filter((f) => !negF.includes(f));
-    if (!fields.length) fields = undefined;
   }
 
   // source: → which indexes (and only those that can be read).

@@ -129,6 +129,13 @@ describe("compileFilters", () => {
       "reply",
       "title",
     ]);
+    expect(compileFilters(parseSearch("x in:prompt -in:prompt"), { ...ctx, available: ["history"] }).fields).toEqual(
+      [],
+    );
+    expect(
+      compileFilters(parseSearch("x -in:prompt -in:reply -in:tool -in:title"), { ...ctx, available: ["history"] })
+        .fields,
+    ).toEqual([]);
     expect(
       compileFilters(parseSearch("x source:local"), { ...ctx, available: ["sessionpipe", "history"] }).sources,
     ).toEqual(["history"]);

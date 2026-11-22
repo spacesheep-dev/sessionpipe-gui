@@ -373,6 +373,7 @@ describe("a damaged segment", () => {
     writeFileSync(join(dir, "history", m.segments[0]!.name), "garbage");
     const rd = new Reader({ dir, sources: ["history"] });
     expect(rd.search(q("words")).matches.map((x) => x.session.key)).toEqual(["claude-code:b"]);
+    expect(rd.search(q("words", { fields: [] })).total).toBe(0);
     rd.close();
   });
 });
