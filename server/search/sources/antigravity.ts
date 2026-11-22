@@ -22,7 +22,7 @@ import type {
   SourceFile,
 } from "../types.js";
 import { TITLE_RANK } from "../types.js";
-import { antigravityDirs, list } from "./homes.js";
+import { antigravityDirs, list, pathParts } from "./homes.js";
 import { type OnLine, parseLine, readAppend } from "./prefilter.js";
 import { cleanPromptBlock, finish, firstAskTitle, ms, toolLine } from "./text.js";
 
@@ -90,7 +90,7 @@ interface Brain {
 }
 /** `…/brain/<id>/<rest>` → the brain. */
 function brainOf(p: string): Brain | undefined {
-  const parts = p.split(path.sep);
+  const parts = pathParts(p);
   const i = parts.lastIndexOf("brain");
   const id = parts[i + 1];
   if (i < 0 || !id || !ID.test(id)) return undefined;
