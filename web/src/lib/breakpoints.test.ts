@@ -7,17 +7,20 @@
 // (DESKTOP_QUERY) or the narrow desktop's, where the panel covers the page
 // (PANEL_COVERS_QUERY), and a part of the page styled by any other would switch on its own
 // too: a Mac window tiled to half the screen would get a phone's rule in the middle of the
-// desktop's layout.
+// desktop's layout, or a tablet turned on its side a Mac's rule in the middle of the
+// touch app. A query that also asks for something else (no hover, motion allowed) is
+// nested inside one of them.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { DESKTOP_QUERY, PANEL_COVERS_QUERY, PHONE_QUERY } from "./device";
+import { DESKTOP_QUERY, PANEL_COVERS_QUERY, PHONE_QUERY, TOUCH_QUERY } from "./device";
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /** The ways a width is written, put together here so this file holds none: in a media
  *  query (a number with px), and as a number a width is compared with. A window with a
- *  mouse changes layout at the first pair, a touch screen at the second. */
+ *  mouse changes layout at the first pair, a screen with no pointer at the second; a
+ *  touch screen at neither. */
 const NUMBERS = ["719", "720", "839", "840"];
 const WIDTHS = NUMBERS.map((n) => `${n}px`);
 const COMPARED = new RegExp(`[<>]=?\\s*(${NUMBERS.join("|")})\\b`);
@@ -25,32 +28,15 @@ const [, MOUSE_FROM, NARROW, WIDE] = NUMBERS as [string, string, string, string]
 
 /** The queries a stylesheet may write: lib/device.ts's own, whole. */
 const SHARED = [PHONE_QUERY, DESKTOP_QUERY, PANEL_COVERS_QUERY];
-/** The queries that name a width and are none of those, each with why it may. */
+/** The queries that name a width and are none of those, each with why it may. A touch
+ *  screen has the phone layout at any width, so a rule for a finger needs no width: one
+ *  for a finger in the desktop layout would never apply, and one for a finger under a
+ *  width is the same rule at every width (narrow.css, control/attachments.css). */
 const OWN: { file: string; query: string; why: string }[] = [
-  {
-    file: "control/attachments.css",
-    query: `(max-width: ${NARROW}px) and (pointer: coarse)`,
-    why: "a picture's frame in the message box under a finger in the phone layout: a touch screen's alone, a narrow window with a mouse keeps the larger frame",
-  },
   {
     file: "styles/chat.css",
     query: `(hover: none), ${PHONE_QUERY}`,
     why: "a bubble's time shows on hover: it is hidden where nothing hovers, at any width, and in the phone layout",
-  },
-  {
-    file: "styles/narrow.css",
-    query: `(pointer: coarse) and (max-width: ${NARROW}px)`,
-    why: "a finger's reach in the phone layout: a touch screen's alone, which changes layout where it always did",
-  },
-  {
-    file: "styles/narrow.css",
-    query: `(pointer: coarse) and (min-width: ${WIDE}px)`,
-    why: "a finger's reach in the desktop layout (a tablet on its side): a touch screen's alone",
-  },
-  {
-    file: "styles/narrow.css",
-    query: `(hover: none) and (max-width: ${NARROW}px)`,
-    why: "a row pressed in the phone layout: only where nothing hovers, so never a window with a mouse",
   },
 ];
 
@@ -73,8 +59,8 @@ function widthQueries(): { rules: string[]; loose: string[]; files: number } {
     const text = readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     for (const [, query] of text.matchAll(/@media\s+([^{]+)\{/g))
       if (WIDTHS.some((w) => query!.includes(w))) rules.push(`${named(f)}: ${query!.replace(/\s+/g, " ").trim()}`);
-    // Outside a media query (a container's, a width), the two a touch screen changes at:
-    // a copy no query form would hold. (720 px is also a measure, a dialog's width.)
+    // Outside a media query (a container's, a width), the two a screen with no pointer
+    // changes at: a copy no query form would hold. (720 px is also a measure, a dialog's.)
     if ([NARROW, WIDE].some((n) => text.replace(/@media\s+[^{]+\{/g, "").includes(`${n}px`))) loose.push(named(f));
   }
   return { rules, loose, files: files.length };
@@ -107,6 +93,16 @@ describe("the layout's widths", () => {
     expect(other.sort()).toEqual(OWN.map((o) => `${o.file}: ${o.query}`).sort());
     for (const o of OWN) expect(o.why).not.toBe("");
     expect(loose).toEqual([]);
+  });
+
+  it("give a touch screen the phone layout at any width, and the desktop layout never", () => {
+    // A finger is a clause of the phone layout's on its own, with no width beside it; the
+    // desktop layout's clauses each name a pointer, and never a finger.
+    expect(PHONE_QUERY.split(", ")).toContain(TOUCH_QUERY);
+    const clauses = DESKTOP_QUERY.split(", ");
+    for (const c of clauses) expect(c).toMatch(/\(pointer: (fine|none)\)$/);
+    expect(DESKTOP_QUERY).not.toContain("coarse");
+    expect(PANEL_COVERS_QUERY).toContain("(pointer: fine)");
   });
 
   it("start where the desktop app's window stops: its narrowest is still a desktop", () => {

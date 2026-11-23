@@ -27,7 +27,7 @@ html[data-shell="macos"] body {
   overscroll-behavior: none;
 }
 
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   /* The sidebar: the band holds the lights at its leading edge and the compose button at
      its trailing edge; the brand steps aside (the menu bar names the app). */
   html[data-shell="macos"] .shell--side .rail-head {
@@ -83,7 +83,7 @@ html[data-shell="macos"] body {
 }
 
 /* A narrow window (the phone layout): no rail, so the page bar starts after the lights. */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   html[data-shell="macos"] .main > .page > .bar,
   html[data-shell="macos"] .boot .bar {
     padding-left: max(var(--gutter), var(--lights));
@@ -93,7 +93,7 @@ html[data-shell="macos"] body {
 /* Sidebar vibrancy (the window's "sidebar" material behind a transparent rail), only when
    the shell turned it on; the page itself stays on its own opaque ground. With Reduce
    Transparency on, the rail is solid again. */
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   html[data-shell="macos"][data-vibrancy],
   html[data-shell="macos"][data-vibrancy] body {
     background: transparent;

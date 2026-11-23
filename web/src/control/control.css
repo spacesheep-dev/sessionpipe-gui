@@ -140,7 +140,7 @@
 }
 /* Beside a command block, the pair sits on the question's line, so it stays put when the
    block unfolds (only the wide bar: the narrow one and the phone put it under). */
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   @container ctl (min-width: 561px) {
     .ctl-answer:has(> .ctl-cmd-block) > .ctl-answer-btns {
       align-self: start;
@@ -373,7 +373,7 @@
 }
 /* The phone: the question on its line, then Deny | Allow at equal widths, 44 px tall;
    when sending is off here, the line under the field says why, and nothing else. */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .ctl-answer {
     display: flex;
     flex-direction: column;
@@ -463,7 +463,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* The bar is docked over the timeline on a phone: the messages scroll inside a short box. */
   .ctl-acts {
     max-height: 25vh;

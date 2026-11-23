@@ -590,4 +590,36 @@ test.describe("search: the phone", () => {
       .tap();
     await expect(page.getByRole("search", { name: "Find in this session" })).toBeVisible();
   });
+
+  test("at 320 wide a range of days keeps its two dates, Cancel and Apply inside its card", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/search?mock=1&q=webhook");
+    await expect(rows(page).first()).toBeVisible({ timeout: 15_000 });
+    await page.getByRole("combobox", { name: "Date" }).click();
+    await page.getByRole("option", { name: "Custom range…" }).click();
+    const card = page.getByRole("dialog", { name: "Custom range" });
+    await expect(card.getByRole("button", { name: "Apply" })).toBeVisible();
+    // Once it has come up whole: it grows as it arrives.
+    await card.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    // The card is inside the window, and each part inside the card's own padding: a date
+    // field is as wide as its column, not as wide as the engine would have a date be.
+    const { ends, parts } = await card.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const pad = Number.parseFloat(getComputedStyle(el).paddingRight);
+      return {
+        ends: [box.left, innerWidth - box.right],
+        parts: Array.from(el.querySelectorAll("input, button"), (part) => {
+          const r = part.getBoundingClientRect();
+          const name = part.textContent || part.closest("label")?.textContent || "";
+          return { name, before: r.left - box.left - pad, after: box.right - pad - r.right };
+        }),
+      };
+    });
+    expect(ends).toEqual([8, 8]);
+    expect(parts.map((part) => part.name)).toEqual(["From", "To", "Cancel", "Apply"]);
+    for (const part of parts) {
+      expect(part.before, part.name).toBeGreaterThanOrEqual(0);
+      expect(part.after, part.name).toBeGreaterThanOrEqual(0);
+    }
+  });
 });

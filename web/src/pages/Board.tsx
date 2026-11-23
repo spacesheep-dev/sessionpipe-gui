@@ -81,6 +81,7 @@ import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRenam
 import { isUnread, setUnread } from "../lib/marks";
 import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
 import { accountMode, apiFetch } from "../lib/net";
+import { pageBarBottom, useResizeAnchor } from "../lib/resizeAnchor";
 import { Link, navigate, searchAll, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
 import { hintFor, useBindingVersion, useShortcut } from "../lib/shortcuts";
@@ -229,6 +230,14 @@ export function Board() {
   const page = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   useStickyTop(page);
+  // A phone unfolded, folded or turned: the card being read stays where it was under the
+  // bar (lib/resizeAnchor.ts).
+  useResizeAnchor({
+    rows: "article.card[data-flip]",
+    key: "data-flip",
+    root: () => listRef.current,
+    barBottom: pageBarBottom(() => page.current),
+  });
   const hidden = useHidden();
   const downAt = useStreamDown();
 
