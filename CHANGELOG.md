@@ -131,6 +131,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   folder can't be written, the message box and New session said the board had no room for
   more files today; they now say it couldn't save the picture or file, with Try again. A
   full disk still says there is no room.
+- **A limit's reset time and a pooled account's "until" on a day the month does not have, or
+  at hour 24, are left out.** A `limits.observed` window or a hello's pooled window with
+  `resets_at` `2026-02-30`, `2026-11-31` or `T24:00:00Z` was kept and shown as resetting on
+  March 2, December 1 or the next day, and a pooled account's `until` the same; the window or
+  the `until` is now dropped, as `2026-13-01` already was. `2028-02-29` still reads.
 
 ## [0.8.7] - 2026-11-20
 
