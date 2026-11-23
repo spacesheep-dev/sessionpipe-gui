@@ -230,11 +230,14 @@ impl Accounts {
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
             .https_only(!cfg.account.allow_local_http);
-        // A test never reaches the real spacesheep.dev: there the name is a port on
-        // this machine where nothing listens, which is also what a phone with no signal
-        // meets (no connection can be made).
+        // A test never reaches the real spacesheep.dev: there the name is an address no
+        // connection can be made to, which is also what a phone with no signal meets.
+        // 0.0.0.0 fails at once on Windows; elsewhere it is this machine, where nothing
+        // listens on port 1. (127.0.0.1 would do on macOS and Linux, but Windows tries a
+        // closed port again for about two seconds, longer than a request's time limit
+        // here.)
         #[cfg(test)]
-        let b = b.resolve("spacesheep.dev", ([127, 0, 0, 1], 1).into());
+        let b = b.resolve("spacesheep.dev", ([0, 0, 0, 0], 1).into());
         b
     }
 }
