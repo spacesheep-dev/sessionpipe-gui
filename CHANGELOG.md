@@ -8,6 +8,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A session forgotten and then gone on with keeps what it says next,** also when the
+  forget and its next events arrive together (a page from spacesheep): they were dropped,
+  and counted as duplicates.
+- **A plugin turned off while it is still starting is stopped.** After a settings save or
+  two enables at once, a plugin turned off before it had finished starting kept running
+  while the Views page listed it off.
 - **An upload the board can't save is no longer said as "no room".** When the board's files
   folder can't be written, the message box and New session said the board had no room for
   more files today; they now say it couldn't save the picture or file, with Try again. A
