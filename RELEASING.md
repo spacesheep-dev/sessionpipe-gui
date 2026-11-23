@@ -107,7 +107,7 @@ environment, so each run waits for the owner's approval before it can read a sec
    they see the update. Nothing else publishes a desktop release.
 
 **iOS → TestFlight** (`ios-testflight.yml`; inputs `tag`, `upload`) runs any time after
-the tag: it builds the iOS app with Xcode 26 (bundle id `dev.spacesheep.sessionpipe`, team
+the tag: it builds the iOS app with Xcode 27.1 (bundle id `dev.spacesheep.sessionpipe`, team
 `QR7H8ARENW`, build number = the run number), signs it with the Apple Distribution
 certificate and the *sessionpipe App Store* profile from a temporary keychain, exports and
 checks an `.ipa` (app-store-connect, manual signing), keeps it as a workflow artifact,
@@ -235,13 +235,15 @@ the workflow says when it has expired, and a new one with the same name (Profile
 profile → Edit → Save, then download) goes into `IOS_APPSTORE_PROFILE`.
 
 *iOS → TestFlight* (`ios-testflight.yml`) takes the tag and:
-1. checks the iOS SDK is 26 or later (App Store Connect refuses older builds since
-   2026-04-28; the job runs on `macos-26`), the secrets, and that the app's record is in
-   App Store Connect;
+1. checks the iOS SDK is 27.1 or later (the first whose app fills iPhone Duo's screens; the
+   job runs on `xcode-27` with Xcode 27.1 pinned), the secrets, and that the app's record
+   is in App Store Connect;
 2. builds, signs and exports the `.ipa`, then checks what App Store Connect checks first:
-   the bundle id, the version, the build number, the SDK, the Apple Distribution signer,
-   the embedded profile, no `get-task-allow`, and the privacy manifest
-   (`PrivacyInfo.xcprivacy`); the `.ipa` is kept as a workflow artifact;
+   the bundle id, the version, the build number, the SDK, the scene manifest
+   (`apps/mobile/src-tauri/Info.ios.plist`: an iOS 27 SDK build without one does not
+   launch), the Apple Distribution signer, the embedded profile, no `get-task-allow`, and
+   the privacy manifest (`PrivacyInfo.xcprivacy`); the `.ipa` is kept as a workflow
+   artifact;
 3. uploads it with `xcrun altool`, naming the app by its Apple ID (Xcode 26's altool can
    otherwise pick another app whose bundle id starts the same);
 4. waits until App Store Connect has processed the build (`VALID`) and puts the TestFlight

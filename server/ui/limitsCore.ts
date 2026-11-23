@@ -23,6 +23,7 @@ import {
   type StreamMessage,
 } from "../../shared/api.js";
 import { DEMO_MACHINE } from "../control/rows.js";
+import { isCalendarTime } from "../receiver/validate.js";
 import type { DocKeep } from "./docKeep.js";
 
 const WINDOW_ID = /^[a-z0-9_]{1,64}$/;
@@ -44,7 +45,8 @@ const name = (v: string | undefined): string | undefined =>
   v !== undefined && v.length <= LIMITS_NAME_MAX && !CONTROL.test(v) ? v : undefined;
 
 export const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
-const isTime = (v: unknown): v is string => typeof v === "string" && RFC3339.test(v) && Number.isFinite(Date.parse(v));
+const isTime = (v: unknown): v is string =>
+  typeof v === "string" && RFC3339.test(v) && Number.isFinite(Date.parse(v)) && isCalendarTime(v);
 
 /** One window as the event or the file has it (`used_percent` or `usedPercent`), or null
  *  when it does not validate. An absent or null resets_at / window_minutes is not known. */

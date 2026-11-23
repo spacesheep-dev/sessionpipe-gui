@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeRunFile } from "../runfile.js";
 import {
   EXIT_NOT_RUNNING,
@@ -205,6 +205,19 @@ const world = {
   platform: "darwin" as NodeJS.Platform,
 };
 const FOREIGN_PID = process.ppid;
+/** A made-up pid can be a live process on the machine running the tests: these answer
+ *  `process.kill(pid, 0)` (pidAlive) as gone, whatever runs there. Restored after each test. */
+const dead = new Set<number>();
+function deadPids(...pids: number[]): void {
+  if (!vi.isMockFunction(process.kill)) {
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (signal === 0 && dead.has(pid)) throw Object.assign(new Error(`kill ESRCH ${pid}`), { code: "ESRCH" });
+      return kill(pid, signal);
+    });
+  }
+  for (const pid of pids) dead.add(pid);
+}
 function managerSays(platform: NodeJS.Platform, pid: number | undefined): void {
   if (platform === "darwin")
     writeFileSync(path.join(dir, "print"), pid ? `\tstate = running\n\tpid = ${pid}\n` : "\tstate = waiting\n");
@@ -290,7 +303,11 @@ beforeEach(() => {
   });
   looks = 0;
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  vi.restoreAllMocks();
+  dead.clear();
+  rmSync(dir, { recursive: true, force: true });
+});
 
 describe("the LaunchAgent plist", () => {
   const spec = {
@@ -864,6 +881,7 @@ describe("service install upgrades a service of ours in place", () => {
     // A dry run takes no lock and changes nothing.
     expect(await runService({ verb: "install", port: 7829, state, dryRun: true }, e)).toBe(0);
     // Its holder is gone: taken over, and released after.
+    deadPids(999_999);
     writeFileSync(lock, "999999 2026-11-12T00:00:00.000Z\n");
     errs = [];
     expect(await runService({ verb: "install", port: 7829, state }, e)).toBe(0);
@@ -883,6 +901,7 @@ describe("service install upgrades a service of ours in place", () => {
   });
 
   it("two installs that both find a stale lock: exactly one takes it over", async () => {
+    deadPids(999_999);
     const e = env();
     const lock = lockPath(e);
     mkdirSync(path.dirname(lock), { recursive: true });
@@ -1610,6 +1629,7 @@ describe("service on Windows", () => {
   });
 
   it("leaves the pid in run.json alone when it is another program's by now, or nobody's", async () => {
+    deadPids(4242);
     const e = win();
     const state = path.join(dir, "s");
     await runService({ verb: "install", port: 7829, state }, e);
@@ -1636,7 +1656,7 @@ describe("service on Windows", () => {
     errs = [];
     expect(await runService({ verb: "uninstall" }, e)).toBe(0);
     expect(stops()).toEqual([`schtasks /End /TN ${name}`]);
-    // pid 4242 isn't alive here, so nothing was left running and nothing is said about it.
+    // pid 4242 isn't alive (deadPids), so nothing was left running and nothing is said about it.
     expect(out.at(-1)).toContain("stopped, and it won't start at login");
     expect(errs).toEqual([]);
     // And --dry-run shows the same: no taskkill line for a pid that isn't the receiver.

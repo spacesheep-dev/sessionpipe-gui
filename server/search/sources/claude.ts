@@ -18,7 +18,7 @@ import type {
   SourceFile,
 } from "../types.js";
 import { TITLE_RANK } from "../types.js";
-import { claudeHomes, list } from "./homes.js";
+import { claudeHomes, list, pathParts } from "./homes.js";
 import { Finder, parseLine, readAppend, startsWith } from "./prefilter.js";
 import { cleanPromptBlock, finish, firstAskTitle, ms, repoName, toolArg, toolLine } from "./text.js";
 
@@ -67,7 +67,7 @@ interface ClaudePath {
 
 /** `<home>/projects/<slug>/<id>.jsonl` or `<home>/projects/<slug>/<id>/subagents/[workflows/<wf>/]agent-<a>.jsonl`. */
 export function parseClaudePath(p: string): ClaudePath | undefined {
-  const parts = p.split(path.sep);
+  const parts = pathParts(p);
   const i = parts.lastIndexOf("projects");
   if (i < 1 || parts.length < i + 3) return undefined;
   const home = parts.slice(0, i).join(path.sep);

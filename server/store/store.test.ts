@@ -399,6 +399,43 @@ describe("forget", () => {
     expect(store.stats()).toMatchObject({ events: 0, sessions: 0, storageBytes: 0 });
     expect(store.forget(KEY)).toBe(false);
   });
+
+  it("drops pre-forget batch events from result.stored and accepts post-forget events in the same batch", () => {
+    const s = new Session();
+    const other = new Session("other");
+    const pre = s.ev("session.started");
+    const otherEv = other.ev("session.started");
+    const forgotten = s.ev("session.forgotten");
+
+    const r1 = store.ingest([pre, otherEv, forgotten], "http");
+    expect(r1.accepted).toBe(3);
+    expect(r1.stored).toHaveLength(1);
+    expect(r1.stored[0]!.session.id).toBe("other");
+    expect(store.session(KEY)).toBeUndefined();
+    expect(existsSync(path.join(tmp.dir, "events", "claude-code", `${SID}.jsonl`))).toBe(false);
+
+    // Seed the session on disk, then forget and recreate it (including reusing seq 0) in one batch.
+    const s2 = new Session("recreated");
+    const key2 = sessionKey("claude-code", "recreated");
+    const seed = s2.ev("session.started");
+    store.ingest([seed], "http");
+    const got: StreamMessage[] = [];
+    store.subscribe((m) => got.push(m));
+
+    const freshStart: typeof seed = { ...seed, id: "ev-post-0", data: { source: "resume" } };
+    const freshTurn = s2.ev("turn.started");
+    const preInBatch = s2.ev("turn.ended", { reason: "stop" });
+    const r2 = store.ingest([preInBatch, s2.ev("session.forgotten"), freshStart, freshTurn], "http");
+    expect(r2.accepted).toBe(4);
+    expect(r2.duplicates).toBe(0);
+    expect(r2.stored.map((e) => e.id)).toEqual(["ev-post-0", freshTurn.id]);
+    expect(store.session(key2)).toBeDefined();
+    expect(store.sessionDetail(key2)?.events.map((e) => e.id)).toEqual(["ev-post-0", freshTurn.id]);
+    const forgetIdx = got.findIndex((m) => m.kind === "forgotten" && m.key === key2);
+    const eventIdx = got.findIndex((m) => m.kind === "event" && m.event.id === "ev-post-0");
+    expect(forgetIdx).toBeGreaterThanOrEqual(0);
+    expect(eventIdx).toBeGreaterThan(forgetIdx);
+  });
 });
 
 describe("detail and feed", () => {

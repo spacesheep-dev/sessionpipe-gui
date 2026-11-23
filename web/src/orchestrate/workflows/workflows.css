@@ -613,7 +613,7 @@ button.wf-row:active {
 }
 /* On a desktop the panel has an edge, the rows 12 px insets, and a row's fill runs to the
    panel's edge (its corners are the panel's), its focus ring inside it. */
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .wf-list,
   .wf-form,
   .wf-steps,
@@ -665,7 +665,7 @@ button.wf-row:active {
 
 /* ----- the phone: grouped cells, 44 px rows ----- */
 
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .wf-head {
     padding: 0 16px 6px;
   }
@@ -768,7 +768,7 @@ button.wf-row:active {
   }
   /* A text action in the bar (Run, Cancel): the title gives it room. */
   .workflows .bar--inline .bar-title {
-    max-width: 38%;
+    max-width: calc(var(--bar-room, 100%) * 0.38);
   }
   .workflows .bar-actions .btn {
     padding: 0 8px;

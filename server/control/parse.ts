@@ -22,6 +22,7 @@ import {
   type StartPermission,
   validModel,
 } from "../../shared/api.js";
+import { isCalendarTime } from "../receiver/validate.js";
 // The same reader the limits store uses for a limits.observed, so a hello's windows and an
 // event's are one shape (server-core owns it; control only reads with it).
 import { readWindows } from "../ui/limits.js";
@@ -89,7 +90,8 @@ export function parseHello(body: unknown): Hello | null {
 }
 
 const RFC3339 = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/;
-const isTime = (v: unknown): v is string => typeof v === "string" && RFC3339.test(v) && Number.isFinite(Date.parse(v));
+const isTime = (v: unknown): v is string =>
+  typeof v === "string" && RFC3339.test(v) && Number.isFinite(Date.parse(v)) && isCalendarTime(v);
 /** A pooled account's id, and a pending login id (CONTROL.md, the pool): the same shape in
  *  the hello's `pool.accounts[].id` and a command's `pool_account` and `pool_order`. */
 export const poolIdOk = (v: unknown): v is string => typeof v === "string" && POOL_ID_RE.test(v);

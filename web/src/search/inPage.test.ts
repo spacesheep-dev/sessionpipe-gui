@@ -34,7 +34,7 @@ const sessions = (): Sess[] => [
     source: "sessionpipe",
     title: "",
     machine: "attic-linux",
-    repo: "acme/web",
+    repo: "github.com/acme/web",
     cwd: "/srv/web",
     docs: [
       { field: "prompt", text: "Add a login test for the refund page.", at: at(60), seq: 1 },
@@ -77,6 +77,11 @@ describe("the search reader in the page", () => {
     expect((await c.sessions({ q: "test -login" })).sessions).toEqual([]);
     expect((await c.sessions({ q: "agent:codex" })).sessions.map((s) => s.id)).toEqual(["bbbb2222"]);
     expect((await c.sessions({ q: "repo:billing retry" })).sessions.map((s) => s.id)).toEqual(["aaaa1111"]);
+    expect((await c.sessions({ q: "repo:acme/bill retry" })).sessions.map((s) => s.id)).toEqual(["aaaa1111"]);
+    // Core sends a repo with its host; an owner/name prefix finds it as the server's does.
+    expect((await c.sessions({ q: "repo:acme/web" })).sessions.map((s) => s.id)).toEqual(["bbbb2222"]);
+    expect((await c.sessions({ q: "repo:acme" })).sessions.map((s) => s.id).sort()).toEqual(["aaaa1111", "bbbb2222"]);
+    expect((await c.sessions({ q: "repo:github.com/acme" })).sessions.map((s) => s.id)).toEqual(["bbbb2222"]);
     expect((await c.sessions({ q: "machine:attic-linux" })).sessions.map((s) => s.id)).toEqual(["bbbb2222"]);
     // `machine:this` means no machine where the page runs on none of them.
     expect((await c.sessions({ q: "machine:this" })).sessions).toEqual([]);

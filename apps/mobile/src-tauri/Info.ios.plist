@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The keys the iOS app cannot do without. Every `tauri ios build` and `tauri ios dev`
+     puts this file's top-level keys over gen/apple/sessionpipe-shell_iOS/Info.plist, whole,
+     so they hold even when the Xcode project is made again (`tauri ios init`, xcodegen).
+     gen/apple/project.yml and the Info.plist beside it carry the same keys. -->
+<plist version="1.0">
+<dict>
+	<!-- One scene, made by tao. An app built with the iOS 27 SDK does not launch without a
+	     scene manifest, and the check at launch reads only this one, so it names tao's
+	     delegate (tauri-apps/tauri#15719). One scene: the shell has one window, "main". -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>TaoSceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<!-- The status bar takes its style from the root view controller, which follows the
+	     window's interface style: app_appearance (uikit.rs set_appearance) sets that when the
+	     page forces Light or Dark, and the bar's text flips with it. -->
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+</dict>
+</plist>
