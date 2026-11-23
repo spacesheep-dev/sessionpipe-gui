@@ -127,6 +127,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   a narrow screen and a pop-up under its button on a wider one was drawn anew as the
   screen changed, and its filter lost the focus (and with it the keyboard). It is now the
   same list in both forms: the filter's text, the focus and the row it was on are kept.
+- **An upload the board can't save is no longer said as "no room".** When the board's files
+  folder can't be written, the message box and New session said the board had no room for
+  more files today; they now say it couldn't save the picture or file, with Try again. A
+  full disk still says there is no room.
 
 ## [0.8.7] - 2026-11-20
 
