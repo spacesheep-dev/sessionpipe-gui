@@ -62,7 +62,7 @@ interface Bed {
 /** A phone with the app on it: spacesheep and the hub stood in, the built page, the shell. */
 async function bed(
   browser: Browser,
-  o: { platform?: string; device?: string; shell?: ShellInitOptions; features?: string[] } = {},
+  o: { platform?: string; device?: string; shell?: ShellInitOptions; features?: string[]; mouse?: boolean } = {},
 ) {
   const ss = new FakeSpacesheep();
   ss.rpId = HOST;
@@ -107,9 +107,9 @@ async function bed(
     viewport: { width: W, height: H },
     colorScheme: SCHEME,
     // A phone: a finger, not a mouse (`(pointer: coarse)` matches, so every small button
-    // is as tall as the app makes it for touch).
-    hasTouch: true,
-    isMobile: true,
+    // is as tall as the app makes it for touch). `mouse`: the same app under a mouse.
+    hasTouch: !o.mouse,
+    isMobile: !o.mouse,
     storageState: { cookies: [], origins: [] },
   });
   // Nothing leaves this machine: a link to the account's origin is never followed.
@@ -1471,6 +1471,24 @@ test.describe("what else an account shows", () => {
     }
   });
 
+  /** Approved on spacesheep by attic-mini, another computer of the account, long ago;
+   *  studio-mac has not taken the key, and only a key.add someone signs on spacesheep gives
+   *  it one. */
+  const notAdded = async (b: Bed): Promise<void> => {
+    const id = [...b.hub.accounts.keys()][0]!;
+    const asked = await b.page.evaluate(
+      (account) =>
+        (
+          window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+        ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+      id,
+    );
+    const other = { ...b.ss.machines[0]!, id: "m_attic0123456789abcde", name: "attic-mini" };
+    b.ss.machines.push({ ...other, passkey_ids: [asked.keyId] });
+    b.ss.trusting.set(asked.keyId, [other.id]);
+    b.ss.deviceRequests.delete(asked.keyId);
+  };
+
   /** In another session the agent asks to run something, now (well inside its hook's wait)
    *  unless `ago` says how long before: that session's id. */
   const asks = (b: Bed, id = "s-refund", ago = 4_000): string => {
@@ -1489,6 +1507,23 @@ test.describe("what else an account shows", () => {
       ),
     ]);
     return id;
+  };
+  /** On attic-mini, which has this device's key, the agent asks to run something too. */
+  const attic = (b: Bed): void => {
+    const s = new Session("s-site", "claude-code", Date.now() - 2_000);
+    const on = {
+      tier: 2 as const,
+      session: { machine: "attic-mini", cwd: "/Users/me/site", title: "Check the site build" },
+    };
+    b.ss.push([
+      s.ev("session.started", { source: "startup" }, on),
+      s.ev("turn.started", { turn_id: "t1" }, on),
+      s.ev(
+        "attention.needed",
+        { attention_id: "perm-2", kind: "permission", tool: "Bash", message: "Bash npm run build" },
+        on,
+      ),
+    ]);
   };
   const signs = async (page: Page) => (await calls(page)).filter((c) => c === "plugin:identity|sign").length;
 
@@ -1705,20 +1740,7 @@ test.describe("what else an account shows", () => {
     try {
       await page.goto(b.server.url);
       await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
-      // Approved on spacesheep by another computer of the account, long ago; studio-mac has
-      // not taken the key, and only a key.add someone signs on spacesheep gives it one.
-      const id = [...b.hub.accounts.keys()][0]!;
-      const asked = await page.evaluate(
-        (account) =>
-          (
-            window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
-          ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
-        id,
-      );
-      const other = { ...b.ss.machines[0]!, id: "m_attic0123456789abcde", name: "attic-mini" };
-      b.ss.machines.push({ ...other, passkey_ids: [asked.keyId] });
-      b.ss.trusting.set(asked.keyId, [other.id]);
-      b.ss.deviceRequests.delete(asked.keyId);
+      await notAdded(b);
       asks(b);
       await page.goto(`${b.server.url}/s/claude-code/s-refund`);
       const line = "studio-mac hasn't added this iPhone yet.";
@@ -1733,9 +1755,17 @@ test.describe("what else an account shows", () => {
       await expect(page.getByText(line)).toHaveCount(1);
       await expect(page.getByText(/can't send yet|next online/)).toHaveCount(0);
       await shot(page, "also-catching-up-prompt");
+      // attic-mini, which has the key, asks too: its prompt is answered as ever.
+      attic(b);
       await page.goto(`${b.server.url}/inbox`);
       const row = page.locator(".inbox-row[data-attention='perm-1']");
-      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
+      const there = page.locator(".inbox-row[data-attention='perm-2']");
+      await expect(there.getByRole("button", { name: "Allow" })).toBeEnabled({ timeout: 15_000 });
+      await expect(there.getByRole("button", { name: "Deny" })).toBeEnabled();
+      // studio-mac's row: no pair that would only be refused, and it still opens its session.
+      await expect(row).toBeVisible();
+      await expect(row.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      await expect(row.locator(".inbox-answer[data-answer='blocked']")).toBeAttached();
       // Said once, in a notice above Notifications, with the way on.
       const said = page.locator(".inbox-notes .notice").first();
       await expect(said.locator(".inbox-reason")).toHaveText(line);
@@ -1771,6 +1801,35 @@ test.describe("what else an account shows", () => {
       await expect(sheet.locator("[data-ns-row=options]")).toHaveText(/^Permission\s*Safe$/);
       await expect(sheet.getByText(/doesn't trust/)).toHaveCount(0);
       await shot(page, "also-new-session-catching-up");
+      expect(await signs(page)).toBe(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("approved, and this computer has not added the key yet, with a mouse: Allow and Deny stay, greyed, on the card and in the Inbox", async ({
+    browser,
+  }) => {
+    const b = await bed(browser, { mouse: true });
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await notAdded(b);
+      asks(b);
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      await expect(card.locator(".ctl-answer-note")).toContainText("studio-mac hasn't added this iPhone yet", {
+        timeout: 15_000,
+      });
+      await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
+      await page.goto(`${b.server.url}/inbox`);
+      const row = page.locator(".inbox-row[data-attention='perm-1']");
+      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled({ timeout: 15_000 });
+      await expect(row.getByRole("button", { name: "Deny" })).toBeDisabled();
       expect(await signs(page)).toBe(0);
     } finally {
       await b.close();
