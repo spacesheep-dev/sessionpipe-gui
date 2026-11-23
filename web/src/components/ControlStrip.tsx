@@ -28,6 +28,7 @@ import {
   type ReactNode,
   type RefObject,
   Suspense,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -560,7 +561,8 @@ export function ControlStrip({
   // is clear, as after Send. Until then its words stayed here.
   const clearAtt = att.clear;
   // Only while it still holds what was held: words typed while the confirm was going stay.
-  const draft = JSON.stringify([text, att.items.map((i) => i.key)]);
+  const draftWith = (words: string) => JSON.stringify([words, att.items.map((i) => i.key)]);
+  const draft = draftWith(text);
   const draftNow = useRef(draft);
   draftNow.current = draft;
   useEffect(() => {
@@ -574,9 +576,20 @@ export function ControlStrip({
     window.addEventListener(COMPOSER_SENT, on);
     return () => window.removeEventListener(COMPOSER_SENT, on);
   }, [session.key, clearAtt]);
+  // The page above is told the draft in the key's own update, so it draws the words in the
+  // same render as the field; any other change (a picture, words put back, a clear) after
+  // the render. Each draft is told once. Told only after the render, a run of keys faster
+  // than the page gets a turn left the page one render behind per key, which React counts as an update loop: at the 51st key it threw
+  // in the key's handler, and that key's letter was lost.
   const onDraftNow = useRef(onDraft);
   onDraftNow.current = onDraft;
-  useEffect(() => onDraftNow.current?.(draft), [draft]);
+  const toldDraft = useRef<string | null>(null);
+  const tellDraft = useCallback((d: string) => {
+    if (d === toldDraft.current) return;
+    toldDraft.current = d;
+    onDraftNow.current?.(d);
+  }, []);
+  useEffect(() => tellDraft(draft), [draft, tellDraft]);
   const name = session.machine ?? "the machine";
   const permissions = (attentions ?? (attention ? [attention] : [])).filter((a) => a.kind === "permission");
   // The answerable prompt(s) only; a notification twin adds nothing. With no answerable one,
@@ -1063,6 +1076,7 @@ export function ControlStrip({
               value={text}
               onChange={(e) => {
                 setText(e.target.value);
+                tellDraft(draftWith(e.target.value));
                 // Typed in, a preview tab beside the page is kept (lib/split.ts); an answer is not.
                 keepTab(session.key);
               }}

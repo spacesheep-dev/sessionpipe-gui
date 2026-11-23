@@ -23,7 +23,7 @@ import {
   useState,
 } from "react";
 import { useSendStates } from "../../account/sendable";
-import { ActionButton, EmptyState, HarnessGlyph, Toggle } from "../../components/bits";
+import { ActionButton, EmptyState, HarnessGlyph, Toggle, withFormScrim } from "../../components/bits";
 import { MoreButton } from "../../components/ContextMenu";
 import { Select, type SelectOption } from "../../components/Select";
 import { wrongOriginHere } from "../../control/api";
@@ -42,6 +42,7 @@ import { useListedSessions, useMachinesMap, useSession, useStore, useStreamDown 
 import { usePhoneLayout } from "../../lib/device";
 import { useFocusTrap } from "../../lib/focus";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../../lib/format";
+import { useFieldAboveKeys } from "../../lib/keyboardInset";
 import { useSheetDrag } from "../../lib/motion";
 import { navigate } from "../../lib/router";
 import { hintFor, matches, useShortcut } from "../../lib/shortcuts";
@@ -96,6 +97,8 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   // The app's stream is down (as the page bar says it): an ask waits for it, as a message does.
   const down = useStreamDown() !== null;
   const ref = useRef<HTMLDivElement>(null);
+  // The keyboard up: the field being typed in stays above it, its status line too.
+  useFieldAboveKeys(ref);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   const name = session?.machine ?? "this machine";
@@ -629,7 +632,9 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   );
 
   if (phone)
-    return (
+    return withFormScrim(
+      close,
+      closing,
       <div
         className="ns-sheet ns-sheet--phone hs-sheet"
         role="dialog"
@@ -696,7 +701,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
             </div>
           </div>
         )}
-      </div>
+      </div>,
     );
 
   return (

@@ -5,6 +5,7 @@
 // tests run it on every generated event; the replay uses it to drop lines that are not
 // events. It returns the problems it found, so a test failure names the field.
 import type { ProtocolEvent } from "../../shared/api.js";
+import { isCalendarTime } from "../receiver/validate.js";
 
 /** The lowest tier that carries each type (PROTOCOL.md §4). */
 export const TYPE_TIER: Record<string, 0 | 1 | 2 | 3> = {
@@ -46,7 +47,8 @@ const TITLE_SOURCES = ["custom", "harness", "first-ask"];
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 const isInt = (v: unknown, min = 0): v is number => Number.isInteger(v) && (v as number) >= min;
-const isTime = (v: unknown): boolean => typeof v === "string" && TIME_RE.test(v) && !Number.isNaN(Date.parse(v));
+const isTime = (v: unknown): boolean =>
+  typeof v === "string" && TIME_RE.test(v) && !Number.isNaN(Date.parse(v)) && isCalendarTime(v);
 
 /** A field rule for one key of a type's `data`. */
 type Rule =

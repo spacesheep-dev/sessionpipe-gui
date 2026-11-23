@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # The phone apps on every PR that changes them (apps/mobile, the network crate they share
 # with the desktop app, the page's native layer): the shell's clippy and tests, an iOS
-# simulator build, and an Android debug build. Nothing is signed or uploaded, and no secret
+# simulator build launched on the iPhone Duo simulator, and an Android debug build. Nothing is signed or uploaded, and no secret
 # is read: a PR from a fork runs it the same way. The signed builds are "iOS → TestFlight"
 # and "Android release".
 name: Mobile
@@ -29,9 +29,12 @@ env:
 jobs:
   ios:
     name: test · iOS simulator build
-    # The Xcode TestFlight builds with (26 or later, which App Store Connect requires).
-    runs-on: macos-26
+    # The Xcode TestFlight builds with (ios-testflight.yml): 27.1, whose SDK lets the app fill
+    # iPhone Duo's displays, on the only image that has it.
+    runs-on: xcode-27
     timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     defaults:
       run:
         shell: bash
@@ -52,9 +55,16 @@ jobs:
           targets: aarch64-apple-ios-sim
 
       # The Rust cache keeps build-script output with Xcode's paths in it (swift-rs, the
-      # clang runtime), so each Xcode build gets its own: a macos-15 cache can't link on 26.
-      - name: Xcode
-        run: echo "XCODE_BUILD=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_ENV"
+      # clang runtime), so each Xcode build gets its own: a cache made with one Xcode can't
+      # link with another.
+      - name: Xcode 27.1 or later
+        run: |
+          set -euo pipefail
+          sdk="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          echo "$(xcodebuild -version | tr '\n' ' '), iOS simulator SDK $sdk." >> "$GITHUB_STEP_SUMMARY"
+          echo "XCODE_BUILD=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_ENV"
+          [ "$(printf '27.1\n%s\n' "$sdk" | sort -V | head -1)" = 27.1 ] \
+            || { echo "::error::iOS SDK $sdk: iPhone Duo needs 27.1 or later"; exit 1; }
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -76,6 +86,71 @@ jobs:
       - name: tauri ios build --debug (simulator)
         working-directory: apps/mobile
         run: npx tauri ios build --debug --target aarch64-sim --ci
+
+      # The app on the iPhone Duo simulator (the iOS 27.1 runtime), on its outer display: it
+      # launches (the scene manifest), and SP_PROBE has it write what the page saw (lib.rs
+      # probe, probe.js): its size, the system's insets, its size class and its errors. The
+      # insets go into test/e2e/duo.ts's DUO table. Folding, unfolding and Split View are
+      # tried by hand in Xcode's Device Hub: simctl has no command for them.
+      - name: iPhone Duo simulator launch
+        working-directory: apps/mobile
+        run: |
+          set -euo pipefail
+          # tauri puts a simulator build in build/arm64-sim (x86_64-sim on an Intel runner).
+          app="$(find src-tauri/gen/apple/build -type d -path '*-sim/*' -name '*.app' -print -quit)"
+          [ -n "$app" ] || { echo "::error::no simulator .app under src-tauri/gen/apple/build"; find src-tauri/gen/apple/build -maxdepth 2; exit 1; }
+          rt="$(xcrun simctl list runtimes -j | node -e 'const r = JSON.parse(require("fs").readFileSync(0, "utf8")).runtimes.filter((r) => r.isAvailable && /^iOS 27\.1\b/.test(r.name)); process.stdout.write(r[0]?.identifier ?? "")')"
+          [ -n "$rt" ] || { echo "::error::no iOS 27.1 simulator runtime"; exit 1; }
+          udid="$(xcrun simctl create duo "iPhone Duo" "$rt")"
+          echo "DUO_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl install "$udid" "$app"
+          id=dev.spacesheep.sessionpipe
+          SIMCTL_CHILD_SP_PROBE=1 SIMCTL_CHILD_SP_START_PATH=/?mock=1 xcrun simctl launch "$udid" "$id"
+          data="$(xcrun simctl get_app_container "$udid" "$id" data)"
+          # The app writes it once the page has said what it saw (or 15 s after the page loaded).
+          probe=""
+          for _ in $(seq 60); do
+            probe="$(find "$data" -name probe.txt -print -quit)"
+            [ -n "$probe" ] && break
+            sleep 1
+          done
+          if [ -z "$probe" ]; then
+            echo "::error::the app wrote no probe in 60 s: did it launch?"
+            xcrun simctl spawn "$udid" log show --last 3m --predicate 'process == "sessionpipe"' | tail -80
+            exit 1
+          fi
+          # w, h, insets, sizeClass and the rest to the summary; any page error fails the step.
+          node -e '
+            const fs = require("fs");
+            const url = new URL(fs.readFileSync(process.argv[1], "utf8"));
+            if (!url.hash.startsWith("#probe=")) {
+              console.log(`::error::the page said nothing in 15 s (${url.href})`);
+              process.exit(1);
+            }
+            const p = JSON.parse(decodeURIComponent(url.hash.slice("#probe=".length)));
+            const { w, h, insets, sizeClass, coarse, vv, dpr, screen, errors } = p;
+            const seen = Object.entries({ w, h, insets, sizeClass, coarse, vv, dpr, screen, errors })
+              .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+              .join("\n");
+            console.log(seen);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `iPhone Duo, outer display, /?mock=1:\n\n\`\`\`\n${seen}\n\`\`\`\n`);
+            if (errors?.length) {
+              console.log(`::error::${errors.length} page error(s), the first: ${errors[0]}`);
+              process.exit(1);
+            }
+          ' "$probe"
+
+      - name: iPhone Duo screenshot
+        if: always() && env.DUO_UDID != ''
+        run: xcrun simctl io "$DUO_UDID" screenshot "$RUNNER_TEMP/iphone-duo-launch.png" || true
+
+      - uses: actions/upload-artifact@v7
+        if: always() && env.DUO_UDID != ''
+        with:
+          name: iphone-duo-launch
+          path: ${{ runner.temp }}/iphone-duo-launch.png
+          if-no-files-found: ignore
 
   android:
     name: Android debug build

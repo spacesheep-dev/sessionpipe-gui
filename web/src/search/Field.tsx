@@ -5,7 +5,15 @@
 // ⌘⏎ open the one under the cursor, Tab goes from the field to the results, Esc closes the
 // list, then clears, then leaves for the list.
 import type { SearchFacets } from "@shared/api";
-import { forwardRef, type KeyboardEvent, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  type KeyboardEvent,
+  type MutableRefObject,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { HarnessGlyph } from "../components/bits";
 import { LabelSwatch } from "../components/LabelDot";
 import { IS_MAC } from "../lib/shortcuts";
@@ -26,6 +34,10 @@ export interface FieldHandle {
   input: () => HTMLInputElement | null;
 }
 
+/** What a field that left with the focus had: its caret, or what was selected. The page
+ *  keeps it for the field it draws next; null, the field had been put down. */
+export type FieldInHand = { start: number; end: number } | null;
+
 export const SearchField = forwardRef<
   FieldHandle,
   {
@@ -34,9 +46,9 @@ export const SearchField = forwardRef<
     facets: SearchFacets | null;
     keys: FieldKeys;
     phone: boolean;
-    autoFocus: boolean;
+    inHand: MutableRefObject<FieldInHand>;
   }
->(function SearchField({ value, onChange, facets, keys, phone, autoFocus }, ref) {
+>(function SearchField({ value, onChange, facets, keys, phone, inHand }, ref) {
   const input = useRef<HTMLInputElement>(null);
   const [caret, setCaret] = useState(value.length);
   const [sel, setSel] = useState(-1);
@@ -51,6 +63,24 @@ export const SearchField = forwardRef<
     },
     input: () => input.current,
   }));
+  // The page draws the field in its bar or, on a phone, under it, so a change of layout
+  // mounts it anew. The one that leaves with the focus says so, and the one that comes
+  // takes it up, caret and all, without scrolling to itself: the words being typed go on.
+  // A field that had been put down stays down.
+  useLayoutEffect(() => {
+    const el = input.current;
+    const had = inHand.current;
+    inHand.current = null;
+    if (el && had) {
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(had.start, had.end);
+      setCaret(had.start);
+    }
+    return () => {
+      if (el && document.activeElement === el)
+        inHand.current = { start: el.selectionStart ?? el.value.length, end: el.selectionEnd ?? el.value.length };
+    };
+  }, [inHand]);
   useLayoutEffect(() => {
     if (pendingCaret.current === null || !input.current) return;
     input.current.setSelectionRange(pendingCaret.current, pendingCaret.current);
@@ -132,8 +162,6 @@ export const SearchField = forwardRef<
           data-search
           type="search"
           value={value}
-          // biome-ignore lint/a11y/noAutofocus: the search page's field is the page
-          autoFocus={autoFocus}
           onChange={(e) => {
             markTyped();
             setCaret(e.target.selectionStart ?? e.target.value.length);
