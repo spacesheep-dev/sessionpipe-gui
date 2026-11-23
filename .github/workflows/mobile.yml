@@ -96,8 +96,9 @@ jobs:
         working-directory: apps/mobile
         run: |
           set -euo pipefail
-          app="$(find src-tauri/gen/apple/build -path '*iphonesimulator*' -name '*.app' -print -quit)"
-          [ -n "$app" ] || { echo "::error::no simulator .app"; exit 1; }
+          # tauri puts a simulator build in build/arm64-sim (x86_64-sim on an Intel runner).
+          app="$(find src-tauri/gen/apple/build -type d -path '*-sim/*' -name '*.app' -print -quit)"
+          [ -n "$app" ] || { echo "::error::no simulator .app under src-tauri/gen/apple/build"; find src-tauri/gen/apple/build -maxdepth 2; exit 1; }
           rt="$(xcrun simctl list runtimes -j | node -e 'const r = JSON.parse(require("fs").readFileSync(0, "utf8")).runtimes.filter((r) => r.isAvailable && /^iOS 27\.1\b/.test(r.name)); process.stdout.write(r[0]?.identifier ?? "")')"
           [ -n "$rt" ] || { echo "::error::no iOS 27.1 simulator runtime"; exit 1; }
           udid="$(xcrun simctl create duo "iPhone Duo" "$rt")"
