@@ -24,6 +24,7 @@ import { findExtra, formatCatalog, installableExtras } from "./extensions/catalo
 import { extraInstalled, installExtra } from "./extensions/extras.js";
 import { InstallError } from "./extensions/install.js";
 import { bundledDirs } from "./extensions/kind.js";
+import { hostOf, notOpenedBy } from "./http/guard.js";
 import { lanAddresses } from "./http/net.js";
 import { runKeyCommand } from "./keyCommand.js";
 import { DEFAULT_HOST, listenErrorMessage } from "./listen-error.js";
@@ -327,9 +328,19 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         if (!a.rpId.trim()) fail("--rp-id needs a host name");
         if (!isIP(a.rpId) && !bareHost(a.rpId)) fail(`--rp-id is a host name, no scheme, port or path: ${a.rpId}`);
         break;
-      case "--allow-host":
-        a.allowHosts = [...(a.allowHosts ?? []), next()];
+      case "--allow-host": {
+        // Compared as the guard reads a Host header (guard.ts hostName): a port and case
+        // are dropped, so "studio.lan:8443" is taken; "https://studio.lan", "*.lan",
+        // "a.lan,b.lan", 0.0.0.0 or "" would start a receiver that never answers to it.
+        const v = next();
+        if (!v.trim()) fail("--allow-host needs a host name");
+        // A bare IPv6 address is read in brackets, as a Host header carries it.
+        const h = hostOf(isIP(v.trim()) === 6 ? `[${v.trim()}]` : v);
+        if (!h || !/^[a-z0-9._:-]+$/.test(h) || notOpenedBy(h))
+          fail(`--allow-host is a name this machine is opened by, a port at most: ${v}`);
+        a.allowHosts = [...(a.allowHosts ?? []), v];
         break;
+      }
       case "--tls":
         a.tls = true;
         break;

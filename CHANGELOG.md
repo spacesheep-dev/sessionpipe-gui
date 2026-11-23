@@ -140,6 +140,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   "q"` and `--state DIR index --status` stopped with "unknown option search", while every
   other command takes the flag first; they now read DIR. Another flag before `search` or
   `index` is refused by its name.
+- **`--allow-host` takes a host name, a port at most.** `--allow-host https://studio.lan`,
+  a path, a space, a wildcard (`*.lan`), a list (`a.lan,b.lan`), an empty value or
+  `0.0.0.0` started a receiver that never answered to that name, without a word. Each now
+  stops with an `--allow-host` message. A background service given such a value after `--`
+  now stops at start too, and its log says why; `sessionpipe-gui service install -- <options>`
+  replaces the options it keeps.
 
 ## [0.8.7] - 2026-11-20
 

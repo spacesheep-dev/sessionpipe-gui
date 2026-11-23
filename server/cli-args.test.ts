@@ -139,6 +139,76 @@ describe("sessionpipe-gui flag values", () => {
     20_000,
   );
 
+  it.each([[""], ["  "]])(
+    "--allow-host %j is refused",
+    (v) => {
+      const r = run("--port", "0", "--allow-host", v);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toBe("sessionpipe-gui: --allow-host needs a host name\n");
+    },
+    20_000,
+  );
+
+  it.each([
+    ["https://studio.lan"],
+    ["http://studio.lan:8443"],
+    ["studio.lan/x"],
+    ["studio.lan?x"],
+    ["studio.lan#x"],
+    ["user@studio.lan"],
+    ["*.lan"],
+    ["*"],
+    ["studio lan"],
+    ["[::1]x"],
+    ["studio.lan,other.lan"],
+    ["0.0.0.0"],
+    ["0"],
+    ["::"],
+    ["[::]:8443"],
+    ["::ffff:127.0.0.1"],
+  ])(
+    "--allow-host %j is refused",
+    (v) => {
+      // Each started a receiver that answered 403 unknown_host under the name all the same
+      // (0.0.0.0, :: and ::ffff: are never taken as a Host: guard.ts notOpenedBy).
+      const r = run("--port", "0", "--allow-host", v);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toBe(
+        `sessionpipe-gui: --allow-host is a name this machine is opened by, a port at most: ${v}\n`,
+      );
+    },
+    20_000,
+  );
+
+  it.each([
+    ["studio.lan"],
+    ["studio.lan:8443"],
+    ["STUDIO.LAN"],
+    ["studio.lan."],
+    ["studio.lan/"],
+    ["my-pc"],
+    ["192.0.2.5"],
+    ["192.0.2.5:8443"],
+    ["::1"],
+    ["[::1]"],
+    ["[::1]:8443"],
+    ["fe80::1%en0"],
+    ["[fe80::1%en0]"],
+    ["127.1"],
+  ])(
+    "--allow-host %j is taken",
+    (v) => {
+      // The guard reads each of these as a host (a port and case dropped), as before.
+      const r = spawnSync(process.execPath, [cli, "--allow-host", v, "--allow-host", "other.lan", "--version"], {
+        encoding: "utf8",
+        timeout: 15_000,
+        cwd: tmp.dir,
+      });
+      expect(r.status).toBe(0);
+    },
+    20_000,
+  );
+
   it("digits still parse, with leading zeros", () => {
     // --version answers where it stands, after the flags before it parsed.
     const r = spawnSync(process.execPath, [cli, "--port", "07373", "--keep-days", "0", "--version"], {
