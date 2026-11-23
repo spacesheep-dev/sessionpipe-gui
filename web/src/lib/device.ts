@@ -22,6 +22,18 @@ export function shellPlatform(): ShellPlatform | null {
   return typeof p === "string" && PLATFORMS.includes(p) ? (p as ShellPlatform) : null;
 }
 
+/** What a sentence calls the device the app runs on, decided here and nowhere else: "iPhone",
+ *  "iPad", "phone" (Android) or "Mac" (a desktop shell, and a browser, as the signer's words
+ *  always read there). The iOS app is one build for both, so only its shell can tell an iPad:
+ *  it says `device: "ipad"` there (an iPad's webview reads as a Mac, so the page could not). */
+export type DeviceNoun = "iPhone" | "iPad" | "phone" | "Mac";
+export function deviceNoun(platform: ShellPlatform | null = shellPlatform()): DeviceNoun {
+  if (platform === "android") return "phone";
+  if (platform !== "ios") return "Mac";
+  const device = (globalThis as { sessionpipeShell?: { device?: unknown } }).sessionpipeShell?.device;
+  return device === "ipad" ? "iPad" : "iPhone";
+}
+
 /** The app posts notifications itself (the shell lists "notifications": the Mac app and
  *  the phone app, not Windows or Linux), so the page's own are not the ones to offer. */
 export const nativeNotify = (): boolean => {

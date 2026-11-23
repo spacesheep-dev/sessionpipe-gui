@@ -78,12 +78,12 @@ export default function AccountSettings() {
             </button>
           </Row>
         )}
-        <Row label={N.machinesApprove(thisPhone())} hint={key ? <Mark kind={key.mark}>{key.words}</Mark> : undefined}>
+        <Row label={N.approveThis(thisPhone())} hint={key ? <Mark kind={key.mark}>{key.words}</Mark> : undefined}>
           <Link
             to="/add-device"
             className="btn btn--sm"
             // Spoken with what it opens: "Open" alone names nothing in a list of links.
-            aria-label={`${N.open}: ${N.machinesApprove(thisPhone())}`}
+            aria-label={`${N.open}: ${N.approveThis(thisPhone())}`}
             data-approve
           >
             {N.open}

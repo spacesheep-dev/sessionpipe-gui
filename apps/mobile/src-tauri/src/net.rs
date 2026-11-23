@@ -74,11 +74,17 @@ pub fn shell_receiver(r: &ReceiverRef) -> ShellReceiver {
 
 /// The contract for a window showing the Hub's active receiver (or none: the welcome).
 pub fn shell_info(hub: &Hub, version: &str) -> ShellInfo {
-    ShellInfo::new(
+    let info = ShellInfo::new(
         Os::current(),
         version,
         hub.active().as_ref().map(shell_receiver),
-    )
+    );
+    #[cfg(target_os = "ios")]
+    let info = ShellInfo {
+        device: crate::uikit::ipad().then_some("ipad"),
+        ..info
+    };
+    info
 }
 
 /// `rx://localhost/<id>/<path>`: the Hub forwards it (cookie, pinned CA, CORS for the

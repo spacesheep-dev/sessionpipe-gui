@@ -75,7 +75,10 @@ export const NEW_WORDS = {
     `On spacesheep: Devices → Remove. It stops carrying anything ${phone} sends, right away.`,
   openDevices: "Open Devices",
   composerCooling: (Phone: string, time: string) => `${Phone} can send from ${time}`,
-  machinesApprove: (phone: string) => `Approve ${phone}`,
+  // Not approved yet: the one sentence and its way on, wherever it is said (under a prompt,
+  // under the message box, New session, Ask another agent, Inbox, Machines).
+  notApproved: (Phone: string) => `${Phone} can't send yet.`,
+  approveThis: (phone: string) => `Approve ${phone}`,
   answerLate: (machine?: string) => `too late to answer from here; answer it on ${machine ?? "its computer"}`,
   answerLateLine: (machine?: string) => `Too late to answer from here; answer it on ${machine ?? "its computer"}.`,
   answerClosed: "already answered, or timed out",
@@ -94,7 +97,6 @@ export const NEW_WORDS = {
   sessionShowMore: "Show more",
   sessionLoadFailed: "Couldn't load. Try again",
   sessionCopyPreview: "Copy message (preview)",
-  answerNotYet: (Phone: string) => `${Phone} can't answer yet`,
   sendNotAdded: (machine: string, phone: string) => `Not sent: ${machine} hasn't added ${phone} yet.`,
   signerTap: (auth: string) => `Confirm with ${auth}…`,
   signerLocked: (auth: string, secret: string) => `${auth} is locked. Unlock it with your ${secret}, then try again.`,
@@ -141,7 +143,7 @@ export const SEND = {
   long: {
     from: NEW_WORDS.approveCoolingAt,
     by: NEW_WORDS.approveCoolingBy,
-    notYet: (Phone: string) => `${Phone} can't send yet.`,
+    notYet: NEW_WORDS.notApproved,
     notHere: (machine: string, phone: string) => `${machine} hasn't added ${phone} yet.`,
   },
 } as const;
@@ -150,7 +152,7 @@ export const SEND = {
  *  form nothing on could start, a machine's few words in the picker, and the Permission row
  *  where the machine sets the level. */
 export const START = {
-  notApproved: (Phone: string) => `${Phone} isn't approved yet`,
+  notApproved: NEW_WORDS.notApproved,
   notHere: SEND.short.notHere,
   old: "update sessionpipe",
   ownSettings: "Its own settings",
@@ -162,7 +164,6 @@ export const START = {
 /** Machines on an account: the one row that says where this phone stands with every
  *  computer, then each computer's rows and what its Details hold. `n` of `m` computers. */
 export const MACHINES = {
-  approve: (phone: string) => `Approve ${phone} to send`,
   waiting: NEW_WORDS.approveWaiting,
   canFrom: NEW_WORDS.composerCooling,
   canBy: (Phone: string, time: string) => `${Phone} can send by ${time}`,

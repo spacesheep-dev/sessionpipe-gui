@@ -390,7 +390,7 @@ test("the inner display turned is the touch app still: its own sidebar, one sent
       // Not approved yet. The prompt's card says so in one sentence with the one way on: no
       // message field that would only refuse, and no second "Approve this iPhone" under it.
       await page.goto(`${b.server.url}${DUO_SESSIONS.prompt}`);
-      await expect(page.locator(".ctl-answer").getByText("This iPhone can't answer yet."), size).toBeVisible();
+      await expect(page.locator(".ctl-answer").getByText("This iPhone can't send yet."), size).toBeVisible();
       await expect(page.getByRole("link", { name: "Approve this iPhone" }), size).toHaveCount(1);
       await expect(page.getByText("Approve this iPhone"), size).toHaveCount(1);
       await expect(page.locator("textarea"), size).toHaveCount(0);

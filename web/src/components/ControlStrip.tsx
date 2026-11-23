@@ -14,7 +14,8 @@
 // approve it in their place, and on the phone it stands alone, as unpaired. They are
 // disabled where they come back by themselves (the hour a new device waits, reconnecting, a
 // send under way), and where this device is approved and the computer has not added its key
-// (the card says so, with Approve this iPhone). Each of those is said once: on the card,
+// (the card says so, with Approve this iPhone; under a finger they are gone there too, as
+// only something done elsewhere brings them back). Each of those is said once: on the card,
 // with its way on, while it has a prompt to answer (in the hour, on the phone, the card then
 // stands alone too), else under the field. A question from the agent has no
 // pair at all: its card is the question and its options to read, and where to answer it.
@@ -789,6 +790,9 @@ export function ControlStrip({
       </>
     );
   const notAdded = approval === "catching-up" && send ? sendWords(send, name)?.long : null;
+  // Under a finger, a prompt this device cannot answer yet has no Allow and Deny that would
+  // only be refused: its sentence and Approve link stand alone. A mouse keeps them, greyed.
+  const noPair = touch && approval === "catching-up";
   // Why Allow / Deny are off, said on their own bar (the line under the field says the rest).
   const offWhy: ReactNode = enabled ? null : !paired ? (
     catching ? null : folded ? (
@@ -819,7 +823,7 @@ export function ControlStrip({
       blockedAnswer(wrong, blockedSays)
     )
   ) : approve ? (
-    `${NEW_WORDS.answerNotYet(ThisPhone())}.`
+    NEW_WORDS.notApproved(ThisPhone())
   ) : stream ? (
     NEW_WORDS.streamAnswer
   ) : notAdded ? (
@@ -1007,7 +1011,7 @@ export function ControlStrip({
               <Link to="/add-device" className="btn ctl-approve">
                 {setupLabel()}
               </Link>
-            ) : !shut ? (
+            ) : !shut && !noPair ? (
               <span className="ctl-answer-btns">
                 <ActionButton
                   className="btn btn--deny"

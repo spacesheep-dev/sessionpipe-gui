@@ -98,7 +98,7 @@ export function answerState(
             ? // Off an account, this computer trusts no key of this device: as the composer says it.
               send.sendable?.kind === "catching-up"
               ? `${s.machine ?? "This machine"} doesn't trust ${deviceWords().this} yet`
-              : NEW_WORDS.answerNotYet(ThisPhone())
+              : NEW_WORDS.notApproved(ThisPhone()).replace(/\.$/, "")
             : approval === "catching-up"
               ? SEND.long.notHere(s.machine ?? "its computer", thisPhone()).replace(/\.$/, "")
               : late

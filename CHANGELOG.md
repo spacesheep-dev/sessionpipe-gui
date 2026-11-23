@@ -49,6 +49,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   "Ask another agent…" under the message field, and Search's large title and its filters,
   fold away while the keyboard is up, so the field, Send and a few results fit above it;
   they come back when it goes. A taller phone keeps them.
+- **A device not approved yet says so in one sentence everywhere.** Under a prompt, under
+  the message field, in the Inbox, New session, Ask another agent and Machines it reads
+  "This iPhone can't send yet." with Approve this iPhone, where it said "can't answer yet",
+  "isn't approved yet" and "Approve this iPhone to send". The iPad app says "this iPad".
+  Under a prompt whose computer has not added the device yet, a touch screen no longer
+  shows Allow and Deny greyed out: the sentence and Approve this iPhone stand alone.
 
 ### Fixed
 

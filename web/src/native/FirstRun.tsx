@@ -121,7 +121,7 @@ export function Connected({ phone, onDone }: { phone: Phone; onDone: () => void 
           </button>
           {signer && (
             <button type="button" className="btn btn--primary onb-primary" data-ask onClick={ask}>
-              {account ? NEW_WORDS.machinesApprove(phoneNoun(phone)) : WORDS.connected.ask(computer)}
+              {account ? NEW_WORDS.approveThis(phoneNoun(phone)) : WORDS.connected.ask(computer)}
             </button>
           )}
         </div>

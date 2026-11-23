@@ -107,6 +107,11 @@ pub struct ShellInfo {
     pub features: Vec<&'static str>,
     pub receiver: Option<ShellReceiver>,
     pub rx_base: Option<String>,
+    /// `"ipad"` on an iPad, and absent everywhere else. The iOS app is one build for iPhone
+    /// and iPad, and the page can't tell them apart (an iPad's webview reads as a Mac), so
+    /// the contract says it, for the sentences that name the device ("this iPad").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<&'static str>,
 }
 
 impl ShellInfo {
@@ -137,6 +142,7 @@ impl ShellInfo {
             features,
             receiver,
             rx_base,
+            device: None,
         }
     }
 }
@@ -415,6 +421,17 @@ mod tests {
             "0.8.0",
             Some(refused)
         ))));
+    }
+
+    /// Only an iPad says what it is; an iPhone's contract is what it always was.
+    #[test]
+    fn an_ipad_says_so_and_an_iphone_says_nothing_new() {
+        let phone = serde_json::to_value(ShellInfo::new(Os::Ios, "0.2.0", None)).unwrap();
+        assert!(phone.get("device").is_none());
+        let mut ipad = ShellInfo::new(Os::Ios, "0.2.0", None);
+        ipad.device = Some("ipad");
+        assert_eq!(serde_json::to_value(&ipad).unwrap()["device"], "ipad");
+        assert!(init_script(&ipad).contains(r#""device":"ipad""#));
     }
 
     #[test]

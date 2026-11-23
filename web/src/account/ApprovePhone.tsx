@@ -78,7 +78,7 @@ export default function ApprovePhone() {
       className="page page--doc page--grouped pair approve"
       data-approve={rp === null ? "reading" : !secure ? "cannot" : (phase ?? "reading")}
     >
-      <PageBar title={N.machinesApprove(thisPhone())} back={<BackButton onClick={() => back("/machines")} />} />
+      <PageBar title={N.approveThis(thisPhone())} back={<BackButton onClick={() => back("/machines")} />} />
       {rp !== null && !secure ? (
         // This phone cannot sign at all: one honest line, and where sending does work.
         <section className="form-group approve-panel">

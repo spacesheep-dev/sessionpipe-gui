@@ -309,7 +309,7 @@ export function Inbox() {
                 </Link>
               }
             >
-              {`${NEW_WORDS.answerNotYet(ThisPhone())}.`}
+              {NEW_WORDS.notApproved(ThisPhone())}
             </Notice>
           )}
           {said.map((o) => (

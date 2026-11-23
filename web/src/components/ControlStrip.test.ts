@@ -311,7 +311,7 @@ describe("an answer from a device that is not approved, or that its computer has
     for (const state of [unapproved, { kind: "waiting", code: "71" } as SendState]) {
       const st = answerState(s, a, control, { ...send, approval: app(state) }, now);
       expect(st).toEqual({
-        reason: "This iPhone can't answer yet",
+        reason: "This iPhone can't send yet",
         off: true,
         status: undefined,
         tag: "unapproved",
