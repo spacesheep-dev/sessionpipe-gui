@@ -136,6 +136,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   `resets_at` `2026-02-30`, `2026-11-31` or `T24:00:00Z` was kept and shown as resetting on
   March 2, December 1 or the next day, and a pooled account's `until` the same; the window or
   the `until` is now dropped, as `2026-13-01` already was. `2028-02-29` still reads.
+- **`--state` before `search` or `index` is taken.** `sessionpipe-gui --state DIR search
+  "q"` and `--state DIR index --status` stopped with "unknown option search", while every
+  other command takes the flag first; they now read DIR. Another flag before `search` or
+  `index` is refused by its name.
 
 ## [0.8.7] - 2026-11-20
 
