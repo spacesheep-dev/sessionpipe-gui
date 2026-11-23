@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--allow-host` takes a host name, a port at most.** `--allow-host https://studio.lan`,
+  a path, a space, a wildcard (`*.lan`), a list (`a.lan,b.lan`), an empty value or
+  `0.0.0.0` started a receiver that never answered to that name, without a word. Each now
+  stops with an `--allow-host` message. A background service given such a value after `--`
+  now stops at start too, and its log says why; `sessionpipe-gui service install -- <options>`
+  replaces the options it keeps.
+
 ## [0.8.7] - 2026-11-20
 
 A round on the desktop app: on a computer a session opens beside the page, Settings opens
