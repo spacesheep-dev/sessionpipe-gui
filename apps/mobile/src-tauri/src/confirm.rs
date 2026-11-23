@@ -20,10 +20,7 @@ pub struct Ask {
 /// The words for adding a receiver: its address as the person will see it in the list.
 pub fn add_receiver(os: crate::contract::Os, origin: &str, pinned: bool) -> Ask {
     let host = origin.split("://").nth(1).unwrap_or(origin);
-    let device = match os {
-        crate::contract::Os::Ios => "This iPhone",
-        crate::contract::Os::Android => "This phone",
-    };
+    let device = sp_receivers::account::sentence_start(os.here());
     let mut message = format!("{device} will show the sessions on {host}.");
     if pinned {
         message.push_str(" Its certificate is pinned to the one in the link.");

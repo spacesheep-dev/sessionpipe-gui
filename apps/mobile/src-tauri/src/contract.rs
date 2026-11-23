@@ -57,22 +57,39 @@ impl Os {
     }
 
     /// What the phone is called in the middle of a sentence the person reads, as the
-    /// alerts already call it (`confirm.rs`).
-    pub const fn here(self) -> &'static str {
+    /// alerts already call it (`confirm.rs`): "this iPad" on an iPad (`ipad`).
+    pub fn here(self) -> &'static str {
+        self.here_on(ipad())
+    }
+    pub const fn here_on(self, ipad: bool) -> &'static str {
         match self {
+            Os::Ios if ipad => "this iPad",
             Os::Ios => "this iPhone",
             Os::Android => "this phone",
         }
     }
 
     /// What this install calls itself on spacesheep's confirm page, and in the name of
-    /// the key made for it there ("sessionpipe-gui on iPhone (0.8.0)").
-    pub const fn device_name(self) -> &'static str {
+    /// the key made for it there ("sessionpipe-gui on iPhone (0.8.0)", on an iPad "iPad").
+    pub fn device_name(self) -> &'static str {
+        self.device_name_on(ipad())
+    }
+    pub const fn device_name_on(self, ipad: bool) -> &'static str {
         match self {
+            Os::Ios if ipad => "iPad",
             Os::Ios => "iPhone",
             Os::Android => "Android phone",
         }
     }
+}
+
+/// Whether the app runs on an iPad. The iOS app is one build for iPhone and iPad, and only
+/// UIKit can tell them apart (`uikit::ipad`); anywhere else, no.
+pub fn ipad() -> bool {
+    #[cfg(target_os = "ios")]
+    return crate::uikit::ipad();
+    #[cfg(not(target_os = "ios"))]
+    false
 }
 
 /// The receiver this window shows. A sessionpipe-gui receiver has the first four fields
@@ -392,6 +409,15 @@ mod tests {
         assert_eq!(
             (Os::Ios.here(), Os::Android.here()),
             ("this iPhone", "this phone")
+        );
+        // On an iPad the same build names the iPad; Android is never one.
+        assert_eq!(
+            (Os::Ios.here_on(true), Os::Ios.device_name_on(true)),
+            ("this iPad", "iPad")
+        );
+        assert_eq!(
+            (Os::Android.here_on(true), Os::Android.device_name_on(true)),
+            ("this phone", "Android phone")
         );
         // The needs-you hand-over is there exactly where the account is.
         for os in [Os::Ios, Os::Android] {

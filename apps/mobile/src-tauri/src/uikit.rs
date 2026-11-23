@@ -12,8 +12,8 @@ unsafe fn nsstring(s: &str) -> *mut AnyObject {
 }
 
 /// Whether the app runs on an iPad: UIKit's idiom for the device (`.pad`, 1), read once on
-/// the main thread (the first contract is made in `setup`, every later one in
-/// `with_webview`, both there) and kept, as it never changes while the app runs.
+/// the main thread (first by the Hub's config in `setup`, which names the device) and kept,
+/// as it never changes while the app runs.
 pub fn ipad() -> bool {
     static IPAD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *IPAD.get_or_init(|| unsafe {
