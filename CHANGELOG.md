@@ -51,10 +51,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
-- **The message field no longer loses a letter when keys come quickly.** In a session's
-  message field, a run of keys that came faster than the page could draw lost one letter
-  after some fifty, and one in every fifty after that: "deploy" came out as "deloy".
-  Every key now lands.
+- **The message field keeps every letter when a program types into it.** In a session's
+  message field, keys that arrive in one burst (a password manager, a macro tool, a
+  barcode scanner) lost one letter after some fifty, and one in every fifty after that:
+  "deploy" came out as "deloy". Every key now lands. Typing by hand was not affected.
 - **The camera fills the screen when you scan a computer's code with iPhone Duo open.**
   It was the size of the outer screen, so on the opened phone it covered only part of the
   screen, upright and turned. It now fills the window either way up, and follows a turn
@@ -106,8 +106,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   ended up as much as a screen away. The row a third of the way down the view now stays
   where it was under the bar, and inside a reply longer than the screen the paragraph does.
   Folded back, the page is where it began, in the iPhone app too, where the folded screen's
-  layout comes a moment after its size: the shorter page it makes no longer leaves a
-  session at its end, following it. A page that changed with nothing scrolled since
+  layout comes a moment after its size: the shorter page it makes no longer jumps to
+  the session's end. A page that changed with nothing scrolled since
   keeps its place too: a long message opened in place, a card that came in above, a list
   still moving its rows.
 - **A session followed at its end is still followed after the phone is turned.** In the

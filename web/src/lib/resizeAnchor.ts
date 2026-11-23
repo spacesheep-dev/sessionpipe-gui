@@ -85,6 +85,9 @@ export interface PlaceKeeper {
    *  the window in script; heard while the page settles, the frames to settle in are
    *  counted from it again. */
   sized(resize?: boolean): boolean;
+  /** True while the page settles in another window WIDTH (rows wrap anew); a change of
+   *  height alone (a browser's toolbar) is not this. */
+  rewrapping(): boolean;
   /** The page is left: nothing more is read, put back or told. */
   stop(): void;
 }
@@ -171,6 +174,7 @@ export function placeKeeper<Place>(view: AnchorView<Place>): PlaceKeeper {
   };
   return {
     sized: (resize) => !stopped && sized(resize),
+    rewrapping: () => !stopped && sized() && wrapped,
     scrolled() {
       if (stopped || sized()) return;
       if (left !== null && Math.abs(view.scrollY() - left) < 1) return;
@@ -386,5 +390,5 @@ export function useResizeAnchor(o: ResizeAnchorOptions): () => boolean {
   // After every commit of the page that draws the rows: one that moves them leaves their
   // box the size it was (a list sorted anew).
   useEffect(() => committed.current?.());
-  return useCallback(() => keeping.current?.sized() ?? false, []);
+  return useCallback(() => keeping.current?.rewrapping() ?? false, []);
 }
