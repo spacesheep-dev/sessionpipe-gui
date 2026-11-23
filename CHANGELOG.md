@@ -6,6 +6,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Search's index list names the history folders on Windows.** Beside Claude Code,
+  Codex and the other agents it showed no `~/.claude` (or `~/.claude-work`, …) on
+  Windows: the folder was compared with a `/` a Windows path does not have.
+
 ## [0.8.7] - 2026-11-20
 
 A round on the desktop app: on a computer a session opens beside the page, Settings opens
