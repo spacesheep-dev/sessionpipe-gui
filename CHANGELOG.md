@@ -6,6 +6,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A plugin turned off while it is still starting is stopped.** After a settings save or
+  two enables at once, a plugin turned off before it had finished starting kept running
+  while the Views page listed it off.
+
 ## [0.8.7] - 2026-11-20
 
 A round on the desktop app: on a computer a session opens beside the page, Settings opens
