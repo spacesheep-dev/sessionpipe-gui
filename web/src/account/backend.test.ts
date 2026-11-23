@@ -884,6 +884,34 @@ describe("a page's own backend on a spacesheep account", () => {
     page.off();
   });
 
+  it("a session forgotten and then gone on with in one page keeps, here too, what came after the forget", async () => {
+    const cache = keptCache();
+    r = rig({ cache });
+    const old = new Session("s-again");
+    r.ss.push([
+      old.ev("session.started", {}, { tier: 2 }),
+      old.ev("turn.transcript", { turn: 1, user: "before the forget", assistant: "ok" }, { tier: 2 }),
+    ]);
+    let b = await r.start();
+    await tick(400);
+    // The forget, and the session going on after it (its outbox gone, so seq starts again at 0).
+    const again = new Session("s-again");
+    r.ss.push([
+      old.ev("session.forgotten", {}, { tier: 2 }),
+      again.ev("session.started", {}, { tier: 2 }),
+      again.ev("turn.transcript", { turn: 1, user: "after the forget", assistant: "ok" }, { tier: 2 }),
+    ]);
+    await tick(30_000);
+    expect(b.view().store.sessions).toBe(1);
+    const text = JSON.stringify(cache.pages());
+    expect(text).not.toContain("before the forget");
+    expect(text).toContain("after the forget");
+    b.stop();
+    b = await r.start();
+    await tick(400);
+    expect(b.view()).toMatchObject({ restored: { events: 2 }, store: { sessions: 1 } });
+  });
+
   describe("a document the hub could not read at the start", () => {
     const account = () => [...r.hub.accounts.values()][0]!;
     /** A launch that needs the documents' reads tried again: time is moved while it starts. */

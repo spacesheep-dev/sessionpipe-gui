@@ -51,6 +51,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A session forgotten and then gone on with keeps what it says next,** also when the
+  forget and its next events arrive together (a page from spacesheep): they were dropped,
+  and counted as duplicates.
+- **A plugin turned off while it is still starting is stopped.** After a settings save or
+  two enables at once, a plugin turned off before it had finished starting kept running
+  while the Views page listed it off.
 - **The message field keeps every letter when a program types into it.** In a session's
   message field, keys that arrive in one burst (a password manager, a macro tool, a
   barcode scanner) lost one letter after some fifty, and one in every fifty after that:
