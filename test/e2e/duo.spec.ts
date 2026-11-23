@@ -807,6 +807,10 @@ test("the outer display and a Split View half keep the tab bar; More or Display 
     await more.click();
     await sheet.getByRole("button", { name: "Display" }).click();
     await expect(display).toBeVisible();
+    // Folded, it is the phone's sheet: from one side of the window to the other.
+    await settled(page);
+    const folded = await boxOf(display);
+    expect([folded.left, folded.right]).toEqual([0, 466]);
     await pose(page, 669, 951);
     await expect(display).toHaveCount(0);
     await pose(page, 466, 678);
@@ -874,7 +878,7 @@ const grabbers = (page: Page) =>
 const ROOM: [size: string, insets: Insets][] = [...REGULAR, ["820x1180", [24, 0, 20, 0]]];
 for (const [size, insets] of ROOM) {
   const where = `${size} [${insets}]`;
-  test(`with room, at ${where}, New session and Ask another agent are a centred form sheet, a row's menu and Display float as cards, and a Select is a pop-up`, {
+  test(`with room, at ${where}, New session and Ask another agent are a centred form sheet, a row's menu, Display and the Feed's Filter float as cards beside the sidebar, and a Select is a pop-up`, {
     tag: "@webkit",
   }, async ({ browser }) => {
     test.setTimeout(90_000);
@@ -904,14 +908,23 @@ for (const [size, insets] of ROOM) {
       });
       expect(foot, what).toBe(16);
     };
-    const card = async (el: Locator, what: string) => {
+    /** A floating card: in the middle of the page beside the sidebar (never over the
+     *  sidebar, 24 pt clear of it at least), over a dim of the whole window, sidebar
+     *  included. `dim` is its dim. */
+    const card = async (el: Locator, dim: Locator, what: string) => {
       await settled(page);
       const box = await boxOf(el);
+      const side = await boxOf(page.locator("nav.rail"));
       expect(box.width, what).toBeLessThanOrEqual(400);
-      expect(Math.abs((box.left + box.right) / 2 - middle), what).toBeLessThanOrEqual(1);
+      expect(Math.abs((box.left + box.right) / 2 - (side.right + width - right) / 2), what).toBeLessThanOrEqual(1);
+      expect(box.left, what).toBeGreaterThanOrEqual(side.right + 24 - 1);
+      expect(box.right, what).toBeLessThanOrEqual(width - right - 24 + 1);
       expect(box.bottom, what).toBeLessThanOrEqual(height - bottom - 16);
+      const d = await boxOf(dim);
+      expect([d.left, d.right, d.top, d.bottom], what).toEqual([0, width, 0, height]);
       expect(await grabbers(page), what).toBe(0);
       if (top || right || left) expect(await underBands(page), what).toEqual([]);
+      return side;
     };
     try {
       Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
@@ -963,9 +976,12 @@ for (const [size, insets] of ROOM) {
       await page.locator("nav.rail").getByRole("button", { name: "Display" }).click();
       const display = page.getByRole("dialog", { name: "Quick settings" });
       await expect(display).toBeVisible();
-      await card(display, `Display, ${where}`);
-      await page.keyboard.press("Escape");
+      const side = await card(display, page.locator(".qs-scrim"), `Display, ${where}`);
+      // A tap on the dim over the sidebar puts it away, and opens no page under it.
+      const before = page.url();
+      await page.mouse.click((side.left + side.right) / 2, side.top + (side.bottom - side.top) / 3);
       await expect(display).toHaveCount(0);
+      expect(page.url(), where).toBe(before);
 
       // A row held down: its menu is a card. (Last on the board: the finger's lift that
       // the menu swallows never comes from a test.)
@@ -984,9 +1000,41 @@ for (const [size, insets] of ROOM) {
           );
         });
       await expect(page.getByRole("menuitem", { name: "Preview", exact: true })).toBeVisible();
-      await card(page.locator(".menu-sheet"), `a row's menu, ${where}`);
+      await card(page.locator(".menu-sheet"), page.locator(".menu-scrim"), `a row's menu, ${where}`);
       await page.keyboard.press("Escape");
       await expect(page.locator(".menu-sheet")).toHaveCount(0);
+
+      // A picker: the Feed's Filter, its machines and agents (in Pro, where the Feed is).
+      await page.evaluate(() => {
+        const key = "sessionpipe-gui.settings";
+        localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? "{}"), mode: "pro" }));
+      });
+      await page.goto(`${b.server.url}/feed`);
+      await page.locator(".filter-btn").click();
+      await expect(page.getByRole("menuitemradio", { name: "All machines" })).toBeVisible();
+      await card(page.locator(".menu-sheet"), page.locator(".menu-scrim"), `the Feed's Filter, ${where}`);
+      await page.mouse.click((side.left + side.right) / 2, side.top + (side.bottom - side.top) / 3);
+      await expect(page.locator(".menu-sheet")).toHaveCount(0);
+      expect(new URL(page.url()).pathname, where).toBe("/feed");
+
+      // Settings covers the sidebar: a card over it (a confirm from one of its sections)
+      // stands in the middle of what the system leaves, as the form sheet does. Measured
+      // on a card put there by hand: no section here asks before it acts.
+      await page.locator("nav.rail").getByRole("link", { name: "Settings" }).click();
+      await expect(page.locator(".settings-wrap")).toBeVisible();
+      const over = await page.evaluate(() => {
+        const probe = document.createElement("div");
+        probe.className = "menu-sheet";
+        probe.style.cssText = "height:100px;animation:none";
+        document.body.append(probe);
+        const r = probe.getBoundingClientRect();
+        probe.remove();
+        return { left: r.left, right: r.right };
+      });
+      expect(over.right - over.left, where).toBeLessThanOrEqual(400);
+      expect(Math.abs((over.left + over.right) / 2 - middle), where).toBeLessThanOrEqual(1);
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".settings-wrap")).toHaveCount(0);
 
       // Ask another agent, from a session.
       await page.goto(`${b.server.url}${DUO_SESSIONS.done}`);
