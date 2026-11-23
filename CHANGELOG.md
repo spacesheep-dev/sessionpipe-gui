@@ -156,6 +156,9 @@ All notable changes to `sessionpipe-gui`. The format follows
   found only this computer's own history, and `repo:github.com/acme` only the others.
   `repo:` now matches from any part of the name, on the receiver, in `sessionpipe-gui
   search --repo`, and in Search on a spacesheep account, which matched the last part only.
+- **Search's index list names the history folders on Windows.** Beside Claude Code,
+  Codex and the other agents it showed no `~/.claude` (or `~/.claude-work`, …) on
+  Windows: the folder was compared with a `/` a Windows path does not have.
 
 ## [0.8.7] - 2026-11-20
 
