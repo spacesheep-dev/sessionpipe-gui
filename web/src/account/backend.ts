@@ -640,15 +640,17 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
           try {
             const r = store.ingest(events, "spacesheep");
             // A session the account forgot is gone from the store; it goes from what is
-            // kept too: from this page (its earlier events came with it) and from every
-            // page before it, so nothing of it stays here or comes back at the next start.
+            // kept too: from every page before this one, so nothing of it stays here or
+            // comes back at the next start. Of this page, `r.stored` holds only what the
+            // store kept: nothing from before the forget, and what came after it (the
+            // session went on).
             const gone = new Set<SessionKey>();
             for (const e of events)
               if (e.type === "session.forgotten") gone.add(sessionKey(e.harness.name, e.session.id));
-            for (const e of withoutSessions(r.stored, gone)) pending.push(e);
+            const back = new Set(r.stored.map((e) => sessionKey(e.harness.name, e.session.id)));
             noteSeen(
               events.map((e) => sessionKey(e.harness.name, e.session.id)),
-              gone,
+              new Set([...gone].filter((k) => !back.has(k))),
             );
             if (gone.size) {
               pending = [...withoutSessions(pending, gone)];
@@ -656,6 +658,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
               // And its draft, and its place in the page's own lists.
               local.forget([...gone]);
             }
+            for (const e of r.stored) pending.push(e);
             return r.accepted;
           } finally {
             // Its board goes out once the page is taken, unless the page was full (onPage).
