@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--state` before `search` or `index` is taken.** `sessionpipe-gui --state DIR search
+  "q"` and `--state DIR index --status` stopped with "unknown option search", while every
+  other command takes the flag first; they now read DIR. Another flag before `search` or
+  `index` is refused by its name.
+
 ## [0.8.7] - 2026-11-20
 
 A round on the desktop app: on a computer a session opens beside the page, Settings opens
