@@ -151,6 +151,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   searched the filter as part of the phrase and filtered nothing; `sessionpipe-gui search
   '"rate limiter' --agent codex` did the same. The quote is now closed first (`"rate
   limiter" agent:codex`). Typing an unclosed quote still searches to the end of the query.
+- **Search's `repo:acme/api` finds the sessions sessionpipe sent for that repo.** Their
+  repo starts with the host (`github.com/acme/api`), so `repo:acme/api` and `repo:acme`
+  found only this computer's own history, and `repo:github.com/acme` only the others.
+  `repo:` now matches from any part of the name, on the receiver, in `sessionpipe-gui
+  search --repo`, and in Search on a spacesheep account, which matched the last part only.
 
 ## [0.8.7] - 2026-11-20
 
