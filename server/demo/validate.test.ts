@@ -29,6 +29,26 @@ describe("validate", () => {
     expect(validate(noData)).toContain("data: missing");
   });
 
+  it("refuses a time on a day the month does not have, or at hour 24, as the receiver does", () => {
+    const TIME = "time: not an RFC 3339 time with ms and Z";
+    for (const t of ["2026-02-30T01:03:11.204Z", "2026-11-31T01:03:11.204Z", "2026-11-20T24:00:00.000Z"]) {
+      expect(validate({ ...good(), time: t })).toContain(TIME);
+      expect(
+        validate({ ...good(), type: "turn.transcript", data: { turn: 1, user: "u", assistant: "a", at: t } }),
+      ).toContain("data.at: not an RFC 3339 time with ms and Z");
+      expect(
+        validate({
+          ...good(),
+          type: "limits.observed",
+          tier: 1,
+          privacy: { rulesets: [], pii: false },
+          data: { windows: [{ id: "five_hour", used_percent: 1, resets_at: t }] },
+        }),
+      ).toContain("data.windows: not 1–8 windows of id, used_percent, resets_at?, window_minutes?");
+    }
+    expect(validate({ ...good(), time: "2028-02-29T01:03:11.204Z" })).toEqual([]);
+  });
+
   it("checks the tier a type needs and what each tier may carry", () => {
     expect(validate({ ...good(), tier: 0 })).toContain("tier: tool.ended needs tier 1");
     expect(validate({ ...good(), tier: 1 })).toContain("data.input: needs tier 3");

@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { copyText } from "../lib/clipboard";
 import { harnessMark, STATE_HINT, STATE_LABEL } from "../lib/format";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
@@ -615,4 +616,25 @@ export function EmptyState({
       {actions ? <div className="state-actions">{actions}</div> : null}
     </div>
   );
+}
+
+/** A phone's full-window sheet (New session, Ask another agent, the pool's), and before it
+ *  the dim it stands on where the window has room and it is a form sheet
+ *  (styles/regular.css); compact, the dim is not shown. A tap on the dim puts it away.
+ *  `into`: both in a portal there. */
+export function withFormScrim(close: () => void, closing: boolean, sheet: ReactNode, into?: Element) {
+  const both = (
+    <>
+      <button
+        type="button"
+        className="menu-scrim menu-scrim--dialog ns-scrim ns-scrim--form"
+        aria-label="Close"
+        onClick={close}
+        data-closing={closing ? "" : undefined}
+        data-dismiss
+      />
+      {sheet}
+    </>
+  );
+  return into ? createPortal(both, into) : both;
 }

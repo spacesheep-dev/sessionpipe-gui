@@ -11,7 +11,7 @@
 .main > .session {
   min-height: 100dvh;
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .main:has(> .session) {
     padding-bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
   }
@@ -65,7 +65,7 @@ html:has(.main > .session) {
 .sess-bar .bar-lead {
   flex: 1 1 0;
 }
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .sess-bar .bar-title {
     flex: 0 0 auto;
     max-width: 60%;
@@ -223,7 +223,7 @@ html:has(.main > .session) {
   min-width: 28px;
   padding: 0 8px;
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .sess-lens .lens-hint {
     flex: 1 1 auto;
   }
@@ -422,6 +422,18 @@ html:has(.main > .session) {
 .reply {
   margin: 8px 0 8px var(--tl-lead);
   color: var(--fg);
+}
+/* A touch screen with room for more (a tablet, a phone opened flat): a reply's prose keeps
+   to about 70 characters a line, where the eye still finds the next one. Its paragraphs,
+   lists, quotes and headings stop there, from the column's leading edge; its code and
+   tables keep the column. In em, so a larger text size holds the same count. The chat's
+   reply too (chat.css `.chat-card`), an agent's last word, and a reply read from the
+   search index with what was found marked in it (search.css `.hx-prose`). */
+@media (pointer: coarse) {
+  :is(.reply, .chat-card, .agent-result-text) > .md > :is(p, ul, ol, blockquote, h1, h2, h3, h4),
+  .chat-card > .hx-prose {
+    max-width: 33em;
+  }
 }
 
 /* A row: the time, a 16 px glyph, the text, the duration trailing. */
@@ -713,7 +725,7 @@ html:has(.main > .session) {
 .sess-new:active {
   background: color-mix(in oklch, var(--bg-2), var(--fg) 10%);
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* Over the tab bar, or on the keyboard when it is up: --kb is its height
      (lib/keyboardInset.ts, from visualViewport; absent, so 0, without one), and the tab bar
      stays where it is, under the keyboard, as iOS's does. The larger of the two, not their
@@ -721,6 +733,28 @@ html:has(.main > .session) {
   .sess-ctl {
     bottom: max(calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom))), var(--kb, 0px));
     padding: 8px var(--gutter);
+  }
+  /* The page's strip is a bar, as the two it stands between are (shell.css --edge-l,
+     --edge-r): its ground runs under what the system keeps at a side to the window's
+     edge, and its field and buttons keep clear of it. */
+  .main > .session > .sess-ctl {
+    margin-left: calc(-1 * var(--edge-l));
+    margin-right: calc(-1 * var(--edge-r));
+    padding-left: var(--edge-l);
+    padding-right: var(--edge-r);
+  }
+  /* "3 new" stays over the message column, the middle of what the system leaves, and not
+     of a ground that runs on under the band. */
+  .main > .session > .sess-ctl > .sess-new {
+    left: calc(50% + (var(--safe-left, env(safe-area-inset-left)) - var(--safe-right, env(safe-area-inset-right))) / 2);
+  }
+}
+/* A short touch screen with the keyboard up (data-kb: lib/keyboardInset.ts) keeps its room
+   for what is being typed: the strip's foot goes while it holds only Ask another agent…,
+   and comes back with the keys down. A reason sentence always stays. */
+@media (pointer: coarse) and (max-height: 760px) {
+  html[data-kb] .sess-ctl .ctl-foot:not(:has(.ctl-hint)) {
+    display: none;
   }
 }
 
@@ -826,7 +860,7 @@ html:has(.main > .session) {
   }
 }
 /* A phone has no "beside": the block itself is the way in, and the chevron stays. */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .agent-beside.icon-btn {
     display: none;
   }

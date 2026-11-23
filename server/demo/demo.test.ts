@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // The simulation is checked on its own virtual clock (deterministic, instant), then the
 // runner on the wall clock at speed 1000 against a fake store.
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { DONE_AFTER_MS, type EventSource, type ProtocolEvent } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
 import { type Hello, MACHINE_RE, parseHello } from "../control/parse.js";
-import type { DemoStart } from "../control/state.js";
+import { ControlState, type DemoStart } from "../control/state.js";
 import { applyEvent, newRecord, refreshState } from "../store/readings.js";
 import type { Store } from "../store/store.js";
 import { MODELS } from "./content.js";
 import { startDemo } from "./index.js";
-import { DEMO_ACP_SESSION, demoMachineId, startDemoMachines } from "./machine.js";
+import { DEMO_ACP_SESSION, demoMachineId, HELLO_MS, startDemoMachines } from "./machine.js";
 import { DEMO_API_ACCOUNT, DEMO_POOL, DEMO_POOL_UNTIL_MS, type DemoStarted, Simulation } from "./sim.js";
 import { TYPE_TIER, validate } from "./validate.js";
 
@@ -912,5 +915,81 @@ describe("demo machines", () => {
     m.stop();
     expect(calls.at(-1)).toBe("remove");
     expect(demoMachineId("lab-mac")).toMatch(MACHINE_RE);
+  });
+
+  it("says each machine's hello again every ten minutes, as a daemon does, however long the demo runs", () => {
+    // The GUI says a machine's facts are "as of 31 m ago" once its hello is older than 15
+    // minutes (web/src/lib/limits.ts STALE_MS): a demo's must never be.
+    expect(HELLO_MS).toBeLessThan(15 * 60_000);
+    vi.useFakeTimers({ now: T0 });
+    try {
+      const said: string[] = [];
+      const control = {
+        demo: {
+          machine: (id: string) => said.push(`machine ${id}`),
+          hello: (id: string, h: Hello) => said.push(`hello ${id} ${h.name}`),
+          poll: () => {},
+          start: () => {},
+          remove: () => 0,
+        },
+      } as unknown as Control;
+      const m = startDemoMachines(control, "lab-mac", () => "acct", T0);
+      said.length = 0;
+      vi.advanceTimersByTime(HELLO_MS - 1);
+      expect(said).toEqual([]);
+      vi.advanceTimersByTime(1);
+      const once = ["lab-mac", "mini-mac", "desk-pc"].map((n) => `hello ${demoMachineId(n)} ${n}`);
+      expect(said).toEqual(once);
+      // An hour and a half in: nine times each, and never paired again.
+      vi.advanceTimersByTime(8 * HELLO_MS);
+      expect(said).toEqual(Array.from({ length: 9 }, () => once).flat());
+      m.stop();
+      vi.advanceTimersByTime(3 * HELLO_MS);
+      expect(said).toHaveLength(27);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a demo machine's hello again is as of now; one forgotten since stays gone", () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "spgui-demo-hello-"));
+    vi.useFakeTimers({ now: T0 });
+    const state = new ControlState(dir);
+    try {
+      const hellos: Hello[] = [];
+      const control = {
+        demo: {
+          machine: (id: string, h: Hello) => {
+            hellos.push(h);
+            state.demoMachine(id, h);
+          },
+          hello: (id: string, h: Hello) => state.demoHello(id, h),
+          poll: (id: string) => state.demoPoll(id),
+          start: () => {},
+          remove: () => state.removeDemoMachines(),
+        },
+      } as unknown as Control;
+      const m = startDemoMachines(control, "lab-mac", () => "acct", T0);
+      const lab = demoMachineId("lab-mac");
+      const mini = demoMachineId("mini-mac");
+      expect(state.machine(lab)?.lastHelloAt).toBe(new Date(T0).toISOString());
+      // 31 minutes on: the last hello was a minute ago, not 31.
+      vi.advanceTimersByTime(31 * 60_000);
+      expect(state.machine(lab)?.lastHelloAt).toBe(new Date(T0 + 30 * 60_000).toISOString());
+      expect(state.machine(lab)?.pool).toEqual(hellos[0]!.pool);
+      // Forgotten from the UI, it is not brought back by its next hello.
+      state.removeMachine(mini);
+      vi.advanceTimersByTime(HELLO_MS);
+      expect(state.machine(mini)).toBeUndefined();
+      expect(state.machine(lab)?.lastHelloAt).toBe(new Date(T0 + 40 * 60_000).toISOString());
+      // Only a demo machine's row is taken.
+      state.demoHello("not-a-demo-machine", hellos[0]!);
+      expect(state.machine("not-a-demo-machine")).toBeUndefined();
+      m.stop();
+    } finally {
+      state.close();
+      vi.useRealTimers();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

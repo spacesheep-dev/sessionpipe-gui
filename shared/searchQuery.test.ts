@@ -107,6 +107,29 @@ describe("editing a query", () => {
     expect(setFilter("x -agent:codex", "agent", null)).toBe("x -agent:codex");
   });
 
+  it("closes a phrase left open before adding a filter, so the filter is not searched as text", () => {
+    const at = (q: string) => setFilter(q, "agent", "codex");
+    for (const [q, want] of [
+      ['"rate limiter', '"rate limiter" agent:codex'],
+      ['"rate limiter ', '"rate limiter" agent:codex'],
+      ['x -"dry run', 'x -"dry run" agent:codex'],
+      ['repo:"my repo', 'repo:"my repo" agent:codex'],
+      ['foo:"bar', 'foo:"bar" agent:codex'],
+      ['x "', 'x "" agent:codex'],
+      ['"rate limiter agent:claude', '"rate limiter agent:claude" agent:codex'],
+    ]) {
+      expect(at(q!)).toBe(want);
+      expect(parseSearch(at(q!)).filters.agent).toEqual(["codex"]);
+    }
+    expect(parseSearch(at('"rate limiter')).clauses).toEqual([{ kind: "phrase", text: "rate limiter", not: false }]);
+    // The open quote was the filter being replaced: it goes, and nothing is closed.
+    expect(setFilter('x repo:"my re', "repo", "foo")).toBe("x repo:foo");
+    // A closed phrase and a removal are left as they are; typing still reads to the end.
+    expect(at('"rate limiter" x')).toBe('"rate limiter" x agent:codex');
+    expect(setFilter('"rate limiter', "agent", null)).toBe('"rate limiter');
+    expect(parseSearch('"rate limiter agent:codex', { live: true }).filters).toEqual({});
+  });
+
   it("builds the no-result hints' queries", () => {
     expect(withoutFilters("webhook agent:codex since:7d 409")).toBe("webhook 409");
     expect(withoutQuotes('"webhook 409" retry')).toBe("webhook 409 retry");

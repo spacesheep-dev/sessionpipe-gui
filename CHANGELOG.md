@@ -6,8 +6,151 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A touch screen has the touch app at any width.** A tablet turned on its side, a phone
+  on its side or opened flat, and a tablet's browser got the Mac's layout from 840 px wide:
+  the icon rail, "Start ⌘↵" and "… is listening." in New session, "Open in new window" in a
+  row's menu, two "Approve this iPhone" under one prompt, and the page running under the
+  status bar at the side. They now keep the phone's tab bar, sheets and words, inside the
+  screen's safe areas, with the message field riding on the keyboard. Turning the screen no
+  longer swaps the app under the hand: New session keeps its open list, the caret and the
+  words being typed. The Mac's sidebar, the panel beside a list and "Open beside" are a
+  window with a mouse's, which still changes at 720 px.
+- **A touch screen with room has a sidebar in place of the tab bar.** On a tablet, either
+  way up, and on a phone opened flat, the pages are a list down the left side of the
+  screen: Board, Inbox with its count, Search, Machines, then what More held (Usage among
+  them) and the views, with Display and Settings at the foot, each a row a finger takes.
+  New session is at its head. The tab bar stretched five tabs across such a screen; a
+  phone held upright, a folded phone, Split View and a window with a mouse keep what they
+  had. A page pinched larger in a tablet's browser keeps its sidebar.
+- **With room, sheets and menus float in the middle, and each page reads down one
+  column.** On a tablet and on a phone opened flat, New session, Ask another agent and
+  adding an account are a sheet of at most 540 pt in the middle, over a dimmed page; a
+  tap beside it closes it. A row's menu, Labels and Display are a card of at most 400 pt,
+  and a choice in a sheet opens as a list under its button, also one tapped while the
+  sheet is still coming up, which rides up with it. The Board, the Inbox, Search,
+  Machines and Settings keep to a column of 672 pt. A phone held upright, a folded phone,
+  Split View and a window with a mouse are unchanged.
+- **On a wide touch screen a reply reads in lines of about 70 characters.** On a tablet,
+  and on a phone opened flat or turned on its side, a reply's lines ran to 90 and 115
+  characters, too long for the eye to find the next one. Its paragraphs, lists, quotes and
+  headings now stop at about 70, from the column's leading edge, at any text size; its
+  code and tables keep the column, and the bubble of what you wrote is no wider than the
+  prose. A phone held upright and a window with a mouse are unchanged.
+- **The iPhone app fills iPhone Duo's screens.** Built with Xcode 26, it showed in a box
+  with black bars round it, folded and opened. It is now built with Xcode 27.1 and reaches
+  the edges of both screens, with its controls clear of the status bar at the side.
+- **The keyboard no longer covers what is being typed.** In New session, Ask another agent
+  and adding an account on a phone, the field being typed in, and the line under it that
+  says why Start waits, now move up above the keys; on a tablet the sheet ends above them
+  wherever it was opened from. On a short screen, such as a folded phone or Split View,
+  "Ask another agent…" under the message field, and Search's large title and its filters,
+  fold away while the keyboard is up, so the field, Send and a few results fit above it;
+  they come back when it goes. A taller phone keeps them.
+
 ### Fixed
 
+- **A session forgotten and then gone on with keeps what it says next,** also when the
+  forget and its next events arrive together (a page from spacesheep): they were dropped,
+  and counted as duplicates.
+- **A plugin turned off while it is still starting is stopped.** After a settings save or
+  two enables at once, a plugin turned off before it had finished starting kept running
+  while the Views page listed it off.
+- **The message field keeps every letter when a program types into it.** In a session's
+  message field, keys that arrive in one burst (a password manager, a macro tool, a
+  barcode scanner) lost one letter after some fifty, and one in every fifty after that:
+  "deploy" came out as "deloy". Every key now lands. Typing by hand was not affected.
+- **The camera fills the screen when you scan a computer's code with iPhone Duo open.**
+  It was the size of the outer screen, so on the opened phone it covered only part of the
+  screen, upright and turned. It now fills the window either way up, and follows a turn
+  and Split View.
+- **A sheet dragged down no longer takes the dim from the next one.** After New session
+  was put away with a drag, Display, More and the next New session opened over a page
+  that was not dimmed.
+- **Nothing to tap sits under what the system keeps at the side of the screen.** Where a
+  phone's own bars stand in a band beside the page (a folding phone closed, in Split View
+  or turned on its side) or a notch does, the page kept only the wider of its margin and
+  that band: a row's time stood flush against it, a bar's last button reached under it,
+  and Start in New session, the More sheet's rows, a row's menu, Labels, Display, Settings,
+  a session's files and Search's pop-ups ran under it. The margin is now inside what the
+  system leaves, on every page and in every sheet and menu; the bars keep their ground to
+  the screen's edge. A session's title stands between its bar's buttons; the
+  "Reconnecting…" pill and the pull-to-refresh ring stand in the middle of what is left,
+  and a list opened from a field never opens under the band. A picture opened whole keeps
+  its picture, × and arrows clear of the band too, and of the status bar and the home
+  indicator in the Android app, where they ran under them. A screen with nothing at its
+  sides is as it was.
+- **A window dragged across 720 px wide changes its layout all at once, and keeps nothing
+  of the layout it left.** Each part of the page watched the width by itself, so for a
+  moment a phone's bar stood over a desktop's page; on Search that put the focus back in
+  the field and threw the results to the top. Search's field now takes the focus when the
+  page opens and is not given it again; a field being typed in keeps it, with its caret,
+  and the results are no longer thrown to the top. In Settings, a choice opened in the
+  narrow window (Mode) stayed as a page with no way back once the window was wide; the
+  section shows instead. The Labels sheet becomes the dialog, and the dialog the sheet, as
+  the window is resized, with the name being typed still in its field.
+- **A label's name given on another device is no longer undone by "Edit labels…" open
+  here.** The dialog opens with its first field in hand, and a field in hand kept the name
+  it had: a name given to that colour elsewhere meanwhile did not show in it, and was put
+  back to the old one as the field was left. A field now saves only a name you changed,
+  and shows a new one as it arrives.
+- **A label's new name that could not be saved stays in its field.** "Not saved; try
+  again" showed under the old name, put back in the field, so there was nothing to try
+  again. The name typed now stays, and Enter or leaving the field saves it.
+- **Search's range of days fits a narrow phone.** On Android and in Chrome, the two dates
+  of "Custom range…" were as wide as the browser draws a date, whatever the card's width:
+  on a phone under about 400 px wide the second one stood out of the card, and at 320 px
+  Apply was off the screen. The two dates now share the card's width, with Cancel and
+  Apply under them. An iPhone already drew it so.
+- **Copy beside a tool's input or output, and on a block of code, takes a finger.** On a
+  touch screen the button answered only on its 24 points; it looks the same and now takes a
+  tap 44 points across.
+- **A window that changes width keeps the place being read.** A phone unfolded, folded or
+  turned, or a window dragged narrower, kept its scroll offset while the page above
+  wrapped anew: the reply being read, or the row on the Board, in the Inbox or in Search,
+  ended up as much as a screen away. The row a third of the way down the view now stays
+  where it was under the bar, and inside a reply longer than the screen the paragraph does.
+  Folded back, the page is where it began, in the iPhone app too, where the folded screen's
+  layout comes a moment after its size: the shorter page it makes no longer jumps to
+  the session's end. A page that changed with nothing scrolled since
+  keeps its place too: a long message opened in place, a card that came in above, a list
+  still moving its rows.
+- **A session followed at its end is still followed after the phone is turned.** In the
+  iPhone app, turning the phone upright again left the session short of its end and no
+  longer following: the next reply came in below, behind a "new" pill. A scroll the
+  browser made to fit the page to its new window was taken for the person's.
+- **Rows no longer glide after a window changes width.** The Board's and the Inbox's rows
+  slid from where the old layout had them to their new places, as they do when the list is
+  sorted anew. Nothing had moved in the list: they now stand where they are.
+- **An open list stays open as the phone is unfolded or folded.** A list that is a sheet on
+  a narrow screen and a pop-up under its button on a wider one was drawn anew as the
+  screen changed, and its filter lost the focus (and with it the keyboard). It is now the
+  same list in both forms: the filter's text, the focus and the row it was on are kept.
+- **An upload the board can't save is no longer said as "no room".** When the board's files
+  folder can't be written, the message box and New session said the board had no room for
+  more files today; they now say it couldn't save the picture or file, with Try again. A
+  full disk still says there is no room.
+- **A limit's reset time and a pooled account's "until" on a day the month does not have, or
+  at hour 24, are left out.** A `limits.observed` window or a hello's pooled window with
+  `resets_at` `2026-02-30`, `2026-11-31` or `T24:00:00Z` was kept and shown as resetting on
+  March 2, December 1 or the next day, and a pooled account's `until` the same; the window or
+  the `until` is now dropped, as `2026-13-01` already was. `2028-02-29` still reads.
+- **`--state` before `search` or `index` is taken.** `sessionpipe-gui --state DIR search
+  "q"` and `--state DIR index --status` stopped with "unknown option search", while every
+  other command takes the flag first; they now read DIR. Another flag before `search` or
+  `index` is refused by its name.
+- **`--allow-host` takes a host name, a port at most.** `--allow-host https://studio.lan`,
+  a path, a space, a wildcard (`*.lan`), a list (`a.lan,b.lan`), an empty value or
+  `0.0.0.0` started a receiver that never answered to that name, without a word. Each now
+  stops with an `--allow-host` message. A background service given such a value after `--`
+  now stops at start too, and its log says why; `sessionpipe-gui service install -- <options>`
+  replaces the options it keeps.
+- **A filter added after an unclosed quote filters.** Choosing an agent, repo or date on
+  Search with a query such as `"rate limiter` gave `"rate limiter agent:codex`, which
+  searched the filter as part of the phrase and filtered nothing; `sessionpipe-gui search
+  '"rate limiter' --agent codex` did the same. The quote is now closed first (`"rate
+  limiter" agent:codex`). Typing an unclosed quote still searches to the end of the query.
 - **Search's `repo:acme/api` finds the sessions sessionpipe sent for that repo.** Their
   repo starts with the host (`github.com/acme/api`), so `repo:acme/api` and `repo:acme`
   found only this computer's own history, and `repo:github.com/acme` only the others.
