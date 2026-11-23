@@ -9,7 +9,7 @@
    own back, the native edge swipe) the page just swaps. The tab bar, the bar and a banner
    carry names of their own, so they are not in the page that slides: the tab bar stays
    put, the bar cross-fades as iOS's does. */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .tabbar {
     view-transition-name: tabbar;
   }

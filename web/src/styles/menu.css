@@ -139,7 +139,9 @@
   max-height: 85dvh;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 0 8px calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 8px);
+  /* Its rows keep clear of what the system keeps at a side; its ground runs under it. */
+  padding: 0 calc(8px + var(--safe-right, env(safe-area-inset-right)))
+    calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 8px) calc(8px + var(--safe-left, env(safe-area-inset-left)));
   border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
   background: var(--grouped-ground);
   box-shadow: var(--shadow-pop);
@@ -320,6 +322,11 @@
 .labels-dialog {
   width: min(400px, calc(100vw - 32px));
   gap: 12px;
+}
+/* Around the rows: the sheet's group on a phone, no box of its own in the dialog. One
+   element in both, so the fields stay mounted when a window changes form. */
+.labels-group {
+  display: contents;
 }
 .labels-rows {
   display: flex;

@@ -13,8 +13,9 @@
 //
 // The other demo machines (studio-mac, build-box) stay unpaired, as a receiver sees a
 // machine before `control pair`. Each row is the one a daemon's pairing and hello leave
-// (control.demo), kept online by a poll every 20 s; nothing is ever queued for them, and
-// they go when demo mode does. lab-mac's hello says `ask` and `handoff`, so the
+// (control.demo), kept online by a poll every 20 s and as of now by its hello again every
+// ten minutes, as a daemon says it (so a pool never reads "as of 31 m ago" however long
+// demo mode runs); nothing is ever queued for them, and they go when demo mode does. lab-mac's hello says `ask` and `handoff`, so the
 // agents-asking-each-other scenes (sim.ts) run on a machine the GUI offers those on.
 import type { MachinePool } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
@@ -23,6 +24,9 @@ import { DEMO_MACHINE } from "../control/state.js";
 import { DEMO_API_ACCOUNT, DEMO_POOL, DEMO_POOL_UNTIL_MS, type DemoStarted } from "./sim.js";
 
 const POLL_MS = 20_000;
+/** A daemon says its hello again this often (sessionpipe's HELLO_EVERY_MS), well inside the
+ *  15 minutes after which the GUI says a machine's facts are "as of" when (lib/limits.ts). */
+export const HELLO_MS = 10 * 60_000;
 /** Where the demo's `~/…` folders live on its pretend machines, for a start's absolute `cwd`. */
 const DEMO_HOME = "/Users/demo";
 /** The two machines that exist for their pools alone. */
@@ -186,6 +190,10 @@ export function startDemoMachines(
     for (const h of hellos) control.demo.poll(demoMachineId(h.name));
   }, POLL_MS);
   timer.unref();
+  const helloTimer = setInterval(() => {
+    for (const h of hellos) control.demo.hello(demoMachineId(h.name), h);
+  }, HELLO_MS);
+  helloTimer.unref();
   return {
     started(s) {
       if (!hellos.some((h) => h.name === s.machine)) return;
@@ -202,6 +210,7 @@ export function startDemoMachines(
     },
     stop() {
       clearInterval(timer);
+      clearInterval(helloTimer);
       control.demo.remove();
     },
   };

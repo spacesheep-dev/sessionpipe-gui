@@ -120,8 +120,9 @@
     flex: none;
   }
 }
-/* A phone (or a tablet held upright, as New session's phone row): each frame within 88×64. */
-@media (max-width: 839px) and (pointer: coarse) {
+/* A touch screen, which has the phone layout at any width (as New session's phone row):
+   each frame within 88×64. A narrow window with a mouse keeps the larger frame. */
+@media (pointer: coarse) {
   .att-thumb {
     max-width: 88px;
     max-height: 64px;
@@ -317,14 +318,18 @@
 }
 
 /* The lightbox: the picture whole over a dark ground in every scheme, its name under it,
-   × at the top right and, with several, a chevron each side. */
+   × at the top right and, with several, a chevron each side. The picture and its buttons
+   keep clear of what the system keeps at a side (a notch, the band a folding phone's bars
+   stand in), as of its top and bottom: --safe-* where a shell sets them, else env(). */
 .lb {
   position: fixed;
   inset: 0;
   z-index: var(--z-menu);
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  padding: max(56px, env(safe-area-inset-top)) 56px max(16px, env(safe-area-inset-bottom));
+  padding: max(56px, var(--safe-top, env(safe-area-inset-top)))
+    calc(56px + var(--safe-right, env(safe-area-inset-right)))
+    max(16px, var(--safe-bottom, env(safe-area-inset-bottom))) calc(56px + var(--safe-left, env(safe-area-inset-left)));
   /* Opaque: nothing of the page (its tabs, the message box) shows through. */
   background: oklch(0.14 0 0);
   color: oklch(0.96 0 0);
@@ -387,8 +392,8 @@
   outline-offset: 2px;
 }
 .lb-x.icon-btn {
-  top: max(8px, env(safe-area-inset-top));
-  right: 8px;
+  top: max(8px, var(--safe-top, env(safe-area-inset-top)));
+  right: calc(8px + var(--safe-right, env(safe-area-inset-right)));
 }
 .lb-prev.icon-btn,
 .lb-next.icon-btn {
@@ -396,10 +401,10 @@
   margin-top: -20px;
 }
 .lb-prev.icon-btn {
-  left: 8px;
+  left: calc(8px + var(--safe-left, env(safe-area-inset-left)));
 }
 .lb-next.icon-btn {
-  right: 8px;
+  right: calc(8px + var(--safe-right, env(safe-area-inset-right)));
 }
 /* Under a finger each is a 44 px target, wherever the lightbox is. */
 @media (pointer: coarse) {
@@ -415,9 +420,9 @@
 /* A phone: the picture takes the width, the chevrons sit beside its name at the foot. */
 @media (max-width: 599px) {
   .lb {
-    padding-left: 8px;
-    padding-right: 8px;
-    padding-bottom: max(64px, calc(env(safe-area-inset-bottom) + 56px));
+    padding-left: calc(8px + var(--safe-left, env(safe-area-inset-left)));
+    padding-right: calc(8px + var(--safe-right, env(safe-area-inset-right)));
+    padding-bottom: max(64px, calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 56px));
   }
   .lb-btn.icon-btn {
     width: 44px;
@@ -426,7 +431,7 @@
   .lb-prev.icon-btn,
   .lb-next.icon-btn {
     top: auto;
-    bottom: max(8px, env(safe-area-inset-bottom));
+    bottom: max(8px, var(--safe-bottom, env(safe-area-inset-bottom)));
     margin-top: 0;
   }
 }

@@ -36,7 +36,7 @@
 .ntf-file {
   max-width: 32ch;
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .ntf {
     gap: 24px;
   }
