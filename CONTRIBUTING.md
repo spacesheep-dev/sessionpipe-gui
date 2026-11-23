@@ -32,7 +32,7 @@ npm run typecheck       # both tsconfigs
 npm run lint            # biome check .
 npm test                # vitest: store, receiver, control, conformance, demo, tls, plugins, ui
 npm run build
-npm run test:e2e        # playwright: a built server in demo mode on :7311 / :7312, desktop and phone
+npm run test:e2e        # playwright: a built server in demo mode on :7311 / :7312; desktop, phone, the iPhone Duo's shapes
 ```
 
 `npm test` holds the receiver to sessionpipe's own conformance fixtures (its control
@@ -55,9 +55,10 @@ Two checks hold the copy to that, and they cover different things:
   CI runs it against a clone at the pinned tag (`.github/workflows/ci.yml`); run it
   yourself after a sync, or when you review a PR that touches `test/conformance/`.
 
-The e2e suite never touches :7373, so it runs beside a GUI you have open. The control
-e2e (`npx playwright test -c web/e2e/playwright.config.ts`) boots its own server on a
-free port. `SHOTS=1 npx playwright test screenshots` writes the README screenshots from
+The e2e suite never touches :7373, so it runs beside a GUI you have open. Its `duo-webkit`
+project runs in WebKit, the iPhone app's engine (`npx playwright install webkit`). The
+control e2e (`npx playwright test -c web/e2e/playwright.config.ts`) boots its own server on
+a free port. `SHOTS=1 npx playwright test screenshots` writes the README screenshots from
 demo data; never commit a screenshot taken from a real state dir.
 
 ## A good PR

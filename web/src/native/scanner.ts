@@ -28,8 +28,11 @@
 // "prompt-with-rationale" }`; `|scan` takes `{ windowed, formats, cameraDirection }` and
 // answers `{ content, format, bounds? }` (no bounds on iOS); `|cancel` makes a pending scan
 // reject with "cancelled"; `|open_app_settings` opens the app's page in Settings.
+// On iOS the plugin's camera view is as big as the main screen, which on iPhone Duo open
+// is the outer display; while a scan runs the page asks the shell to fit it to the window
+// (`fitCamera` below).
 import { invoke } from "./bridge";
-import { features } from "./shell";
+import { features, platform } from "./shell";
 
 /** Whether this shell can scan. */
 export const hasScanner = (): boolean => features().has("scanner");
@@ -61,19 +64,40 @@ const reason = (e: unknown): string =>
  *  caller draws the viewfinder over a transparent ground (styles in native/mobile.css). */
 export async function scanQr(): Promise<string | null> {
   document.documentElement.dataset.scanning = "";
+  let stopFitting = () => {};
   try {
-    const r = await invoke<{ content?: string }>("plugin:barcode-scanner|scan", {
+    const scan = invoke<{ content?: string }>("plugin:barcode-scanner|scan", {
       windowed: true,
       formats: ["QR_CODE"],
       cameraDirection: "back",
     });
+    stopFitting = fitCamera();
+    const r = await scan;
     return r?.content ?? null;
   } catch (e) {
     if (reason(e) === "cancelled") return null;
     throw new Error(reason(e));
   } finally {
+    stopFitting();
     delete document.documentElement.dataset.scanning;
   }
+}
+
+/** While a scan runs on iOS, asks the shell to fit the camera to the window
+ *  (`app_fit_camera`, uikit.rs `fit_camera`): the plugin sizes its camera view to the main
+ *  screen, which on iPhone Duo open is the outer display. Once, a moment after the scan
+ *  starts (the plugin puts the camera in on its next turn of the main thread), and on every
+ *  resize (a turn, Split View). Answers the function that stops it. Remove it with the shim
+ *  once a plugin release sizes the camera from the window. */
+function fitCamera(): () => void {
+  if (platform() !== "ios") return () => {};
+  const fit = () => void invoke("app_fit_camera").catch(() => {});
+  const first = setTimeout(fit, 300);
+  window.addEventListener("resize", fit);
+  return () => {
+    clearTimeout(first);
+    window.removeEventListener("resize", fit);
+  };
 }
 
 /** Stops a scan in progress; `scanQr` then resolves null. */

@@ -130,7 +130,7 @@
 /* Wide (a tablet on its side, a desktop window): there is no grouped ground under the page
    there, so each of the three blocks is a panel by its own line, and all three start at
    the same edge. Narrow, the grouped page draws them (settings.css). */
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .approve > .form-group {
     padding: 14px 16px 16px;
     border: 1px solid var(--line);

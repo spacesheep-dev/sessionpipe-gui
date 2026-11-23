@@ -122,7 +122,7 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .pair-actions > .btn {
     min-height: 44px;
   }
@@ -230,7 +230,7 @@
   margin-bottom: 12px;
 }
 /* On a desktop the requests are an inset panel like the rest of the page. */
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .pending > .section-label {
     padding: 0 12px;
   }
@@ -246,7 +246,7 @@
     background: none;
   }
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* On a phone the requests are an inset group like the rest of the page. */
   .pending > .section-label {
     padding: 0 16px;

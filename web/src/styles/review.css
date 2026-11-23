@@ -10,7 +10,7 @@
 }
 /* A phone: the two tabs span the column under the large title, as iOS lays a segmented
    control out, on the gutter (the filter row starts 8 px out, for chips with no fill). */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .bar-filters > .rv-tabs {
     flex: 1;
     margin-left: 8px;
@@ -277,7 +277,7 @@
 .rv-sess .num {
   color: var(--fg-3);
 }
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .rv-path {
     grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) 15ch;
     grid-template-areas: "file touched when";
@@ -401,7 +401,7 @@
   font-weight: 600;
   border-top: var(--hairline) solid var(--line-2);
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .rv-table .rv-col-wide {
     display: none;
   }
@@ -466,7 +466,7 @@
 
 /* The phone's bar stacks as a grid (shell.css); the tabs under the search are drawn, so
    they keep a gap of their own. */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .page.review .bar-below .bar-tools {
     row-gap: 8px;
   }

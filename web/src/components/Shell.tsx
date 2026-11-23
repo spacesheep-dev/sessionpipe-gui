@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The window: a sidebar on the chrome ground (a labelled source list when there is room,
-// a compact icon rail otherwise), a bottom tab bar on phones. Carries the connection
+// a compact icon rail otherwise), a bottom tab bar on phones; a touch screen with room
+// (lib/device.ts sizeClass "regular") has a sidebar of 44 pt rows in the tab bar's place,
+// listing what the tab bar and More do (styles/regular.css). Carries the connection
 // indicator, the display popover, and one entry per installed theme plugin
 // (web/src/themes/host), routed to /t/<id>. The tab bar holds the first four pages and a
 // More tab whose sheet lists the rest (pages, installed views, Display and Settings).
@@ -16,7 +18,8 @@ import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
 import { useAppState, useNeedsYouCount, useStore, useStreamMark } from "../data/hooks";
-import { phoneLayout, reachName, usePanelCovers, usePhoneLayout } from "../lib/device";
+import { onPhoneLayout, phoneLayout, reachName, usePanelCovers, usePhoneLayout, useRegular } from "../lib/device";
+import { useKeyboardInset } from "../lib/keyboardInset";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
@@ -50,7 +53,7 @@ import { MenuHost, type MenuList, useContextMenu } from "./ContextMenu";
 import type { MoreSheetProps } from "./MoreSheet";
 import { openPalette } from "./Palette";
 import { PULL_PAGES, PullRefresh } from "./PullRefresh";
-import { QuickSettings } from "./QuickSettings";
+import { GearIcon, QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
 import { Settings } from "./Settings";
 import { ShortcutHelp } from "./ShortcutHelp";
@@ -75,9 +78,6 @@ const writeSetupHint = (on: boolean): void => {
     // a private window: the entry just arrives a moment late
   }
 };
-
-/** The phone layout: a tab bar, sheets, large titles (lib/device.ts decides it). */
-export { PHONE_QUERY } from "../lib/device";
 
 /** What is drawn over the page and is not the page (the palette, the toasts): its keys stay
  *  live while the panel covers the page (a narrow window) and the page's own are off. */
@@ -481,18 +481,42 @@ function MoreRow({ n, active, action }: { n: NavItem; active: string; action: st
   );
 }
 
+/** What More lists after the tabs: its pages (Usage among them), then the installed views. */
+const moreLists = (items: NavItem[]): { pages: NavItem[]; plugins: NavItem[] } => ({
+  pages: withUsage(items.filter((n) => !n.key.startsWith("t:"))),
+  plugins: items.filter((n) => n.key.startsWith("t:")),
+});
+
 /** The fifth tab: a sheet with the entries the bar has no room for, as grouped lists:
  *  the pages, the installed views, then Display and Settings. Carries aria-current when
  *  the active page is inside. */
-function MoreTab({ items, active, views }: { items: NavItem[]; active: string; views: NavItem[] }) {
+function MoreTab({
+  items,
+  active,
+  views,
+  regular,
+}: {
+  items: NavItem[];
+  active: string;
+  views: NavItem[];
+  /** The sidebar is in the tab bar's place and lists it all. */
+  regular: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [display, setDisplay] = useState(false);
-  const plugins = items.filter((n) => n.key.startsWith("t:"));
-  const pages = withUsage(items.filter((n) => !n.key.startsWith("t:")));
+  const { pages, plugins } = moreLists(items);
   const inside = [...pages, ...plugins].some((n) => n.key === active);
   const { mounted, closing } = usePresence(open);
   // A route change closes the sheet, whichever tab was tapped.
   useEffect(() => setOpen(false), [active]);
+  // So does the sidebar taking the tab bar's place: a sheet left open never comes back by
+  // itself when the screen is folded again.
+  useEffect(() => {
+    if (regular) {
+      setOpen(false);
+      setDisplay(false);
+    }
+  }, [regular]);
   // The exit copy marks no page current: the tab itself carries that once it closes.
   const row = (n: NavItem) => <MoreRow key={n.key} n={n} active={closing ? "" : active} action={navAction(n, views)} />;
   return (
@@ -530,10 +554,19 @@ function MoreTab({ items, active, views }: { items: NavItem[]; active: string; v
   );
 }
 
-/** The More sheet is a phone's alone: its code is fetched when a phone is idle after load
- *  (so the first tap opens it at once), never on a desktop. */
+/** The More sheet is a phone's alone: its code is fetched once the page has the phone
+ *  layout, when it is idle after load or when a window is narrowed into it later (so the
+ *  first tap opens it at once), never in a window that stays wide. The layout is listened
+ *  to until the code is in: a fetch that failed is tried at the next narrowing. */
 const moreSheet = lazyModule(() => import("./MoreSheet"));
-if (typeof window !== "undefined" && phoneLayout()) whenIdle(() => void moreSheet.preload().catch(() => {}));
+if (typeof window !== "undefined")
+  whenIdle(() => {
+    const warm = () => {
+      if (phoneLayout()) void moreSheet.preload().then(off, () => {});
+    };
+    const off = onPhoneLayout(warm);
+    warm();
+  });
 function MoreSheetHost(p: MoreSheetProps) {
   const m = moreSheet.use();
   return m ? <m.MoreSheet {...p} /> : null;
@@ -582,7 +615,17 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   // More lists them.
   const views = navItems(themes, { setup: showSetup, account }).filter((n) => n.key.startsWith("t:"));
   const phone = usePhoneLayout();
+  const regular = useRegular();
+  // Display, from the sidebar's foot where the touch app has one; it goes with the sidebar.
+  const [display, setDisplay] = useState(false);
+  useEffect(() => {
+    if (!regular) setDisplay(false);
+  }, [regular]);
   useResize();
+  // The phone's keyboard, wherever a field has the focus: --kb and data-kb on <html>
+  // (lib/keyboardInset.ts), so a session's docked composer rides on the keys, a sheet makes
+  // room under its fields, and a short screen folds its extras away while typing.
+  useKeyboardInset();
   useThemeColor();
   useStreamMark();
   // Boot: the last visit's tabs when the URL carries none.
@@ -688,14 +731,16 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       covered={covers}
     />
   );
-  // Usage is in the sidebar once: its lines where they are drawn, a row otherwise.
-  const glance = useGlanceShown() && side && !phone;
-  const railNav = glance ? nav : withUsage(nav);
-  const firstView = railNav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
   // The tab bar keeps its four; Workflows is a page for the More sheet on a phone. More
   // lists every view: a phone has no ⌘K or `g` keys to reach the ones Simple leaves off.
   const tabs = nav.filter((n) => n.key !== "workflows").slice(0, TABS);
   const more = [...nav.filter((n) => !tabs.includes(n) && !n.key.startsWith("t:")), ...views];
+  // Usage is in the sidebar once: its lines where they are drawn, a row otherwise. The
+  // touch app's sidebar lists what the tab bar and More do, in their order.
+  const glance = useGlanceShown() && side && !phone;
+  const inMore = moreLists(more);
+  const railNav = regular ? [...tabs, ...inMore.pages, ...inMore.plugins] : glance ? nav : withUsage(nav);
+  const firstView = railNav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
   // The app's update, downloaded and waiting ("0.8.5 is ready"): the foot's Settings button marks it.
   const update = useReadyUpdate();
   return (
@@ -718,7 +763,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {announce}
       </div>
       <ConnAnnouncer owned={route.name === "board" || route.name === "inbox"} />
-      <nav className="rail" aria-label="Pages" {...railMenuProps}>
+      <nav className="rail" aria-label="Pages" {...(regular ? {} : railMenuProps)}>
         <div className="rail-head">
           <Link to="/" className="rail-brand" title="sessionpipe gui">
             <Mark size={28} />
@@ -758,13 +803,22 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
                     Experimental
                   </div>
                 ) : null}
-                {entry(n, !side)}
+                {entry(n, !side && !regular)}
               </Fragment>
             );
           })}
         </div>
         {glance && <UsageGlance here={route.name === "usage"} />}
         <div className="rail-foot">
+          {regular && (
+            <SideFoot
+              display={display}
+              setDisplay={setDisplay}
+              settings={settingsShown}
+              path={fullPath}
+              update={update}
+            />
+          )}
           <ConnectionPill />
           {!account && (
             <Link
@@ -819,7 +873,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       </main>
       <nav className="tabbar" aria-label="Pages">
         {tabs.map((n) => entry(n, false))}
-        <MoreTab items={more} active={active} views={views} />
+        <MoreTab items={more} active={active} views={views} regular={regular} />
       </nav>
       {phone && <PhoneConn />}
       {phone && PULL_PAGES.has(route.name) && <PullRefresh main={mainRef} />}
@@ -832,6 +886,59 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <MenuHost />
       <TipHost />
     </div>
+  );
+}
+
+/** The touch app's sidebar ends as the More sheet does: Display, which opens its sheet,
+ *  and Settings, in rows like the pages', with the sheet's glyphs. Settings carries the
+ *  rail's dot for an update that waits, and leads to its row. */
+function SideFoot({
+  display,
+  setDisplay,
+  settings,
+  path,
+  update,
+}: {
+  display: boolean;
+  setDisplay: (open: boolean) => void;
+  /** Settings is open over the page. */
+  settings: boolean;
+  path: string;
+  /** The app's update, downloaded and waiting ("0.8.5 is ready"), or null. */
+  update: string | null;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        className={`nav-link ${display ? "nav-link--on" : ""}`}
+        onClick={() => setDisplay(true)}
+        aria-haspopup="dialog"
+        aria-expanded={display}
+        data-nav="display"
+      >
+        <span className="nav-glyph" aria-hidden="true">
+          <GearIcon size={20} />
+        </span>
+        <span className="nav-label">Display</span>
+      </button>
+      <Link
+        to={settingsHref(update ? "about" : null, path)}
+        plainClick={() => openSettings(update ? "about" : null)}
+        className={`nav-link ${settings ? "nav-link--on" : ""}`}
+        aria-label={update ? `Settings, ${update}` : undefined}
+        aria-haspopup="dialog"
+        aria-expanded={settings}
+        data-nav="settings"
+      >
+        <span className="nav-glyph" aria-hidden="true">
+          <SlidersIcon size={20} />
+        </span>
+        <span className="nav-label">Settings</span>
+        {update ? <span className="nav-dot" aria-hidden="true" /> : null}
+      </Link>
+      <QuickSettings placement="tabbar" trigger={false} open={display} onOpenChange={setDisplay} />
+    </>
   );
 }
 

@@ -9,7 +9,9 @@
 //
 // With ACCOUNT_SCREENS=<folder> every state is also saved as a picture there, at the size
 // and scheme ACCOUNT_SCREENS_SIZE (WxH) and ACCOUNT_SCREENS_SCHEME name: the pages the
-// owner approves the screens from.
+// owner approves the screens from. ACCOUNT_SCREENS_INSETS (t,r,b,l in pt) is what the
+// system keeps for itself on each side at that size, as on the iPhone Duo (duo.ts):
+// 0,84,20,0 at 466x678.
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,18 +21,24 @@ import { HubRefused, HubStandIn, UNUSED_KEY_NOTE } from "../account/hub.js";
 import { type AccountServer, startAccountServer } from "../account/serve.js";
 import { fakeShell, type ShellInitOptions } from "../account/shell-init.js";
 import { Session } from "../events.js";
+import { type Insets, insetsInit } from "./duo.js";
 import { strandedMarks } from "./helpers.js";
 
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/web");
 const SHOTS = process.env.ACCOUNT_SCREENS ?? "";
 const [W, H] = (process.env.ACCOUNT_SCREENS_SIZE ?? "390x844").split("x").map(Number) as [number, number];
 const SCHEME = process.env.ACCOUNT_SCREENS_SCHEME === "dark" ? "dark" : "light";
+const INSETS = ((said) => {
+  if (!said) return null;
+  // Four numbers or none: a slip here would take the band away and every test would still pass.
+  if (!/^\d+(\.\d+)?(,\d+(\.\d+)?){3}$/.test(said))
+    throw new Error(`ACCOUNT_SCREENS_INSETS is top,right,bottom,left in pt, as 0,84,20,0: got "${said}"`);
+  return said.split(",").map(Number) as Insets;
+})(process.env.ACCOUNT_SCREENS_INSETS);
 /** The hour on a prompt's card, with the way to answer it on spacesheep: the hour's own
- *  sentence, then on a phone the link on a line of its own, and wider after a "·". */
-const HOUR_ON_CARD =
-  W < 840
-    ? /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.\sOpen on spacesheep\.dev$/
-    : /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\s·\sOpen on spacesheep\.dev$/;
+ *  sentence, then the link on a line of its own. A touch screen's card at every width: a
+ *  tablet held wide has the phone's, never a mouse window's "·" between the two. */
+const HOUR_ON_CARD = /^This iPhone can send from \d{1,2}:\d{2}( [AP]M)?\.\sOpen on spacesheep\.dev$/;
 const MACHINE = "m_studio0123456789abcd";
 const NAME = "studio-mac";
 /** The account's origin as a person reads it. Nothing is asked of it: spacesheep is stood in. */
@@ -106,6 +114,8 @@ async function bed(browser: Browser, o: { platform?: string; shell?: ShellInitOp
     (r) => r.abort(),
   );
   await context.addInitScript(fakeShell, o.shell ?? {});
+  // That size's insets: a test that walks to another width leaves them behind.
+  if (INSETS) await insetsInit(context, INSETS, { width: W, height: H });
   const page = await context.newPage();
   const b: Bed = {
     ss,
@@ -141,6 +151,11 @@ async function shot(page: Page, name: string, o: { own?: boolean } = {}): Promis
 
 const step = (page: Page, name: string) => page.locator(`.onb[data-step='${name}']`);
 const button = (page: Page, name: string | RegExp) => page.getByRole("button", { name });
+/** New session, wherever this width has it: the Board's bar on a phone, the sidebar's head. */
+const compose = (page: Page) => page.getByRole("button", { name: "New session", exact: true });
+/** The touch app's size class at a window (lib/device.ts): with room, New session is the
+ *  sidebar's; else the page bar's. */
+const sizeClassAt = (width: number, height: number) => (width >= 600 && height >= 560 ? "regular" : "compact");
 /** The app comes back to the front (from the browser). */
 const foreground = (page: Page) =>
   page.evaluate(() => {
@@ -292,7 +307,7 @@ test.describe("the first run with a spacesheep account", () => {
     await expect(page.getByText(/Approve this iPhone/)).toHaveCount(0);
     // New session, from the Board's bar: nothing says the computer does not trust the phone.
     await page.locator("a[data-nav='board']:visible").click();
-    await page.locator(".page.board .compose-btn--phone").click();
+    await compose(page).click();
     const sheet = page.locator("[data-new-session]");
     await expect(sheet.locator(".ns-status")).toBeVisible();
     await expect(sheet).not.toContainText(/doesn't trust|can't send yet/);
@@ -724,7 +739,7 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
     try {
       await page.goto(b.server.url);
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       const sheet = page.locator("[data-new-session]");
       await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
       const start = sheet.locator("[data-ns-start]");
@@ -782,7 +797,7 @@ test.describe("Settings and 'Approve this iPhone' on a connected account", () =>
     await expect(page.getByText(/can send (by|from)/)).toHaveCount(0);
     // New session the same: Start goes, and a refusal for the hour would make the time known.
     await page.goto(b.server.url);
-    await page.locator(".page.board .compose-btn--phone").click();
+    await compose(page).click();
     const sheet = page.locator("[data-new-session]");
     await sheet.locator("[data-ns-text]").fill("Look around.");
     await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
@@ -1042,9 +1057,9 @@ test("the Approve page's blocks are panels that start at one edge, at any width"
         expect(z.h, JSON.stringify(z)).toBeLessThan(50);
       }
     }
-    // One left edge and one right edge for all of them; and on a wide screen, where the
-    // page draws no panels of its own, each is one, and what is inside starts equally far in.
-    for (const k of W >= 840 ? (["left", "right", "inner"] as const) : (["left", "right"] as const))
+    // One left edge and one right edge for all of them, at any width: the grouped page
+    // draws the panels on a touch screen however wide it is.
+    for (const k of ["left", "right"] as const)
       expect(new Set(boxes.map((x) => Math.round(x[k]))).size, `${k}: ${JSON.stringify(boxes)}`).toBe(1);
   } finally {
     await b.close();
@@ -1199,7 +1214,7 @@ test.describe("what else an account shows", () => {
       // New session: all is well, so its foot says nothing (its line is there for what comes),
       // and the level the machine sets is a value on one line.
       await page.goto(b.server.url);
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       const sheet = page.locator("[data-new-session]");
       await sheet.locator("[data-ns-text]").fill("Look around.");
       await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
@@ -1415,7 +1430,9 @@ test.describe("what else an account shows", () => {
         [820, 1180],
       ] as const) {
         await page.setViewportSize({ width, height });
-        await page.locator(".page.board .compose-btn--phone").click();
+        // The sidebar's New session or the bar's, once the window has heard of its size.
+        await expect(page.locator("html")).toHaveAttribute("data-size-class", sizeClassAt(width, height));
+        await compose(page).click();
         await expect(sheet.locator(".state-title")).toHaveText("This iPhone isn't approved yet");
         await expect(sheet.locator(".state-text")).toHaveCount(0);
         await expect(sheet.locator("[data-ns-start], textarea, [data-ns-row]")).toHaveCount(0);
@@ -1433,14 +1450,15 @@ test.describe("what else an account shows", () => {
         await expect(sheet).toHaveCount(0);
       }
       await page.setViewportSize({ width: W, height: H });
-      await page.locator(".page.board .compose-btn--phone").click();
+      await expect(page.locator("html")).toHaveAttribute("data-size-class", sizeClassAt(W, H));
+      await compose(page).click();
       await sheet.locator("[data-ns-approve]").click();
       await expect(page.locator("[data-approve='idle']")).toBeVisible();
       await expect(sheet).toHaveCount(0);
       // Approved (long ago, as far as this page knows): the form, with the message as it was.
       await trusted(b);
       await page.goto(b.server.url);
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       await expect(sheet.locator("[data-ns-text]")).toHaveValue("Check the refund rounding.");
       await expect(sheet.locator("[data-ns-start]")).toBeEnabled();
     } finally {
@@ -1683,7 +1701,7 @@ test.describe("what else an account shows", () => {
       // New session: on its own it opens on attic-mini, which can take a start, though the
       // newest session is studio-mac's; studio-mac is listed, off, with why in two words.
       await page.goto(b.server.url);
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       const sheet = page.locator("[data-new-session]");
       const machine = sheet.locator("[data-ns-row=machine] button.sel");
       await expect(machine).toHaveAttribute("data-value", "attic-mini");
@@ -2042,15 +2060,13 @@ test.describe("what else an account shows", () => {
       // and no button that would be refused.
       await expect(card.locator(".ctl-answer-note")).toHaveText(HOUR_ON_CARD, { timeout: 15_000 });
       await expect(card.locator("[data-elsewhere]")).toBeVisible();
-      if (W < 840) {
-        // The link starts its own line, where the sentence starts: no "·" left at a line's end.
-        const [note, link] = await Promise.all([
-          card.locator(".ctl-answer-note").boundingBox(),
-          card.locator("[data-elsewhere]").boundingBox(),
-        ]);
-        expect(Math.round(link!.x)).toBe(Math.round(note!.x));
-        await expect(card.locator(".ctl-answer-note")).not.toContainText("·");
-      }
+      // The link starts its own line, where the sentence starts: no "·" left at a line's end.
+      const [note, link] = await Promise.all([
+        card.locator(".ctl-answer-note").boundingBox(),
+        card.locator("[data-elsewhere]").boundingBox(),
+      ]);
+      expect(Math.round(link!.x)).toBe(Math.round(note!.x));
+      await expect(card.locator(".ctl-answer-note")).not.toContainText("·");
       await expect(page.getByText("this page cannot sign an answer")).toHaveCount(0);
       const allow = card.getByRole("button", { name: "Allow" });
       const deny = card.getByRole("button", { name: "Deny" });
@@ -2064,12 +2080,12 @@ test.describe("what else an account shows", () => {
       // Off, Allow wears Deny's face: neither reads as the one pressed.
       const face = (l: typeof allow) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
       expect(await face(allow)).toBe(await face(deny));
-      // On the phone the card stands alone: the field, off for the hour too, takes no room.
-      if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
+      // On a touch screen the card stands alone: the field, off for the hour too, takes no room.
+      await expect(page.locator(".ctl-field")).toHaveCount(0);
       await shot(page, "also-prompt-cooling");
-      // On the phone and on an iPad's card, upright or held wide (a grid whose rows are 2 px
-      // apart, the pair beside), Open on spacesheep.dev is 45 tall to a finger and takes no
-      // tap from the question above it or from the pair under it.
+      // On the phone and on an iPad, upright or held wide (the same card at each: the touch
+      // app's), Open on spacesheep.dev is 45 tall to a finger and takes no tap from the
+      // question above it or from the pair under it.
       const elsewhere = card.locator("[data-elsewhere]");
       for (const size of [
         { width: 390, height: 844 },
@@ -2077,6 +2093,8 @@ test.describe("what else an account shows", () => {
         { width: 1180, height: 820 },
       ]) {
         await page.setViewportSize(size);
+        // The card takes the width's form, and draws the link anew as it does: measured after.
+        await expect(card.locator(".ctl-answer-note")).toHaveText(HOUR_ON_CARD);
         await expect(elsewhere).toBeVisible();
         const hits = await elsewhere.evaluate((el) => {
           const r = el.getBoundingClientRect();
@@ -2454,7 +2472,7 @@ test.describe("what else an account shows", () => {
       await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
       await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
       await expect(page.getByText(line)).toHaveCount(1);
-      if (W < 840) await expect(page.locator(".ctl-field")).toHaveCount(0);
+      await expect(page.locator(".ctl-field")).toHaveCount(0);
       // With no prompt open, the line under the field, which is off.
       await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
       await expect(page.locator(".ctl-foot[data-reason='blocked']")).toContainText(line, { timeout: 15_000 });
@@ -2558,7 +2576,9 @@ test.describe("what else an account shows", () => {
     };
     return g;
   };
-  const tab = (page: Page, name: string) => page.locator(".tabbar").getByRole("link", { name: new RegExp(`^${name}`) });
+  /** A page by its name in the navigation this width shows: the tab bar, or the sidebar. */
+  const tab = (page: Page, name: string) =>
+    page.getByRole("navigation", { name: "Pages" }).getByRole("link", { name: new RegExp(`^${name}`) });
 
   test("a first connect with a long history: loading rows under 'Catching up…' and no badge, then the whole board once", async ({
     browser,
@@ -2784,7 +2804,7 @@ test.describe("what else an account shows", () => {
       );
       b.ss.approveDevice(asked.keyId);
       await page.reload();
-      await page.locator(".page.board .compose-btn--phone").click();
+      await compose(page).click();
       const sheet = page.locator("[data-new-session]");
       await sheet.locator("[data-ns-text]").fill("Add a test for the rounding.");
       const start = sheet.locator("[data-ns-start]");

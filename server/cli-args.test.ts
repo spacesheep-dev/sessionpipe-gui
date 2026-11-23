@@ -5,7 +5,7 @@
 // one that is let through would start a receiver, so each spawn has a short timeout and a
 // refusal is checked by its exit code.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -139,6 +139,76 @@ describe("sessionpipe-gui flag values", () => {
     20_000,
   );
 
+  it.each([[""], ["  "]])(
+    "--allow-host %j is refused",
+    (v) => {
+      const r = run("--port", "0", "--allow-host", v);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toBe("sessionpipe-gui: --allow-host needs a host name\n");
+    },
+    20_000,
+  );
+
+  it.each([
+    ["https://studio.lan"],
+    ["http://studio.lan:8443"],
+    ["studio.lan/x"],
+    ["studio.lan?x"],
+    ["studio.lan#x"],
+    ["user@studio.lan"],
+    ["*.lan"],
+    ["*"],
+    ["studio lan"],
+    ["[::1]x"],
+    ["studio.lan,other.lan"],
+    ["0.0.0.0"],
+    ["0"],
+    ["::"],
+    ["[::]:8443"],
+    ["::ffff:127.0.0.1"],
+  ])(
+    "--allow-host %j is refused",
+    (v) => {
+      // Each started a receiver that answered 403 unknown_host under the name all the same
+      // (0.0.0.0, :: and ::ffff: are never taken as a Host: guard.ts notOpenedBy).
+      const r = run("--port", "0", "--allow-host", v);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toBe(
+        `sessionpipe-gui: --allow-host is a name this machine is opened by, a port at most: ${v}\n`,
+      );
+    },
+    20_000,
+  );
+
+  it.each([
+    ["studio.lan"],
+    ["studio.lan:8443"],
+    ["STUDIO.LAN"],
+    ["studio.lan."],
+    ["studio.lan/"],
+    ["my-pc"],
+    ["192.0.2.5"],
+    ["192.0.2.5:8443"],
+    ["::1"],
+    ["[::1]"],
+    ["[::1]:8443"],
+    ["fe80::1%en0"],
+    ["[fe80::1%en0]"],
+    ["127.1"],
+  ])(
+    "--allow-host %j is taken",
+    (v) => {
+      // The guard reads each of these as a host (a port and case dropped), as before.
+      const r = spawnSync(process.execPath, [cli, "--allow-host", v, "--allow-host", "other.lan", "--version"], {
+        encoding: "utf8",
+        timeout: 15_000,
+        cwd: tmp.dir,
+      });
+      expect(r.status).toBe(0);
+    },
+    20_000,
+  );
+
   it("digits still parse, with leading zeros", () => {
     // --version answers where it stands, after the flags before it parsed.
     const r = spawnSync(process.execPath, [cli, "--port", "07373", "--keep-days", "0", "--version"], {
@@ -159,4 +229,87 @@ describe("sessionpipe-gui flag values", () => {
     });
     expect(r.status).toBe(0);
   }, 20_000);
+
+  // `search` and `index` take a flag written before them, as every other verb does. An
+  // empty config.json is one the search CLI refuses by its path, so the message shows which
+  // state folder it read, without indexing anything.
+  describe("a flag before search or index", () => {
+    const bare = (...args: string[]) =>
+      spawnSync(process.execPath, [cli, ...args], { encoding: "utf8", timeout: 15_000, cwd: tmp.dir });
+    const brokenState = (name: string): string => {
+      const dir = path.join(tmp.dir, name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "config.json"), "");
+      return dir;
+    };
+
+    it.each([
+      ["search", "q"],
+      ["index", "--status"],
+    ])(
+      "--state DIR %s is read from DIR",
+      (verb, arg) => {
+        const dir = brokenState(`before-${verb}`);
+        const r = bare("--state", dir, verb, arg);
+        expect(r.stderr).not.toContain("unknown option");
+        expect(r.stderr).toContain(path.join(dir, "config.json"));
+        expect(r.status).toBe(2);
+      },
+      20_000,
+    );
+
+    it("a state folder named search is still a value", () => {
+      brokenState("search");
+      const r = bare("--state", "search", "index", "--status");
+      expect(r.stderr).not.toContain("unknown option");
+      expect(r.stderr).toMatch(/search[\\/]config\.json is empty/);
+      expect(r.status).toBe(2);
+    }, 20_000);
+
+    it("index --status after --state and --search-home answers", () => {
+      const dir = path.join(tmp.dir, "fresh");
+      const r = bare("--state", dir, "--search-home", path.join(tmp.dir, "home"), "index", "--status");
+      expect(r.stderr).toBe("");
+      expect(r.stdout).toMatch(/^(No search index yet|0 sessions · 0 messages)/);
+      expect(r.status).toBe(0);
+    }, 20_000);
+
+    it.each([
+      ["--port", "7000", "search", "q"],
+      ["-q", "search", "q"],
+      ["--demo", "index", "--ipc"],
+    ])(
+      "a flag search and index do not take is refused by name: %s",
+      (...args) => {
+        const r = bare(...args);
+        const verb = args.includes("search") ? "search" : "index";
+        expect(r.stderr).toBe(`sessionpipe-gui: unknown option ${args[0]} (try ${verb} --help)\n`);
+        expect(r.status).toBe(2);
+      },
+      20_000,
+    );
+
+    it.each([
+      [["--state", "@other", "--state", "@dir", "search", "q"]],
+      [["--state", "@other", "search", "q", "--state", "@dir"]],
+      [["--state", "@other", "index", "--status", "--state", "@dir"]],
+    ])(
+      "the last --state given is the one read: %j",
+      (args) => {
+        const dir = brokenState("last");
+        const other = brokenState("other");
+        const r = bare(...args.map((v) => (v === "@dir" ? dir : v === "@other" ? other : v)));
+        expect(r.stderr).toContain(path.join(dir, "config.json"));
+        expect(r.stderr).not.toContain(other);
+        expect(r.status).toBe(2);
+      },
+      20_000,
+    );
+
+    it("after another command it stays an unknown word", () => {
+      const r = bare("tls", "status", "search");
+      expect(r.stderr).toBe("sessionpipe-gui: unknown option search (try --help)\n");
+      expect(r.status).toBe(2);
+    }, 20_000);
+  });
 });

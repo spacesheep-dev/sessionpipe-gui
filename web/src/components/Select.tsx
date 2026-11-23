@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // The one custom select (house rule: no native <select> anywhere in the GUI). A
 // pop-up button (the toolbar's control height) and a listbox in a portal under document.body,
-// anchored below the trigger and flipped above when the room runs out; on a phone the
-// same list is a bottom sheet. The APG select-only combobox pattern: focus stays on the
+// anchored below the trigger and flipped above when the room runs out; on a phone without
+// room to spare, folded or upright, the same list is a bottom sheet (lib/device.ts
+// selectSheet), and on one with room a pop-up as on a tablet. The APG select-only combobox pattern: focus stays on the
 // trigger (role combobox), the list is role listbox, the row under the cursor is named by
 // aria-activedescendant. Space / Enter / arrows open; arrows, Home, End and typing move;
 // Enter picks; Esc closes and gives focus back; Tab closes. `MultiSelect` is the same
@@ -22,6 +23,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { safeSides, useSelectSheet } from "../lib/device";
 import "../styles/select.css";
 
 export interface SelectOption<T> {
@@ -77,24 +79,26 @@ export interface MultiSelectProps<T> extends CommonProps<T> {
   onChange: (v: T[]) => void;
 }
 
-const PHONE = "(max-width: 599px)";
 const MAX_LIST_WIDTH = 320;
 const MAX_LIST_HEIGHT = 320;
 const GAP = 6;
 const EDGE = 8;
 
-function usePhone(): boolean {
-  const [phone, setPhone] = useState(() => (typeof matchMedia === "function" ? matchMedia(PHONE).matches : false));
-  useEffect(() => {
-    const mq = matchMedia(PHONE);
-    const on = () => setPhone(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return phone;
-}
-
 const defaultKey = (v: unknown) => String(v);
+
+/** Whether `el` is being carried somewhere now: an animation or a transition that ends
+ *  (a sheet's entrance, a page pushed in) is under way on it or on what it is in. */
+function carried(el: Element): boolean {
+  if (typeof document.getAnimations !== "function") return false;
+  return document.getAnimations().some((a) => {
+    const target = (a.effect as KeyframeEffect | null)?.target;
+    return (
+      a.playState === "running" &&
+      !!target?.contains(el) &&
+      a.effect?.getComputedTiming().endTime !== Number.POSITIVE_INFINITY
+    );
+  });
+}
 
 export function Select<T>(p: SelectProps<T>) {
   const { value, onChange, ...rest } = p;
@@ -127,6 +131,14 @@ interface Place {
   maxHeight: number;
   above: boolean;
 }
+const samePlace = (a: Place, b: Place): boolean =>
+  a.top === b.top &&
+  a.bottom === b.bottom &&
+  a.left === b.left &&
+  a.minWidth === b.minWidth &&
+  a.maxWidth === b.maxWidth &&
+  a.maxHeight === b.maxHeight &&
+  a.above === b.above;
 
 function Picker<T>({
   options,
@@ -148,7 +160,7 @@ function Picker<T>({
   className = "",
   keyOf = defaultKey,
 }: CommonProps<T> & { chosen: T[]; onPick: (v: T) => void; multiple: boolean }) {
-  const phone = usePhone();
+  const phone = useSelectSheet();
   const canSearch = !!custom || (searchable ?? options.length > 8);
   const rawId = useId().replace(/:/g, "");
   const listId = `sel-${rawId}-list`;
@@ -235,14 +247,19 @@ function Picker<T>({
 
   // ----- placement (desktop): under the trigger, flipped above when there is no room -----
 
+  // From side to side the list has what the system leaves of the window: it never opens
+  // under the band its bars stand in beside a folding phone's page. Read each time the
+  // list is fitted (as it opens, as the window changes), not at a scroll: the band stays.
+  const sides = useRef({ left: 0, right: 0 });
   const measure = useCallback(() => {
     const t = trigger.current;
     const el = pop.current;
     if (!t || !el) return;
     const r = t.getBoundingClientRect();
-    const vw = window.innerWidth;
+    const lo = sides.current.left + EDGE;
+    const hi = window.innerWidth - sides.current.right - EDGE;
     const vh = window.innerHeight;
-    const maxWidth = Math.min(Math.max(MAX_LIST_WIDTH, r.width), vw - EDGE * 2);
+    const maxWidth = Math.min(Math.max(MAX_LIST_WIDTH, r.width), hi - lo);
     const below = vh - r.bottom - GAP - EDGE;
     const aboveRoom = r.top - GAP - EDGE;
     const need = Math.min(el.scrollHeight, MAX_LIST_HEIGHT);
@@ -250,25 +267,55 @@ function Picker<T>({
     const maxHeight = Math.max(96, Math.min(MAX_LIST_HEIGHT, above ? aboveRoom : below));
     const w = Math.min(Math.max(el.offsetWidth, r.width), maxWidth);
     let left = align === "end" ? r.right - w : r.left;
-    left = Math.max(EDGE, Math.min(left, vw - w - EDGE));
-    setPlace({
+    left = Math.max(lo, Math.min(left, hi - w));
+    const next: Place = {
       left,
       minWidth: r.width,
       maxWidth,
       maxHeight,
       above,
       ...(above ? { bottom: vh - r.top + GAP } : { top: r.bottom + GAP }),
-    });
+    };
+    setPlace((was) => (was && samePlace(was, next) ? was : next));
   }, [align]);
 
+  // As a sheet the list has no place; turned back into a pop-up it is measured afresh.
+  useLayoutEffect(() => {
+    if (phone) setPlace(null);
+  }, [phone]);
   useLayoutEffect(() => {
     if (!open || phone) return;
-    measure();
+    // While what the button is in moves (a sheet still rising, as a tap in its first
+    // moment opens the list), the list is measured each frame, so it rides with the button
+    // and stands under it once the move has ended; then not at all.
+    let frame = 0;
+    const follow = () => {
+      frame = 0;
+      measure();
+      const t = trigger.current;
+      if (t && carried(t)) frame = requestAnimationFrame(follow);
+    };
+    const moved = (e: Event) => {
+      const t = trigger.current;
+      if (!frame && t && e.target instanceof Node && e.target.contains(t)) frame = requestAnimationFrame(follow);
+    };
+    const fit = () => {
+      sides.current = safeSides();
+      measure();
+      const t = trigger.current;
+      if (!frame && t && carried(t)) frame = requestAnimationFrame(follow);
+    };
+    fit();
     window.addEventListener("scroll", measure, true);
-    window.addEventListener("resize", measure);
+    window.addEventListener("resize", fit);
+    document.addEventListener("animationstart", moved, true);
+    document.addEventListener("transitionrun", moved, true);
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("scroll", measure, true);
-      window.removeEventListener("resize", measure);
+      window.removeEventListener("resize", fit);
+      document.removeEventListener("animationstart", moved, true);
+      document.removeEventListener("transitionrun", moved, true);
     };
   }, [open, phone, measure, shown.length]);
 
@@ -481,41 +528,38 @@ function Picker<T>({
   );
 
   // data-dismiss: a dialog's focus trap (lib/focus.ts) lets focus move into the filter.
+  // One element for both forms, the sheet and the pop-up: when the window crosses the
+  // width between them with the list open (a phone unfolded or folded), the list stays the
+  // list it was, with the filter's focus, its text and where the rows were scrolled to.
   const popover = open
     ? createPortal(
-        phone ? (
-          <>
-            <button type="button" className="sel-scrim" aria-label="Close" onClick={() => close()} />
-            <div className="sel-sheet" ref={pop} data-dismiss>
-              <span className="sel-grab" aria-hidden="true" />
-              {filterBox}
-              {rows}
-              {footer && <p className="sel-foot">{footer}</p>}
-            </div>
-          </>
-        ) : (
+        <>
+          {phone && <button type="button" className="sel-scrim" aria-label="Close" onClick={() => close()} />}
           <div
-            className={`sel-pop ${place?.above ? "sel-pop--above" : ""}`}
+            className={phone ? "sel-sheet" : `sel-pop ${place?.above ? "sel-pop--above" : ""}`}
             ref={pop}
             data-dismiss
             style={
-              place
-                ? {
-                    top: place.top,
-                    bottom: place.bottom,
-                    left: place.left,
-                    minWidth: place.minWidth,
-                    maxWidth: place.maxWidth,
-                    maxHeight: place.maxHeight,
-                  }
-                : { visibility: "hidden", top: 0, left: 0 }
+              phone
+                ? undefined
+                : place
+                  ? {
+                      top: place.top,
+                      bottom: place.bottom,
+                      left: place.left,
+                      minWidth: place.minWidth,
+                      maxWidth: place.maxWidth,
+                      maxHeight: place.maxHeight,
+                    }
+                  : { visibility: "hidden", top: 0, left: 0 }
             }
           >
+            {phone && <span className="sel-grab" aria-hidden="true" />}
             {filterBox}
             {rows}
             {footer && <p className="sel-foot">{footer}</p>}
           </div>
-        ),
+        </>,
         document.body,
       )
     : null;
