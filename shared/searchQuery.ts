@@ -73,7 +73,14 @@ const KEY_RE = /^([A-Za-z][A-Za-z-]*):/;
 
 /** Splits a query into tokens. `"…"` may hold spaces; so may `key:"…"`. */
 export function lexSearch(q: string): SearchToken[] {
+  return lex(q).toks;
+}
+
+/** The tokens, and whether `q` ends inside a quote it never closed (`"rate limiter`,
+ *  `repo:"my repo`, or a lone `"`). */
+function lex(q: string): { toks: SearchToken[]; open: boolean } {
   const out: SearchToken[] = [];
+  let open = false;
   let i = 0;
   const n = q.length;
   while (i < n) {
@@ -87,6 +94,7 @@ export function lexSearch(q: string): SearchToken[] {
     }
     if (q[i] === '"') {
       const close = q.indexOf('"', i + 1);
+      if (close < 0) open = true;
       const end = close < 0 ? n : close + 1;
       const value = q.slice(i + 1, close < 0 ? n : close).trim();
       if (value) out.push({ start, end, not, kind: "phrase", value });
@@ -102,6 +110,7 @@ export function lexSearch(q: string): SearchToken[] {
       let value: string;
       if (q[j] === '"') {
         const close = q.indexOf('"', j + 1);
+        if (close < 0) open = true;
         value = q.slice(j + 1, close < 0 ? n : close).trim();
         j = close < 0 ? n : close + 1;
       } else {
@@ -129,7 +138,7 @@ export function lexSearch(q: string): SearchToken[] {
     if (value) out.push({ start, end: j, not, kind, value });
     i = j === i ? i + 1 : j;
   }
-  return out;
+  return { toks: out, open };
 }
 
 const cpLen = (s: string): number => {
@@ -222,9 +231,16 @@ const quoteValue = (v: string): string => (/[\s"]/.test(v) ? `"${v.replace(/"/g,
  *  them when `value` is null. Negated tokens of that key are left alone. */
 export function setFilter(q: string, key: SearchFilterKey, value: string | null): string {
   const toks = lexSearch(q).filter((t) => t.kind === "filter" && t.key === key && !t.not);
-  let out = cut(q, toks);
-  if (value !== null && value !== "") out = `${out}${out && !out.endsWith(" ") ? " " : ""}${key}:${quoteValue(value)}`;
-  return out;
+  const out = cut(q, toks);
+  return value !== null && value !== "" ? appendToQuery(out, `${key}:${quoteValue(value)}`) : out;
+}
+
+/** `q` with `tail` (filters) after it. A quote `q` leaves open is closed first, so `tail` is
+ *  read on its own and not as the end of that phrase (`"rate limiter` + `agent:codex`). */
+export function appendToQuery(q: string, tail: string): string {
+  if (!tail) return q;
+  const head = lex(q).open ? `${q.trimEnd()}"` : q;
+  return `${head}${head && !head.endsWith(" ") ? " " : ""}${tail}`;
 }
 
 /** The query without any filter (the "Search without filters" hint). */

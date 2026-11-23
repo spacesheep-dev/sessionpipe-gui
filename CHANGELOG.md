@@ -146,6 +146,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   stops with an `--allow-host` message. A background service given such a value after `--`
   now stops at start too, and its log says why; `sessionpipe-gui service install -- <options>`
   replaces the options it keeps.
+- **A filter added after an unclosed quote filters.** Choosing an agent, repo or date on
+  Search with a query such as `"rate limiter` gave `"rate limiter agent:codex`, which
+  searched the filter as part of the phrase and filtered nothing; `sessionpipe-gui search
+  '"rate limiter' --agent codex` did the same. The quote is now closed first (`"rate
+  limiter" agent:codex`). Typing an unclosed quote still searches to the end of the query.
 
 ## [0.8.7] - 2026-11-20
 
