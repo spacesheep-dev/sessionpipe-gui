@@ -56,15 +56,16 @@ jobs:
       # when it is absent, so a bare clone builds.
       - run: npm run build
 
-      # --with-deps asks apt for the libraries and fonts Chromium wants. The runner's image
-      # has the libraries already, and apt there can lose Ubuntu's archive for an hour at a
-      # time ("Temporary failure resolving 'archive.ubuntu.com'", 2026-11-11: every run red
-      # at this step). When apt fails, the browser alone is installed: no test here compares
-      # pixels, and a browser that cannot start fails the suites below all the same.
+      # --with-deps asks apt for the libraries and fonts the browsers want. The runner's
+      # image has Chromium's already, and apt there can lose Ubuntu's archive for an hour at
+      # a time ("Temporary failure resolving 'archive.ubuntu.com'", 2026-11-11: every run red
+      # at this step). When apt fails, the browsers alone are installed: no test here
+      # compares pixels, and a browser that cannot start fails the suites below all the same.
+      # WebKit is the engine of the iPhone app's WKWebView: the duo-webkit project runs in it.
       - name: Playwright browsers
-        run: npx playwright install --with-deps chromium || npx playwright install chromium
+        run: npx playwright install --with-deps chromium webkit || npx playwright install chromium webkit
 
-      - name: Playwright (desktop + phone, demo mode on :7311 / :7312)
+      - name: Playwright (desktop, phone and the iPhone Duo's shapes; demo mode on :7311 / :7312)
         run: npm run test:e2e
 
       - name: Playwright (control channel)

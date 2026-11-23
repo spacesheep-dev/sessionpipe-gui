@@ -100,7 +100,7 @@
   max-width: 560px;
   min-width: 0;
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .machines {
     gap: 32px;
   }
@@ -125,7 +125,7 @@
 /* A phone's bar holds one text action, as iOS does: "Add a phone…" stays; Connect is a
    tab away under More, and two words-wide buttons would run into the centred title
    once the large title folds into the bar. */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .machines .bar-actions .btn + .btn {
     display: none;
   }
@@ -271,7 +271,7 @@
     transition: none;
   }
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* A pressed row is lit to the group's edge, under the inset its text keeps. */
   .machines .machine-line-link,
   .machine-more summary {

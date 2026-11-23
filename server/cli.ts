@@ -229,6 +229,9 @@ interface Args {
   keyCommand?: string;
   /** `service install|uninstall|status`: a subcommand instead of the server. */
   service?: Verb;
+  /** `[flags] search|index …`: session search, given the flags before the verb and the
+   *  words after it (main() sends `search`/`index` as the first word straight there). */
+  search?: { sub: "search" | "index"; argv: string[] };
   dryRun: boolean;
   /** `service install --downgrade`: an older CLI may replace a newer service. */
   downgrade: boolean;
@@ -389,6 +392,27 @@ function parseArgs(argv: string[]): Args | "help" | "version" {
         if (verb !== "install" && verb !== "uninstall" && verb !== "status")
           fail(`unknown service command "${verb}" (install, uninstall, status)`);
         a.service = verb;
+        break;
+      }
+      case "search":
+      case "index": {
+        // After another command (`tls status search`) it is a stray word, as it always was.
+        if (a.ext || a.extras || a.tlsCommand !== undefined || a.keyCommand !== undefined || a.service)
+          fail(`unknown option ${f} (try --help)`);
+        // Before it (`--state DIR search q`) only --state and --search-home mean anything to
+        // search; each was read above with its value, so any other word here is a flag.
+        for (let j = 0; j < i; j += 2)
+          if (argv[j] !== "--state" && argv[j] !== "--search-home") fail(`unknown option ${argv[j]} (try ${f} --help)`);
+        // The last one given wins, as for every other verb: one after the verb over one before.
+        const rest = argv.slice(i + 1);
+        const own = rest.includes("--") ? rest.slice(0, rest.indexOf("--")) : rest;
+        const before = (name: string, v: string | undefined) =>
+          v !== undefined && !own.includes(name) ? [name, v] : [];
+        a.search = {
+          sub: f,
+          argv: [...before("--state", a.state), ...before("--search-home", a.searchHome), ...rest],
+        };
+        i = argv.length;
         break;
       }
       case "--dry-run":
@@ -784,6 +808,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${packageVersion()}\n`);
     return;
   }
+  if (parsed.search) return searchCommand(parsed.search.sub, parsed.search.argv);
   if (parsed.ext) return extensionCommand(parsed);
   if (parsed.extras) return extrasCommand(parsed);
   if (parsed.tlsCommand !== undefined) return tlsCommand(parsed);

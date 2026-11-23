@@ -92,3 +92,9 @@ export function list(dir: string): import("node:fs").Dirent[] {
     return [];
   }
 }
+
+/** Split a path into segments; on Windows (`sep === "\\"`), both `/` and `\` separate
+ *  segments, while on POSIX `\` is an ordinary filename character and stays intact. */
+export function pathParts(p: string, sep = path.sep): string[] {
+  return p.split(sep === "\\" ? /[/\\]/ : sep);
+}

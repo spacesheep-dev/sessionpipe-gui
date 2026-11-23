@@ -40,13 +40,18 @@ env:
   TEAM_ID: QR7H8ARENW
   PROFILE_NAME: sessionpipe App Store
   CARGO_TERM_COLOR: always
+  # Xcode 27.1 and its iOS 27.1 SDK, pinned: the image has 27.0, 27.1 and 27.2, and the SDK
+  # uploaded (and the Rust cache's key) move only when this line does. Upload with 27.2
+  # once it is a release.
+  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
 
 jobs:
   testflight:
     name: build, sign, upload
-    # App Store Connect takes only builds made with Xcode 26 and the iOS 26 SDK or later
-    # (since 2026-04-28); macos-26's default Xcode is one.
-    runs-on: macos-26
+    # The iOS 27.1 SDK is the first whose app fills both of iPhone Duo's displays: built with
+    # 26 it is letterboxed, with 27.0 the status bar's side stays empty. Only the `xcode-27`
+    # image (macOS 27, arm64) has it; macos-26 and macos-15 stop at Xcode 26.
+    runs-on: xcode-27
     environment: release
     timeout-minutes: 90
     defaults:
@@ -68,13 +73,15 @@ jobs:
           case "$TAG" in v*) ;; *) echo "::error::$TAG is not a v* tag"; exit 1 ;; esac
           [ "v$v" = "$TAG" ] || { echo "::error::tag $TAG, package.json $v"; exit 1; }
 
-      - name: Xcode 26 or later
+      - name: Xcode 27.1 or later
         run: |
           set -euo pipefail
           sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
           echo "$(xcodebuild -version | tr '\n' ' '), iOS SDK $sdk." >> "$GITHUB_STEP_SUMMARY"
           echo "XCODE_BUILD=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_ENV"
-          [ "${sdk%%.*}" -ge 26 ] || { echo "::error::iOS SDK $sdk: App Store Connect takes 26 or later"; exit 1; }
+          # 27.1 for iPhone Duo's whole displays (App Store Connect's floor, 26, is below it).
+          [ "$(printf '27.1\n%s\n' "$sdk" | sort -V | head -1)" = 27.1 ] \
+            || { echo "::error::iOS SDK $sdk: iPhone Duo needs 27.1 or later"; exit 1; }
 
       - name: The secrets this build needs
         env:
@@ -215,7 +222,7 @@ jobs:
           echo "IPA=$PWD/$ipa" >> "$GITHUB_ENV"
 
       # What App Store Connect checks first, checked here: the ids and numbers, the SDK, the
-      # signer, the profile, and no debugger entitlement.
+      # scene manifest, the signer, the profile, and no debugger entitlement.
       - name: Check the .ipa
         run: |
           set -euo pipefail
@@ -229,7 +236,11 @@ jobs:
           [ "$(plist CFBundleVersion)" = "$BUILD" ] || bad "CFBundleVersion is $(plist CFBundleVersion), not $BUILD"
           sdk="$(plist DTSDKName)"
           v="${sdk#iphoneos}"
-          [ "$v" != "$sdk" ] && [ "${v%%.*}" -ge 26 ] || bad "built with $sdk"
+          [ "$v" != "$sdk" ] && [ "$(printf '27.1\n%s\n' "$v" | sort -V | head -1)" = 27.1 ] \
+            || bad "built with $sdk, not 27.1 or later"
+          # An iOS 27 SDK build without a scene manifest does not launch (Info.ios.plist).
+          [ "$(plist UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0:UISceneDelegateClassName 2>/dev/null || true)" = TaoSceneDelegate ] \
+            || bad "no scene manifest naming TaoSceneDelegate: the app would not launch"
           codesign --verify --deep --strict "$app"
           codesign -dvv "$app" 2>&1 | grep '^Authority=Apple Distribution: ' >/dev/null || bad "not signed by Apple Distribution"
           codesign -d --entitlements :- "$app" 2>/dev/null > "$x/ent.plist"

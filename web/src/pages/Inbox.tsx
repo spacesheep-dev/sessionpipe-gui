@@ -68,6 +68,7 @@ import { anyLabel, type LabelFilter, labelItems, labelPasses } from "../lib/labe
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
+import { pageBarBottom, useResizeAnchor } from "../lib/resizeAnchor";
 import { Link, openSettings, sessionPath } from "../lib/router";
 import { type Lens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
@@ -159,6 +160,14 @@ export function Inbox() {
   const phone = usePhoneLayout();
   const page = useRef<HTMLDivElement>(null);
   useStickyTop(page);
+  // A phone unfolded, folded or turned: the prompt being read stays where it was under the
+  // bar (lib/resizeAnchor.ts).
+  useResizeAnchor({
+    rows: ".inbox-row[data-flip]",
+    key: "data-flip",
+    root: () => page.current,
+    barBottom: pageBarBottom(() => page.current),
+  });
 
   // Why Allow / Deny are off, reported by each answerable row and said once for all, each
   // in a notice of its own above Notifications: this device not approved, with the way to

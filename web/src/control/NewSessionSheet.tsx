@@ -38,7 +38,7 @@ import {
   useState,
 } from "react";
 import { useSendStates } from "../account/sendable";
-import { ActionButton, EmptyState, HarnessGlyph } from "../components/bits";
+import { ActionButton, EmptyState, HarnessGlyph, withFormScrim } from "../components/bits";
 import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
 import { useAppState, useLimits, useListedSessions, useMachines } from "../data/hooks";
@@ -47,6 +47,7 @@ import { useFocusTrap } from "../lib/focus";
 import "../lib/acp";
 import { UPLOAD_REFUSED, UPLOAD_WORDS } from "@shared/attachments";
 import { bytes, harnessMark } from "../lib/format";
+import { useFieldAboveKeys } from "../lib/keyboardInset";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { accountMode, uploadProgress } from "../lib/net";
 import { navigate, sessionPath } from "../lib/router";
@@ -161,6 +162,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const wrong = wrongOriginHere();
   const sendTo = useSendStates(rp);
   const ref = useRef<HTMLDivElement>(null);
+  // The keyboard up: the field being typed in stays above it, its status line too.
+  useFieldAboveKeys(ref);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -1186,7 +1189,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const form = !noMachine && !unapproved;
 
   if (phone)
-    return (
+    return withFormScrim(
+      close,
+      closing,
       <div
         className="ns-sheet ns-sheet--phone"
         role="dialog"
@@ -1251,7 +1256,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
             </>
           )}
         </div>
-      </div>
+      </div>,
     );
 
   return (
