@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DOC_TEXT_MAX, TITLE_RANK } from "../types.js";
 import { claudeAdapter, parseClaudePath } from "./claude.js";
+import { pathParts } from "./homes.js";
 import { Collect, fixtureHome, readAll, testEnv } from "./testkit.js";
 
 const A = "claude-code:a0000000-0000-4000-8000-000000000001";
@@ -21,7 +22,7 @@ afterEach(() => fx.done());
 describe("claude discover", () => {
   it("finds every home's sessions and subagents, largest copy wins, never memory or tool results", async () => {
     const files = await claudeAdapter().discover(testEnv(fx.home, fx.state));
-    const rel = files.map((f) => path.relative(fx.home, f.path)).sort();
+    const rel = files.map((f) => path.relative(fx.home, f.path).replace(/\\/g, "/")).sort();
     expect(rel).toEqual([
       `.claude-work/projects/-Users-dev-acme-web/b0000000-0000-4000-8000-000000000003.jsonl`,
       `.claude/projects/${SLUG}/a0000000-0000-4000-8000-000000000001.jsonl`,
@@ -47,12 +48,56 @@ describe("claude discover", () => {
   });
 
   it("parses paths", () => {
-    expect(parseClaudePath("/h/.claude/projects/s/x.jsonl")).toMatchObject({ id: "x", home: "/h/.claude" });
-    expect(parseClaudePath("/h/.claude/projects/s/x/subagents/workflows/w/agent-ab.jsonl")).toMatchObject({
+    const base = path.join("/h", ".claude");
+    const slugDir = path.join(base, "projects", "s");
+    expect(parseClaudePath(path.join(slugDir, "x.jsonl"))).toMatchObject({ id: "x", home: base });
+    expect(parseClaudePath(path.join(slugDir, "x", "subagents", "workflows", "w", "agent-ab.jsonl"))).toMatchObject({
       id: "x",
+      home: base,
+      slugDir,
       agentId: "ab",
     });
-    expect(parseClaudePath("/h/.claude/projects/s/x/tool-results/a.jsonl")).toBeUndefined();
+    expect(parseClaudePath(path.join(slugDir, "x", "tool-results", "a.jsonl"))).toBeUndefined();
+  });
+
+  it("pathParts splits Windows slashes only on Windows, keeping POSIX backslashes intact", () => {
+    expect(pathParts("C:\\Users\\dev\\.claude\\projects\\s\\x.jsonl", "\\")).toEqual([
+      "C:",
+      "Users",
+      "dev",
+      ".claude",
+      "projects",
+      "s",
+      "x.jsonl",
+    ]);
+    expect(pathParts("\\\\server\\share\\.claude\\projects\\s\\x.jsonl", "\\")).toEqual([
+      "",
+      "",
+      "server",
+      "share",
+      ".claude",
+      "projects",
+      "s",
+      "x.jsonl",
+    ]);
+    expect(pathParts("C:\\Users/dev\\.claude/projects\\s/x.jsonl", "\\")).toEqual([
+      "C:",
+      "Users",
+      "dev",
+      ".claude",
+      "projects",
+      "s",
+      "x.jsonl",
+    ]);
+    expect(pathParts("/home/a\\b/.claude/projects/s/x.jsonl", "/")).toEqual([
+      "",
+      "home",
+      "a\\b",
+      ".claude",
+      "projects",
+      "s",
+      "x.jsonl",
+    ]);
   });
 });
 

@@ -6,6 +6,7 @@
 // turns into an instant state change under `prefers-reduced-motion`.
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMenuOpen } from "../components/ContextMenu";
+import { drawnY } from "./drawn";
 
 /** Whether the person asked for less motion, read live. */
 export const reducedMotion = (): boolean =>
@@ -190,16 +191,6 @@ export function useHeldOrder<T>(
 
 // ----- FLIP: rows slide to their new place -----
 
-/** The vertical translate an element is drawn with right now (a running animation's). */
-function drawnY(el: HTMLElement): number {
-  const t = getComputedStyle(el).transform;
-  if (!t || t === "none") return 0;
-  const m = t.match(/^matrix(3d)?\((.+)\)$/);
-  if (!m) return 0;
-  const v = m[2]!.split(",").map(Number);
-  return (m[1] ? v[13] : v[5]) ?? 0;
-}
-
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 /** Animates the children of `ref` that carry `data-flip="<key>"` from where they are
@@ -209,11 +200,16 @@ const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
  *  row is drawn right now, and the playing move is cancelled before the new one starts,
  *  so a row that moves twice glides on without a jump. A row inside another FLIP row (a
  *  subagent under its parent) is its own list's to move, never this one's. Positions are
- *  container-relative, so a scroll is not a move. Off under reduced motion, and past
- *  `max` rows (a long list just snaps). */
+ *  container-relative, so a scroll is not a move. Nor is a list in another width than at
+ *  its last commit (a window resized, a phone unfolded or turned): its rows are laid out
+ *  anew, and none of them went anywhere. (A list that was hidden then had no width: shown,
+ *  its rows come in as new ones do.) Off under reduced motion, and past `max` rows (a
+ *  long list just snaps). */
 export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
   /** Each row's layout top (no transform), relative to the container, at the last commit. */
   const prev = useRef<Map<string, number> | null>(null);
+  /** The container's width at the last commit; 0 while it had no box. */
+  const width = useRef(0);
   const moving = useRef(new Map<string, Animation>());
   useLayoutEffect(() => {
     const box = ref.current;
@@ -222,7 +218,9 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
       const outer = el.parentElement?.closest("[data-flip]");
       return !outer || !box.contains(outer);
     });
-    const top = box.getBoundingClientRect().top;
+    const { top, width: wide } = box.getBoundingClientRect();
+    const rewrapped = width.current > 0 && wide > 0 && Math.round(wide) !== width.current;
+    width.current = Math.round(wide);
     // A hidden page (an occluded or minimised window, a background tab) draws nothing and
     // WebKit holds its animation clock: a row would wait there, transparent or half-moved,
     // until the window is seen again. Nobody can see a move then, so it just snaps.
@@ -242,7 +240,7 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
     }
     const before = prev.current;
     prev.current = now;
-    if (!before || !motion) return;
+    if (!before || !motion || rewrapped) return;
     const slow = tokenMs("--dur-slow", 280);
     const dur = tokenMs("--dur", 200);
     const live = new Map<string, Animation>();
@@ -294,7 +292,9 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
  *  inside the sheet; the whole sheet while it is scrolled to its top): it follows the
  *  finger 1:1, rubber-bands upward, and on release dismisses past 40 % of its height or
  *  above 500 px/s downward, else springs back. The scrim behind reads `--sheet-drag`
- *  (0 → 1) from the sheet's parent to fade with the drag. */
+ *  (0 → 1) from the sheet's parent to fade with the drag. The mark stays through the
+ *  sheet's exit (a scrim's fade-out starts from it) and goes with the sheet: a parent that
+ *  outlives it (the shell) would otherwise take the dim from every sheet after it. */
 export function useSheetDrag(
   ref: RefObject<HTMLElement | null>,
   onDismiss: () => void,
@@ -305,7 +305,15 @@ export function useSheetDrag(
   dismiss.current = onDismiss;
   useEffect(() => {
     const sheet = ref.current;
-    if (!sheet || !enabled) return;
+    if (!sheet) return;
+    // Read now: on unmount the sheet is already out of the page, with no parent.
+    const parent = sheet.parentElement;
+    const unmark = () => {
+      if (!sheet.isConnected) parent?.style.removeProperty("--sheet-drag");
+    };
+    if (!enabled) return unmark;
+    // Each opening starts undragged.
+    parent?.style.removeProperty("--sheet-drag");
     let startY = 0;
     let dy = 0;
     let samples: { y: number; t: number }[] = [];
@@ -317,7 +325,7 @@ export function useSheetDrag(
       sheet.style.transition = animate ? `transform ${tokenMs("--dur", 200)}ms cubic-bezier(0.22, 1, 0.36, 1)` : "none";
       sheet.style.transform = y ? `translateY(${y}px)` : "";
       const p = Math.max(0, Math.min(1, y / Math.max(1, sheet.offsetHeight)));
-      sheet.parentElement?.style.setProperty("--sheet-drag", String(p));
+      parent?.style.setProperty("--sheet-drag", String(p));
     };
     const down = (e: PointerEvent) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -376,6 +384,7 @@ export function useSheetDrag(
       sheet.removeEventListener("pointermove", move);
       sheet.removeEventListener("pointerup", up);
       sheet.removeEventListener("pointercancel", up);
+      unmark();
     };
   }, [ref, handle, enabled]);
 }

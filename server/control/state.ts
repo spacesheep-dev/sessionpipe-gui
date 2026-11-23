@@ -767,6 +767,14 @@ export class ControlState {
     this.demoPoll(id);
   }
 
+  /** The demo machine says its hello again, as a daemon does every ten minutes: what it
+   *  says is as of now. A demo machine forgotten since stays gone, as a daemon's row does. */
+  demoHello(id: string, h: Hello): void {
+    const m = this.machinesById.get(id);
+    if (!m || !id.startsWith(DEMO_MACHINE)) return;
+    this.hello(m, h);
+  }
+
   /** The demo machine polled (it never holds a long-poll open: nothing is ever queued for it). */
   demoPoll(id: string): void {
     const m = this.machinesById.get(id);

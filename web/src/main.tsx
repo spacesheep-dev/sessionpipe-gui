@@ -8,13 +8,14 @@ import { StoreContext } from "./data/hooks";
 import { watchResume } from "./data/resume";
 import { Store } from "./data/store";
 import { createHttpTransport, type Transport } from "./data/transport";
+import { followSizeClass } from "./lib/device";
 import { accountMode } from "./lib/net";
 import { applySettings } from "./lib/theme";
 // The stylesheets, one per surface, in cascade order. They land after every component's
 // own CSS (select, menu, palette, control…), which is why they come after ./app: keep
 // this block where it is. tokens.css stays one file (themes/host/api.ts reads it); the
 // shared pieces come before the pages that use them; narrow.css and density.css patch
-// what precedes them and stay last.
+// what precedes them, and regular.css (the touch app's sidebar) all of it: they stay last.
 import "./styles/fonts.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
@@ -43,8 +44,11 @@ import "./styles/shortcuts.css";
 import "./styles/transitions.css";
 import "./styles/narrow.css";
 import "./styles/density.css";
+import "./styles/regular.css";
 
 applySettings();
+// Before any part listens to the window: the sidebar or the tab bar, for all at once.
+followSizeClass();
 
 const isMockMode = () => import.meta.env.VITE_MOCK === "1" || new URLSearchParams(location.search).get("mock") === "1";
 

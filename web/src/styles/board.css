@@ -661,7 +661,7 @@
 .offline-line-x {
   margin-left: auto;
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .offline-line {
     padding-right: calc(var(--gutter) - 12px);
   }
@@ -875,7 +875,7 @@
     padding-right: 8px;
   }
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .card-link {
     min-height: 64px;
     row-gap: 3px;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Shared pieces for the end-to-end suite: page openers that wait for the live stream,
-// the session's message field, a check for a full stop that starts a line, a hand-rolled ULID
+// Shared pieces for the end-to-end suite: page openers that wait for the live stream, a
+// window resized, the session's message field, a check for a full stop that starts a line, a hand-rolled ULID
 // (so the specs need nothing but @playwright/test), a tier-1 batch a sink would send, with
 // a fresh session id per call, and a session posted with a permission prompt open.
 import { randomUUID } from "node:crypto";
@@ -37,6 +37,13 @@ export async function openPage(page: Page, path: string): Promise<void> {
 export async function openBoard(page: Page): Promise<void> {
   await openPage(page, "/");
   await expect(page.locator("section.group").first()).toBeVisible();
+}
+
+/** The window resized, and the page given the frames in which it hears of it. */
+export async function resizeWindow(page: Page, size: { width: number; height: number }): Promise<void> {
+  await page.setViewportSize(size);
+  await expect.poll(() => page.evaluate(() => innerWidth)).toBe(size.width);
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 }
 
 /** Rests the pointer on the board's list, so it holds still (Board.tsx `useListHold`): a row

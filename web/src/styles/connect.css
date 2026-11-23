@@ -186,7 +186,7 @@
     align-self: center;
   }
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .url-label {
     min-width: 0;
   }
@@ -308,7 +308,7 @@
   font-size: var(--text-sm);
 }
 
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .connect-phone {
     padding: calc(12px - var(--hairline));
     border: var(--hairline) solid var(--line);
@@ -345,7 +345,7 @@
   }
 }
 
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .connect {
     gap: 32px;
   }
