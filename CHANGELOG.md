@@ -6,6 +6,12 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A session forgotten and then gone on with keeps what it says next,** also when the
+  forget and its next events arrive together (a page from spacesheep): they were dropped,
+  and counted as duplicates.
+
 ## [0.8.7] - 2026-11-20
 
 A round on the desktop app: on a computer a session opens beside the page, Settings opens
