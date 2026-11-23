@@ -4,7 +4,9 @@
 // phone-shell.ts): the welcome's three ways in, scan → connecting → the board and the
 // connected sheet, a code that isn't from sessionpipe, the TLS code's trust page, a
 // refused camera, a scan that can't run, the address path with its failures, and the
-// Mac's words never on the phone. The last tests are the phone shell at tablet width.
+// Mac's words never on the phone. The last tests are the phone shell at tablet width: the
+// same touch app, its first run a centred sheet; and held wide with a pen or a mouse, the
+// rail's layout under the status bar.
 import { expect, type Page, test } from "@playwright/test";
 import {
   haptics,
@@ -239,6 +241,36 @@ test.describe("the phone's first run", () => {
     expect(await shellCalls(page)).toContain("plugin:barcode-scanner|cancel");
   });
 
+  test("while a scan runs the iPhone's camera is fitted to the window, and on a resize; not after", async ({
+    page,
+  }) => {
+    await openInPhone(page, "/", { scan: { hold: true } });
+    const fits = async () => (await shellCalls(page)).filter((c) => c === "app_fit_camera").length;
+    await button(page, "Scan the code on your computer").click();
+    await expect(page.locator("html")).toHaveAttribute("data-scanning", "");
+    await expect.poll(fits).toBe(1);
+    // Turned: asked again.
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(fits).toBeGreaterThan(1);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(welcome(page)).toBeVisible();
+    const after = await fits();
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    expect(await fits()).toBe(after);
+  });
+
+  test("Android sizes its own camera: the shell is never asked to fit it", async ({ page }) => {
+    await openInPhone(page, "/", { platform: "android", scan: { hold: true } });
+    await button(page, "Scan the code on your computer").click();
+    await expect(page.locator("html")).toHaveAttribute("data-scanning", "");
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(welcome(page)).toBeVisible();
+    expect(await shellCalls(page)).not.toContain("app_fit_camera");
+  });
+
   test("the camera refused: a plain reason, Open Settings, the address instead", async ({ page }) => {
     await openInPhone(page, "/", { camera: "prompt", grant: "denied" });
     await button(page, "Scan the code on your computer").click();
@@ -353,29 +385,36 @@ test.describe("the phone shell at tablet width", () => {
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
   };
 
-  test("the rail's head keeps the mark inside and clears the status bar", async ({ page }) => {
+  test("a labelled sidebar beside the page and no tab bar: a tablet has the touch app's own sidebar", async ({
+    page,
+  }) => {
     await tablet(page);
-    const rail = page.locator(".rail");
-    await expect(rail).toBeVisible();
-    const mark = await page.locator(".rail-brand .mark").boundingBox();
-    expect(mark!.x).toBeGreaterThanOrEqual(0);
-    const railBox = await rail.boundingBox();
-    expect(mark!.x + mark!.width).toBeLessThanOrEqual(railBox!.x + railBox!.width);
-    // The compose glyph sits beside the mark, inside the rail, and still gets a finger's target.
-    const compose = page.locator(".rail-compose");
-    const cb = await compose.boundingBox();
-    expect(cb!.x + cb!.width).toBeLessThanOrEqual(railBox!.x + railBox!.width);
-    expect(cb!.x).toBeGreaterThanOrEqual(mark!.x + mark!.width);
-    const target = await compose.evaluate((el) => {
-      const after = getComputedStyle(el, "::after");
-      const r = el.getBoundingClientRect();
-      return r.height - Number.parseFloat(after.top) - Number.parseFloat(after.bottom);
-    });
-    expect(target).toBeGreaterThanOrEqual(44);
-    // Under the status bar: the head starts at the safe inset, and the mark below it.
-    const head = page.locator(".rail-head");
+    const side = page.locator("nav.rail");
+    await expect(side).toBeVisible();
+    await expect(page.locator("nav.tabbar")).toBeHidden();
+    await expect(page.locator(".shell--side")).toHaveCount(0);
+    // Down the leading edge, from top to bottom, with the page beside it.
+    const box = (await side.boundingBox())!;
+    expect(Math.round(box.x)).toBe(0);
+    expect(Math.round(box.width)).toBe(220);
+    expect(Math.round(box.y + box.height)).toBe(1376);
+    for (const name of ["Board", "Inbox", "Search", "Machines", "Settings"])
+      await expect(side.getByRole("link", { name })).toBeVisible();
+    await expect(side.getByRole("button", { name: "Display" })).toBeVisible();
+    // Its head is under the status bar, the mark in it.
+    const head = side.locator(".rail-head");
     expect(await head.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingTop))).toBe(24);
-    expect(mark!.y).toBeGreaterThanOrEqual(24);
+    const mark = (await side.locator(".rail-brand .mark").boundingBox())!;
+    expect(mark.x).toBeGreaterThanOrEqual(box.x);
+    expect(mark.x + mark.width).toBeLessThanOrEqual(box.x + box.width);
+    expect(mark.y).toBeGreaterThanOrEqual(24);
+    // New session is the head's, a finger's size, under the status bar; the page bar has none.
+    const compose = (await side.getByRole("button", { name: "New session" }).boundingBox())!;
+    expect(compose.width).toBeGreaterThanOrEqual(44);
+    expect(compose.height).toBeGreaterThanOrEqual(44);
+    expect(compose.y).toBeGreaterThanOrEqual(24);
+    expect(compose.x + compose.width).toBeLessThanOrEqual(box.x + box.width);
+    await expect(page.getByRole("button", { name: "New session" })).toHaveCount(1);
   });
 
   test("the connected sheet is a centred form sheet, and a step keeps to one glance", async ({ page }) => {
@@ -401,6 +440,53 @@ test.describe("the phone shell at tablet width", () => {
 
   test("the page bar starts under the status bar", async ({ page }) => {
     await tablet(page);
+    const bar = page.locator(".main > .page > .bar").first();
+    await expect(bar).toBeVisible();
+    expect(await bar.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingTop))).toBe(24);
+    const title = await bar.locator(".bar-title").first().boundingBox();
+    expect(title!.y).toBeGreaterThanOrEqual(24);
+  });
+});
+
+// An Android tablet with a pen or a mouse: its main pointer is fine, so at 720 px and wider
+// it has the mouse window's layout, the rail and the inline bar, in the phone's shell. The
+// status bar still sits over the top.
+test.describe("the phone shell held wide with a fine pointer", () => {
+  test.use({ hasTouch: false, isMobile: false, viewport: { width: 1032, height: 1376 } });
+  const wide = async (page: Page) => {
+    await openInPhone(page, "/", { platform: "android", receiver: true });
+    await page.evaluate(() => document.documentElement.style.setProperty("--safe-top", "24px"));
+    await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+    expect(await page.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+  };
+
+  test("the rail's head keeps the mark inside and clears the status bar", async ({ page }) => {
+    await wide(page);
+    const rail = page.locator(".rail");
+    await expect(rail).toBeVisible();
+    const railBox = await rail.boundingBox();
+    const mark = await page.locator(".rail-brand .mark").boundingBox();
+    expect(mark!.x).toBeGreaterThanOrEqual(0);
+    expect(mark!.x + mark!.width).toBeLessThanOrEqual(railBox!.x + railBox!.width);
+    // The compose glyph sits beside the mark, inside the rail, and still gets a finger's target.
+    const compose = page.locator(".rail-compose");
+    const cb = await compose.boundingBox();
+    expect(cb!.x + cb!.width).toBeLessThanOrEqual(railBox!.x + railBox!.width);
+    expect(cb!.x).toBeGreaterThanOrEqual(mark!.x + mark!.width);
+    const target = await compose.evaluate((el) => {
+      const after = getComputedStyle(el, "::after");
+      const r = el.getBoundingClientRect();
+      return r.height - Number.parseFloat(after.top) - Number.parseFloat(after.bottom);
+    });
+    expect(target).toBeGreaterThanOrEqual(44);
+    // Under the status bar: the head starts at the safe inset, and the mark below it.
+    const head = page.locator(".rail-head");
+    expect(await head.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingTop))).toBe(24);
+    expect(mark!.y).toBeGreaterThanOrEqual(24);
+  });
+
+  test("the page bar starts under the status bar", async ({ page }) => {
+    await wide(page);
     const bar = page.locator(".main > .page > .bar").first();
     await expect(bar).toBeVisible();
     expect(await bar.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingTop))).toBe(24);

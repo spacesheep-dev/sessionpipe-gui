@@ -123,7 +123,11 @@
         }
         const scale = size * (skin?.typography?.scale || 1);
         if (scale !== 1) d.style.fontSize = `${Math.round(scale * 1000) / 10}%`;
-        if (matchMedia("(min-width: 1200px)").matches) shell.classList.add("shell--side");
+        // The labelled sidebar is a mouse window's: a touch screen has the touch app at any width,
+        // with its own sidebar where the window has room (lib/device.ts sizeClass).
+        const touch = matchMedia("(pointer: coarse)").matches;
+        if (!touch && matchMedia("(min-width: 1200px)").matches) shell.classList.add("shell--side");
+        if (touch) d.setAttribute("data-size-class", innerWidth >= 600 && innerHeight >= 560 ? "regular" : "compact");
         // The page: its tab lit, its title, the loading rows on the board only. A first visit
         // may open Setup at "/", so it claims no page.
         const p = location.pathname;

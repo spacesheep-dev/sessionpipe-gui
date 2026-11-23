@@ -145,6 +145,7 @@ function fakePhone(a: Args) {
         case "app_open_external":
         case "app_mark":
         case "app_appearance":
+        case "app_fit_camera":
           return null;
         case "app_haptic":
           haptics.push(args.kind as string);
