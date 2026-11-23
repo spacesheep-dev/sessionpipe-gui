@@ -11,6 +11,9 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **A session forgotten and then gone on with keeps what it says next,** also when the
   forget and its next events arrive together (a page from spacesheep): they were dropped,
   and counted as duplicates.
+- **A plugin turned off while it is still starting is stopped.** After a settings save or
+  two enables at once, a plugin turned off before it had finished starting kept running
+  while the Views page listed it off.
 
 ## [0.8.7] - 2026-11-20
 
