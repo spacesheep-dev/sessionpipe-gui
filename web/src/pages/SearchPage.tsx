@@ -16,21 +16,22 @@ import {
   setFilter,
   withoutFilters,
 } from "@shared/searchQuery";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChipSelect, HarnessGlyph, Segmented } from "../components/bits";
 import { LabelSwatch } from "../components/LabelDot";
 import { PageBar } from "../components/PageBar";
 import { useBackgroundMenu } from "../components/SessionCard";
 import { useStore } from "../data/hooks";
-import { usePhoneLayout } from "../lib/device";
+import { usePhoneLayout, wideLayout } from "../lib/device";
 import { focusSearch } from "../lib/keys";
+import { pageBarBottom, useResizeAnchor } from "../lib/resizeAnchor";
 import { parseRoute, SPLIT_ACTIVE_PARAM, SPLIT_PARAM } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
 import { closeTab, type OpenHow, openWay, parseSplit } from "../lib/split";
 import { useNow } from "../lib/time";
 import { markTyped, PAGE_SIZE, useFacets, useSearchClient, useSearchStatus, useSessionSearch } from "../search/client";
 import { DateRange, rangeLabel } from "../search/DateRange";
-import { type FieldHandle, SearchField } from "../search/Field";
+import { type FieldHandle, type FieldInHand, SearchField } from "../search/Field";
 import { copyResume, type RowMenuContext } from "../search/menu";
 import { openResult, openResultAs } from "../search/open";
 import { Row } from "../search/Row";
@@ -142,6 +143,21 @@ export function Search() {
   const onRow = useRef<string | null>(null);
   const field = useRef<FieldHandle>(null);
   const listRef = useRef<HTMLOListElement>(null);
+  // A phone unfolded, folded or turned: the result being read stays where it was under the
+  // bar (lib/resizeAnchor.ts).
+  useResizeAnchor({
+    rows: ".sx-row[data-key]",
+    key: "data-key",
+    root: () => listRef.current,
+    barBottom: pageBarBottom(() => listRef.current),
+  });
+  // The field takes the focus as the page is entered, in a wide window (a phone would
+  // raise its keyboard): once. A change of layout mounts the field anew, and gives the
+  // new one the focus only if the one it replaces had it (search/Field.tsx).
+  useLayoutEffect(() => {
+    if (wideLayout()) field.current?.focus();
+  }, []);
+  const inHand = useRef<FieldInHand>(null);
   // New results: the cursor stays on its session if it is still there, else the first
   // row is the soft selection (⏎ in the field opens the top hit).
   const keyList = useMemo(() => sessions.map((s) => s.key), [sessions]);
@@ -477,15 +493,7 @@ export function Search() {
   const byDay = sort === "newest" || (page?.sort === "newest" && !page.parsed.clauses.some((c) => !c.not));
 
   const fieldEl = (
-    <SearchField
-      ref={field}
-      value={q}
-      onChange={setQuery}
-      facets={facets}
-      keys={keys}
-      phone={phone}
-      autoFocus={!phone}
-    />
+    <SearchField ref={field} value={q} onChange={setQuery} facets={facets} keys={keys} phone={phone} inHand={inHand} />
   );
   return (
     <div className={`page sx ${phone ? "sx--phone" : ""}`} {...bgMenu}>

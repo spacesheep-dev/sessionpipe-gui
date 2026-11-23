@@ -52,13 +52,16 @@
   .page.session.session--files > .files--page {
     left: 0;
     width: auto;
+    /* From one side of the window to the other: its head and its rows keep clear of what
+       the system keeps at the left, as of what it keeps at the right (below). */
+    padding-left: var(--safe-left, env(safe-area-inset-left));
     border-left: 0;
     z-index: var(--z-panel);
   }
   /* In a window with a mouse (the desktop layout from 720 px) it covers the page and no
      more: the rail stays beside it, and in the Mac app the traffic lights stay in the
      rail, not over the drawer's title. A touch screen is left as it was. */
-  @media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+  @media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
     @media (pointer: fine) {
       .page.session.session--files > .files--page {
         left: var(--rail);
@@ -66,10 +69,11 @@
     }
   }
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .files--page {
     bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
     padding-top: var(--safe-top, env(safe-area-inset-top));
+    padding-right: var(--safe-right, env(safe-area-inset-right));
   }
 }
 /* In the panel the drawer takes the panel body whole; the timeline under it stays
@@ -140,7 +144,7 @@
 .files-done {
   display: none;
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .files-head {
     height: 44px;
     padding-left: 8px;

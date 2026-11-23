@@ -1714,22 +1714,51 @@ test.describe("notifications in the Mac app", () => {
 });
 
 // A touch screen as wide as a narrow Mac window (an iPad held upright, or beside another
-// app) is not one: the width alone gives it the phone's layout, as before.
+// app) is not one: it has the touch app, and with this much room the touch app's own
+// sidebar (lib/device.ts sizeClass), never a Mac's.
 test.describe("a touch screen 760 px wide", () => {
   test.use({ viewport: { width: 760, height: 800 }, hasTouch: true });
 
   for (const where of ["the phone app", "a browser"] as const)
-    test(`keeps the tab bar in ${where}`, async ({ page }) => {
+    test(`keeps the touch app in ${where}, its sidebar in the tab bar's place`, async ({ page }) => {
       if (where === "a browser") await page.goto("/");
       else await openInPhone(page, "/", { receiver: true });
       await expect(page.locator("section.group").first()).toBeVisible({ timeout: 15_000 });
-      await expect(page.locator("nav.tabbar")).toBeVisible();
-      await expect(page.locator("nav.rail")).toBeHidden();
+      await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular");
+      await expect(page.locator("nav.rail")).toBeVisible();
+      await expect(page.locator("nav.tabbar")).toBeHidden();
+      await expect(page.locator(".shell--side")).toHaveCount(0);
       await expect(page.locator(".main > .page > .bar")).toHaveClass(/bar--large/);
       expect(
         await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bar").trim()),
       ).toBe("44px");
     });
+
+  test("in the desktop app, a downloaded update puts its dot on the sidebar's Settings row, which opens About", async ({
+    page,
+  }) => {
+    await openInShell(page, "/", { update: READY });
+    await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular", { timeout: 15_000 });
+    const settings = page.locator("nav.rail .rail-foot a.nav-link[data-nav='settings']");
+    await expect(settings).toBeVisible();
+    await expect(settings).toHaveAttribute("aria-label", "Settings, 0.3.1 is ready");
+    await expect(settings).toHaveAttribute("href", "/?settings=about");
+    const dot = settings.locator(".nav-dot");
+    await expect(dot).toBeVisible();
+    // At the row's trailing edge, beside its label.
+    const b = (await settings.boundingBox())!;
+    const d = (await dot.boundingBox())!;
+    const label = (await settings.locator(".nav-label").boundingBox())!;
+    expect(d.x).toBeGreaterThan(label.x);
+    expect(d.x + d.width).toBeLessThanOrEqual(b.x + b.width);
+    await settings.click();
+    await expect(page).toHaveURL(/\/\?settings=about$/);
+    await expect(page.getByRole("tabpanel", { name: "About" })).toBeVisible();
+    // Installed, or checked again: the dot goes with it.
+    await emit(page, "update", { state: "checking" });
+    await expect(dot).toHaveCount(0);
+    await expect(settings).not.toHaveAttribute("aria-label");
+  });
 });
 
 // The phone app (phone-shell.ts) at a phone's width: its bars are solid, so a list that runs

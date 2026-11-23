@@ -107,13 +107,15 @@ html[data-scanning] .onb {
   background: transparent !important;
 }
 
-/* The tablet (an iPad, a phone turned wide): the shell is still the app, so the status
-   bar still sits over the top. The desktop layout (shell.css) pads nothing for it, so
-   here the rail's head and the page bar start under the safe area; and inside the rail,
-   whose head is 72 px wide, the compose glyph keeps the desktop's size (the coarse-pointer
-   rule in shared.css would grow it to 44 px and push the mark past the edge), its finger
-   target reaching out past the glyph instead. */
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+/* The desktop layout of a touch shell whose main pointer is fine: an Android tablet or
+   phone with a pen or a mouse, 720 px wide or wider, gets the mouse window's rail and
+   inline bar (lib/device.ts DESKTOP_QUERY; a touch-first screen keeps the touch app at
+   any width). The shell is still the app, so the status bar still sits over the top, and
+   that layout (shell.css) pads nothing for it: here the rail's head and the page bar start
+   under the safe area. Inside the rail, whose head is 72 px wide, the compose glyph keeps
+   the desktop's size, its finger target reaching out past the glyph instead, as the
+   screen still takes a finger. */
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   html:is([data-shell="ios"], [data-shell="android"]) .rail-head {
     box-sizing: content-box;
     padding-top: var(--safe-top, env(safe-area-inset-top));
