@@ -526,10 +526,14 @@ export function registerUiRoutes(router: Router, d: UiRouteDeps): void {
       try {
         held = state.files.put(bytes, type);
       } catch (e) {
-        // Only a store with no room left is "full"; a write the system refused (a folder
-        // it cannot write, a full disk) is the router's 500, logged with its cause.
+        // Only no room is "full": the store's own cap, or a disk with none left. Any other
+        // write the system refused (a folder it cannot write, a read-only disk) is the
+        // router's 500, logged with its cause.
         if (e instanceof RangeError && e.message === "full")
           throw new HttpError(507, { reason: "full", error: "Too many files are held here; try again tomorrow." });
+        const code = (e as NodeJS.ErrnoException | null)?.code;
+        if (code === "ENOSPC" || code === "EDQUOT")
+          throw new HttpError(507, { reason: "full", error: "The disk this board keeps files on is full." });
         throw e;
       }
       const entry: UploadedFile = { name, type, size: held.size, sha256: held.sha256 };

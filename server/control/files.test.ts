@@ -120,7 +120,7 @@ describe("FileStore: making room", () => {
       expect(shas.every((s) => fs.picture(s, now) === "gone")).toBe(true);
       expect(fs.has(needed, now)).toBe(true);
       // Now it is full of files machines may fetch: the next upload is refused. (Exactly
-      // RangeError("full"): the upload route answers 507 for that one and no other.)
+      // RangeError("full"): the upload route answers 507 for that one, and for a full disk.)
       expect(() => fs.put(bytes(10, 4), "image/png", now)).toThrow(new RangeError("full"));
     } finally {
       tmp.cleanup();
@@ -277,4 +277,28 @@ describe("POST /api/ui/control/files", () => {
     },
     60_000,
   );
+
+  it("a disk with no room left is still full: 507, never a path", async () => {
+    const tmp = tempDir();
+    const web = path.join(tmp.dir, "web");
+    mkdirSync(web, { recursive: true });
+    writeFileSync(path.join(web, "index.html"), "<!doctype html><title>board</title>");
+    const app = await createApp({ port: 0, stateDir: tmp.dir, outbox: false, quiet: true, webDir: web });
+    const put = vi.spyOn(FileStore.prototype, "put").mockImplementation(() => {
+      throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+    });
+    try {
+      const res = await fetch(`${app.url}${ROUTES.ui.control}/files?name=notes.txt`, {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "notes",
+      });
+      expect(res.status).toBe(507);
+      expect(await res.json()).toEqual({ reason: "full", error: "The disk this board keeps files on is full." });
+    } finally {
+      put.mockRestore();
+      await app.close();
+      tmp.cleanup();
+    }
+  });
 });

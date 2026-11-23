@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **An upload the board can't save is no longer said as "no room".** When the board's files
+  folder can't be written, the message box and New session said the board had no room for
+  more files today; they now say it couldn't save the picture or file, with Try again. A
+  full disk still says there is no room.
+
 ## [0.8.7] - 2026-11-20
 
 A round on the desktop app: on a computer a session opens beside the page, Settings opens
