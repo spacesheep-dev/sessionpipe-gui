@@ -22,7 +22,7 @@ const MAX = 500;
  *  Hide fell on it while it needed you, `dismissed`: that needs-you state's own
  *  `stateSince`, hidden too; the next one shows, and the setting holds. */
 type Entry = string | { since: string; until: "needs"; dismissed?: string };
-type Hidden = Record<string, Entry>;
+export type Hidden = Record<string, Entry>;
 
 let hidden: Hidden | null = null;
 const listeners = new Set<() => void>();

@@ -5,7 +5,8 @@
 // control strip sits above the tabs (its Return a new line, its line's way on a finger's
 // 44 points), New session is a full-height sheet, a pull down a
 // list refreshes it, and an inbox row pushes its session's page (never the desktop's
-// panel as a sheet, and nothing of that panel comes back on the next launch).
+// panel as a sheet, and nothing of that panel comes back on the next launch). An asked
+// session that needs you takes its parent's row into Needs you, the tab's badge its count.
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
@@ -17,7 +18,7 @@ import {
   seenSetupHere,
   sinkToken,
 } from "./control-helpers.js";
-import { composer, EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
+import { askedPair, composer, EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
 
 /** A finger down the page from its top, as touch events (page.touchscreen only taps):
  *  lands at y 200, moves `by` px in steps, and stays down until `lift` is called. */
@@ -424,6 +425,41 @@ test.describe("phone", () => {
         await page.getByRole("button", { name: "Close", exact: true }).evaluate((el) => (el as HTMLElement).click());
       }
       await expect(sheet, how).toHaveCount(0);
+    }
+  });
+
+  test("an asked session that needs you takes its working parent into Needs you, marked under it, a finger's row; the tab's badge is the count", async ({
+    page,
+    request,
+  }) => {
+    const pair = await askedPair(request, { machine: `tree-${randomUUID().slice(0, 6)}`, title: "Plan the migration" });
+    const parent = page.locator(`section.group--needs_you article.card[data-flip="${pair.parent.key}"]`);
+    try {
+      await openBoard(page);
+      await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+      await pair.raise();
+      await expect(parent).toBeVisible({ timeout: 15_000 });
+      await expect(parent).toHaveClass(/card--working/);
+      const kid = parent.locator(".kid[data-needs]");
+      await expect(kid).toContainText(pair.child.title);
+      expect((await kid.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const num = (sel: string) => Number(document.querySelector(sel)?.textContent ?? 0);
+              const badge = num("nav.tabbar a[data-nav='inbox'] .nav-badge");
+              const heading = num("section.group--needs_you .group-count");
+              return badge > 0 && badge === heading ? "agree" : JSON.stringify({ badge, heading });
+            }),
+          { timeout: 15_000 },
+        )
+        .toBe("agree");
+      // A tap on it pushes the asked session's page, where its prompt is answered.
+      await kid.tap();
+      await expect(page).toHaveURL(new RegExp(sessionUrl("codex", pair.child.id)));
+    } finally {
+      await pair.end();
     }
   });
 });

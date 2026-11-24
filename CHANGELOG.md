@@ -28,6 +28,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   a question from before the session ended, or before its answer or the next step,
   arriving last, showed "needs you" and its toast on a session that had finished or gone
   on, for up to a day. Each now reads as it happened.
+- **A session another one asked, when it needs you, is in Needs you, and quiet when its
+  parent is.** On the Board it sat under its parent in Working, where Needs you's count
+  missed it while the Inbox badge had it; its parent's row now goes to Needs you with it,
+  the child marked under it, and the count is the badge's. A session set to Never in
+  Notify me now quiets the sessions it asked as it quiets its subagents.
 
 ## [0.8.8] - 2026-11-24
 

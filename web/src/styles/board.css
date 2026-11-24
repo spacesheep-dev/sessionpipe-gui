@@ -536,6 +536,15 @@
 .kid-state {
   color: var(--fg-3);
 }
+/* A child that needs you, the reason its parent's row is in Needs you: its title in ink,
+   its state in the needs-you colour, as a row's prompt kind is weighted. */
+.kid[data-needs] {
+  color: var(--fg);
+}
+.kid[data-needs] > .kid-state {
+  color: var(--needs-fg);
+  font-weight: 500;
+}
 .kid > .card-muted {
   margin-right: 0;
   color: var(--fg-3);

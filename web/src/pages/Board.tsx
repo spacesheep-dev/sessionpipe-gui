@@ -50,8 +50,9 @@ import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "..
 import { useStartTitles } from "../control/Starting";
 import { cliCommand, isFinal } from "../control/words";
 import {
-  answeredAll,
+  bySectionThenRecent,
   byStateThenRecent,
+  needsYouNow,
   useAppState,
   useFirstLoad,
   useLabels,
@@ -62,7 +63,7 @@ import {
   useUnreadKeys,
 } from "../data/hooks";
 import { agentFound } from "../lib/agents";
-import { foldsAway, nestDelegated } from "../lib/delegated";
+import { foldsAway, nestDelegated, sectionOf, waitingIn } from "../lib/delegated";
 import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import {
@@ -316,6 +317,18 @@ export function Board() {
       childrenOf.set(key, [...(childrenOf.get(key) ?? []), ...list].sort(byStateThenRecent));
     return { roots, childrenOf };
   }, [tree, all, machine, harness, labels, label, lq, aliased, hidden, showDone]);
+  // A row is in Needs you while a session under it needs you (one hidden on this device in
+  // that state, which the Inbox badge leaves out, takes it nowhere), so the section holds
+  // every session the badge counts; it goes back when the child stops needing you.
+  const sectionFor = useCallback(
+    (s: SessionSummary) =>
+      sectionOf(
+        s,
+        childrenOf.get(s.key),
+        (c) => c.state === "needs_you" && !isHidden(hidden, c.key, c.stateSince, true),
+      ),
+    [childrenOf, hidden],
+  );
 
   const passes = useCallback(
     (s: SessionSummary) =>
@@ -330,8 +343,11 @@ export function Board() {
     [machine, harness, label, labels, lq, childrenOf, aliased],
   );
   const visible = useMemo(
-    () => roots.filter((s) => passes(s) && !isHidden(hidden, s.key, s.stateSince, s.state === "needs_you")),
-    [roots, passes, hidden],
+    () =>
+      roots
+        .filter((s) => passes(s) && !isHidden(hidden, s.key, s.stateSince, s.state === "needs_you"))
+        .sort(bySectionThenRecent(sectionFor)),
+    [roots, passes, hidden, sectionFor],
   );
 
   // Held still under the hand: rows keep their place and section; new ones wait.
@@ -341,7 +357,7 @@ export function Board() {
   const heldFilter = useRef(filterKey);
   const hold = listHold && heldFilter.current === filterKey;
   heldFilter.current = filterKey;
-  const heldAll = useHeldOrder(visible, keyOf, hold, stateOf);
+  const heldAll = useHeldOrder(visible, keyOf, hold, sectionFor);
   const known = useRef<Set<string>>(new Set());
   // Held, new rows wait; but a list that has shown nothing yet (a first snapshot, a tree
   // just opened, the very first session) shows what it has at once.
@@ -376,14 +392,25 @@ export function Board() {
     for (const h of held) g.get(h.group as SessionState)?.push(h);
     return g;
   }, [held]);
-  // Needs you counts what still needs you, as the Inbox badge does: a row whose every
-  // prompt has its answer out, or that has moved on under the hand, keeps its place and
-  // counts no more.
-  const asked = useMemo(() => groups.get("needs_you")!.flatMap((h) => h.item.openAttentions), [groups]);
+  // Needs you counts the sessions that still need you, as the Inbox badge does, a child
+  // under its row included: one whose every prompt has its answer out, or that has moved
+  // on under the hand, keeps its place and counts no more.
+  const asked = useMemo(
+    () =>
+      groups
+        .get("needs_you")!
+        .flatMap((h) => [h.item, ...(childrenOf.get(h.key) ?? [])].flatMap((s) => s.openAttentions)),
+    [groups, childrenOf],
+  );
   const answered = useAnswersOut(asked);
-  const stillNeeds = groups
-    .get("needs_you")!
-    .filter((h) => !h.gone && h.item.state === "needs_you" && !answeredAll(h.item, answered)).length;
+  const stillNeeds = waitingIn(
+    groups
+      .get("needs_you")!
+      .filter((h) => !h.gone)
+      .map((h) => h.item),
+    (s) => childrenOf.get(s.key),
+    (s) => needsYouNow(s, hidden, answered),
+  );
 
   const [showHidden, setShowHiddenState] = useState(hiddenOpen);
   const toggleHidden = useCallback(() => {
@@ -783,7 +810,6 @@ function useHideKeys(row: () => SessionSummary | undefined, leave: () => void): 
 }
 
 const keyOf = (s: SessionSummary) => s.key;
-const stateOf = (s: SessionSummary) => s.state;
 
 /** The end of a list the field narrows: the way on to Search, for every session with
  *  these words, what was sent included. Its key (⇧⌘F, or what it is bound to) with a

@@ -187,3 +187,56 @@ describe("toastAllowed", () => {
     expect(toastAllowed({ session: "codex:elsewhere" }, t.marks, t.sessions)).toBe(true);
   });
 });
+
+// A session another one asked (`delegatedBy`: sessionpipe ask) is capped by its asker as a
+// subagent's session is by its parent: Codex asked by Claude Code, and a subagent of Codex.
+const asked = (notify: Marks["notify"]) => {
+  const m = marks({ notify });
+  const sessions = new Map(
+    [
+      { key: "claude-code:asker", harness: "claude-code", id: "asker" },
+      { key: "codex:asked", harness: "codex", id: "asked", delegatedBy: "claude-code:asker" },
+      { key: "codex:sub", harness: "codex", id: "sub", parentId: "asked" },
+    ].map((s) => [s.key, s as SessionSummary] as const),
+  );
+  const get = (key: string) => sessions.get(key)!;
+  return { marks: m, sessions, get, level: (key: string) => effectiveNotify(get(key), m, sessions) };
+};
+
+describe("the Notify cap follows the session that asked", () => {
+  it("a quiet asker quiets the session it asked, and what that one runs", () => {
+    const t = asked({ "claude-code:asker": "never" });
+    expect(t.level("codex:asked")).toBe("never");
+    expect(t.level("codex:sub")).toBe("never");
+    expect(notifyCap(t.get("codex:asked"), t.marks, t.sessions)).toEqual({ level: "never", parent: true });
+    expect(notifyCap(t.get("codex:sub"), t.marks, t.sessions)).toEqual({ level: "never", parent: false });
+  });
+
+  it("an asked session's own setting never makes it louder, and a quieter one of its own stays", () => {
+    expect(asked({ "claude-code:asker": "never", "codex:asked": "finishes" }).level("codex:asked")).toBe("never");
+    expect(asked({ "claude-code:asker": "finishes", "codex:asked": "never" }).level("codex:asked")).toBe("never");
+    expect(asked({ "codex:asked": "finishes" }).level("codex:asked")).toBe("finishes");
+    expect(asked({}).level("codex:asked")).toBe("needs");
+  });
+
+  it("drops its banners, and draws the bell once, on the asker's row", () => {
+    const t = asked({ "claude-code:asker": "never" });
+    expect(toastAllowed({ session: "codex:asked" }, t.marks, t.sessions)).toBe(false);
+    expect(showsNever(t.get("codex:asked"), t.marks, t.sessions, true)).toBe(false);
+    expect(showsNever(t.get("codex:asked"), t.marks, t.sessions)).toBe(true);
+  });
+
+  it("an asker that is not known caps nothing; a loop of askers ends", () => {
+    const m = marks({ notify: { "claude-code:a": "never" } });
+    const loop = new Map(
+      [
+        { key: "claude-code:a", harness: "claude-code", id: "a", delegatedBy: "codex:b" },
+        { key: "codex:b", harness: "codex", id: "b", delegatedBy: "claude-code:a" },
+        { key: "codex:c", harness: "codex", id: "c", delegatedBy: "claude-code:gone" },
+      ].map((s) => [s.key, s as SessionSummary] as const),
+    );
+    expect(effectiveNotify(loop.get("codex:b")!, m, loop)).toBe("never");
+    expect(effectiveNotify(loop.get("claude-code:a")!, m, loop)).toBe("never");
+    expect(effectiveNotify(loop.get("codex:c")!, m, loop)).toBe("needs");
+  });
+});

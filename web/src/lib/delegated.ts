@@ -5,9 +5,12 @@
 // daemon allows one nested ask) hangs every link under the top of the chain, since a kid
 // row draws no kids of its own; a loop in the hooks' say-so (A says B, B says A) nests
 // nobody, since neither would be drawn; a parent off the board (another machine, a
-// filter, a subagent's child session) ends the climb where it is. Nothing vanishes. And
-// which sessions a session's page lists as the ones it asked (AskedSessions).
-import type { SessionKey, SessionSummary } from "@shared/api";
+// filter, a subagent's child session) ends the climb where it is. Nothing vanishes.
+// A child that needs you takes its parent's row into Needs you (`sectionOf`), and that
+// section counts sessions, a child under its parent included (`waitingIn`): the number
+// the Inbox badge has. And which sessions a session's page lists as the ones it asked
+// (AskedSessions).
+import type { SessionKey, SessionState, SessionSummary } from "@shared/api";
 
 /** Whether a parent drawn in a folded Done would take the child out of sight: the parent
  *  is done and Done is folded while the child still runs or needs you. A done child under
@@ -66,6 +69,27 @@ export function nestDelegated(
     nested.set(anchor.key, list);
   }
   return { roots: out, nested };
+}
+
+/** The section a row is drawn in: its own state's, or Needs you while a session under it
+ *  (`kids`: its subagents' sessions and the ones it asked) `needs` you. The row keeps its
+ *  own words and lamp; it is there for its child. */
+export const sectionOf = (
+  s: SessionSummary,
+  kids: readonly SessionSummary[] | undefined,
+  needs: (kid: SessionSummary) => boolean,
+): SessionState => (s.state !== "needs_you" && kids?.some(needs) ? "needs_you" : s.state);
+
+/** How many sessions the rows of Needs you hold that `wait` on you: each row's own and each
+ *  one under it, every session once. */
+export function waitingIn(
+  rows: readonly SessionSummary[],
+  kidsOf: (s: SessionSummary) => readonly SessionSummary[] | undefined,
+  wait: (s: SessionSummary) => boolean,
+): number {
+  const counted = new Set<SessionKey>();
+  for (const s of rows) for (const x of [s, ...(kidsOf(s) ?? [])]) if (wait(x)) counted.add(x.key);
+  return counted.size;
 }
 
 // ----- a session's page: the sessions it asked -----

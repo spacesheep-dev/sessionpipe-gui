@@ -3,9 +3,13 @@
 // Codex from inside its turn (sessionpipe ask) and another gets a handoff's answer back.
 // The asking session's page shows the row; the asked session's page says who asked, with
 // a link back; the board nests it under its parent; Machines says lab-mac's agents can
-// ask each other; the Feed words the two events. Desktop only.
+// ask each other; the Feed words the two events. An asked session that needs you takes
+// its working parent's row into Needs you, marked under it, and the count is the Inbox
+// badge's; a parent set to Never quiets the session it asked. Desktop only (a finger's:
+// mobile.spec).
+import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
-import { openBoard, openPage } from "./helpers.js";
+import { askedPair, openBoard, openPage } from "./helpers.js";
 
 test.skip(({ isMobile }) => isMobile, "desktop project");
 
@@ -98,4 +102,94 @@ test("Machines: lab-mac's agents can ask each other; the Feed words the events",
   // The kind column says who was asked; the detail column says how the ask is going.
   await expect(ev).toContainText(/asked Codex/i);
   await expect(ev).toContainText(/running/);
+});
+
+test.describe("an asked session that needs you", () => {
+  test("lifts its working parent into Needs you, marked under it, counted as the Inbox badge counts, until its prompt clears", async ({
+    page,
+    request,
+  }) => {
+    const pair = await askedPair(request, { machine: `tree-${randomUUID().slice(0, 6)}`, title: "Plan the migration" });
+    const needsYou = page.locator("section.group--needs_you");
+    const working = page.locator("section.group--working");
+    const parent = (in_: typeof needsYou) => in_.locator(`article.card[data-flip="${pair.parent.key}"]`);
+    try {
+      await openBoard(page);
+      await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+      await page.mouse.move(0, 0);
+      await expect(parent(working)).toBeVisible({ timeout: 15_000 });
+      await expect(parent(working).locator(".kid", { hasText: pair.child.title })).toBeVisible();
+      await expect(parent(working).locator(".kid[data-needs]")).toHaveCount(0);
+
+      await pair.raise();
+      await expect(parent(needsYou)).toBeVisible({ timeout: 15_000 });
+      // The row keeps its own state; the child under it is the one marked.
+      await expect(parent(needsYou)).toHaveClass(/card--working/);
+      const kid = parent(needsYou).locator(".kid[data-needs]");
+      await expect(kid).toHaveCount(1);
+      await expect(kid).toContainText(pair.child.title);
+      await expect(kid.locator(".kid-state")).toHaveText("needs you");
+      // Nothing new to press on it: no Allow or Deny on the row.
+      await expect(parent(needsYou).getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      // Needs you's count is the badge's (other specs raise prompts meanwhile: read at once).
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const num = (sel: string) => Number(document.querySelector(sel)?.textContent ?? 0);
+              const badge = num("nav.rail a[data-nav='inbox'] .nav-badge");
+              const heading = num("section.group--needs_you .group-count");
+              return badge > 0 && badge === heading ? "agree" : JSON.stringify({ badge, heading });
+            }),
+          { timeout: 15_000 },
+        )
+        .toBe("agree");
+
+      // The prompt clears: the parent goes back to Working once the pointer is off the list.
+      await pair.clear();
+      await page.mouse.move(0, 0);
+      await expect(parent(working)).toBeVisible({ timeout: 15_000 });
+      await expect(parent(needsYou)).toHaveCount(0);
+      await expect(parent(working).locator(".kid[data-needs]")).toHaveCount(0);
+    } finally {
+      await pair.end();
+    }
+  });
+
+  test("raises no banner when its parent is set to Never; the same ask under a parent left alone does", async ({
+    page,
+    request,
+  }) => {
+    const quiet = await askedPair(request, { machine: `tree-${randomUUID().slice(0, 6)}`, title: "Quiet parent" });
+    const loud = await askedPair(request, { machine: `tree-${randomUUID().slice(0, 6)}`, title: "Loud parent" });
+    const marks = (level: "never" | null) =>
+      request.patch("/api/ui/marks", { data: { notify: { [quiet.parent.key]: level } } });
+    // Every banner that ever shows, by its session: the demo's own prompts share the three
+    // slots and may push one out before it is looked at.
+    await page.addInitScript(() => {
+      const seen = new Set<string>();
+      (window as unknown as { __banners: Set<string> }).__banners = seen;
+      new MutationObserver(() => {
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>(".toast[data-session]")))
+          seen.add(el.dataset.session!);
+      }).observe(document, { childList: true, subtree: true });
+    });
+    const banners = () => page.evaluate(() => [...(window as unknown as { __banners: Set<string> }).__banners]);
+    try {
+      expect((await marks("never")).ok()).toBeTruthy();
+      await openPage(page, "/feed");
+      await page.mouse.move(0, 0);
+      await quiet.raise();
+      await loud.raise();
+      // The loud one's banner comes, after the quiet one's prompt was raised: by then the
+      // quiet one's would have come too.
+      await expect.poll(banners, { timeout: 15_000 }).toContain(loud.child.key);
+      await page.waitForTimeout(1_000);
+      expect(await banners()).not.toContain(quiet.child.key);
+    } finally {
+      await marks(null);
+      await quiet.end();
+      await loud.end();
+    }
+  });
 });

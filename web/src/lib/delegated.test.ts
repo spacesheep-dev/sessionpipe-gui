@@ -1,10 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // Where an asked session goes on the board: under its asker; a chain under the chain's
 // top; a loop nests nobody; a parent the child may not hang under (another machine, a
-// filter, not a root) ends the climb; nothing is ever lost from the board.
-import type { SessionSummary } from "@shared/api";
+// filter, not a root) ends the climb; nothing is ever lost from the board. A child that
+// needs you takes its parent into Needs you, whose count is the Inbox badge's.
+// The badge's own test (data/hooks.ts needsYouNow) needs the page's window.
+import "../native/test-env";
+import type { Attention, SessionState, SessionSummary } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { ASKED_SHOWN, askedComputer, askedSessions, askedShown, foldsAway, nestDelegated } from "./delegated";
+import type { AnswerOut } from "../control/answers";
+import { needsYouNow } from "../data/hooks";
+import {
+  ASKED_SHOWN,
+  askedComputer,
+  askedSessions,
+  askedShown,
+  foldsAway,
+  nestDelegated,
+  sectionOf,
+  waitingIn,
+} from "./delegated";
 
 const s = (key: string, delegatedBy?: string, machine = "lab-mac"): SessionSummary =>
   ({ key, machine, ...(delegatedBy ? { delegatedBy } : {}) }) as unknown as SessionSummary;
@@ -152,5 +166,74 @@ describe("askedSessions (a session's page)", () => {
     );
     expect(askedComputer(kid("a:3", { machine: undefined }))).toBe("Unknown computer");
     expect(askedComputer(kid("a:4", { machine: "  " }))).toBe("Unknown computer");
+  });
+});
+
+describe("a child that needs you lifts its parent into Needs you", () => {
+  const at = "2026-11-24T10:00:00.000Z";
+  const prompt = (id: string): Attention => ({ attentionId: id, kind: "permission", at }) as Attention;
+  const row = (key: string, state: SessionState, delegatedBy?: string): SessionSummary =>
+    ({
+      key,
+      machine: "lab-mac",
+      state,
+      stateSince: at,
+      startedAt: at,
+      openAttentions: state === "needs_you" ? [prompt(`p-${key}`)] : [],
+      ...(delegatedBy ? { delegatedBy } : {}),
+    }) as unknown as SessionSummary;
+  /** The Board's Needs you, as pages/Board.tsx draws it with nothing held, and the badge's
+   *  number (data/hooks.ts useNeedsYouCount) for the same sessions. */
+  const board = (all: SessionSummary[], out: Record<string, AnswerOut> = {}) => {
+    const { roots, nested } = nestDelegated(all, all, sameMachine);
+    const needs = (c: SessionSummary) => c.state === "needs_you";
+    const section = new Map(roots.map((r) => [r.key, sectionOf(r, nested.get(r.key), needs)]));
+    const rows = roots.filter((r) => section.get(r.key) === "needs_you");
+    const wait = (x: SessionSummary) => needsYouNow(x, {}, out);
+    return {
+      rows: keys(rows),
+      count: waitingIn(rows, (r) => nested.get(r.key), wait),
+      badge: all.filter(wait).length,
+      section: Object.fromEntries(section),
+    };
+  };
+
+  it("the parent needs you and its child does not: the parent alone, one", () => {
+    const b = board([row("claude-code:p", "needs_you"), row("codex:c", "working", "claude-code:p")]);
+    expect(b).toMatchObject({ rows: ["claude-code:p"], count: 1, badge: 1 });
+  });
+
+  it("the child needs you under a working parent: the parent's row is in Needs you, one", () => {
+    const b = board([row("claude-code:p", "working"), row("codex:c", "needs_you", "claude-code:p")]);
+    expect(b).toMatchObject({ rows: ["claude-code:p"], count: 1, badge: 1 });
+    expect(b.section["claude-code:p"]).toBe("needs_you");
+  });
+
+  it("both need you: one row, two sessions", () => {
+    const b = board([row("claude-code:p", "needs_you"), row("codex:c", "needs_you", "claude-code:p")]);
+    expect(b).toMatchObject({ rows: ["claude-code:p"], count: 2, badge: 2 });
+  });
+
+  it("two children need you under an idle parent, beside a row that needs you itself: three", () => {
+    const b = board([
+      row("claude-code:p", "idle"),
+      row("codex:c1", "needs_you", "claude-code:p"),
+      row("gemini-cli:c2", "needs_you", "claude-code:p"),
+      row("claude-code:q", "needs_you"),
+    ]);
+    expect(b).toMatchObject({ rows: ["claude-code:p", "claude-code:q"], count: 3, badge: 3 });
+  });
+
+  it("a child whose prompt has its answer out keeps the parent there and counts no more, as the badge", () => {
+    const b = board([row("claude-code:p", "working"), row("codex:c", "needs_you", "claude-code:p")], {
+      "p-codex:c": { status: "sent", decision: "allow" },
+    });
+    expect(b).toMatchObject({ rows: ["claude-code:p"], count: 0, badge: 0 });
+  });
+
+  it("the child stops needing you: the parent goes back to its own section", () => {
+    const b = board([row("claude-code:p", "working"), row("codex:c", "working", "claude-code:p")]);
+    expect(b).toMatchObject({ rows: [], count: 0, badge: 0 });
+    expect(b.section["claude-code:p"]).toBe("working");
   });
 });

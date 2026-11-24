@@ -574,7 +574,8 @@ function KidList({
 }
 
 /** A subagent, or a session this one asked (`delegatedBy`): one line under its parent,
- *  on the tree guide, with the session menu. */
+ *  on the tree guide, with the session menu. One that needs you says so in the needs-you
+ *  colour: it is why its parent's row is in Needs you (pages/Board.tsx). */
 function KidRow({
   c,
   flip,
@@ -591,6 +592,7 @@ function KidRow({
       <Link
         to={sessionPath(c.harness, c.id)}
         className="kid"
+        data-needs={c.state === "needs_you" ? "" : undefined}
         title={sessionTitle(c)}
         plainClick={() => openSession(c.key, "primary")}
         modClick={(o) => openSession(c.key, o.background ? "background" : "other")}
