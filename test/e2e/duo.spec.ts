@@ -229,36 +229,37 @@ test("a reply on the outer display and in Split View reads in lines of at most 7
   }
 });
 
-test("a reply on the inner display, upright and turned, and on a tablet reads in lines of at most 75 characters", async ({
+test("a reply on a tablet on its side, whose column is 640 pt and more, reads in lines of 65 to 75 characters", async ({
   browser,
 }) => {
-  // The widest of them, a tablet on its side, has room for any line: there it is 65 to 75.
-  for (const [size, least] of [
-    ["669x951", 20],
-    ["951x669", 20],
-    ["1180x820", 65],
-  ] as const) {
-    const b = await duoBed(browser, size);
-    const { page } = b;
-    try {
-      await page.goto(`${b.server.url}${DUO_SESSIONS.prompt}`);
-      const reply = page.getByText(DUO_REPLY, { exact: true });
-      await expect(reply).toBeVisible();
-      // In the page's own face: the one it stands in for until then is as wide only on the whole.
-      await page.evaluate(() => document.fonts.ready);
-      const chars = await firstLineChars(reply);
-      expect(chars, size).toBeGreaterThanOrEqual(least);
-      expect(chars, size).toBeLessThanOrEqual(75);
-    } finally {
-      await b.close();
-    }
+  const b = await duoBed(browser, "1180x820");
+  const { page } = b;
+  try {
+    await page.goto(`${b.server.url}${DUO_SESSIONS.prompt}`);
+    const reply = page.getByText(DUO_REPLY, { exact: true });
+    await expect(reply).toBeVisible();
+    // In the page's own face: the one it stands in for until then is as wide only on the whole.
+    await page.evaluate(() => document.fonts.ready);
+    const chars = await firstLineChars(reply);
+    expect(chars).toBeGreaterThanOrEqual(65);
+    expect(chars).toBeLessThanOrEqual(75);
+  } finally {
+    await b.close();
   }
 });
 
-test("on a wide touch screen a reply's prose stops at its measure from the column's leading edge, its code and its table keep the column, and the bubble stops at the same measure", async ({
-  browser,
-}) => {
-  for (const size of ["951x669", "1180x820"]) {
+// The column is the transcript's own, beside the sidebar and inside the bands: under 640 pt
+// on the inner display upright and turned and on a tablet held upright, 672 on a tablet on
+// its side. Each size says which it is, so a sidebar or a band of another width is heard.
+for (const [size, wide] of [
+  ["669x951", false],
+  ["951x669", false],
+  ["820x1180", false],
+  ["1180x820", true],
+] as const)
+  test(`at ${size} a reply's prose ${wide ? "stops at its measure from the column's leading edge" : "runs to the column's far edge, as the messages do"}, its code and its table keep the column, and the bubble ${wide ? "stops at the same measure" : "keeps a phone's 85%"}`, async ({
+    browser,
+  }) => {
     const b = await duoBed(browser, size);
     const { page } = b;
     try {
@@ -266,37 +267,50 @@ test("on a wide touch screen a reply's prose stops at its measure from the colum
       const card = page.locator(".chat-card");
       await expect(card.locator(".md-table")).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
-      /** A box's two sides, and how many of its own em it is wide. */
+      /** A box's two sides, its width, and how many of its own em it is wide. */
       const box = (sel: string) =>
         page.locator(sel).evaluate((el) => {
           const r = el.getBoundingClientRect();
-          return { left: r.left, right: r.right, em: r.width / Number.parseFloat(getComputedStyle(el).fontSize) };
+          return {
+            left: r.left,
+            right: r.right,
+            width: r.width,
+            em: r.width / Number.parseFloat(getComputedStyle(el).fontSize),
+          };
         });
+      const timeline = await box(".timeline");
+      expect(timeline.width >= 640, `the column at ${size} is ${timeline.width} pt`).toBe(wide);
+      await expect(page.locator(".timeline")).toHaveAttribute("data-column", wide ? "wide" : "narrow");
       const column = await box(".chat-card");
+      expect([column.left, column.right], size).toEqual([timeline.left, timeline.right]);
       const para = await box(".chat-card .md > p");
       const list = await box(".chat-card .md > ul");
-      // Prose: from where the column starts, to a measure that is narrower than the column.
+      // Prose: from where the column starts; to a measure narrower than a wide column, or to
+      // the far edge of a narrow one.
       expect(para.left, size).toBe(column.left);
       expect(list.left, size).toBe(column.left);
-      expect(para.right, size).toBeLessThan(column.right - 100);
+      if (wide) {
+        expect(para.right, size).toBeLessThan(column.right - 100);
+        const chars = await firstLineChars(page.locator(".chat-card .md > p"));
+        expect(chars, size).toBeGreaterThanOrEqual(60);
+        expect(chars, size).toBeLessThanOrEqual(75);
+      } else expect(para.right, size).toBe(column.right);
       expect(list.right, size).toBe(para.right);
-      const chars = await firstLineChars(page.locator(".chat-card .md > p"));
-      expect(chars, size).toBeGreaterThanOrEqual(60);
-      expect(chars, size).toBeLessThanOrEqual(75);
       // Code and a table are read across, not down: they keep the column.
-      for (const wide of [".chat-card .md-pre", ".chat-card .md-table"]) {
-        const got = await box(wide);
-        expect([got.left, got.right], `${wide} at ${size}`).toEqual([column.left, column.right]);
+      for (const wider of [".chat-card .md-pre", ".chat-card .md-table"]) {
+        const got = await box(wider);
+        expect([got.left, got.right], `${wider} at ${size}`).toEqual([column.left, column.right]);
       }
-      // What the person wrote: on the column's far edge, no wider than the prose.
+      // What the person wrote: on the column's far edge; no wider than the prose where the
+      // column is wide, a phone's 85% of it where it is not.
       const bubble = await box(".chat-bubble");
       expect(bubble.right, size).toBe(column.right);
-      expect(bubble.em, size).toBeCloseTo(para.em, 1);
+      if (wide) expect(bubble.em, size).toBeCloseTo(para.em, 1);
+      else expect(bubble.width, size).toBeCloseTo(column.width * 0.85, 0);
     } finally {
       await b.close();
     }
-  }
-});
+  });
 
 test("on the inner display turned and on a tablet a plan waiting for its answer reads across its whole card: the reply's measure is not the plan's", async ({
   browser,

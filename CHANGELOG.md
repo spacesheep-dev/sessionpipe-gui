@@ -38,7 +38,11 @@ All notable changes to `sessionpipe-gui`. The format follows
   characters, too long for the eye to find the next one. Its paragraphs, lists, quotes and
   headings now stop at about 70, from the column's leading edge, at any text size; its
   code and tables keep the column, and the bubble of what you wrote is no wider than the
-  prose. A phone held upright and a window with a mouse are unchanged.
+  prose. That is where the session's column is 640 pt wide or more, as on a tablet on its
+  side; in a narrower one, beside the sidebar on a phone opened flat or on a tablet held
+  upright, a reply runs to the column's edge, as your messages and the message field do,
+  so its right edge is not ragged. A phone held upright and a window with a mouse are
+  unchanged.
 - **The iPhone app fills iPhone Duo's screens.** Built with Xcode 26, it showed in a box
   with black bars round it, folded and opened. It is now built with Xcode 27.1 and reaches
   the edges of both screens, with its controls clear of the status bar at the side.

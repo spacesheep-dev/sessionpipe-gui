@@ -77,6 +77,7 @@ import { FilesButton } from "../files/FilesButton";
 import { BESIDE, FilesDrawer } from "../files/FilesDrawer";
 import { closeDrawer, FILE_PARAM, openDrawer, toggleDrawer, useDrawer } from "../files/state";
 import { useAskedInput } from "../lib/askedInput";
+import { useColumnRef } from "../lib/column";
 import { usePhoneLayout, wideLayout } from "../lib/device";
 import {
   ATTENTION_LABEL,
@@ -381,6 +382,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const lastSeq = useRef(-1);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
+  const columnRef = useColumnRef(listRef);
 
   const [hasOlder, setHasOlder] = useState(false);
   const [olderBusy, setOlderBusy] = useState(false);
@@ -1517,7 +1519,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
             </p>
           )}
 
-          <ol className={`timeline ${chat ? "timeline--chat" : ""}`} ref={listRef}>
+          <ol className={`timeline ${chat ? "timeline--chat" : ""}`} ref={columnRef}>
             {hasOlder && (
               <li className="older">
                 <button
