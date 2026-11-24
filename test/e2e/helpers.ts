@@ -276,10 +276,12 @@ export async function openPrompt(
 /** A Claude Code session working on `machine` and the Codex session it asked (`delegated_by`,
  *  as the daemon starts it: same machine, same folder), both mid-turn, posted the way
  *  their hooks send them. `raise()` opens a permission prompt in the asked one and
- *  `clear()` closes it; `end()` ends both, so no other spec finds them. */
+ *  `clear()` closes it; `end()` ends both, so no other spec finds them. With `subagent`
+ *  the child is the parent's own subagent session instead (`parent_id`, Claude Code, so
+ *  also one of its agents). */
 export async function askedPair(
   request: APIRequestContext,
-  o: { machine: string; title: string },
+  o: { machine: string; title: string; subagent?: boolean },
 ): Promise<{
   parent: { key: string; id: string; title: string };
   child: { key: string; id: string; title: string };
@@ -320,13 +322,15 @@ export async function askedPair(
     return { id, key: `${harness}:${id}`, title, ev };
   };
   const parent = sess("claude-code", o.title);
-  const child = sess("codex", `${o.title}: the asked one`, { delegated_by: parent.key });
+  const child = o.subagent
+    ? sess("claude-code", `${o.title}: the subagent`, { parent_id: parent.id })
+    : sess("codex", `${o.title}: the asked one`, { delegated_by: parent.key });
   await post([
     parent.ev("session.started", { source: "startup" }, "SessionStart"),
     parent.ev("turn.started", { turn_id: "t1", prompt_chars: 30 }, "UserPromptSubmit"),
   ]);
   await post([
-    child.ev("session.started", { source: "startup" }, "SessionStart"),
+    child.ev("session.started", { source: o.subagent ? "fork" : "startup" }, "SessionStart"),
     child.ev("turn.started", { turn_id: "t1", prompt_chars: 60 }, "UserPromptSubmit"),
   ]);
   const open: string[] = [];

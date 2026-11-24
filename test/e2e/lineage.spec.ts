@@ -5,7 +5,8 @@
 // a link back; the board nests it under its parent; Machines says lab-mac's agents can
 // ask each other; the Feed words the two events. An asked session that needs you takes
 // its working parent's row into Needs you, marked under it, and the count is the Inbox
-// badge's; a parent set to Never quiets the session it asked. Desktop only (a finger's:
+// badge's (a subagent's own session too, its agent row marked even in a folded tree); a
+// parent set to Never quiets the session it asked. Desktop only (a finger's:
 // mobile.spec).
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
@@ -151,6 +152,50 @@ test.describe("an asked session that needs you", () => {
       await expect(parent(working)).toBeVisible({ timeout: 15_000 });
       await expect(parent(needsYou)).toHaveCount(0);
       await expect(parent(working).locator(".kid[data-needs]")).toHaveCount(0);
+    } finally {
+      await pair.end();
+    }
+  });
+
+  test("a subagent's own session does the same: its agent row is marked, shown though the person folded the tree", async ({
+    page,
+    request,
+  }) => {
+    const pair = await askedPair(request, {
+      machine: `tree-${randomUUID().slice(0, 6)}`,
+      title: "Tidy the docs",
+      subagent: true,
+    });
+    const row = page.locator(`article.card[data-flip="${pair.parent.key}"]`);
+    const inNeeds = page.locator(`section.group--needs_you article.card[data-flip="${pair.parent.key}"]`);
+    // The person folded its agents on this device (lib/agents.ts).
+    await page.addInitScript(
+      (key) => localStorage.setItem("sessionpipe-gui.agentsOpen", JSON.stringify([[key, false]])),
+      pair.parent.key,
+    );
+    try {
+      await openBoard(page);
+      await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+      await page.mouse.move(0, 0);
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      await expect(row.locator(".card-disclose")).toHaveAttribute("aria-expanded", "false");
+      await expect(row.locator(".agent-row")).toHaveCount(0);
+
+      await pair.raise();
+      await expect(inNeeds).toBeVisible({ timeout: 15_000 });
+      await expect(row).not.toHaveClass(/card--needs_you/);
+      // The reason shows, folded or not: that one agent, saying "needs you", not its time.
+      await expect(row.locator(".card-disclose")).toHaveAttribute("aria-expanded", "false");
+      const agent = row.locator(".agent-row");
+      await expect(agent).toHaveCount(1);
+      await expect(agent).toHaveAttribute("data-needs", "");
+      await expect(agent.locator(".kid-state")).toHaveText("needs you");
+      await expect(agent.locator(".agent-now")).toHaveCount(0);
+
+      await pair.clear();
+      await page.mouse.move(0, 0);
+      await expect(inNeeds).toHaveCount(0, { timeout: 15_000 });
+      await expect(row.locator(".agent-row")).toHaveCount(0);
     } finally {
       await pair.end();
     }

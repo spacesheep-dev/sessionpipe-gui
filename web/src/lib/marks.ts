@@ -100,7 +100,11 @@ export const ownNotify = (marks: Marks, key: SessionKey): NotifyLevel => marks.n
 
 type Lineage = Pick<SessionSummary, "key" | "harness" | "parentId" | "delegatedBy">;
 /** A session's parents: the session whose subagent it is (`parentId`, in its own harness)
- *  and the session that asked it (`delegatedBy`, any harness). */
+ *  and the session that asked it (`delegatedBy`, any harness, on any machine). The Board
+ *  nests an asked session only under a parent on its own machine (lib/delegated.ts), so
+ *  one that names a muted asker on another computer is quiet while drawn as a row of its
+ *  own: on purpose, as a session only ever quiets itself here, and the way later stages
+ *  (a child on another computer) want it. */
 const parentsOf = (s: Omit<Lineage, "key">): SessionKey[] => {
   const out: SessionKey[] = [];
   if (s.parentId) out.push(sessionKey(s.harness, s.parentId));
