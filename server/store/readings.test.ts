@@ -718,4 +718,22 @@ describe("attentions out of order or after end", () => {
     );
     expect(s.read()).toMatchObject({ state: "needs_you", turn: "p1" });
   });
+
+  it("a permission prompt delivered after the Notification about it is the prompt, and answerable", () => {
+    const ev = recorder();
+    const start = ev("session.started", 0);
+    const turn = ev("turn.started", 1 * S, { turn_id: "p1" });
+    const prompt = ev("attention.needed", 2 * S, { attention_id: "perm-a", kind: "permission", tool: "Bash" });
+    const notice = ev("attention.needed", 8 * S, { attention_id: "notif-1", kind: "permission" });
+    for (const order of [
+      [start, turn, prompt, notice],
+      [start, turn, notice, prompt],
+    ]) {
+      const rec = newRecord("claude-code", "s", new Date(NOW).toISOString(), "http");
+      for (const e of order) applyEvent(rec, e, new Date(NOW).toISOString(), "http");
+      refreshState(rec, NOW);
+      expect(rec.summary.state).toBe("needs_you");
+      expect(rec.summary.openAttentions).toMatchObject([{ attentionId: "perm-a", answerable: true }]);
+    }
+  });
 });

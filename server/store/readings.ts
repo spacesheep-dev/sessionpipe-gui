@@ -685,6 +685,8 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
     !answerableAttention(ev) &&
     s.openAttentions.some((x) => x.kind === "permission" && x.answerable);
   const hook = !twin && !NOT_HOOK.has(ev.type) && ev.type !== "attention.cleared";
+  /** A Notification about a permission prompt: the prompt's twin, whichever of the two is read first. */
+  const notice = ev.type === "attention.needed" && d.kind === "permission" && !answerableAttention(ev);
   const attentionId = ev.type === "attention.needed" ? (str(d.attention_id) ?? ev.id) : undefined;
   // CONTROL.md §7: the session's next hook event closes whatever attention was open.
   // A hook delivered late from before an already-open attention must not close that newer one.
@@ -1018,6 +1020,8 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       }
       s.openAttentions = [...s.openAttentions.filter((x) => x.attentionId !== attentionId), a];
       t.attentions.set(attentionId, m);
+      // The prompt itself, read after the Notification about it: that Notification was its twin.
+      if (a.answerable) keepAttentions(s, t, (x) => x.kind !== "permission" || !!x.answerable);
       break;
     }
     case "attention.cleared": {
@@ -1132,7 +1136,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
     default:
       break;
   }
-  if (hook && !before(m, t.lastHook)) t.lastHook = m;
+  if (hook && !notice && !before(m, t.lastHook)) t.lastHook = m;
 }
 
 /** The state machine (shared/api.ts SessionState) read at `now`. Returns the state

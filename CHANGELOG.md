@@ -6,6 +6,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A session that asks you something shows it until it is over, whatever order its
+  events arrive in.** When a session's events reached the receiver out of order (a relay,
+  a retry, the outbox catching up), a tool or turn event from before a question, arriving
+  after it, closed it: the session stopped showing "needs you" while it still waited. And
+  a question from before the session ended, or before its answer or the next step,
+  arriving last, showed "needs you" and its toast on a session that had finished or gone
+  on, for up to a day. Each now reads as it happened.
+
 ## [0.8.8] - 2026-11-24
 
 The iPhone app on a screen that folds: it is the touch app at every width, with a sidebar
