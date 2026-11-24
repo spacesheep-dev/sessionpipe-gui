@@ -298,13 +298,16 @@ function MachineBlock({
 }
 
 /** On an account, the one row for this phone above the computers (screenWords.ts phoneRow):
- *  a sentence and its mark, the whole row the way to Approve this iPhone. */
+ *  a sentence and its mark, or while it is not approved the sentence and its way on, as
+ *  every place says them; the whole row the way to Approve this iPhone. */
 function PhoneRow({ row }: { row: ReturnType<typeof phoneRow> }) {
   if (!row) return null;
   const words = row.mark ? (
     <Mark kind={row.mark}>{row.words}</Mark>
   ) : (
-    <span className="machines-phone-ask">{row.words}</span>
+    <span className="machines-phone-not">
+      {row.words} <span className="machines-phone-ask">{row.ask}</span>
+    </span>
   );
   return (
     <section className="form-group machines-phone" aria-label={ThisPhone()}>

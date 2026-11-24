@@ -73,20 +73,27 @@ export function phoneLine(view: ApproveView | null): { mark: "ok" | "wait" | "wa
 }
 
 /** Machines' one row for this phone, above the computers: a sentence and its mark (none
- *  where the row is the ask itself), and whether it opens Approve this iPhone. `cannot`: why
+ *  while it is not approved: the row then is the sentence and, as `ask`, its way on, the
+ *  words every place says it with), and whether it opens Approve this iPhone. `cannot`: why
  *  nothing can be signed here, when nothing can; that is the row then, and it opens nothing.
  *  `state` names the row for the page and its tests. */
 export function phoneRow(
   view: ApproveView | null,
   cannot: string | null,
-): { mark: "ok" | "wait" | "warn" | null; words: string; link: boolean; state: string } | null {
+): { mark: "ok" | "wait" | "warn" | null; words: string; ask?: string; link: boolean; state: string } | null {
   if (cannot) return { mark: "warn", words: cannot, link: false, state: "cannot" };
   if (!view) return null;
   const p = view.phase;
   switch (p.kind) {
     case "idle":
     case "dropped":
-      return { mark: null, words: M.approve(thisPhone()), link: true, state: p.kind };
+      return {
+        mark: null,
+        words: N.notApproved(ThisPhone()),
+        ask: N.approveThis(thisPhone()),
+        link: true,
+        state: p.kind,
+      };
     case "waiting":
       return { mark: "wait", words: M.waiting, link: true, state: p.kind };
     case "cooling":

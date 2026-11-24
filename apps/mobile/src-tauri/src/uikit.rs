@@ -11,6 +11,21 @@ unsafe fn nsstring(s: &str) -> *mut AnyObject {
     msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()]
 }
 
+/// Whether the app runs on an iPad: UIKit's idiom for the device (`.pad`, 1), read once on
+/// the main thread (first by the Hub's config in `setup`, which names the device) and kept,
+/// as it never changes while the app runs.
+pub fn ipad() -> bool {
+    static IPAD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *IPAD.get_or_init(|| unsafe {
+        let device: *mut AnyObject = msg_send![class!(UIDevice), currentDevice];
+        if device.is_null() {
+            return false;
+        }
+        let idiom: isize = msg_send![device, userInterfaceIdiom];
+        idiom == 1
+    })
+}
+
 /// Fits the main WKWebView to an app:
 /// - the page owns the safe areas (`viewport-fit=cover` + `env()`), so UIKit's automatic
 ///   content insets go (they doubled the band under the tab bar), and the outer scroll view

@@ -208,7 +208,8 @@
   animation: fade-out var(--dur-exit) var(--ease-in) both;
   pointer-events: none;
 }
-/* One platter for the actions and one for Cancel. `flex: none`: in the sheet's
+/* One platter for the actions, and one for Cancel in a confirm and in a mouse's menu
+   (a finger's menu has none: a tap on the scrim closes it). `flex: none`: in the sheet's
    scrolling column a group must never shrink, or its rows clip. */
 .menu-sheet-group {
   flex: none;

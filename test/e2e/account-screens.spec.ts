@@ -15,7 +15,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Browser, type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { type Browser, type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { FakeSpacesheep, NEW_DEVICE_WAIT_MS } from "../account/fake-spacesheep.js";
 import { HubRefused, HubStandIn, UNUSED_KEY_NOTE } from "../account/hub.js";
 import { type AccountServer, startAccountServer } from "../account/serve.js";
@@ -60,7 +60,10 @@ interface Bed {
 }
 
 /** A phone with the app on it: spacesheep and the hub stood in, the built page, the shell. */
-async function bed(browser: Browser, o: { platform?: string; shell?: ShellInitOptions; features?: string[] } = {}) {
+async function bed(
+  browser: Browser,
+  o: { platform?: string; device?: string; shell?: ShellInitOptions; features?: string[]; mouse?: boolean } = {},
+) {
   const ss = new FakeSpacesheep();
   ss.rpId = HOST;
   ss.machines = [
@@ -97,15 +100,16 @@ async function bed(browser: Browser, o: { platform?: string; shell?: ShellInitOp
     upstream: { origin: ORIGIN, ask: (req) => ss.handle(req) },
     ...(o.platform ? { platform: o.platform } : {}),
     ...(o.features ? { features: o.features } : {}),
+    ...(o.device ? { device: o.device } : {}),
   });
   const server = await startAccountServer({ web: WEB, hub });
   const context = await browser.newContext({
     viewport: { width: W, height: H },
     colorScheme: SCHEME,
     // A phone: a finger, not a mouse (`(pointer: coarse)` matches, so every small button
-    // is as tall as the app makes it for touch).
-    hasTouch: true,
-    isMobile: true,
+    // is as tall as the app makes it for touch). `mouse`: the same app under a mouse.
+    hasTouch: !o.mouse,
+    isMobile: !o.mouse,
     storageState: { cookies: [], origins: [] },
   });
   // Nothing leaves this machine: a link to the account's origin is never followed.
@@ -1271,7 +1275,8 @@ test.describe("what else an account shows", () => {
         const row = page.locator("[data-this-phone]");
         await expect(row).toHaveCount(1);
         await expect(row).toHaveAttribute("data-this-phone", "idle");
-        await expect(row).toHaveText("Approve this iPhone to send");
+        // The one sentence every place says, and its way on.
+        await expect(row).toHaveText("This iPhone can't send yet. Approve this iPhone");
         expect((await row.boundingBox())!.height, `${width}`).toBeGreaterThanOrEqual(44);
         // One way to Approve this iPhone on the page, and it is that row.
         await expect(page.locator("a[href='/add-device']")).toHaveCount(1);
@@ -1408,7 +1413,7 @@ test.describe("what else an account shows", () => {
       // Ask another agent: nothing on it could ask, so it is the way to approve the phone.
       await page.locator("[data-ctl-ask]").click();
       const ask = page.locator("[data-handoff]");
-      await expect(ask.locator(".state-title")).toHaveText("This iPhone isn't approved yet");
+      await expect(ask.locator(".state-title")).toHaveText("This iPhone can't send yet.");
       await expect(ask.locator("[data-hs-ask], textarea, [data-hs-row]")).toHaveCount(0);
       await expect(ask.getByRole("button", { name: "Approve this iPhone" })).toBeVisible();
       await shot(page, "also-handoff-not-approved");
@@ -1433,7 +1438,7 @@ test.describe("what else an account shows", () => {
         // The sidebar's New session or the bar's, once the window has heard of its size.
         await expect(page.locator("html")).toHaveAttribute("data-size-class", sizeClassAt(width, height));
         await compose(page).click();
-        await expect(sheet.locator(".state-title")).toHaveText("This iPhone isn't approved yet");
+        await expect(sheet.locator(".state-title")).toHaveText("This iPhone can't send yet.");
         await expect(sheet.locator(".state-text")).toHaveCount(0);
         await expect(sheet.locator("[data-ns-start], textarea, [data-ns-row]")).toHaveCount(0);
         await expect(sheet.locator(".ns-bar")).toHaveText(/^Cancel\s*New session$/);
@@ -1466,6 +1471,24 @@ test.describe("what else an account shows", () => {
     }
   });
 
+  /** Approved on spacesheep by attic-mini, another computer of the account, long ago;
+   *  studio-mac has not taken the key, and only a key.add someone signs on spacesheep gives
+   *  it one. */
+  const notAdded = async (b: Bed): Promise<void> => {
+    const id = [...b.hub.accounts.keys()][0]!;
+    const asked = await b.page.evaluate(
+      (account) =>
+        (
+          window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
+        ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
+      id,
+    );
+    const other = { ...b.ss.machines[0]!, id: "m_attic0123456789abcde", name: "attic-mini" };
+    b.ss.machines.push({ ...other, passkey_ids: [asked.keyId] });
+    b.ss.trusting.set(asked.keyId, [other.id]);
+    b.ss.deviceRequests.delete(asked.keyId);
+  };
+
   /** In another session the agent asks to run something, now (well inside its hook's wait)
    *  unless `ago` says how long before: that session's id. */
   const asks = (b: Bed, id = "s-refund", ago = 4_000): string => {
@@ -1484,6 +1507,23 @@ test.describe("what else an account shows", () => {
       ),
     ]);
     return id;
+  };
+  /** On attic-mini, which has this device's key, the agent asks to run something too. */
+  const attic = (b: Bed): void => {
+    const s = new Session("s-site", "claude-code", Date.now() - 2_000);
+    const on = {
+      tier: 2 as const,
+      session: { machine: "attic-mini", cwd: "/Users/me/site", title: "Check the site build" },
+    };
+    b.ss.push([
+      s.ev("session.started", { source: "startup" }, on),
+      s.ev("turn.started", { turn_id: "t1" }, on),
+      s.ev(
+        "attention.needed",
+        { attention_id: "perm-2", kind: "permission", tool: "Bash", message: "Bash npm run build" },
+        on,
+      ),
+    ]);
   };
   const signs = async (page: Page) => (await calls(page)).filter((c) => c === "plugin:identity|sign").length;
 
@@ -1507,7 +1547,7 @@ test.describe("what else an account shows", () => {
         await page.goto(`${b.server.url}/s/claude-code/${sid}`);
         const card = page.locator(".ctl-answer[data-attention='perm-1']");
         await expect(card, at).toHaveAttribute("data-answer", "unapproved");
-        await expect(card.locator(".ctl-answer-note"), at).toHaveText("This iPhone can't answer yet.");
+        await expect(card.locator(".ctl-answer-note"), at).toHaveText("This iPhone can't send yet.");
         const approve = card.getByRole("link", { name: "Approve this iPhone" });
         await expect(approve, at).toHaveAttribute("href", "/add-device");
         expect((await approve.boundingBox())!.height, at).toBeGreaterThanOrEqual(44);
@@ -1546,7 +1586,7 @@ test.describe("what else an account shows", () => {
         await expect(row, at).toBeVisible();
         await expect(row.getByRole("button", { name: /^(Allow|Deny)$/ }), at).toHaveCount(0);
         const notice = page.locator(".inbox-notes .notice").first();
-        await expect(notice.locator(".notice-text"), at).toHaveText("This iPhone can't answer yet.");
+        await expect(notice.locator(".notice-text"), at).toHaveText("This iPhone can't send yet.");
         await expect(notice.getByRole("link", { name: "Approve this iPhone" }), at).toHaveAttribute(
           "href",
           "/add-device",
@@ -1561,6 +1601,48 @@ test.describe("what else an account shows", () => {
       await expect(page.locator("[data-approve='idle']")).toBeVisible();
       expect(await signs(page)).toBe(0);
       expect(b.ss.log.filter((l) => l.startsWith("POST /api/machines/"))).toEqual([]);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("on an iPad, not approved: every place names this iPad, with the one sentence and Approve this iPad", async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    const b = await bed(browser, { device: "ipad" });
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    const noIphone = (where: string) =>
+      expect(page.locator("body"), where).not.toContainText("iPhone", { useInnerText: true });
+    try {
+      await page.setViewportSize({ width: 820, height: 1180 });
+      // Under a prompt: the sentence and the link, no Allow and Deny.
+      const sid = asks(b, "s-refund-ipad");
+      await page.goto(`${b.server.url}/s/claude-code/${sid}`);
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      await expect(card.locator(".ctl-answer-note")).toHaveText("This iPad can't send yet.");
+      await expect(card.getByRole("link", { name: "Approve this iPad" })).toHaveAttribute("href", "/add-device");
+      await expect(page.getByRole("button", { name: /^(Allow|Deny)/ })).toHaveCount(0);
+      await noIphone("prompt");
+      // Under the message box.
+      await page.goto(`${b.server.url}/s/claude-code/s-invoice`);
+      await expect(page.locator(".ctl-foot[data-reason='unapproved']")).toHaveText(
+        /^This iPad can't send yet\.\s*Approve this iPad/,
+      );
+      await noIphone("message box");
+      // New session.
+      await page.goto(b.server.url);
+      await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular");
+      await compose(page).click();
+      const sheet = page.locator("[data-new-session]");
+      await expect(sheet.locator(".state-title")).toHaveText("This iPad can't send yet.");
+      await expect(sheet.getByRole("button", { name: "Approve this iPad" })).toBeVisible();
+      await noIphone("new session");
+      // Machines.
+      await page.goto(`${b.server.url}/machines`);
+      await expect(page.locator("[data-this-phone='idle']")).toHaveText("This iPad can't send yet. Approve this iPad");
+      await noIphone("machines");
     } finally {
       await b.close();
     }
@@ -1602,7 +1684,7 @@ test.describe("what else an account shows", () => {
         ).toHaveCount(0);
         // The page's one notice says why, with the way on.
         const notes = page.locator(".inbox-notes");
-        await expect(notes.getByText("This iPhone can't answer yet.", { exact: true }), at).toHaveCount(1);
+        await expect(notes.getByText("This iPhone can't send yet.", { exact: true }), at).toHaveCount(1);
         await expect(notes.getByRole("link", { name: "Approve this iPhone" }), at).toHaveAttribute(
           "href",
           "/add-device",
@@ -1649,7 +1731,7 @@ test.describe("what else an account shows", () => {
     }
   });
 
-  test("approved, and this computer has not added the key yet: Allow, Deny and Send wait, disabled, with one sentence and Approve this iPhone", async ({
+  test("approved, and this computer has not added the key yet: one sentence and Approve this iPhone, no Allow and Deny under a finger, Send disabled", async ({
     browser,
   }) => {
     const b = await bed(browser);
@@ -1658,20 +1740,7 @@ test.describe("what else an account shows", () => {
     try {
       await page.goto(b.server.url);
       await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
-      // Approved on spacesheep by another computer of the account, long ago; studio-mac has
-      // not taken the key, and only a key.add someone signs on spacesheep gives it one.
-      const id = [...b.hub.accounts.keys()][0]!;
-      const asked = await page.evaluate(
-        (account) =>
-          (
-            window as unknown as { __TAURI_INTERNALS__: { invoke(c: string, a: unknown): Promise<unknown> } }
-          ).__TAURI_INTERNALS__.invoke("acct_device_ask", { id: account }) as Promise<{ keyId: string }>,
-        id,
-      );
-      const other = { ...b.ss.machines[0]!, id: "m_attic0123456789abcde", name: "attic-mini" };
-      b.ss.machines.push({ ...other, passkey_ids: [asked.keyId] });
-      b.ss.trusting.set(asked.keyId, [other.id]);
-      b.ss.deviceRequests.delete(asked.keyId);
+      await notAdded(b);
       asks(b);
       await page.goto(`${b.server.url}/s/claude-code/s-refund`);
       const line = "studio-mac hasn't added this iPhone yet.";
@@ -1679,16 +1748,24 @@ test.describe("what else an account shows", () => {
       // Said once, on the card, with the way on; the line under the field says nothing.
       await expect(card.locator(".ctl-answer-note")).toHaveText(`${line} Approve this iPhone`, { timeout: 15_000 });
       await expect(card.getByRole("link", { name: "Approve this iPhone" })).toHaveAttribute("href", "/add-device");
-      await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
-      await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
+      // Allow and Deny would only be refused: under a finger they are not there at all.
+      await expect(card.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
       await expect(composer(page)).toBeDisabled();
       await expect(page.locator(".ctl-foot[data-reason]")).toHaveCount(0);
       await expect(page.getByText(line)).toHaveCount(1);
-      await expect(page.getByText(/can't answer yet|next online/)).toHaveCount(0);
+      await expect(page.getByText(/can't send yet|next online/)).toHaveCount(0);
       await shot(page, "also-catching-up-prompt");
+      // attic-mini, which has the key, asks too: its prompt is answered as ever.
+      attic(b);
       await page.goto(`${b.server.url}/inbox`);
       const row = page.locator(".inbox-row[data-attention='perm-1']");
-      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled();
+      const there = page.locator(".inbox-row[data-attention='perm-2']");
+      await expect(there.getByRole("button", { name: "Allow" })).toBeEnabled({ timeout: 15_000 });
+      await expect(there.getByRole("button", { name: "Deny" })).toBeEnabled();
+      // studio-mac's row: no pair that would only be refused, and it still opens its session.
+      await expect(row).toBeVisible();
+      await expect(row.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      await expect(row.locator(".inbox-answer[data-answer='blocked']")).toBeAttached();
       // Said once, in a notice above Notifications, with the way on.
       const said = page.locator(".inbox-notes .notice").first();
       await expect(said.locator(".inbox-reason")).toHaveText(line);
@@ -1724,6 +1801,101 @@ test.describe("what else an account shows", () => {
       await expect(sheet.locator("[data-ns-row=options]")).toHaveText(/^Permission\s*Safe$/);
       await expect(sheet.getByText(/doesn't trust/)).toHaveCount(0);
       await shot(page, "also-new-session-catching-up");
+      expect(await signs(page)).toBe(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("approved, and this computer has not added the key yet, under a finger: the banner and the Board row's long-press menu have no Allow or Deny either", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await notAdded(b);
+      // On the Board as the agent asks: its banner, a tap that opens the Inbox, and nothing
+      // to press that would only be refused.
+      asks(b);
+      const banner = page.locator(".toast[data-attention='perm-1']");
+      await expect(banner).toBeVisible({ timeout: 15_000 });
+      await expect(banner.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      const hold = async (el: Locator) => {
+        await el.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(300);
+        await el.evaluate((e) => {
+          const r = e.getBoundingClientRect();
+          e.dispatchEvent(
+            new PointerEvent("pointerdown", {
+              bubbles: true,
+              pointerType: "touch",
+              clientX: r.left + 4,
+              clientY: r.top + 4,
+            }),
+          );
+        });
+      };
+      const sheet = page.locator(".menu-sheet");
+      // The banner's own long-press menu: Dismiss, and no pair.
+      await hold(banner.locator(".toast-title"));
+      await expect(sheet.getByRole("menuitem", { name: "Dismiss" })).toBeVisible();
+      await expect(sheet.getByRole("menuitem", { name: /^(Allow|Deny) Bash$/ })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(sheet).toHaveCount(0);
+      // The session's row on the Board: held, its menu opens and offers no pair.
+      const row = page.locator("article.card", { hasText: "Refund the double charge" });
+      await expect(row.locator(".card-attn")).toContainText("npm test", { timeout: 15_000 });
+      await hold(row.locator(".card-title"));
+      await expect(sheet.getByRole("menuitem", { name: "Hide", exact: true })).toBeVisible();
+      await expect(sheet.getByRole("menuitem", { name: /^(Allow|Deny) Bash$/ })).toHaveCount(0);
+      await shot(page, "also-catching-up-board-menu");
+      expect(await signs(page)).toBe(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("approved, and this computer has not added the key yet, with a mouse: Allow and Deny stay, greyed, on the card, the banner, the Board row's menu and in the Inbox", async ({
+    browser,
+  }) => {
+    const b = await bed(browser, { mouse: true });
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await notAdded(b);
+      asks(b);
+      const banner = page.locator(".toast[data-attention='perm-1']");
+      await expect(banner.locator(".toast-note")).toHaveText("studio-mac hasn't added this iPhone yet", {
+        timeout: 15_000,
+      });
+      await expect(banner.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(banner.getByRole("button", { name: "Deny" })).toBeDisabled();
+      await banner.getByRole("button", { name: "Dismiss" }).click();
+      await page
+        .locator("article.card", { hasText: "Refund the double charge" })
+        .locator(".card-title")
+        .click({ button: "right" });
+      const menu = page.getByRole("menu");
+      await expect(menu.getByRole("menuitem", { name: "Allow Bash" })).toBeDisabled();
+      await expect(menu.getByRole("menuitem", { name: "Deny Bash" })).toBeDisabled();
+      await page.keyboard.press("Escape");
+      await page.goto(`${b.server.url}/s/claude-code/s-refund`);
+      const card = page.locator(".ctl-answer[data-attention='perm-1']");
+      await expect(card.locator(".ctl-answer-note")).toContainText("studio-mac hasn't added this iPhone yet", {
+        timeout: 15_000,
+      });
+      await expect(card.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(card.getByRole("button", { name: "Deny" })).toBeDisabled();
+      await page.goto(`${b.server.url}/inbox`);
+      const row = page.locator(".inbox-row[data-attention='perm-1']");
+      await expect(row.getByRole("button", { name: "Allow" })).toBeDisabled({ timeout: 15_000 });
+      await expect(row.getByRole("button", { name: "Deny" })).toBeDisabled();
       expect(await signs(page)).toBe(0);
     } finally {
       await b.close();
@@ -2162,6 +2334,8 @@ test.describe("what else an account shows", () => {
       await page.goto(`${b.server.url}/s/claude-code/s-deploy`);
       const card = page.locator(".ctl-answer[data-attention='perm-deploy']");
       await expect(card.getByRole("button", { name: "Allow" })).toBeEnabled({ timeout: 15_000 });
+      // Approved: both, as ever.
+      await expect(card.getByRole("button", { name: "Deny" })).toBeEnabled();
       const block = card.locator(".ctl-cmd-block");
       await expect(block).toHaveText(cmd);
       // Every line of it is there to read: nothing scrolls inside the block, or off the screen.

@@ -428,11 +428,24 @@ html:has(.main > .session) {
    lists, quotes and headings stop there, from the column's leading edge; its code and
    tables keep the column. In em, so a larger text size holds the same count. The chat's
    reply too (chat.css `.chat-card`), an agent's last word, and a reply read from the
-   search index with what was found marked in it (search.css `.hx-prose`). */
+   search index with what was found marked in it (search.css `.hx-prose`).
+   That is in a column of 640 pt and more. In a narrower one (beside the sidebar on a phone
+   opened flat, upright or turned, or on a tablet held upright) the measure would stop a
+   reply short of the messages and the message field: there it takes the column's whole
+   width, as on a phone held upright. The column is the transcript's own (a session's, or
+   one read from Search), measured where it is drawn (lib/column.ts data-column), so the
+   sidebar and the bands at the sides are not counted; the bubble follows it (chat.css). */
 @media (pointer: coarse) {
   :is(.reply, .chat-card, .agent-result-text) > .md > :is(p, ul, ol, blockquote, h1, h2, h3, h4),
   .chat-card > .hx-prose {
     max-width: 33em;
+  }
+  .timeline[data-column="narrow"]
+    :is(.reply, .chat-card, .agent-result-text)
+    > .md
+    > :is(p, ul, ol, blockquote, h1, h2, h3, h4),
+  .timeline[data-column="narrow"] .chat-card > .hx-prose {
+    max-width: none;
   }
 }
 

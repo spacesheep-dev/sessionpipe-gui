@@ -25,7 +25,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/clipboard";
-import { phoneLayout } from "../lib/device";
+import { phoneLayout, useTouchKeys } from "../lib/device";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { usePath } from "../lib/router";
 import { hintFor } from "../lib/shortcuts";
@@ -757,10 +757,14 @@ function MenuPanel({
 let draggedOut = false;
 
 /** The touch presentation: an action sheet with the same items on one platter (the
- *  separators become wider rules, as an iOS context menu's are), destructive items last,
- *  Cancel apart; a submenu pushes into the sheet. It follows the finger down from its
- *  grabber or head and leaves by velocity (lib/motion.ts useSheetDrag). `closing` is its
- *  exit copy: drawn, inert, sliding down. */
+ *  separators become wider rules, as an iOS context menu's are), destructive items last;
+ *  a submenu pushes into the sheet. Under a finger no Cancel, as iOS's context menu has
+ *  none: the scrim covers the whole window at every size and a tap on it closes the
+ *  sheet, Esc closes it, and the scrim is a button named Close, the way out VoiceOver
+ *  reaches (and its escape gesture is Esc). A mouse, in a window narrow enough for the
+ *  sheet, keeps Cancel apart, as before. It follows the finger down from its grabber or
+ *  head and leaves by velocity (lib/motion.ts useSheetDrag). `closing` is its exit copy:
+ *  drawn, inert, sliding down. */
 function ActionSheet({
   req,
   onCloseAll,
@@ -771,6 +775,7 @@ function ActionSheet({
   closing?: boolean;
 }) {
   const [stack, setStack] = useState<{ label: string; items: MenuItem[] }[]>([]);
+  const finger = useTouchKeys();
   const level = stack[stack.length - 1];
   const items = level ? level.items : req.items;
   const ref = useRef<HTMLDivElement>(null);
@@ -881,11 +886,13 @@ function ActionSheet({
             </Fragment>
           ))}
         </div>
-        <div className="menu-sheet-group">
-          <button type="button" className="menu-sheet-item menu-sheet-cancel" onClick={() => onCloseAll(true)}>
-            Cancel
-          </button>
-        </div>
+        {finger ? null : (
+          <div className="menu-sheet-group">
+            <button type="button" className="menu-sheet-item menu-sheet-cancel" onClick={() => onCloseAll(true)}>
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ import { type Approval, approvalOf, type SendState, useSendStates } from "../acc
 import type { ControlAction } from "../components/ControlStrip";
 import { answerLate } from "../lib/answerWindow";
 import { isPlanReview } from "../lib/format";
+import { accountMode } from "../lib/net";
 import { clock, NEW_WORDS, SEND, ThisPhone, thisPhone } from "../native/accountWords";
 import { type AnswerOut, type AnswerStatus, answersHere, type Press } from "./answers";
 import { ControlError, UNHEARD_CODE } from "./api";
@@ -98,7 +99,9 @@ export function answerState(
             ? // Off an account, this computer trusts no key of this device: as the composer says it.
               send.sendable?.kind === "catching-up"
               ? `${s.machine ?? "This machine"} doesn't trust ${deviceWords().this} yet`
-              : NEW_WORDS.answerNotYet(ThisPhone())
+              : accountMode()
+                ? NEW_WORDS.notApproved(ThisPhone()).replace(/\.$/, "")
+                : NEW_WORDS.offAccountNotYet(ThisPhone())
             : approval === "catching-up"
               ? SEND.long.notHere(s.machine ?? "its computer", thisPhone()).replace(/\.$/, "")
               : late

@@ -273,13 +273,26 @@ html[data-size-class="regular"] :is(.ns-grab, .menu-grab, .qs-grab) {
   display: none;
 }
 
-/* The cards. */
+/* The cards. They stand in the middle of the page beside the sidebar, never over it: of
+   the window less the sidebar (with the band it keeps clear of) and the band at the
+   right, and that width less 24 pt a side. Their dim still covers
+   the whole window. With no sidebar showing (Settings covers it), and while a form sheet
+   is open (a menu from New session's or Ask another agent's ⋯ opens over the form), they
+   stand in the middle of what the system leaves, as the form sheet does. */
+html[data-size-class="regular"] {
+  --card-l: var(--inset-l);
+  --card-mid: calc(var(--card-l) + (100% - var(--card-l) - var(--inset-r)) / 2);
+  --card-room: calc(100% - var(--card-l) - var(--inset-r) - 48px);
+}
+html[data-size-class="regular"]:has(.shell > .rail):not(:has(.settings-wrap, .ns-sheet--phone)) {
+  --card-l: var(--side-w);
+}
 html[data-size-class="regular"] :is(.menu-sheet, .qs--tabbar .qs-pop) {
-  left: var(--float-mid);
+  left: var(--card-mid);
   right: auto;
   bottom: calc(var(--float-floor) + 16px);
   translate: -50% 0;
-  width: min(400px, var(--float-room));
+  width: min(400px, var(--card-room));
   max-height: calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - var(--float-floor) - 32px);
   border-radius: var(--radius-sheet);
 }

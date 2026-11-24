@@ -4,13 +4,14 @@
 // can. Every decision is here, apart from the React (PhoneOnboarding.tsx) and the shell
 // (scanner.ts, bridge.ts): the step machine, the reading of what the camera saw or the
 // person typed, the words, and the failure lines. Tested on its own (onboarding.test.ts).
+import { deviceNoun } from "../lib/device";
 import { isCancel } from "./logic";
 
 // ----- the words, in one place -----
 
-/** The phone, as the sheet names it ("this iPhone", "this phone"). */
+/** The phone, as the sheet names it ("this iPhone", "this iPad", "this phone"). */
 export type Phone = "ios" | "android";
-export const phoneNoun = (p: Phone | null): string => (p === "android" ? "this phone" : "this iPhone");
+export const phoneNoun = (p: Phone | null): string => `this ${deviceNoun(p ?? "ios")}`;
 
 export const WORDS = {
   name: "sessionpipe",

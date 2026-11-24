@@ -184,6 +184,8 @@ export interface HubOptions {
   platform?: string;
   appVersion?: string;
   features?: string[];
+  /** `"ipad"`: the iOS app on an iPad, as the shell's contract says it (contract.rs `device`). */
+  device?: string;
   /** The origin the bundled page asks from; a door asked from another is refused. */
   appOrigin?: string;
 }
@@ -308,6 +310,7 @@ export class HubStandIn {
           }
         : null,
       rxBase: a ? this.rxBase(a.id) : null,
+      ...(this.o.device ? { device: this.o.device } : {}),
     };
   }
 

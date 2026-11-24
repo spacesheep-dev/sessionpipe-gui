@@ -193,15 +193,17 @@
 /* A sentence row: a mark and words that wrap, or the inherit caution. */
 .machine-line .acct-state,
 .machines-phone .acct-state,
-.machines-phone-ask {
+.machines-phone-not {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--fg);
   font-size: var(--text-md);
   text-wrap: pretty;
 }
+/* Not approved: the sentence, then its way on, which never breaks across lines. */
 .machines-phone-ask {
   color: var(--tint-fg);
+  white-space: nowrap;
 }
 .machine-line .machine-caution {
   margin-top: 0;
