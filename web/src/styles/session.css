@@ -134,24 +134,8 @@ html:has(.main > .session) {
   color: var(--fg-2);
   font-weight: 500;
 }
-/* Several launched runs fold into one entry that opens a menu; it reads like the link. */
-.sess-copy .sess-launched {
-  width: auto;
-  height: auto;
-  padding: 0;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  font: inherit;
-  line-height: inherit;
-  cursor: pointer;
-  color: var(--fg-2);
-  font-weight: 500;
-}
 @media (hover: hover) {
-  .sess-copy a:hover,
-  .sess-copy .sess-launched:hover {
+  .sess-copy a:hover {
     background: none;
     color: var(--fg);
     text-decoration: underline;
@@ -180,7 +164,7 @@ html:has(.main > .session) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* The launcher link or the folded runs: readable beside a short machine and repo too. The
+/* The launcher link: readable beside a short machine and repo too. The
    40% is of a line sized by its own content, which beside "dev-mac · acme/api" is an ellipsis. */
 .sess-where > .sess-launch {
   max-width: max(40%, 14em);

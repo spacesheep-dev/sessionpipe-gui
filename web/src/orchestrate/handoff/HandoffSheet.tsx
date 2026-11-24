@@ -110,7 +110,10 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   );
 
   // ----- the first values: the draft the sheet was closed on, else the defaults -----
+  // Aimed at a session (Message on a parent's list): that one, if it may be asked.
+  const aimed = open.to && others.some((s) => s.key === open.to) ? open.to : undefined;
   const initial = useMemo(() => {
+    if (aimed) return { draft: null, target: { kind: "session", key: aimed } as Target };
     const draft = open.reply === undefined ? readHandoffDraft(open.session) : null;
     const fromDraft = draft ? parseTarget(draft.target) : null;
     const valid =
@@ -131,7 +134,9 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   }, []);
   const [target, setTarget] = useState<Target | null>(initial.target);
   const [bringBack, setBringBack] = useState(initial.draft?.bringBack ?? true);
-  const [text, setText] = useState(initial.draft?.text ?? (open.reply !== undefined ? prefillText(open.reply) : ""));
+  const [text, setText] = useState(
+    initial.draft?.text ?? (open.reply !== undefined && !aimed ? prefillText(open.reply) : ""),
+  );
   const [busy, setBusy] = useState(false);
   const [tap, setTap] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -189,9 +194,9 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
 
   // ----- the prefill: once, from the session's last reply, unless it came with the open -----
   const lastReply = useRef<string | null>(open.reply ?? null);
-  const [replyKnown, setReplyKnown] = useState(open.reply !== undefined);
+  const [replyKnown, setReplyKnown] = useState(open.reply !== undefined || !!aimed);
   useEffect(() => {
-    if (!session || open.reply !== undefined) return;
+    if (!session || open.reply !== undefined || aimed) return;
     let on = true;
     const apply = (reply: string) => {
       if (!on) return;

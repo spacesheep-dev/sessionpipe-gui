@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { MenuItem } from "../components/ContextMenu";
 import type { Store } from "../data/store";
 import { PHONE_QUERY } from "./device";
-import { askItem, type SessionMenuContext, sessionItems } from "./menus";
+import { askItem, messageItem, type SessionMenuContext, sessionItems } from "./menus";
 import { setSettings } from "./settings";
 
 // A wide window with a mouse, as every part of the page asks for it.
@@ -91,6 +91,32 @@ describe("askItem", () => {
     const reply = askItem(session(), store, { label: "Ask another agent about this…", reply: "Done." })!;
     expect(reply).toMatchObject({ label: "Ask another agent about this…" });
     expect("action" in reply ? reply.action : "none").toBeUndefined();
+  });
+});
+
+describe("messageItem", () => {
+  const parent = session({ state: "working" });
+  const child = session({ key: "codex:s-2", harness: "codex", id: "s-2", state: "working", delegatedBy: parent.key });
+
+  it("opens the Handoff sheet aimed at the child where the parent could ask it", () => {
+    const item = messageItem(parent, child, storeOf(asking, [parent, child]));
+    expect(item).toMatchObject({ label: "Message…" });
+    expect("disabled" in item!).toBe(false);
+  });
+
+  it("is not there where the message would only be refused", () => {
+    // The parent's computer not paired here, or its daemon predates asking.
+    expect(messageItem(parent, child, storeOf(undefined, [parent, child]))).toBeNull();
+    expect(messageItem(parent, child, storeOf(older, [parent, child]))).toBeNull();
+    // A child on another computer: today's asks stay on one.
+    const away = { ...child, machine: "build-box" } as SessionSummary;
+    expect(messageItem(parent, away, storeOf(asking, [parent, away]))).toBeNull();
+    // A subagent's session is not an agent to ask.
+    const sub = { ...child, parentId: "s-1" } as SessionSummary;
+    expect(messageItem(parent, sub, storeOf(asking, [parent, sub]))).toBeNull();
+    // Done more than a day ago: history.
+    const old = { ...child, state: "done", lastAt: "2026-11-01T10:00:00Z" } as SessionSummary;
+    expect(messageItem(parent, old, storeOf(asking, [parent, old]))).toBeNull();
   });
 });
 

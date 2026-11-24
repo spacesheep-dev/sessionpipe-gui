@@ -177,7 +177,7 @@ test.describe("session page", () => {
     await expect(page.locator(".sess-lens")).toHaveCount(0);
   });
 
-  test("a launched session names and links its launcher, which links it back; neither is a subagent", async ({
+  test("a launched session names and links its launcher, which lists it with the sessions it asked; neither is a subagent", async ({
     page,
     request,
   }) => {
@@ -199,37 +199,36 @@ test.describe("session page", () => {
     const by = (b: ReturnType<typeof tier1Batch>) =>
       b.events.map((e) => ({ ...e, session: { ...(e.session as object), launched_by: launchedBy } }));
     await post(launcher.events);
-    // The launcher's page is open before its first run reports: the link appears without a reload.
+    // The launcher's page is open before its first run reports: the run is listed without a
+    // reload, under the bar, with the sessions it asked; the where-line names no launch.
     await openPage(page, sessionUrl(launcher.harness, launcher.sessionId));
-    await expect(page.locator(".sess-where .sess-copy")).toHaveCount(0);
+    await expect(page.locator("section.kids")).toHaveCount(0);
     const first = run(1);
     await post(by(first));
-    const link = page.locator(".sess-where .sess-copy a", { hasText: first.title });
+    const link = page.locator("section.kids a.kids-link", { hasText: first.title });
     await expect(link).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".sess-where .sess-copy")).toHaveCount(0);
     await expect(page.getByText(/subagent/)).toHaveCount(0);
     await link.click();
     await expect(page.locator("h1.sess-title")).toHaveText(first.title);
     await expect(page.locator(".sess-where .sess-copy a", { hasText: launcher.title })).toBeVisible();
-    // Two more runs fold the launcher's entry into one that opens a menu listing them all.
+    // Two more runs: the launcher lists all three.
     const second = run(2);
     const third = run(3);
     await post(by(second));
     await post(by(third));
     await page.locator(".sess-where .sess-copy a", { hasText: launcher.title }).click();
-    const fold = page.locator(".sess-where .sess-launched");
-    await expect(fold).toHaveText("3 sessions", { timeout: 15_000 });
-    await fold.click();
-    const items = page.locator("[role=menu] .menu-item");
-    await expect(items).toHaveCount(3);
-    for (const t of [first.title, second.title, third.title]) await expect(items.filter({ hasText: t })).toHaveCount(1);
-    await items.filter({ hasText: third.title }).click();
+    const rows = page.locator("section.kids li.kids-row");
+    await expect(rows).toHaveCount(3, { timeout: 15_000 });
+    for (const t of [first.title, second.title, third.title]) await expect(rows.filter({ hasText: t })).toHaveCount(1);
+    await rows.filter({ hasText: third.title }).locator("a.kids-link").click();
     await expect(page.locator("h1.sess-title")).toHaveText(third.title);
     // Simple mode, the default for a new device, shows the links too.
     await page.evaluate((k) => localStorage.setItem(k, JSON.stringify({ mode: "simple" })), SETTINGS_KEY);
     await page.reload();
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
     await page.locator(".sess-where .sess-copy a", { hasText: launcher.title }).click();
-    await expect(page.locator(".sess-where .sess-launched")).toHaveText("3 sessions");
+    await expect(page.locator("section.kids li.kids-row")).toHaveCount(3);
   });
 
   test("follow toggles from the menu and back returns to the board", async ({ page, request }) => {

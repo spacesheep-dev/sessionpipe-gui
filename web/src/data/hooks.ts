@@ -26,7 +26,7 @@ import { useBehind } from "../account/current";
 import { answerable } from "../components/ControlStrip";
 import { type AnswerOut, answersOut } from "../control/answers";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
-import { isQuestion, sessionTitle } from "../lib/format";
+import { isQuestion } from "../lib/format";
 import { isHidden, useHidden } from "../lib/hidden";
 import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
 import { useShortcut } from "../lib/shortcuts";
@@ -131,24 +131,6 @@ export function useResyncs(): number {
 export function useSession(key: SessionKey): SessionSummary | undefined {
   const store = useStore();
   const read = useCallback(() => store.get().sessions.get(key), [store, key]);
-  return useSyncExternalStore(store.subscribe, read, read);
-}
-
-/** The sessions that name `key` as their launcher, newest first. The array is kept until
- *  the set, a title or a state changes, so a launcher's page follows runs that start later. */
-export function useLaunched(key: SessionKey): SessionSummary[] {
-  const store = useStore();
-  const last = useRef<{ sig: string; list: SessionSummary[] }>({ sig: "", list: [] });
-  const read = useCallback(() => {
-    const list: SessionSummary[] = [];
-    for (const s of store.get().sessions.values()) if (s.launchedBy === key && s.key !== key) list.push(s);
-    list.sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.key.localeCompare(b.key));
-    // What the header renders: the title as sessionTitle derives it, and the state.
-    // ...and the start, which the menu's "ago" and the order read.
-    const sig = list.map((s) => `${s.key}\u0000${sessionTitle(s)}\u0000${s.state}\u0000${s.startedAt}`).join("\u0001");
-    if (sig !== last.current.sig) last.current = { sig, list };
-    return last.current.list;
-  }, [store, key]);
   return useSyncExternalStore(store.subscribe, read, read);
 }
 

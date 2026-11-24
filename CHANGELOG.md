@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A session's page lists the sessions it asked.** Under the bar, "Asked sessions": each
+  agent it asked or launched, with its state, its agent, its title, the computer it runs
+  on and when it last moved; one that needs you first, five and "Show all". A row opens
+  the session; beside it, or in its menu, Open beside and Message, which asks that session
+  through Ask another agent with the answer brought back. The launched runs that the bar
+  named move into the list.
+
 ### Fixed
 
 - **Search's `in:` with nothing left searches nothing.** `in:prompt -in:prompt`, or every

@@ -5,7 +5,8 @@
 // daemon allows one nested ask) hangs every link under the top of the chain, since a kid
 // row draws no kids of its own; a loop in the hooks' say-so (A says B, B says A) nests
 // nobody, since neither would be drawn; a parent off the board (another machine, a
-// filter, a subagent's child session) ends the climb where it is. Nothing vanishes.
+// filter, a subagent's child session) ends the climb where it is. Nothing vanishes. And
+// which sessions a session's page lists as the ones it asked (AskedSessions).
 import type { SessionKey, SessionSummary } from "@shared/api";
 
 /** Whether a parent drawn in a folded Done would take the child out of sight: the parent
@@ -66,3 +67,48 @@ export function nestDelegated(
   }
   return { roots: out, nested };
 }
+
+// ----- a session's page: the sessions it asked -----
+
+/** How many asked sessions a page lists before "Show all n". */
+export const ASKED_SHOWN = 5;
+
+/** The sessions `parent` asked or started, as its page lists them: the ones its
+ *  delegations name (`to`), and the ones that name it as the session they were started
+ *  for (`delegatedBy`) or launched by (`launchedBy`). A subagent's own session
+ *  (`parentId`) is its subagent, listed with the turn that ran it, not here; a session
+ *  the store does not hold has its row in the turn that asked (AskRow). One level: the
+ *  sessions a child asked are on the child's page. Those that need you first, then the
+ *  newest started; each once. */
+export function askedSessions(
+  parent: Pick<SessionSummary, "key" | "delegations">,
+  all: Iterable<SessionSummary>,
+): SessionSummary[] {
+  const asked = new Set((parent.delegations ?? []).map((d) => d.to).filter((k): k is SessionKey => !!k));
+  const out: SessionSummary[] = [];
+  for (const s of all)
+    if (s.key !== parent.key && (asked.has(s.key) || s.delegatedBy === parent.key || s.launchedBy === parent.key))
+      out.push(s);
+  return out.sort(
+    (a, b) =>
+      Number(b.state === "needs_you") - Number(a.state === "needs_you") ||
+      b.startedAt.localeCompare(a.startedAt) ||
+      a.key.localeCompare(b.key),
+  );
+}
+
+/** The rows a list shows: the first `max`, or every one that needs you when more do, or
+ *  all of them once "Show all" was pressed; `more` is how many are left out. */
+export function askedShown<T extends Pick<SessionSummary, "state">>(
+  list: readonly T[],
+  all: boolean,
+  max = ASKED_SHOWN,
+): { shown: T[]; more: number } {
+  const n = all ? list.length : Math.max(max, list.filter((s) => s.state === "needs_you").length);
+  const shown = list.slice(0, n);
+  return { shown, more: list.length - shown.length };
+}
+
+/** The computer an asked session runs on, always named (a later stage runs one on another
+ *  computer, and its row must say where), also when it is the asking session's own. */
+export const askedComputer = (s: Pick<SessionSummary, "machine">): string => s.machine?.trim() || "Unknown computer";

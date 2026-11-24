@@ -7,12 +7,12 @@
 // that would only be refused; a key beside an item only where pressing it there does that
 // to this session. A surface adds its own groups around these. Builders run when a menu
 // opens, so they read the current URL and settings, never a stale render.
-import { type AgentRun, type SessionSummary, splitKey } from "@shared/api";
+import { type AgentRun, isEmptySession, type SessionSummary, splitKey } from "@shared/api";
 import type { MenuItem, MenuList } from "../components/ContextMenu";
 import { confirmAction, tidy } from "../components/ContextMenu";
 import { openNewSession } from "../control/newSessionState";
 import type { Store } from "../data/store";
-import { canAskFrom } from "../orchestrate/handoff/handoff";
+import { askableSessions, canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { copyText } from "./clipboard";
@@ -263,6 +263,28 @@ export function askItem(
         ...(o.turnSeq !== undefined ? { turnSeq: o.turnSeq } : {}),
       }),
   };
+}
+
+/** "Message…" on a parent's list of the sessions it asked: the same Handoff sheet, aimed
+ *  at that one, with the answer brought back. Only where the sheet could ask it (the
+ *  parent's machine is paired, asking is on, the child is a session it may ask); never
+ *  disabled. */
+export function messageItem(parent: SessionSummary, child: SessionSummary, store: Store): MenuItem | null {
+  if (!canMessage(parent, child, store)) return null;
+  return { label: "Message…", run: () => openHandoffFor(parent, { to: child.key }) };
+}
+
+/** Whether the parent's sheet may ask that child (messageItem). */
+export function canMessage(parent: SessionSummary, child: SessionSummary, store: Store): boolean {
+  const { machines, sessions } = store.get();
+  const control = parent.machine ? machines.get(parent.machine)?.control : undefined;
+  const now = Date.now();
+  // The sheet lists the sessions the board does: one nothing has happened in yet is not.
+  return (
+    !isEmptySession(child) &&
+    canAskFrom(parent, control, sessions.values(), now) &&
+    askableSessions([child], parent, now).some((s) => s.key === child.key)
+  );
 }
 
 /** The sheet head for a session: its title, and where it runs. */

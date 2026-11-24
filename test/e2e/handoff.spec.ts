@@ -423,3 +423,131 @@ test("an older machine, and one that is not paired: neither the strip nor a menu
   await expect(ask).toHaveCount(0);
   await expect(page.locator(".menu > .menu-sep + .menu-sep")).toHaveCount(0);
 });
+
+/** A session started for `parent` (sessionpipe ask: `delegated_by` on its events), in a
+ *  state: one that needs you (a Bash prompt open), one working (a turn open), one done. */
+async function postAsked(
+  token: string,
+  o: { machine: string; harness: string; title: string; parent: string; state: "needs_you" | "working" | "done" },
+): Promise<{ harness: string; id: string; key: string }> {
+  const id = randomUUID();
+  let seq = 0;
+  let clock = Date.now() - 20_000;
+  const ev = (type: string, data: Record<string, unknown>) => {
+    clock += 500;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: o.harness, version: "2.1.296", event: "Hook" },
+      session: {
+        id,
+        seq: seq++,
+        machine: o.machine,
+        cwd: "/Users/e2e/code",
+        title: o.title,
+        title_source: "custom",
+        delegated_by: o.parent,
+      },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const events = [ev("session.started", { source: "startup" }), ev("turn.started", { turn_id: "t1" })];
+  if (o.state === "needs_you")
+    events.push(ev("attention.needed", { attention_id: `att_${id}`, kind: "permission", tool: "Bash" }));
+  if (o.state === "done") events.push(ev("turn.ended", { turn_id: "t1" }), ev("session.ended", { reason: "exit" }));
+  await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
+    body: JSON.stringify({ events }),
+  });
+  return { harness: o.harness, id, key: `${o.harness}:${id}` };
+}
+
+test("a parent's Asked sessions: each with its state, agent and computer, the one that needs you first; Open and Message", async ({
+  page,
+}) => {
+  const name = `ho-kids-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const p = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Parent ${name}` });
+  const parent = `${p.harness}:${p.id}`;
+  // Started in this order: the newest is the working one, the oldest the one that needs you.
+  const needs = await postAsked(sink, {
+    machine: name,
+    harness: "codex",
+    title: "Run the suite",
+    parent,
+    state: "needs_you",
+  });
+  // One on another computer: a later stage's shape, which today's data can already carry.
+  const done = await postAsked(sink, {
+    machine: `${name}-b`,
+    harness: "codex",
+    title: "Review the copy",
+    parent,
+    state: "done",
+  });
+  const work = await postAsked(sink, {
+    machine: name,
+    harness: "claude-code",
+    title: "Draft the note",
+    parent,
+    state: "working",
+  });
+  await page.goto(`${CONTROL_BASE}/s/${p.harness}/${p.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+
+  const kids = page.locator("section.kids");
+  await expect(kids.getByRole("heading", { name: /Asked sessions/ })).toBeVisible();
+  const rows = kids.locator("li.kids-row");
+  await expect(rows).toHaveCount(3);
+  // The one that needs you first, marked; then the newest started.
+  await expect(rows.nth(0)).toHaveAttribute("data-kid", needs.key);
+  await expect(rows.nth(0)).toHaveAttribute("data-state", "needs_you");
+  await expect(rows.nth(1)).toHaveAttribute("data-kid", work.key);
+  await expect(rows.nth(2)).toHaveAttribute("data-kid", done.key);
+  // Each says its state, its agent and its computer (this session's own, named all the same).
+  for (const [i, state, agent, title, computer] of [
+    [0, "needs you", "Codex", "Run the suite", name],
+    [1, "working", "Claude Code", "Draft the note", name],
+    [2, "done", "Codex", "Review the copy", `${name}-b`],
+  ] as const) {
+    await expect(rows.nth(i).locator(".kids-word")).toHaveText(state);
+    await expect(rows.nth(i).locator(".kids-agent")).toHaveText(agent);
+    await expect(rows.nth(i).locator(".kids-where")).toHaveText(computer);
+    await expect(rows.nth(i).locator(".kids-title")).toHaveText(title);
+  }
+
+  // Message: Ask another agent… aimed at that session, the answer brought back.
+  await rows.nth(1).hover();
+  await rows.nth(1).getByRole("button", { name: "Message Claude Code" }).click();
+  await expect(sheet(page)).toBeVisible();
+  await expect(rowValue(page, "agent")).toContainText("Draft the note");
+  await expect(sheet(page).locator("[data-hs-row=back] [role=switch]")).toHaveAttribute("aria-checked", "true");
+  await expect(sheet(page).locator("[data-hs-text]")).toHaveValue("");
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  // The one on another computer is no agent this session can ask today: no Message there,
+  // in the row or its menu.
+  await rows.nth(2).hover();
+  await expect(rows.nth(2).getByRole("button", { name: /^Message/ })).toHaveCount(0);
+  await rows.nth(2).click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Open beside" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /^Message/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // In the working one's menu, Message is there too.
+  await rows.nth(1).click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Message…" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Open: the row goes to the child's page, whose bar says whom it works for.
+  await rows.nth(0).locator("a.kids-link").click();
+  await expect(page).toHaveURL(new RegExp(`/s/codex/${needs.id}`));
+  await expect(page.locator(".sess-for a")).toHaveText(`Parent ${name}`);
+  // One level: the child asked nobody, and a session that asked none has no list at all.
+  await expect(page.locator("section.kids")).toHaveCount(0);
+});

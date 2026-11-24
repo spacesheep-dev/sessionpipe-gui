@@ -16,6 +16,7 @@ interface Snap {
     id: string;
     title?: string;
     delegatedBy?: string;
+    machine?: string;
     delegations?: { via: string; harness: string; to?: string; endedAt?: string; relayed?: string }[];
   }[];
 }
@@ -55,6 +56,26 @@ test("the asking session shows the row; the asked session says who asked", async
     await expect(page.getByRole("menuitem", { name: "Open the asking session" })).toBeVisible();
     await page.keyboard.press("Escape");
   }
+});
+
+test("the asking session lists the sessions it asked under its bar; one that asked none has no list", async ({
+  page,
+}) => {
+  await openPage(page, "/");
+  const { asker, child } = await lineage(page);
+  test.skip(!child, "the asked session is not in the snapshot yet");
+  await openPage(page, `/s/${asker.harness}/${asker.id}`);
+  const row = page.locator(`section.kids li.kids-row[data-kid="${child!.key}"]`);
+  await expect(row).toBeVisible();
+  await expect(row.locator(".kids-word")).toHaveText(/needs you|working|stale|idle|done/);
+  await expect(row.locator(".kids-agent")).toHaveText("Codex");
+  // The computer is named, though it is the asking session's own.
+  await expect(row.locator(".kids-where")).toHaveText(child!.machine!);
+  // Open: the row goes to the asked session, which asked nobody itself.
+  await row.locator("a.kids-link").click();
+  await expect(page).toHaveURL(new RegExp(`/s/codex/${child!.id}`));
+  await expect(page.locator(".sess-for")).toBeVisible();
+  await expect(page.locator("section.kids")).toHaveCount(0);
 });
 
 test("the board nests the asked session under its parent", async ({ page }) => {

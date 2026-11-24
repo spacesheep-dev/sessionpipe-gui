@@ -16,6 +16,10 @@ export interface HandoffTarget {
   session: SessionKey;
   turnSeq?: number;
   reply?: string;
+  /** The session to ask, picked in the Agent picker (a parent's Message to a session it
+   *  asked): the sheet opens on it with "Bring the answer back" on and an empty message,
+   *  neither the draft nor the last reply. */
+  to?: SessionKey;
 }
 
 interface OpenState {
