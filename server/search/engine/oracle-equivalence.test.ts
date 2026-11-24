@@ -139,6 +139,7 @@ describe("engine ≡ oracle", () => {
       compare(engine, oracle, sources, text, live);
       compare(engine, oracle, sources, text, live, { sources: ["sessionpipe"] });
       compare(engine, oracle, sources, text, live, { fields: ["prompt", "title"] });
+      compare(engine, oracle, sources, text, live, { fields: [] });
       compare(engine, oracle, sources, text, live, { sort: "newest", allow: (s) => s.harness === "claude-code" });
     }
   });

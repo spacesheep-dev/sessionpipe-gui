@@ -8,6 +8,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **Search's `in:` with nothing left searches nothing.** `in:prompt -in:prompt`, or every
+  field excluded, searched every field; it now finds nothing and offers to search without
+  filters. A list with no words whose `in:` leaves out prompts (`agent:codex in:reply`) no
+  longer shows each session's first prompt.
 - **A session that asks you something shows it until it is over, whatever order its
   events arrive in.** When a session's events reached the receiver out of order (a relay,
   a retry, the outbox catching up), a tool or turn event from before a question, arriving
