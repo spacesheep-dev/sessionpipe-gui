@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-11-24
+
+The iPhone app on a screen that folds: it is the touch app at every width, with a sidebar
+and centred sheets when there is room, nothing under the band iOS keeps at the side, the
+place you were reading kept through a fold, and a keyboard that never covers what you
+type. A device that is not approved yet says so in one sentence everywhere, an iPad says
+iPad, cards open beside the sidebar, and Search has a Cancel. And a round of fixes, most
+of them from contributors, in search, the command line, limits and uploads.
+
 ### Changed
 
 - **A touch screen has the touch app at any width.** A tablet turned on its side, a phone
@@ -2308,7 +2317,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.7...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.8...HEAD
+[0.8.8]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.4...v0.8.5
