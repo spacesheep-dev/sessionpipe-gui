@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseSearch } from "../../../shared/searchQuery.js";
 import type { EngineQuery } from "../types.js";
-import { Reader } from "./reader.js";
+import { homeOf, Reader } from "./reader.js";
 import { bruteMatch, type GenDoc, randomDocs, rng, VOCAB, writeIndex } from "./testkit.js";
 
 const dirs: string[] = [];
@@ -373,6 +373,44 @@ describe("a damaged segment", () => {
     writeFileSync(join(dir, "history", m.segments[0]!.name), "garbage");
     const rd = new Reader({ dir, sources: ["history"] });
     expect(rd.search(q("words")).matches.map((x) => x.session.key)).toEqual(["claude-code:b"]);
+    rd.close();
+  });
+
+  it("extracts source home labels on both POSIX and Windows paths", () => {
+    expect(homeOf("/Users/demo/.claude/projects/p/a.jsonl", "/Users/demo")).toBe("~/.claude");
+    expect(homeOf("/Users/demo/.claude-work/projects/p/a.jsonl", "/Users/demo/")).toBe("~/.claude-work");
+    expect(homeOf("/Users/demo2/.claude/projects/p/a.jsonl", "/Users/demo")).toBeUndefined();
+    expect(homeOf("C:\\Users\\demo\\.claude\\projects\\p\\a.jsonl", "C:\\Users\\demo")).toBe("~/.claude");
+    expect(homeOf("C:\\Users\\demo\\.claude-work\\projects\\p\\a.jsonl", "C:/Users/demo/")).toBe("~/.claude-work");
+    expect(homeOf("C:\\.claude\\projects\\p\\a.jsonl", "C:\\")).toBe("~/.claude");
+
+    const dir = tmp();
+    const docs: GenDoc[] = [{ key: "claude-code:w", field: "prompt", text: "win home", at: 1, offset: 0, file: 1 }];
+    writeIndex(
+      dir,
+      "history",
+      docs,
+      [
+        {
+          key: "claude-code:w",
+          harness: "claude-code",
+          id: "w",
+          path: "C:\\Users\\demo\\.claude-work\\projects\\p\\w.jsonl",
+        },
+      ],
+      1,
+    );
+    const rd = new Reader({
+      dir,
+      sources: ["history"],
+      live: {
+        env: { home: "C:\\Users\\demo", stateDir: dir, hostname: "winbox", platform: "win32", env: {} },
+        adapters: [],
+      },
+    });
+    expect(rd.stats().bySource).toEqual([
+      { harness: "claude-code", source: "history", homes: ["~/.claude-work"], sessions: 1 },
+    ]);
     rd.close();
   });
 });

@@ -20,7 +20,7 @@ import {
   type SessionMatch,
   type SessionSearchPage,
 } from "../../shared/api.js";
-import { isEmptySearch, parseSearch, searchQueryNote } from "../../shared/searchQuery.js";
+import { appendToQuery, isEmptySearch, parseSearch, searchQueryNote } from "../../shared/searchQuery.js";
 import { ConfigError, readConfigFile } from "../config.js";
 import { HARNESS_LABELS } from "./facets.js";
 import { homePath } from "./resume.js";
@@ -155,7 +155,7 @@ export function parseSearchArgs(argv: string[]): SearchArgs | "help" {
         words.push(f);
     }
   }
-  a.q = [...words, ...filters].join(" ").trim();
+  a.q = appendToQuery(words.join(" "), filters.join(" ")).trim();
   if (!a.q || isEmptySearch(parseSearch(a.q))) throw new UsageError("search needs a query (try search --help)");
   return a;
 }

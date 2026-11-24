@@ -12,7 +12,7 @@ import { ROUTES } from "../../shared/api.js";
 import { Session, tempDir } from "../../test/events.js";
 import { type App, createApp } from "../app.js";
 import { localHostname } from "../tls/certs.js";
-import { checkRequest, fromAnotherOrigin, type GuardRequest, hostName, knownHost } from "./guard.js";
+import { checkRequest, fromAnotherOrigin, type GuardRequest, hostName, hostOf, knownHost } from "./guard.js";
 import { Router } from "./router.js";
 
 const fake = (headers: Record<string, string>, o: Partial<GuardRequest> & { method?: string; from?: string } = {}) =>
@@ -28,6 +28,17 @@ const fake = (headers: Record<string, string>, o: Partial<GuardRequest> & { meth
   }) satisfies GuardRequest;
 
 describe("the guard's readings", () => {
+  it("answers to an --allow-host value cli.ts takes, and hostOf reads no host where hostName hands it back", () => {
+    for (const v of ["studio.lan", "studio.lan:8443", "STUDIO.LAN", "studio.lan.", "studio.lan/"]) {
+      expect(hostOf(v)).toBe("studio.lan");
+      expect(knownHost(hostName("studio.lan:7373"), { hosts: () => [v] })).toBe(true);
+    }
+    for (const v of ["", "https://studio.lan", "studio.lan/x", "user@studio.lan", "studio lan", "[::1]x"]) {
+      expect(hostOf(v)).toBeNull();
+      expect(hostName(v)).toBe(v);
+    }
+  });
+
   it("reads the name out of a Host header as a URL would", () => {
     expect(hostName("Studio.local:7373")).toBe("studio.local");
     expect(hostName("localhost")).toBe("localhost");

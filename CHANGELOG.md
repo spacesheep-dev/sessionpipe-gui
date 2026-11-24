@@ -146,6 +146,38 @@ All notable changes to `sessionpipe-gui`. The format follows
   a narrow screen and a pop-up under its button on a wider one was drawn anew as the
   screen changed, and its filter lost the focus (and with it the keyboard). It is now the
   same list in both forms: the filter's text, the focus and the row it was on are kept.
+- **An upload the board can't save is no longer said as "no room".** When the board's files
+  folder can't be written, the message box and New session said the board had no room for
+  more files today; they now say it couldn't save the picture or file, with Try again. A
+  full disk still says there is no room.
+- **A limit's reset time and a pooled account's "until" on a day the month does not have, or
+  at hour 24, are left out.** A `limits.observed` window or a hello's pooled window with
+  `resets_at` `2026-02-30`, `2026-11-31` or `T24:00:00Z` was kept and shown as resetting on
+  March 2, December 1 or the next day, and a pooled account's `until` the same; the window or
+  the `until` is now dropped, as `2026-13-01` already was. `2028-02-29` still reads.
+- **`--state` before `search` or `index` is taken.** `sessionpipe-gui --state DIR search
+  "q"` and `--state DIR index --status` stopped with "unknown option search", while every
+  other command takes the flag first; they now read DIR. Another flag before `search` or
+  `index` is refused by its name.
+- **`--allow-host` takes a host name, a port at most.** `--allow-host https://studio.lan`,
+  a path, a space, a wildcard (`*.lan`), a list (`a.lan,b.lan`), an empty value or
+  `0.0.0.0` started a receiver that never answered to that name, without a word. Each now
+  stops with an `--allow-host` message. A background service given such a value after `--`
+  now stops at start too, and its log says why; `sessionpipe-gui service install -- <options>`
+  replaces the options it keeps.
+- **A filter added after an unclosed quote filters.** Choosing an agent, repo or date on
+  Search with a query such as `"rate limiter` gave `"rate limiter agent:codex`, which
+  searched the filter as part of the phrase and filtered nothing; `sessionpipe-gui search
+  '"rate limiter' --agent codex` did the same. The quote is now closed first (`"rate
+  limiter" agent:codex`). Typing an unclosed quote still searches to the end of the query.
+- **Search's `repo:acme/api` finds the sessions sessionpipe sent for that repo.** Their
+  repo starts with the host (`github.com/acme/api`), so `repo:acme/api` and `repo:acme`
+  found only this computer's own history, and `repo:github.com/acme` only the others.
+  `repo:` now matches from any part of the name, on the receiver, in `sessionpipe-gui
+  search --repo`, and in Search on a spacesheep account, which matched the last part only.
+- **Search's index list names the history folders on Windows.** Beside Claude Code,
+  Codex and the other agents it showed no `~/.claude` (or `~/.claude-work`, …) on
+  Windows: the folder was compared with a `/` a Windows path does not have.
 
 ## [0.8.7] - 2026-11-20
 

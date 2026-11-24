@@ -77,6 +77,30 @@ describe("compileFilters", () => {
     expect(pick("repo:api")).toEqual([]);
   });
 
+  it("repo: an owner/name prefix finds a repo core sent with its host, as it finds one without", () => {
+    const repos = [
+      sess({ id: "gh", sources: ["sessionpipe"], repo: "github.com/acme/api" }),
+      sess({ id: "alias", sources: ["sessionpipe"], repo: "github-work/Acme/api" }),
+      sess({ id: "sshport", sources: ["sessionpipe"], repo: "git.example.com/2222/acme/api" }),
+      sess({ id: "bare", repo: "acme/api" }),
+      sess({ id: "other", sources: ["sessionpipe"], repo: "github.com/beta/acme" }),
+      sess({ id: "sub", sources: ["sessionpipe"], repo: "gitlab.com/group/sub/proj" }),
+    ];
+    const ids = (q: string) => {
+      const f = compileFilters(parseSearch(q), { ...ctx, available: [...ctx.available] });
+      return repos.filter((s) => !f.allow || f.allow(s)).map((s) => s.id);
+    };
+    expect(ids("repo:acme/api")).toEqual(["gh", "alias", "sshport", "bare"]);
+    expect(ids("repo:ACME/a")).toEqual(["gh", "alias", "sshport", "bare"]);
+    expect(ids("repo:acme")).toEqual(["gh", "alias", "sshport", "bare", "other"]);
+    expect(ids("repo:sub/proj")).toEqual(["sub"]);
+    expect(ids("repo:github.com/acme")).toEqual(["gh"]);
+    expect(ids("repo:beta/acme")).toEqual(["other"]);
+    expect(ids("repo:api")).toEqual(["gh", "alias", "sshport", "bare"]);
+    expect(ids("repo:cme")).toEqual([]);
+    expect(ids("-repo:acme/api")).toEqual(["other", "sub"]);
+  });
+
   it("label: colour or name with _ for spaces; -label inverts", () => {
     expect(pick("label:red")).toEqual(["a"]);
     expect(pick("label:client_work")).toEqual(["b"]);
