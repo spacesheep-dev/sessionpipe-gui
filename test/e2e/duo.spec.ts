@@ -940,6 +940,25 @@ for (const [size, insets] of ROOM) {
       if (top || right || left) expect(await underBands(page), what).toEqual([]);
       return side;
     };
+    /** A card over a form sheet (a menu, a confirm) stands in the form's middle, not the
+     *  page's beside the sidebar. Measured on a card put there by hand: nothing in the touch
+     *  forms opens one yet. */
+    const overForm = async (form: Locator, what: string) => {
+      const f = await boxOf(form);
+      const over = await page.evaluate(() => {
+        const probe = document.createElement("div");
+        probe.className = "menu-sheet";
+        probe.style.cssText = "height:100px;animation:none";
+        document.body.append(probe);
+        const r = probe.getBoundingClientRect();
+        probe.remove();
+        return { left: r.left, right: r.right };
+      });
+      expect(
+        Math.abs((over.left + over.right) / 2 - (f.left + f.right) / 2),
+        `a card over ${what}`,
+      ).toBeLessThanOrEqual(1);
+    };
     try {
       Object.assign(b.ss.machines[0]!, { ask: true, handoff: true });
       await page.goto(b.server.url);
@@ -983,6 +1002,7 @@ for (const [size, insets] of ROOM) {
         .click();
       await expect(page.getByRole("listbox")).toHaveCount(0);
       await expect(ns).toBeVisible();
+      await overForm(ns, `New session, ${where}`);
       await ns.getByRole("button", { name: "Cancel" }).click();
       await expect(ns).toHaveCount(0);
 
@@ -1056,6 +1076,7 @@ for (const [size, insets] of ROOM) {
       const hs = page.locator("[data-handoff]");
       await expect(hs.locator("[data-hs-text]")).toBeVisible();
       await formSheet(hs, `Ask another agent, ${where}`);
+      await overForm(hs, `Ask another agent, ${where}`);
       // With the keys up, it ends above them.
       await hs.locator("[data-hs-text]").click();
       await fakeKeyboard(page, 300);
