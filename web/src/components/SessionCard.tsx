@@ -35,7 +35,7 @@ import { prefetchProps } from "../data/prefetch";
 import { agentFound, agentsChoice, agentsRunningFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
 import { useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
-import { usePhoneLayout } from "../lib/device";
+import { usePhoneLayout, useTouchKeys } from "../lib/device";
 import {
   ATTENTION_LABEL,
   askedQuestion,
@@ -677,10 +677,15 @@ function CardAnswer({
           BOARD_KEYS,
         )
       : [];
+  // Under a finger, a prompt this device cannot answer until its computer adds it has no
+  // Allow and Deny that would only be refused, as under the prompt and in the Inbox. A mouse
+  // keeps them, greyed.
+  const noPair = useTouchKeys() && send.approval === "catching-up";
   // Not paired is no moment's state: the menu leaves the pair out, as it does Ask another
-  // agent…, and the row says why once `a` or `d` is pressed.
+  // agent…, and the row says why once `a` or `d` is pressed (`noPair` too: a hardware
+  // keyboard's a or d still says why).
   useLayoutEffect(() => {
-    into.current = st?.tag === "unpaired" ? [] : items;
+    into.current = st?.tag === "unpaired" || noPair ? [] : items;
   });
   const receipt = st?.receipt?.text;
   const held = !!receipt && control?.online === false;

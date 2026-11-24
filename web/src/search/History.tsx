@@ -15,6 +15,7 @@ import { type MenuList, MoreButton } from "../components/ContextMenu";
 import { Markdown } from "../components/Markdown";
 import { BackButton, PageBar } from "../components/PageBar";
 import { useStore } from "../data/hooks";
+import { useColumnRef } from "../lib/column";
 import { toolLabel } from "../lib/format";
 import { noteHistoryTitle } from "../lib/historyTitle";
 import { back } from "../lib/router";
@@ -57,6 +58,7 @@ export function HistorySession({
   const [at, setAt] = useState<string | null>(hashRef);
   const [current, setCurrent] = useState(-1);
   const listRef = useRef<HTMLOListElement>(null);
+  const columnRef = useColumnRef(listRef);
   const findRef = useRef<HTMLInputElement>(null);
   const scrollTo = useRef<string | null>(at);
 
@@ -245,7 +247,7 @@ export function HistorySession({
           </button>
         </div>
       )}
-      <ol className="timeline timeline--chat hx-msgs" ref={listRef}>
+      <ol className="timeline timeline--chat hx-msgs" ref={columnRef}>
         {turns.map((t) => (
           <Turn
             key={t[0]!.ref}

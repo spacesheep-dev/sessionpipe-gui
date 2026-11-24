@@ -5,7 +5,7 @@
 // new or changed (accountWords.new.ts, one line a sentence). No screen holds a sentence of
 // its own. The hub's own words (its note about a key that is not kept, its alerts) are the
 // hub's and are shown as they come.
-import { shellPlatform } from "../lib/device";
+import { deviceNoun } from "../lib/device";
 import { MACHINES, NEW_WORDS, SEND, START } from "./accountWords.new";
 import { WORDS } from "./onboarding";
 
@@ -42,12 +42,10 @@ export const REUSED = {
   openOn: (host: string) => `Open on ${host}`,
 } as const;
 
-/** "this iPhone" / "this phone" (as control/signer.ts deviceWords says it; not imported
- *  here, so the first run stays as light as it was), and the same with a capital. */
-export const thisPhone = (): string => {
-  const p = shellPlatform();
-  return p === "ios" ? "this iPhone" : p === "android" ? "this phone" : "this Mac";
-};
+/** "this iPhone" / "this iPad" / "this phone" (as control/signer.ts deviceWords says it; not
+ *  imported here, so the first run stays as light as it was; both name the device by
+ *  lib/device.ts deviceNoun), and the same with a capital. */
+export const thisPhone = (): string => `this ${deviceNoun()}`;
 export const ThisPhone = (): string => {
   const p = thisPhone();
   return p.charAt(0).toUpperCase() + p.slice(1);

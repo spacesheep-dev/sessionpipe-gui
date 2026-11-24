@@ -3,7 +3,8 @@
 // button, every keystroke a query. While the caret ends a token a small list completes it
 // (keys with Tab; values with ↑↓ and Tab or ⏎). ↑↓ outside it walk the results, ⏎ / ⇧⏎ /
 // ⌘⏎ open the one under the cursor, Tab goes from the field to the results, Esc closes the
-// list, then clears, then leaves for the list.
+// list, then clears, then leaves for the list. On a touch screen Cancel stands beside the
+// field while it has the focus or holds words, as beside iOS's search bar: it ends the search.
 import type { SearchFacets } from "@shared/api";
 import {
   forwardRef,
@@ -16,6 +17,7 @@ import {
 } from "react";
 import { HarnessGlyph } from "../components/bits";
 import { LabelSwatch } from "../components/LabelDot";
+import { useTouchKeys } from "../lib/device";
 import { IS_MAC } from "../lib/shortcuts";
 import type { OpenHow } from "../lib/split";
 import { markTyped } from "./client";
@@ -56,6 +58,7 @@ export const SearchField = forwardRef<
   const [shut, setShut] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
   const pendingCaret = useRef<number | null>(null);
+  const touch = useTouchKeys();
   useImperativeHandle(ref, () => ({
     focus: (select = false) => {
       input.current?.focus();
@@ -217,6 +220,26 @@ export const SearchField = forwardRef<
           <kbd title="Press / to search">/</kbd>
         )}
       </label>
+      {phone && touch && (focused || value) ? (
+        <button
+          type="button"
+          className="sx-cancel"
+          // The field keeps the focus until the tap lands, or Cancel would go from under it.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            if (value) {
+              markTyped();
+              onChange("");
+            }
+            // The keyboard goes down, and with it the title and the filters come back; the
+            // focus goes to the page, as when any control that held it goes away.
+            input.current?.blur();
+            document.getElementById("main")?.focus({ preventScroll: true });
+          }}
+        >
+          Cancel
+        </button>
+      ) : null}
       {shown && (
         <div
           className="sx-complete menu-surface"

@@ -9,7 +9,7 @@
 // exact command and gets the signed body back.
 import type { MachineControl } from "@shared/api";
 import { useEffect, useMemo, useState } from "react";
-import { type ShellPlatform, shellPlatform } from "../lib/device";
+import { deviceNoun, type ShellPlatform, shellPlatform } from "../lib/device";
 import { NEW_WORDS } from "../native/accountWords.new";
 import type { DeviceSignature, SendBody, TrustedKey } from "./api";
 import { sha256 } from "./bytes";
@@ -39,10 +39,10 @@ export function isCancel(e: unknown): boolean {
 }
 
 /** The app's words for the device it runs on, by the shell's platform (lib/device.ts):
- *  the Mac app says "this Mac" and "Touch ID", the iPhone app "this iPhone" and "Face ID",
- *  Android "this phone" and "your fingerprint". A desktop browser, and a shell with no
- *  signer of its own (Linux, Windows), read as the Mac app did: a browser never shows
- *  these lines, and the setup they describe is the Mac's. */
+ *  the Mac app says "this Mac" and "Touch ID", the iPhone app "this iPhone" (on an iPad
+ *  "this iPad") and "Face ID", Android "this phone" and "your fingerprint". A desktop
+ *  browser, and a shell with no signer of its own (Linux, Windows), read as the Mac app
+ *  did: a browser never shows these lines, and the setup they describe is the Mac's. */
 export interface DeviceWords {
   /** "this Mac": the device, as the subject of a sentence. */
   this: string;
@@ -54,7 +54,11 @@ export interface DeviceWords {
   app: string;
 }
 export function deviceWords(platform: ShellPlatform | null = shellPlatform()): DeviceWords {
-  if (platform === "ios") return { this: "this iPhone", auth: "Face ID", its: "this iPhone's", app: "iPhone app" };
+  if (platform === "ios") {
+    // "iPhone", or "iPad" where the shell says so (lib/device.ts deviceNoun).
+    const d = deviceNoun(platform);
+    return { this: `this ${d}`, auth: "Face ID", its: `this ${d}'s`, app: `${d} app` };
+  }
   if (platform === "android")
     return { this: "this phone", auth: "your fingerprint", its: "this phone's", app: "Android app" };
   return { this: "this Mac", auth: "Touch ID", its: "this Mac's", app: "Mac app" };
@@ -137,8 +141,9 @@ export const updateWords = (machine: string | undefined): string =>
   `Update sessionpipe on ${machine || "that machine"} to send from the app.`;
 
 /** The app's setup, where its device key is made and a trusted device approves it once:
- *  "Approve this Mac" (or this iPhone, this phone). */
-export const setupLabel = (): string => `Approve ${deviceWords().this}`;
+ *  "Approve this Mac" (or this iPhone, this iPad, this phone). The words are the one way on
+ *  wherever a device not approved yet is said (accountWords.new.ts `approveThis`). */
+export const setupLabel = (): string => NEW_WORDS.approveThis(deviceWords().this);
 /** The one line where a machine takes device keys but doesn't trust this device's yet. */
 export const setupWords = (machine: string | undefined): string => {
   const w = deviceWords();

@@ -177,7 +177,7 @@ test("the app's device key: asked for, approved from a browser, key.add delivere
       const hereRow = app.page.locator(`.inbox-row[data-attention="${here.attention}"]`);
       await hereRow.hover();
       await expect(hereRow.getByRole("button", { name: "Allow" })).toBeEnabled();
-      await expect(app.page.getByText("This Mac can't answer yet")).toHaveCount(0);
+      await expect(app.page.getByText("This Mac can't send yet")).toHaveCount(0);
       await shot(app.page, "3-app-inbox-one-machine-untrusted");
     } finally {
       await here.clear();

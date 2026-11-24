@@ -103,7 +103,7 @@ export function App() {
   useEffect(() => {
     // On a spacesheep account that address is the page that approves this phone, and is
     // named (and announced) as that page names itself.
-    const own = route.name === "add-device" && accountMode() ? NEW_WORDS.machinesApprove(thisPhone()) : undefined;
+    const own = route.name === "add-device" && accountMode() ? NEW_WORDS.approveThis(thisPhone()) : undefined;
     document.title = `${titlePrefix(open)}${themeName ?? own ?? TITLES[route.name] ?? "sessionpipe"} · sessionpipe gui`;
   }, [route, themeName, open]);
   // To the top when the path changes (not on a `?s=` tab change, not on a stream-driven

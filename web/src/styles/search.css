@@ -53,10 +53,50 @@
 .sx-phonefield {
   margin-top: -12px;
 }
+/* The phone field's height, which Cancel beside it centres its 44 on. */
+.sx-fieldwrap--phone {
+  --sx-field-h: 36px;
+}
 .sx-fieldwrap--phone .sx-search.search {
-  height: 36px;
+  height: var(--sx-field-h);
   border-radius: var(--radius-pop);
   padding-left: 10px;
+}
+/* A finger's Cancel (search/Field.tsx): beside the field while it has the focus or holds
+   words, in the tint, as a bar's button is. The field gives it the room; the row keeps
+   the field's 36 pt, the button a finger's 44 by standing past it above and below. */
+.sx-fieldwrap--phone:has(> .sx-cancel) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sx-fieldwrap--phone:has(> .sx-cancel) .sx-search.search {
+  flex: 1 1 auto;
+  width: auto;
+}
+.sx-cancel {
+  flex: none;
+  min-height: var(--tap);
+  margin: calc((var(--sx-field-h) - var(--tap)) / 2) 0;
+  padding: 0 0 0 4px;
+  color: var(--tint-fg);
+  font-size: var(--text-md);
+  animation: fade-in var(--dur-fast) var(--ease-out) both;
+}
+/* The clear button's glyph keeps its size; a finger's target round it is 44 by 44. */
+@media (pointer: coarse) {
+  .sx-clear {
+    position: relative;
+  }
+  .sx-clear::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: var(--tap);
+    height: var(--tap);
+    translate: -50% -50%;
+  }
 }
 
 /* Completion: the menu's surface, under the token being typed. */

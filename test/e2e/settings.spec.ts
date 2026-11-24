@@ -74,6 +74,27 @@ test.describe("quick settings", () => {
     for (const s of skins) await expect(pop.locator(`[data-skin='${s.id}']`)).toBeVisible();
   });
 
+  test("with a mouse, the popover stands beside the sidebar's foot, not in the middle as a touch card does", async ({
+    page,
+  }) => {
+    await openBoard(page);
+    await expect(page.locator("html")).not.toHaveAttribute("data-size-class", "regular");
+    await page.locator("nav.rail button[aria-label='Quick settings']").click();
+    const pop = page.getByRole("dialog", { name: "Quick settings" });
+    await expect(pop).toBeVisible();
+    const rail = (await page.locator("nav.rail").boundingBox())!;
+    const height = page.viewportSize()!.height;
+    // Its rise ends where it stays: 8 px right of the sidebar, 12 px over the window's foot.
+    await expect
+      .poll(async () => {
+        const b = (await pop.boundingBox())!;
+        return [b.x, b.width, Math.round(b.y + b.height)];
+      })
+      .toEqual([rail.x + rail.width + 8, 260, height - 12]);
+    await page.keyboard.press("Escape");
+    await expect(pop).toHaveCount(0);
+  });
+
   test("the popover ends in a row to the Settings window", async ({ page }) => {
     await openBoard(page);
     await page.locator("nav.rail button[aria-label='Quick settings']").click();

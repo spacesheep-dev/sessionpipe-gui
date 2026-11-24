@@ -10,6 +10,7 @@ import type { MachineControl, SessionSummary } from "@shared/api";
 import { type MutableRefObject, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { answerState, useSessionSend } from "../control/useSend";
 import { useAnswerClock } from "../lib/answerWindow";
+import { useTouchKeys } from "../lib/device";
 import { askFitsRow } from "../lib/format";
 import { copyItem } from "../lib/menus";
 import { usePath } from "../lib/router";
@@ -168,13 +169,17 @@ function ToastAnswer({
   // An answer out (from anywhere), closed, its hook stopped waiting, or this device not
   // approved: nothing to press, and the note says why (the receipt, while an answer is out).
   const shut = !!status || tag === "late" || tag === "unapproved";
+  // Under a finger, a prompt this device cannot answer until its computer adds it has no
+  // Allow and Deny that would only be refused, in the menu or on the banner: the note says
+  // why. A mouse keeps them, greyed.
+  const noPair = useTouchKeys() && send.approval === "catching-up";
   const answer = (allow: boolean) =>
     void send
       .onSend({ kind: "permission.answer", attentionId: a.attentionId, allow })
       .then(() => dismissToast(toast.id))
       .catch(() => {});
   useLayoutEffect(() => {
-    into.current = whole ? answerItems(a.tool, st, answer) : [];
+    into.current = whole && !noPair ? answerItems(a.tool, st, answer) : [];
   });
   useEffect(
     () => () => {
@@ -190,7 +195,7 @@ function ToastAnswer({
           {NEW_WORDS.inboxOpen}
         </button>
       )}
-      {!shut && whole && (
+      {!shut && whole && !noPair && (
         <>
           <button type="button" className="btn btn--sm btn--deny" disabled={off} onClick={() => answer(false)}>
             Deny

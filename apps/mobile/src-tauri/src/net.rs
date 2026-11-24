@@ -74,11 +74,14 @@ pub fn shell_receiver(r: &ReceiverRef) -> ShellReceiver {
 
 /// The contract for a window showing the Hub's active receiver (or none: the welcome).
 pub fn shell_info(hub: &Hub, version: &str) -> ShellInfo {
-    ShellInfo::new(
-        Os::current(),
-        version,
-        hub.active().as_ref().map(shell_receiver),
-    )
+    ShellInfo {
+        device: crate::contract::ipad().then_some("ipad"),
+        ..ShellInfo::new(
+            Os::current(),
+            version,
+            hub.active().as_ref().map(shell_receiver),
+        )
+    }
 }
 
 /// `rx://localhost/<id>/<path>`: the Hub forwards it (cookie, pinned CA, CORS for the

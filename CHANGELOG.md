@@ -27,17 +27,22 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **With room, sheets and menus float in the middle, and each page reads down one
   column.** On a tablet and on a phone opened flat, New session, Ask another agent and
   adding an account are a sheet of at most 540 pt in the middle, over a dimmed page; a
-  tap beside it closes it. A row's menu, Labels and Display are a card of at most 400 pt,
+  tap beside it closes it. A row's menu, Labels, Display and a page's Filter are a card
+  of at most 400 pt in the middle of the page beside the sidebar, never over the sidebar,
   and a choice in a sheet opens as a list under its button, also one tapped while the
-  sheet is still coming up, which rides up with it. The Board, the Inbox, Search,
-  Machines and Settings keep to a column of 672 pt. A phone held upright, a folded phone,
-  Split View and a window with a mouse are unchanged.
+  sheet is still coming up, which rides up with it. The Board, the Inbox, Search, Machines
+  and Settings keep to a column of 672 pt. A phone held upright, a folded phone, Split
+  View and a window with a mouse are unchanged.
 - **On a wide touch screen a reply reads in lines of about 70 characters.** On a tablet,
   and on a phone opened flat or turned on its side, a reply's lines ran to 90 and 115
   characters, too long for the eye to find the next one. Its paragraphs, lists, quotes and
   headings now stop at about 70, from the column's leading edge, at any text size; its
   code and tables keep the column, and the bubble of what you wrote is no wider than the
-  prose. A phone held upright and a window with a mouse are unchanged.
+  prose. That is where the session's column is 640 pt wide or more, as on a tablet on its
+  side; in a narrower one, beside the sidebar on a phone opened flat or on a tablet held
+  upright, a reply runs to the column's edge, as your messages and the message field do,
+  so its right edge is not ragged. A phone held upright and a window with a mouse are
+  unchanged.
 - **The iPhone app fills iPhone Duo's screens.** Built with Xcode 26, it showed in a box
   with black bars round it, folded and opened. It is now built with Xcode 27.1 and reaches
   the edges of both screens, with its controls clear of the status bar at the side.
@@ -48,6 +53,20 @@ All notable changes to `sessionpipe-gui`. The format follows
   "Ask another agent…" under the message field, and Search's large title and its filters,
   fold away while the keyboard is up, so the field, Send and a few results fit above it;
   they come back when it goes. A taller phone keeps them.
+- **A device not approved yet says so in one sentence everywhere.** Under a prompt, under
+  the message field, in the Inbox, New session, Ask another agent and Machines it reads
+  "This iPhone can't send yet." with Approve this iPhone, where it said "can't answer yet",
+  "isn't approved yet" and "Approve this iPhone to send". The iPad app says "this iPad".
+  Where a prompt's computer has not added the device yet, a touch screen no longer shows
+  Allow and Deny greyed out, under the prompt, in the Inbox or in a Board row's menu: the
+  sentence stands alone, with Approve this iPhone under the prompt and in the Inbox.
+- **Search on a touch screen has Cancel beside its field.** While the field is in use or
+  holds words, Cancel clears them, puts the keyboard away and brings the title and the
+  filters back; the small clear button in the field now takes a finger's whole tap. A
+  window with a mouse is unchanged.
+- **A row's menu and the Feed's Filter on a touch screen have no Cancel.** A tap anywhere
+  outside closes them, as iOS's menus do, so they are a row shorter. A confirm still asks
+  with Cancel, and a window with a mouse keeps it.
 
 ### Fixed
 

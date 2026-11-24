@@ -83,8 +83,9 @@ export function sendState(
  *  - "unapproved": only an approval made elsewhere brings them back (not approved, a request
  *    waiting, or off an account a computer that trusts no key of this device). Allow and
  *    Deny give way to the way to approve it.
- *  - "catching-up": approved, and this computer has not added the key yet. Allow and Deny
- *    stay, disabled, and the way on beside them is Approve this iPhone.
+ *  - "catching-up": approved, and this computer has not added the key yet. With a mouse
+ *    Allow and Deny stay, disabled; under a finger they are left out (ControlStrip / Inbox
+ *    / Board / banner `noPair`). Either way the way on is Approve this iPhone.
  *  - "ok": nothing here turns them off.
  *  Only for the app's own device key (`device`), and only once the signer has said which key
  *  it holds (`keyKnown`): a browser's list of its passkeys misses synced ones, and the app's
