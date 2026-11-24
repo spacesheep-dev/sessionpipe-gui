@@ -62,7 +62,7 @@ env:
 jobs:
   release:
     name: the tag's draft release
-    runs-on: graphide
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       id: ${{ steps.release.outputs.id }}
