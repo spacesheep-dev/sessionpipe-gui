@@ -174,6 +174,8 @@ function readRun(v: unknown): WorkflowRun | null {
       const t = (s as Record<string, unknown>)[k];
       if (t !== undefined && typeof t !== "string") return null;
     }
+    const afterRev = (s as StepRun).claimedAfterRev;
+    if (afterRev !== undefined && (!Number.isInteger(afterRev) || afterRev < 0)) return null;
   }
   const ids: string[] = [];
   for (const raw of r.plan as unknown[]) {

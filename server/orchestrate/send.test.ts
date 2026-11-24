@@ -313,6 +313,43 @@ describe("the one-move send over a fake control: what lands while the verifier w
       await expect(late).rejects.toMatchObject({ status: 412, why: "the step was not being sent" });
       expect(queuedCmds).toEqual([]);
 
+      // The first claim went stale AND a second tab claimed the re-offered step before the
+      // first tab's signature finished verifying: the first tab's stale rev must not queue
+      // anything or steal the second tab's claim.
+      let rRe = svc.startRun("w", undefined);
+      rRe = svc.claim(rRe.id, "a", rRe.rev);
+      const staleRev = rRe.rev;
+      const staleSend = svc.send(rRe.id, "a", staleRev, {});
+      await new Promise((r) => setTimeout(r, 0));
+      clock += CLAIM_TTL_MS + 1;
+      svc.tick();
+      const offered = svc.run(rRe.id)!;
+      expect(offered.steps.a!.status).toBe("ready");
+      const secondClaim = svc.claim(rRe.id, "a", offered.rev);
+      release();
+      await expect(staleSend).rejects.toMatchObject({ status: 412 });
+      expect(queuedCmds).toEqual([]);
+      expect(svc.run(rRe.id)!.steps.a).toMatchObject({ status: "sending" });
+      expect(svc.run(rRe.id)!.rev).toBe(secondClaim.rev);
+
+      // Even a command refusal on the first tab's stale claim does not fail the second tab's claim.
+      let rRef = svc.startRun("w", undefined);
+      rRef = svc.claim(rRef.id, "a", rRef.rev);
+      let rejectVerify!: () => void;
+      verify = () =>
+        new Promise((_, rej) => {
+          rejectVerify = () => rej(new HttpError(422, { reason: "cwd is not an allowed folder", code: "folder" }));
+        });
+      const staleRefusal = svc.send(rRef.id, "a", rRef.rev, {});
+      await new Promise((r) => setTimeout(r, 0));
+      clock += CLAIM_TTL_MS + 1;
+      svc.tick();
+      const reClaim = svc.claim(rRef.id, "a", svc.run(rRef.id)!.rev);
+      rejectVerify();
+      await expect(staleRefusal).rejects.toMatchObject({ status: 412 });
+      expect(svc.run(rRef.id)!.steps.a).toMatchObject({ status: "sending" });
+      expect(svc.run(rRef.id)!.rev).toBe(reClaim.rev);
+
       // The usual way: verified, queued, sent, in one move. The command is queued for the
       // queue's longest life, a day, whatever the body asked: a step is an agent's whole
       // task, and the default hour failed a long one as expired while it still ran.
