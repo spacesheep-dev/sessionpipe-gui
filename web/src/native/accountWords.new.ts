@@ -78,6 +78,9 @@ export const NEW_WORDS = {
   // Not approved yet: the one sentence and its way on, wherever it is said (under a prompt,
   // under the message box, New session, Ask another agent, Inbox, Machines).
   notApproved: (Phone: string) => `${Phone} can't send yet.`,
+  // Not an account's sentence: the Mac's own (and a browser's), said off an account under a
+  // prompt and in the Inbox, and unchanged there.
+  offAccountNotYet: (Phone: string) => `${Phone} can't answer yet`,
   approveThis: (phone: string) => `Approve ${phone}`,
   answerLate: (machine?: string) => `too late to answer from here; answer it on ${machine ?? "its computer"}`,
   answerLateLine: (machine?: string) => `Too late to answer from here; answer it on ${machine ?? "its computer"}.`,

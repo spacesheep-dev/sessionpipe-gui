@@ -70,6 +70,7 @@ import {
   saidCommand,
   toolLabel,
 } from "../lib/format";
+import { accountMode } from "../lib/net";
 
 import { Link } from "../lib/router";
 import { useLens } from "../lib/settings";
@@ -823,7 +824,11 @@ export function ControlStrip({
       blockedAnswer(wrong, blockedSays)
     )
   ) : approve ? (
-    NEW_WORDS.notApproved(ThisPhone())
+    accountMode() ? (
+      NEW_WORDS.notApproved(ThisPhone())
+    ) : (
+      `${NEW_WORDS.offAccountNotYet(ThisPhone())}.`
+    )
   ) : stream ? (
     NEW_WORDS.streamAnswer
   ) : notAdded ? (

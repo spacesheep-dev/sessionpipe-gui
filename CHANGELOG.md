@@ -56,10 +56,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 - **A device not approved yet says so in one sentence everywhere.** Under a prompt, under
   the message field, in the Inbox, New session, Ask another agent and Machines it reads
   "This iPhone can't send yet." with Approve this iPhone, where it said "can't answer yet",
-  "isn't approved yet" and "Approve this iPhone to send". The iPad app says "this iPad",
-  the Mac app "This Mac can't send yet.". Where a prompt's computer has not added the
-  device yet, a touch screen no longer shows Allow and Deny greyed out, under the prompt or
-  in the Inbox: the sentence and Approve this iPhone stand alone.
+  "isn't approved yet" and "Approve this iPhone to send". The iPad app says "this iPad".
+  Where a prompt's computer has not added the device yet, a touch screen no longer shows
+  Allow and Deny greyed out, under the prompt or in the Inbox: the sentence and Approve
+  this iPhone stand alone.
 - **Search on a touch screen has Cancel beside its field.** While the field is in use or
   holds words, Cancel clears them, puts the keyboard away and brings the title and the
   filters back; the small clear button in the field now takes a finger's whole tap. A

@@ -40,8 +40,13 @@ describe("a device not approved yet", () => {
       (f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f),
     );
     expect(files).toContain(path.join("native", "accountWords.new.ts"));
+    // The one name let through: the Mac's own sentence off an account (a browser's too),
+    // unchanged there. Only its definition is skipped, so no account sentence can drift back.
+    const OFF_ACCOUNT = /^ {2}offAccountNotYet: .*$/m;
+    expect(N.offAccountNotYet("This Mac")).toBe("This Mac can't answer yet");
     const found = files.flatMap((f) => {
-      const text = readFileSync(path.join(SRC, f), "utf8");
+      const read = readFileSync(path.join(SRC, f), "utf8");
+      const text = f === path.join("native", "accountWords.new.ts") ? read.replace(OFF_ACCOUNT, "") : read;
       return OLD.filter((re) => re.test(text)).map((re) => `${f}: ${re}`);
     });
     expect(found).toEqual([]);

@@ -611,6 +611,11 @@ test.describe("inside the native shell", () => {
       const foot = page.locator('[data-reason="untrusted"]');
       await expect(foot).toContainText("lab-mac doesn't trust this Mac yet.");
       await expect(foot.getByRole("link", { name: "Approve this Mac" })).toBeVisible();
+      // The prompt's card keeps the Mac's own sentence off an account: an account's "can't
+      // send yet" is not said here.
+      const card = page.locator('.ctl-answer[data-answer="unapproved"]');
+      await expect(card).toContainText("This Mac can't answer yet.");
+      await expect(card).not.toContainText("can't send yet");
     } finally {
       await s.clear();
     }

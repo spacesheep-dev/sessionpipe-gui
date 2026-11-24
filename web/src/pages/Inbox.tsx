@@ -67,6 +67,7 @@ import { inPanel, panelAnswers, useListNav } from "../lib/keys";
 import { anyLabel, type LabelFilter, labelItems, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
+import { accountMode } from "../lib/net";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
 import { pageBarBottom, useResizeAnchor } from "../lib/resizeAnchor";
 import { Link, openSettings, sessionPath } from "../lib/router";
@@ -309,7 +310,7 @@ export function Inbox() {
                 </Link>
               }
             >
-              {NEW_WORDS.notApproved(ThisPhone())}
+              {accountMode() ? NEW_WORDS.notApproved(ThisPhone()) : `${NEW_WORDS.offAccountNotYet(ThisPhone())}.`}
             </Notice>
           )}
           {said.map((o) => (
