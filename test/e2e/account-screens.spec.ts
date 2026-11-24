@@ -15,7 +15,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Browser, type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { type Browser, type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { FakeSpacesheep, NEW_DEVICE_WAIT_MS } from "../account/fake-spacesheep.js";
 import { HubRefused, HubStandIn, UNUSED_KEY_NOTE } from "../account/hub.js";
 import { type AccountServer, startAccountServer } from "../account/serve.js";
@@ -1807,7 +1807,58 @@ test.describe("what else an account shows", () => {
     }
   });
 
-  test("approved, and this computer has not added the key yet, with a mouse: Allow and Deny stay, greyed, on the card and in the Inbox", async ({
+  test("approved, and this computer has not added the key yet, under a finger: the banner and the Board row's long-press menu have no Allow or Deny either", async ({
+    browser,
+  }) => {
+    const b = await bed(browser);
+    b.hub.add("me@example.com", b.ss.key, Date.parse("2026-11-03T09:00:00Z"));
+    const { page } = b;
+    try {
+      await page.goto(b.server.url);
+      await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
+      await notAdded(b);
+      // On the Board as the agent asks: its banner, a tap that opens the Inbox, and nothing
+      // to press that would only be refused.
+      asks(b);
+      const banner = page.locator(".toast[data-attention='perm-1']");
+      await expect(banner).toBeVisible({ timeout: 15_000 });
+      await expect(banner.getByRole("button", { name: /^(Allow|Deny)$/ })).toHaveCount(0);
+      const hold = async (el: Locator) => {
+        await el.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(300);
+        await el.evaluate((e) => {
+          const r = e.getBoundingClientRect();
+          e.dispatchEvent(
+            new PointerEvent("pointerdown", {
+              bubbles: true,
+              pointerType: "touch",
+              clientX: r.left + 4,
+              clientY: r.top + 4,
+            }),
+          );
+        });
+      };
+      const sheet = page.locator(".menu-sheet");
+      // The banner's own long-press menu: Dismiss, and no pair.
+      await hold(banner.locator(".toast-title"));
+      await expect(sheet.getByRole("menuitem", { name: "Dismiss" })).toBeVisible();
+      await expect(sheet.getByRole("menuitem", { name: /^(Allow|Deny) Bash$/ })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+      await expect(sheet).toHaveCount(0);
+      // The session's row on the Board: held, its menu opens and offers no pair.
+      const row = page.locator("article.card", { hasText: "Refund the double charge" });
+      await expect(row.locator(".card-attn")).toContainText("npm test", { timeout: 15_000 });
+      await hold(row.locator(".card-title"));
+      await expect(sheet.getByRole("menuitem", { name: "Hide", exact: true })).toBeVisible();
+      await expect(sheet.getByRole("menuitem", { name: /^(Allow|Deny) Bash$/ })).toHaveCount(0);
+      await shot(page, "also-catching-up-board-menu");
+      expect(await signs(page)).toBe(0);
+    } finally {
+      await b.close();
+    }
+  });
+
+  test("approved, and this computer has not added the key yet, with a mouse: Allow and Deny stay, greyed, on the card, the banner, the Board row's menu and in the Inbox", async ({
     browser,
   }) => {
     const b = await bed(browser, { mouse: true });
@@ -1819,6 +1870,21 @@ test.describe("what else an account shows", () => {
       await expect(page.getByText("Fix the invoice webhook").first()).toBeVisible();
       await notAdded(b);
       asks(b);
+      const banner = page.locator(".toast[data-attention='perm-1']");
+      await expect(banner.locator(".toast-note")).toHaveText("studio-mac hasn't added this iPhone yet", {
+        timeout: 15_000,
+      });
+      await expect(banner.getByRole("button", { name: "Allow" })).toBeDisabled();
+      await expect(banner.getByRole("button", { name: "Deny" })).toBeDisabled();
+      await banner.getByRole("button", { name: "Dismiss" }).click();
+      await page
+        .locator("article.card", { hasText: "Refund the double charge" })
+        .locator(".card-title")
+        .click({ button: "right" });
+      const menu = page.getByRole("menu");
+      await expect(menu.getByRole("menuitem", { name: "Allow Bash" })).toBeDisabled();
+      await expect(menu.getByRole("menuitem", { name: "Deny Bash" })).toBeDisabled();
+      await page.keyboard.press("Escape");
       await page.goto(`${b.server.url}/s/claude-code/s-refund`);
       const card = page.locator(".ctl-answer[data-attention='perm-1']");
       await expect(card.locator(".ctl-answer-note")).toContainText("studio-mac hasn't added this iPhone yet", {

@@ -58,8 +58,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   "This iPhone can't send yet." with Approve this iPhone, where it said "can't answer yet",
   "isn't approved yet" and "Approve this iPhone to send". The iPad app says "this iPad".
   Where a prompt's computer has not added the device yet, a touch screen no longer shows
-  Allow and Deny greyed out, under the prompt or in the Inbox: the sentence and Approve
-  this iPhone stand alone.
+  Allow and Deny greyed out, under the prompt, in the Inbox or in a Board row's menu: the
+  sentence stands alone, with Approve this iPhone under the prompt and in the Inbox.
 - **Search on a touch screen has Cancel beside its field.** While the field is in use or
   holds words, Cancel clears them, puts the keyboard away and brings the title and the
   filters back; the small clear button in the field now takes a finger's whole tap. A
