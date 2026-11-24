@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Search's `in:` with nothing left searches nothing.** `in:prompt -in:prompt`, or every
+  field excluded, searched every field; it now finds nothing and offers to search without
+  filters. A list with no words whose `in:` leaves out prompts (`agent:codex in:reply`) no
+  longer shows each session's first prompt.
+
 ## [0.8.8] - 2026-11-24
 
 The iPhone app on a screen that folds: it is the touch app at every width, with a sidebar

@@ -616,7 +616,7 @@ export class Reader implements SearchReader {
   }
 
   private fieldMask(fields: EngineQuery["fields"]): { docs: number; title: boolean } {
-    if (!fields?.length) return { docs: 0x3f, title: true };
+    if (!fields) return { docs: 0x3f, title: true };
     let m = 0;
     let title = false;
     for (const f of fields) {
@@ -668,7 +668,7 @@ export class Reader implements SearchReader {
 
     let result: EngineResult;
     try {
-      if (!pos.length) result = this.browse(q, hitsWanted, width, t0);
+      if (!pos.length) result = this.browse(q, hitsWanted, width, t0, (fm.docs & 0x09) !== 0);
       else result = this.rank(q, compiled, fm, hitsWanted, width, now, t0);
     } finally {
       for (const g of droppedList) dropped[g] = 0;
@@ -1028,7 +1028,7 @@ export class Reader implements SearchReader {
     return { matches, total, more: q.offset + q.limit < total, unknownWords: [], ms: performance.now() - t0 };
   }
 
-  private browse(q: EngineQuery, hitsWanted: number, width: number, t0: number): EngineResult {
+  private browse(q: EngineQuery, hitsWanted: number, width: number, t0: number, includePrompt: boolean): EngineResult {
     const A = this.allowed;
     const dropped = this.dropped;
     const list: GSession[] = [];
@@ -1038,7 +1038,7 @@ export class Reader implements SearchReader {
     const page = list.slice(q.offset, q.offset + q.limit);
     const matches: EngineMatch[] = page.map((G) => {
       const hits: EngineHit[] = [];
-      if (hitsWanted > 0) {
+      if (hitsWanted > 0 && includePrompt) {
         const fp = this.firstPrompt(G.g);
         if (fp) hits.push(this.hit(fp.r, fp.d, null, width));
       }
