@@ -8,7 +8,16 @@
 // signed without it), a claim this tab already holds.
 import type { MachineControl, WorkflowRun, WorkflowStep } from "@shared/api";
 import { describe, expect, it } from "vitest";
-import { type Claim, claimKey, commandFor, grantGoodAt, plan, type RunnerMachine, unsignable } from "./runner";
+import {
+  type Claim,
+  claimKey,
+  commandFor,
+  grantGoodAt,
+  plan,
+  type RunnerMachine,
+  sameClaim,
+  unsignable,
+} from "./runner";
 
 const MACHINE = "m_lab00000000000001";
 const KEY = { id: "key-of-this-page", alg: -7, addedAt: "2026-10-28T09:00:00.000Z" };
@@ -178,6 +187,39 @@ describe("runner: two tabs", () => {
   it("a claim this tab holds (in flight, or just refused) is not offered again", () => {
     expect(input([ready], { held: new Set([claimKey("01RUN", "implement")]) })).toEqual([]);
     expect(input([ready], { held: new Set([claimKey("01RUN", "review")]) })).toHaveLength(1);
+  });
+
+  it("sameClaim holds across rev bumps on the same claim, and rejects a re-claim or non-sending step", () => {
+    const mine = run({
+      rev: 2,
+      steps: {
+        implement: { status: "sending", text: "x", claimedAt: "2026-10-28T10:00:02.000Z" },
+        review: { status: "pending" },
+      },
+    });
+    const parallelMove = run({
+      rev: 3,
+      steps: {
+        implement: { status: "sending", text: "x", claimedAt: "2026-10-28T10:00:02.000Z" },
+        review: { status: "ready", text: "y" },
+      },
+    });
+    const reclaimed = run({
+      rev: 4,
+      steps: {
+        implement: {
+          status: "sending",
+          text: "x",
+          claimedAt: "2026-10-28T10:01:05.000Z",
+          claimedAfterRev: 2,
+        },
+        review: { status: "pending" },
+      },
+    });
+    expect(sameClaim(mine, parallelMove, "implement")).toBe(true);
+    expect(sameClaim(mine, reclaimed, "implement")).toBe(false);
+    expect(sameClaim(mine, ready, "implement")).toBe(false);
+    expect(sameClaim(mine, undefined, "implement")).toBe(false);
   });
 });
 

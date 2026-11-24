@@ -57,6 +57,14 @@ export interface Claim {
 
 export const claimKey = (runId: string, stepId: string): string => `${runId}/${stepId}`;
 
+/** Whether `theirs` still holds the same claim `mine` made on `stepId`. A re-claim after
+ *  CLAIM_TTL_MS sets a new `claimedAt` even though `status` is `"sending"` again. */
+export function sameClaim(mine: WorkflowRun, theirs: WorkflowRun | undefined, stepId: string): boolean {
+  const a = mine.steps[stepId];
+  const b = theirs?.steps[stepId];
+  return a?.status === "sending" && b?.status === "sending" && !!a.claimedAt && b.claimedAt === a.claimedAt;
+}
+
 /** Does the hello offer this level for the harness? */
 const offersPermission = (opts: HarnessStartOptions | undefined, p: WorkflowStep["permission"]) =>
   !!p && !!opts?.permissions.includes(p);

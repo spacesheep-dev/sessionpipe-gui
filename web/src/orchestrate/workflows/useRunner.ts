@@ -25,7 +25,7 @@ import { useNow } from "../../lib/time";
 import { noteOwnSend } from "../../lib/toasts";
 import { WorkflowsError, workflowsApi } from "./api";
 import { useMine } from "./mine";
-import { type Claim, claimKey, grantGoodAt, plan } from "./runner";
+import { type Claim, claimKey, grantGoodAt, plan, sameClaim } from "./runner";
 import { applyRun, attachStore, useWorkflowsState } from "./state";
 import { runLive } from "./words";
 
@@ -92,8 +92,7 @@ export function useRunner(): void {
               try {
                 return await workflowsApi.send(c.runId, c.stepId, body, run.rev);
               } catch (e) {
-                const stillOurs =
-                  e instanceof WorkflowsError && e.status === 412 && e.run?.steps[c.stepId]?.status === "sending";
+                const stillOurs = e instanceof WorkflowsError && e.status === 412 && sameClaim(run, e.run, c.stepId);
                 if (!stillOurs || tries >= SENT_RETRIES) throw e;
                 run = e.run!;
               }

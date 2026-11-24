@@ -290,14 +290,6 @@ export function claim(run: WorkflowRun, stepId: string, rev: number, now: number
   };
 }
 
-/** The tab that claimed a step queued its command: the step is sent, and the run is read
- *  again (a wait for a signer ends). The claim is the guard here, not the rev: between a
- *  tab's claim and its command another step's claim or ack moves the run (two roots
- *  claimed at once), and the id must still land; `rev` is read only to be sure the tab
- *  holds this run at all (a re-offered claim leaves the step `ready`, which refuses).
- *  `session` is the one the command named (the uuid a start chose, the session a prompt
- *  goes to): known from this moment, so the run view can link it and a cancel can offer
- *  to stop it while the step runs; the ack's own session replaces it when it settles. */
 /** Step `stepId` when it is still `sending` for a claim at `rev`, rejecting stale revs from before expiry. */
 export function sendingStep(run: WorkflowRun, stepId: string, rev: number): StepRun {
   if (rev > run.rev) throw new RunError(412, "conflict", "the run moved; read it again");
@@ -309,9 +301,15 @@ export function sendingStep(run: WorkflowRun, stepId: string, rev: number): Step
   return s;
 }
 
-/** A command was queued for the claimed step. Guarded against another tab having taken or
- *  cancelled the claim in between; a rev from behind another step's move still lands unless
- *  a previous claim on this step already expired at or after that rev. */
+/** The tab that claimed a step queued its command: the step is sent, and the run is read
+ *  again (a wait for a signer ends). The claim is the guard here, not the rev: between a
+ *  tab's claim and its command another step's claim or ack moves the run (two roots
+ *  claimed at once), and the id must still land; `rev` is read to be sure the tab holds
+ *  this run and is not from before the step was last offered again (which refuses even
+ *  after another tab re-claims it). `session` is the one the command named (the uuid a
+ *  start chose, the session a prompt goes to): known from this moment, so the run view can
+ *  link it and a cancel can offer to stop it while the step runs; the ack's own session
+ *  replaces it when it settles. */
 export function sent(
   run: WorkflowRun,
   stepId: string,

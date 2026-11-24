@@ -51,6 +51,11 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ### Fixed
 
+- **A workflow step that a stalled tab had claimed is sent by the tab that took it over.**
+  When a tab took more than a minute between claiming a step and handing back its signed
+  command, the step was offered again, and if another tab claimed it, the first tab's late
+  command still landed in its place, or failed the step with its own refusal. That late
+  command is now refused.
 - **A session forgotten and then gone on with keeps what it says next,** also when the
   forget and its next events arrive together (a page from spacesheep): they were dropped,
   and counted as duplicates.
