@@ -647,3 +647,93 @@ describe("generated sessions", () => {
     });
   }
 });
+
+describe("attentions out of order or after end", () => {
+  it("a late attention.needed after the session ended leaves it done with no open attentions", () => {
+    const ev = recorder();
+    const got = read([
+      ev("session.started", 0),
+      ev("turn.started", 1 * S),
+      ev("session.ended", 5 * S, { reason: "exit" }),
+      ev("attention.needed", 2 * S, { attention_id: "p1", kind: "permission", tool: "Bash", message: "rm -rf" }),
+    ]);
+    expect(got).toMatchObject({ state: "done", ended: true });
+    const rec = newRecord("claude-code", "s", new Date(NOW).toISOString(), "http");
+    for (const e of [
+      ev("session.started", 0),
+      ev("turn.started", 1 * S),
+      ev("session.ended", 5 * S, { reason: "exit" }),
+      ev("attention.needed", 2 * S, { attention_id: "p1", kind: "permission", tool: "Bash", message: "rm -rf" }),
+    ])
+      applyEvent(rec, e, new Date(NOW).toISOString(), "http");
+    refreshState(rec, NOW);
+    expect(rec.summary.openAttentions).toEqual([]);
+  });
+
+  it("an attention.needed arriving after a later closing hook or its own clear does not linger as needs_you", () => {
+    const ev = recorder();
+    const afterHook = read([
+      ev("session.started", 0),
+      ev("turn.started", 1 * S, { turn_id: "p1" }),
+      ev("tool.started", 3 * S, { tool: "Bash", call_id: "c1", turn_id: "p1" }),
+      ev("attention.needed", 2 * S, { attention_id: "perm-1", kind: "permission", tool: "Bash" }),
+    ]);
+    expect(afterHook).toMatchObject({ state: "working", tool: "c1" });
+
+    const afterTurnEnd = read([
+      ev("session.started", 0),
+      ev("turn.started", 1 * S, { turn_id: "p1" }),
+      ev("turn.ended", 4 * S, { turn_id: "p1", reason: "stop" }),
+      ev("attention.needed", 2 * S, { attention_id: "perm-2", kind: "question", message: "Continue?" }),
+    ]);
+    expect(afterTurnEnd).toMatchObject({ state: "idle", turn: null });
+
+    const afterClear = read([
+      ev("session.started", 0),
+      ev("turn.started", 1 * S, { turn_id: "p1" }),
+      ev("attention.cleared", 3 * S, { attention_id: "perm-3", how: "answered" }),
+      ev("attention.needed", 2 * S, { attention_id: "perm-3", kind: "permission", tool: "Bash" }),
+    ]);
+    expect(afterClear).toMatchObject({ state: "working", turn: "p1" });
+
+    // A late hook from BEFORE a newer attention must not clear that newer attention.
+    const lateHookBeforeNewAttention = read([
+      ev("session.started", 0),
+      ev("turn.started", 1 * S, { turn_id: "p1" }),
+      ev("attention.needed", 5 * S, { attention_id: "perm-new", kind: "permission", tool: "Bash" }),
+      ev("tool.started", 3.5 * S, { tool: "Read", call_id: "r1", turn_id: "p1" }),
+    ]);
+    expect(lateHookBeforeNewAttention).toMatchObject({ state: "needs_you", turn: "p1", tool: "r1" });
+
+    // A sender clock that steps back by minutes after earlier hooks still opens a real new attention.
+    const s = live();
+    s.ev("session.started", 0)
+      .ev("turn.started", 1 * S, { turn_id: "p1" })
+      .ev("tool.started", 5 * S, { tool: "Bash", call_id: "c1", turn_id: "p1" });
+    s.ev(
+      "attention.needed",
+      10 * S - 5 * MIN,
+      { attention_id: "perm-back", kind: "question", message: "Proceed?" },
+      { at: 10 * S + 50 },
+    );
+    expect(s.read()).toMatchObject({ state: "needs_you", turn: "p1" });
+  });
+
+  it("a permission prompt delivered after the Notification about it is the prompt, and answerable", () => {
+    const ev = recorder();
+    const start = ev("session.started", 0);
+    const turn = ev("turn.started", 1 * S, { turn_id: "p1" });
+    const prompt = ev("attention.needed", 2 * S, { attention_id: "perm-a", kind: "permission", tool: "Bash" });
+    const notice = ev("attention.needed", 8 * S, { attention_id: "notif-1", kind: "permission" });
+    for (const order of [
+      [start, turn, prompt, notice],
+      [start, turn, notice, prompt],
+    ]) {
+      const rec = newRecord("claude-code", "s", new Date(NOW).toISOString(), "http");
+      for (const e of order) applyEvent(rec, e, new Date(NOW).toISOString(), "http");
+      refreshState(rec, NOW);
+      expect(rec.summary.state).toBe("needs_you");
+      expect(rec.summary.openAttentions).toMatchObject([{ attentionId: "perm-a", answerable: true }]);
+    }
+  });
+});

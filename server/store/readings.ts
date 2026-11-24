@@ -116,6 +116,13 @@ export interface Tracking {
    *  has been seen to step back (`place`). */
   top?: { t: number; seq: number };
   era: number;
+  /** Newest closing hook event seen (`applyEvent`): an `attention.needed` from before it is already over. */
+  lastHook?: Mark;
+  /** Marks of currently open attentions (`summary.openAttentions`), by `attentionId`. */
+  attentions: Map<string, Mark>;
+  /** The last AGENT_ENDS cleared attentions, by `attention_id`, and the newest blanket clear. */
+  attentionClears: Map<string, Mark>;
+  allAttentionsCleared?: Mark;
   /** Each agent's `subagent.ended`, by agent id: its start, or a call of its, from before
    *  that end does not start it again, listed still or not. The last AGENT_ENDS of them. */
   agentEnds: Map<string, Mark>;
@@ -280,10 +287,21 @@ export function newRecord(harness: string, id: string, at: string, source: Event
       launches: [],
       turnIds: [],
       era: 0,
+      attentions: new Map(),
+      attentionClears: new Map(),
       agentEnds: new Map(),
       callsEnded: [],
     },
   };
+}
+
+/** Drop closed attentions from both the summary and mark map together. */
+function keepAttentions(s: SessionSummary, t: Tracking, keep: (a: Attention) => boolean): void {
+  const kept = s.openAttentions.filter(keep);
+  if (kept.length === s.openAttentions.length) return;
+  s.openAttentions = kept;
+  const keepIds = new Set(kept.map((x) => x.attentionId));
+  for (const id of [...t.attentions.keys()]) if (!keepIds.has(id)) t.attentions.delete(id);
 }
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v : undefined);
@@ -666,13 +684,18 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
     d.kind === "permission" &&
     !answerableAttention(ev) &&
     s.openAttentions.some((x) => x.kind === "permission" && x.answerable);
+  const hook = !twin && !NOT_HOOK.has(ev.type) && ev.type !== "attention.cleared";
+  /** A Notification about a permission prompt: the prompt's twin, whichever of the two is read first. */
+  const notice = ev.type === "attention.needed" && d.kind === "permission" && !answerableAttention(ev);
+  const attentionId = ev.type === "attention.needed" ? (str(d.attention_id) ?? ev.id) : undefined;
   // CONTROL.md §7: the session's next hook event closes whatever attention was open.
-  if (!twin && !NOT_HOOK.has(ev.type) && ev.type !== "attention.cleared" && s.openAttentions.length) {
-    if (
-      ev.type !== "attention.needed" ||
-      str(d.attention_id) !== s.openAttentions[s.openAttentions.length - 1]?.attentionId
-    )
-      s.openAttentions = [];
+  // A hook delivered late from before an already-open attention must not close that newer one.
+  if (hook && s.openAttentions.length) {
+    const sameLatest =
+      ev.type === "attention.needed" &&
+      !idleNotice(ev) &&
+      attentionId === s.openAttentions[s.openAttentions.length - 1]?.attentionId;
+    if (!sameLatest) keepAttentions(s, t, (x) => before(m, t.attentions.get(x.attentionId)));
   }
 
   switch (ev.type) {
@@ -720,6 +743,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       s.currentTool = undefined;
       s.progress = undefined;
       s.openAttentions = [];
+      t.attentions.clear();
       closeAgents(s, at);
       closeDelegations(s, at);
       break;
@@ -983,13 +1007,41 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
       if (message) a.message = message.slice(0, 200);
       if (kind === "permission" && answerableAttention(ev)) a.answerable = true;
       if (twin) break; // folded into the open, answerable prompt
-      s.openAttentions = [...s.openAttentions.filter((x) => x.attentionId !== attentionId), a];
       s.counts.attentions++;
+      // An ended session, or an attention whose clear or next hook already arrived from after it,
+      // stays historical only: never resurrect `needs_you`.
+      if (
+        rec.ended ||
+        before(m, t.lastHook) ||
+        before(m, t.attentionClears.get(attentionId)) ||
+        before(m, t.allAttentionsCleared)
+      ) {
+        break;
+      }
+      s.openAttentions = [...s.openAttentions.filter((x) => x.attentionId !== attentionId), a];
+      t.attentions.set(attentionId, m);
+      // The prompt itself, read after the Notification about it: that Notification was its twin.
+      if (a.answerable) keepAttentions(s, t, (x) => x.kind !== "permission" || !!x.answerable);
       break;
     }
     case "attention.cleared": {
       const attentionId = str(d.attention_id);
-      s.openAttentions = attentionId ? s.openAttentions.filter((x) => x.attentionId !== attentionId) : [];
+      if (attentionId) {
+        if (!before(m, t.attentionClears.get(attentionId))) {
+          t.attentionClears.delete(attentionId);
+          t.attentionClears.set(attentionId, m);
+          if (t.attentionClears.size > AGENT_ENDS) {
+            t.attentionClears.delete(t.attentionClears.keys().next().value!);
+          }
+        }
+        if (!before(m, t.attentions.get(attentionId))) {
+          s.openAttentions = s.openAttentions.filter((x) => x.attentionId !== attentionId);
+          t.attentions.delete(attentionId);
+        }
+      } else {
+        if (!before(m, t.allAttentionsCleared)) t.allAttentionsCleared = m;
+        keepAttentions(s, t, (x) => before(m, t.attentions.get(x.attentionId)));
+      }
       break;
     }
     case "subagent.started": {
@@ -1084,6 +1136,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
     default:
       break;
   }
+  if (hook && !notice && !before(m, t.lastHook)) t.lastHook = m;
 }
 
 /** The state machine (shared/api.ts SessionState) read at `now`. Returns the state
@@ -1092,10 +1145,10 @@ export function evaluateState(rec: SessionRecord, now: number): { state: Session
   const s = rec.summary;
   const last = Date.parse(s.lastAt);
   const silent = now - last;
+  if (rec.ended) return { state: "done", since: s.endedAt ?? s.lastAt };
   if (s.openAttentions.length && silent < DONE_AFTER_MS) {
     return { state: "needs_you", since: s.openAttentions[s.openAttentions.length - 1]!.at };
   }
-  if (rec.ended) return { state: "done", since: s.endedAt ?? s.lastAt };
   if (!rec.live) return { state: "done", since: s.lastAt };
   if (silent >= DONE_AFTER_MS) return { state: "done", since: new Date(last + DONE_AFTER_MS).toISOString() };
   // A subagent still running keeps its orchestrator working, even after the turn that
@@ -1119,11 +1172,14 @@ export function evaluateState(rec: SessionRecord, now: number): { state: Session
 export function refreshState(rec: SessionRecord, now: number): boolean {
   const { state, since } = evaluateState(rec, now);
   const s = rec.summary;
-  if (state === "done" && !rec.ended && s.openAttentions.length) {
-    // Silent for DONE_AFTER_MS: the hook's window closed long ago.
+  if (state === "done" && s.openAttentions.length) {
+    // Ended or silent for DONE_AFTER_MS: the hook's window closed.
     s.openAttentions = [];
-    s.currentTurn = undefined;
-    s.currentTool = undefined;
+    rec.track.attentions.clear();
+    if (!rec.ended) {
+      s.currentTurn = undefined;
+      s.currentTool = undefined;
+    }
   }
   const agents = refreshAgents(s, state, now);
   // Read done (silent a day): what it asked is closed with it, answer unknown.
