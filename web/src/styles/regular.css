@@ -1,0 +1,359 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the touch app with room: a labelled sidebar ---------- */
+/* Where the touch app's window is regular (lib/device.ts sizeClass: a tablet, a phone
+   opened flat, either way up; index.html marks it before the first paint), a sidebar on
+   the chrome ground stands in the tab bar's place, as iPadOS's does: the mark and New
+   session at its head, then one 44 pt row for each page the tab bar and More list, in
+   their order, the views under their heading, and Display and Settings at its foot. The
+   sidebar keeps clear of what the system keeps at the left, so the page beside it has
+   only its gutter there. A compact window and a window with a mouse never match a rule
+   here. */
+
+html[data-size-class="regular"] {
+  --tabbar: 0px;
+  --rail: 220px;
+  --side-w: calc(var(--rail) + var(--safe-left, env(safe-area-inset-left)));
+  --edge-l: var(--gutter);
+}
+
+html[data-size-class="regular"] .shell {
+  grid-template-columns: var(--side-w) minmax(0, 1fr);
+  grid-template-rows: none;
+}
+html[data-size-class="regular"] .tabbar {
+  display: none;
+}
+
+/* The sidebar: sticky, so it is a stacking context of its own above the page's rows, and
+   Display's sheet opens from inside it. Its head and foot stay put; the rows between them
+   scroll by themselves when they are more than the screen holds. */
+html[data-size-class="regular"] .rail {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-chrome);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100dvh;
+  padding: 0 8px max(8px, var(--safe-bottom, env(safe-area-inset-bottom)))
+    calc(8px + var(--safe-left, env(safe-area-inset-left)));
+  border-right: var(--hairline) solid var(--line);
+  background: var(--chrome);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Its head: as tall as the page's bar, under the status bar; the mark at the leading edge
+   over the rows' glyphs, New session at the trailing edge. */
+html[data-size-class="regular"] .rail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: content-box;
+  height: var(--bar);
+  padding: var(--safe-top, env(safe-area-inset-top)) 0 0 12px;
+}
+/* The mark is a link to the Board: a finger's 44 pt, the mark drawn where it was. */
+html[data-size-class="regular"] .rail-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 100%;
+  margin-inline: -8px;
+}
+html[data-size-class="regular"] .rail-brand .mark {
+  display: block;
+}
+html[data-size-class="regular"] .rail-word {
+  display: none;
+}
+html[data-size-class="regular"] .rail-compose {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  color: var(--fg-2);
+}
+
+/* The rows: a glyph and its page's name, in the More sheet's type. */
+html[data-size-class="regular"] .rail-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+html[data-size-class="regular"] .rail .nav-link {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  color: var(--fg);
+  font-size: max(1rem, 16px);
+  font-weight: 400;
+  text-align: left;
+  transition: background-color var(--dur-release) linear;
+}
+html[data-size-class="regular"] .rail .nav-link:active {
+  background: var(--press);
+  transition: none;
+}
+html[data-size-class="regular"] .rail .nav-link--on,
+html[data-size-class="regular"] .rail .nav-link[data-menu-open] {
+  background: var(--sel);
+}
+html[data-size-class="regular"] .rail .nav-glyph {
+  width: 20px;
+  height: 20px;
+}
+html[data-size-class="regular"] .rail .nav-glyph--svg svg {
+  width: 20px;
+  height: 20px;
+}
+html[data-size-class="regular"] .rail .nav-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+html[data-size-class="regular"] .rail :is(.nav-badge, .nav-dot) {
+  position: static;
+  flex: none;
+  margin-left: auto;
+}
+/* The views' headings, as the More sheet's groups are, over the rows' glyphs; no hairline
+   besides. */
+html[data-size-class="regular"] .rail-group {
+  display: none;
+}
+html[data-size-class="regular"] .rail-section {
+  display: block;
+  margin: 16px 0 6px;
+  padding: 0 12px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+
+/* Its foot: Display and Settings, rows like the others, under a hairline. The stream's
+   state is the page bar's to say in the touch app, and Views is in Settings. */
+html[data-size-class="regular"] .rail-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: var(--hairline) solid var(--line);
+}
+html[data-size-class="regular"] .rail-foot > :is(.conn, .theme-btn, .qs--rail) {
+  display: none;
+}
+
+/* New session is the sidebar's: the page bar's copy goes. */
+html[data-size-class="regular"] .icon-btn.compose-btn--phone {
+  display: none;
+}
+
+/* The page beside the sidebar has the system's band at its right alone: its bar's title
+   and "N new" stand in the middle of what that leaves. */
+html[data-size-class="regular"] .main > .page > .bar {
+  --bar-room: calc(100% - var(--safe-right, env(safe-area-inset-right)));
+}
+html[data-size-class="regular"] .main > .page > :is(.bar--inline, .bar--large) .bar-title,
+html[data-size-class="regular"] .main > .session > .sess-ctl > .sess-new {
+  left: calc(50% - var(--safe-right, env(safe-area-inset-right)) / 2);
+}
+
+/* What floats over the page stands over the page, not the sidebar: the dropped stream's
+   pill, the pull-to-refresh ring and the banners. */
+html[data-size-class="regular"] :is(.phone-conn, .pull) {
+  inset-inline: var(--side-w) var(--safe-right, env(safe-area-inset-right));
+}
+html[data-size-class="regular"] .phone-conn {
+  max-width: calc(100% - 32px - var(--side-w) - var(--safe-right, env(safe-area-inset-right)));
+}
+html[data-size-class="regular"] .toasts--phone {
+  inset-inline: var(--side-w) 0;
+}
+html[data-size-class="regular"] .toasts--phone .toast-slot {
+  left: 8px;
+}
+html[data-size-class="regular"] .toasts--phone .toast-unlock {
+  left: 16px;
+}
+
+/* With no tab bar under them, the grounds that stood on it run on under the home
+   indicator to the screen's edge, their contents kept above it: a session's docked strip
+   (on the keys when they are up); and Display's dim (its card is below). */
+html[data-size-class="regular"] .main:has(> .session) {
+  padding-bottom: 0;
+}
+html[data-size-class="regular"] .main > .session {
+  min-height: 100dvh;
+}
+html[data-size-class="regular"] .sess-ctl {
+  bottom: var(--kb, 0px);
+  padding-bottom: max(8px, calc(8px + var(--safe-bottom, env(safe-area-inset-bottom)) - var(--kb, 0px)));
+}
+html[data-size-class="regular"] .qs-scrim {
+  bottom: 0;
+}
+
+/* The first frame (index.html) lists its pages as the sidebar will: in Simple, Machines
+   with the tab bar's four, Workflows after it. */
+html[data-size-class="regular"] .boot[data-mode="simple"] .rail-nav > [data-boot="workflows"] {
+  order: 1;
+}
+
+/* ---------- sheets and menus with room: a form sheet and floating cards ---------- */
+/* As iPadOS presents them: New session, Ask another agent and the pool's sheet are a form
+   sheet of at most 540 pt, centred on what the system leaves of the width, 40 pt under the
+   status bar, over a dim; a row's menu, Labels and Display are a card of at most 400 pt
+   that floats 16 pt over the home indicator or the keys. Every corner is rounded, and
+   none has a grabber: a pull down from the top still puts it away. They come and go as
+   the phone's do, with the same animation: one open through a fold or an unfold changes
+   its place and does not play its entrance again. */
+html[data-size-class="regular"] {
+  --inset-l: var(--safe-left, env(safe-area-inset-left));
+  --inset-r: var(--safe-right, env(safe-area-inset-right));
+  /* The middle of what the system leaves of the width, for a box translated back by half
+     its width; and that width less 24 pt a side. */
+  --float-mid: calc(var(--inset-l) + (100% - var(--inset-l) - var(--inset-r)) / 2);
+  --float-room: calc(100% - var(--inset-l) - var(--inset-r) - 48px);
+  /* What a card stands on: the home indicator, or the keys while they are up. */
+  --float-floor: max(var(--safe-bottom, env(safe-area-inset-bottom)), var(--kb, 0px));
+}
+
+html[data-size-class="regular"] .ns-sheet--phone {
+  inset: auto;
+  top: calc(var(--safe-top, env(safe-area-inset-top)) + 40px);
+  left: var(--float-mid);
+  translate: -50% 0;
+  width: min(540px, var(--float-room));
+  max-height: min(720px, calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - var(--float-floor) - 80px));
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--shadow-pop);
+}
+/* The page under it is dimmed and a tap there puts the sheet away, as the desktop's does;
+   over the notifications, as the sheet is. */
+html[data-size-class="regular"] .ns-scrim--form {
+  display: block;
+  z-index: calc(var(--z-toast) + 1);
+}
+/* Its bar is the sheet's own top, inside the safe area: no status bar over it, no band
+   beside it. */
+html[data-size-class="regular"] .ns-sheet--phone .ns-bar {
+  height: var(--bar);
+  padding: 0 8px;
+}
+/* It ends above the keys already: a field brought into view keeps clear of its bar alone. */
+html[data-size-class="regular"] .ns-sheet--phone {
+  scroll-padding: var(--bar) 0 0;
+}
+html[data-size-class="regular"] .ns-sheet--phone .ns-scroll {
+  padding: 16px;
+}
+/* The card ends at its last group, the scroll's padding under it: a foot with nothing to
+   say (its live lines are kept in place, empty) takes back the group's margin and its own
+   gaps. */
+html[data-size-class="regular"] .ns-sheet--phone .ns-group-foot:not(:has(> :not(:empty))) {
+  gap: 0;
+  margin-top: -16px;
+}
+/* A sheet with nothing to fill in (this phone not approved yet) is its sentence and its one
+   button at the top of the card, not the phone's screen centred 22% down. */
+html[data-size-class="regular"] .ns-sheet--phone .ns-empty {
+  padding: 32px 24px 28px;
+}
+html[data-size-class="regular"] :is(.ns-grab, .menu-grab, .qs-grab) {
+  display: none;
+}
+
+/* The cards. They stand in the middle of the page beside the sidebar, never over it: of
+   the window less the sidebar (with the band it keeps clear of) and the band at the
+   right, and that width less 24 pt a side. Their dim still covers
+   the whole window. With no sidebar showing (Settings covers it), and while a form sheet
+   is open (a menu from New session's or Ask another agent's ⋯ opens over the form), they
+   stand in the middle of what the system leaves, as the form sheet does. */
+html[data-size-class="regular"] {
+  --card-l: var(--inset-l);
+  --card-mid: calc(var(--card-l) + (100% - var(--card-l) - var(--inset-r)) / 2);
+  --card-room: calc(100% - var(--card-l) - var(--inset-r) - 48px);
+}
+html[data-size-class="regular"]:has(.shell > .rail):not(:has(.settings-wrap, .ns-sheet--phone)) {
+  --card-l: var(--side-w);
+}
+html[data-size-class="regular"] :is(.menu-sheet, .qs--tabbar .qs-pop) {
+  left: var(--card-mid);
+  right: auto;
+  bottom: calc(var(--float-floor) + 16px);
+  translate: -50% 0;
+  width: min(400px, var(--card-room));
+  max-height: calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - var(--float-floor) - 32px);
+  border-radius: var(--radius-sheet);
+}
+html[data-size-class="regular"] .menu-sheet {
+  padding: 8px;
+}
+html[data-size-class="regular"] .qs--tabbar .qs-pop {
+  padding: 20px 16px;
+}
+/* A Select's list is a pop-up there (lib/device.ts selectSheet), its rows a finger's, and
+   its filter in the type size WebKit does not zoom in on. */
+html[data-size-class="regular"] .sel-pop .sel-opt {
+  min-height: var(--tap);
+  font-size: var(--text-md);
+}
+html[data-size-class="regular"] .sel-pop .sel-search input {
+  height: 36px;
+  font-size: max(1rem, 16px);
+}
+
+/* ---------- one column ---------- */
+/* A page reads down one column of at most 672 pt, centred in what is beside the sidebar:
+   the page stands in from either side by --column-in and is the phone's page inside it,
+   a column still, so an empty list's sentence centres in what is left under the bar, and
+   a part that runs a gutter past its column (the Board's list, Search's filters) still
+   does. The bar's ground runs on to the window's edges, its words over the column. What
+   the pages stand in (.main) is a container, so --column-in is one length in the page and
+   in its bar (100cqi is the page's width; a percentage in the bar would be the column's).
+   It is a container of its inline size alone: a sheet fixed inside it still stands on the
+   window, and it stacks as before. A session already keeps to the same measure: its bar
+   stands its words in the same way. */
+html[data-size-class="regular"] {
+  --measure-read: 672px;
+}
+html[data-size-class="regular"] .main {
+  container-type: inline-size;
+  --column-in: max(0px, (100cqi - var(--measure-read)) / 2);
+}
+html[data-size-class="regular"] .main > .page:not(.session) {
+  padding-inline: var(--column-in);
+}
+html[data-size-class="regular"] .main > .page > .bar {
+  padding-left: calc(var(--edge-l) + var(--column-in));
+  padding-right: calc(var(--edge-r) + var(--column-in));
+}
+html[data-size-class="regular"] .main > .page:not(.session) > .bar {
+  margin-left: calc(-1 * (var(--edge-l) + var(--column-in)));
+  margin-right: calc(-1 * (var(--edge-r) + var(--column-in)));
+}
+/* And a session's line under its bar (its machine and folder) starts where Back and the
+   messages do. */
+html[data-size-class="regular"] .main > .session > .bar-below {
+  padding-inline: var(--column-in);
+}
+/* Settings covers the window: its list and each section keep to the same column, with
+   their gutter of 16 pt. */
+html[data-size-class="regular"] :is(.settings-nav, .settings-pane) {
+  --column-in: max(0px, (100% - 32px - var(--measure-read)) / 2);
+  padding-inline: calc(16px + var(--column-in));
+}
+html[data-size-class="regular"] .settings-bar {
+  --column-in: max(0px, (100% - 32px - var(--measure-read)) / 2);
+  padding-inline: calc(4px + var(--column-in));
+}

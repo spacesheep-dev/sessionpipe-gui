@@ -194,9 +194,14 @@ export function pageSearch(src: PageSearchSource): SearchClient {
         case "machine":
           return (v === "this" ? src.here : v) === s.machine.toLowerCase();
         case "repo": {
-          const short = (s.repo ?? "").split("/").pop()?.toLowerCase() ?? "";
+          // As the server reads it (server/search/filters.ts): a prefix of the repo from any
+          // segment on, so `repo:acme/api` finds `github.com/acme/api` and `acme/api`.
+          const repo = (s.repo ?? "").toLowerCase();
+          // From the name's start and after each "/", as the receiver reads it.
+          const starts = [0];
+          for (let i = repo.indexOf("/"); i >= 0; i = repo.indexOf("/", i + 1)) starts.push(i + 1);
           return (
-            short.startsWith(v) ||
+            starts.some((i) => repo.startsWith(v, i)) ||
             (s.cwd ?? "")
               .toLowerCase()
               .split("/")

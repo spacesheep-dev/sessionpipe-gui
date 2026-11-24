@@ -42,7 +42,7 @@ import {
 } from "../data/hooks";
 import { openDrawer, toggleDrawer } from "../files/state";
 import { agentLabel, agentMatches, openAgent } from "../lib/agents";
-import { phoneLayout } from "../lib/device";
+import { phoneLayout, usePhoneLayout } from "../lib/device";
 import {
   attentionMessage,
   isPlanReview,
@@ -84,14 +84,22 @@ import { APPEARANCE, noContextMenu, SIZE_NAME, SkinSwatch, useListedSkins } from
 import { AskedLine, Inline, literalAsk } from "./SessionCard";
 import "../styles/palette.css";
 
-/** The quick settings: on the rail its own button, on a phone the row in the More sheet. */
+/** The quick settings: on the rail its own button, in the touch app's sidebar its Display
+ *  row, on a phone the row in the More sheet. Only a button that is shown is pressed: a
+ *  More sheet opened inside a hidden tab bar would come back by itself on a fold. */
 function openDisplaySettings(): void {
-  const rail = document.querySelector<HTMLElement>("nav.rail .qs-trigger");
-  if (rail && rail.offsetParent !== null) {
+  const shown = (sel: string) => {
+    const el = document.querySelector<HTMLElement>(sel);
+    return el && el.offsetParent !== null ? el : null;
+  };
+  const rail = shown("nav.rail .qs-trigger") ?? shown("nav.rail [data-nav='display']");
+  if (rail) {
     rail.click();
     return;
   }
-  document.querySelector<HTMLElement>("[data-nav='more']")?.click();
+  const more = shown("[data-nav='more']");
+  if (!more) return;
+  more.click();
   requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-nav='display']")?.click());
 }
 
@@ -1397,13 +1405,16 @@ export function PaletteDialog({ closing = false }: { closing?: boolean }) {
     }
   }, [at]);
   // The list ends on a whole row at its fold, never half a row: measured when its rows
-  // change (not on every live update) and on a resize.
+  // change (not on every live update), on a resize, and when the window changes layout
+  // (a resize that crosses the width is measured before the page hears of the change, so
+  // as the layout it left).
   const shape = items.map((it) => it.id).join("|");
+  const phone = usePhoneLayout();
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
     snapToRows(list);
-  }, [shape, mode.kind]);
+  }, [shape, mode.kind, phone]);
   useEffect(() => {
     const on = () => listRef.current && snapToRows(listRef.current);
     window.addEventListener("resize", on);

@@ -149,6 +149,18 @@ describe("LimitsStore", () => {
     expect(e?.plan).toBeUndefined();
   });
 
+  it("skips a window whose resets_at is on a day the month does not have, or at hour 24, as the receiver does", () => {
+    const at = (resets_at: string) => readWindows([{ id: "five_hour", used_percent: 1, resets_at }]);
+    for (const t of ["2026-02-30T10:00:00Z", "2026-11-31T10:00:00Z", "2026-02-29T10:00:00Z", "2026-11-20T24:00:00Z"])
+      expect(at(t)).toEqual([]);
+    expect(at("2028-02-29T10:00:00Z")).toEqual([
+      { id: "five_hour", usedPercent: 1, resetsAt: "2028-02-29T10:00:00.000Z" },
+    ]);
+    expect(at("2026-11-30T23:59:59+07:00")).toEqual([
+      { id: "five_hour", usedPercent: 1, resetsAt: "2026-11-30T16:59:59.000Z" },
+    ]);
+  });
+
   it("an account id or a machine name longer than a line is not one: its report is not kept, under any key", () => {
     const long = "a".repeat(LIMITS_NAME_MAX + 1);
     // The account that served it, the session's own, the machine: each too long, each refused.

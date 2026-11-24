@@ -92,16 +92,24 @@ function withoutZone(raw: string): string {
  *  name nothing answers to. */
 export function hostName(header: string | undefined): string {
   const raw = (header ?? "").trim().toLowerCase();
-  if (!raw) return "";
+  return hostOf(raw) ?? raw;
+}
+
+/** The host `hostName` reads from `value`, or null when it is no host at all (empty, a
+ *  user part, a path, a query, too long, or no URL host), which `hostName` hands back as
+ *  it was sent. `--allow-host` refuses those (cli.ts), since they never match a request. */
+export function hostOf(value: string): string | null {
+  const raw = value.trim().toLowerCase();
+  if (!raw) return null;
   // A name is at most 253 characters, and a port, brackets and a zone id add little: what
   // is longer is no host, and is not worth reading.
-  if (raw.length > HOST_MAX) return raw;
+  if (raw.length > HOST_MAX) return null;
   try {
     const u = new URL(`http://${withoutZone(raw)}`);
-    if (u.username || u.password || u.pathname !== "/" || u.search || u.hash || raw.includes("@")) return raw;
+    if (u.username || u.password || u.pathname !== "/" || u.search || u.hash || raw.includes("@")) return null;
     return u.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
   } catch {
-    return raw;
+    return null;
   }
 }
 
@@ -109,7 +117,7 @@ export function hostName(header: string | undefined): string {
  *  the connection may arrive from loopback all the same: the unspecified address (0.0.0.0,
  *  ::), which is where a server listens, not where it is opened, and an IPv4 address
  *  written as an IPv6 one (::ffff:127.0.0.1). Neither is a way this server is opened. */
-const notOpenedBy = (host: string): boolean => host === "0.0.0.0" || host === "::" || host.startsWith("::ffff:");
+export const notOpenedBy = (host: string): boolean => host === "0.0.0.0" || host === "::" || host.startsWith("::ffff:");
 
 /** Whether `host` (as `hostName` gives it) is a name this server answers to on this
  *  machine: localhost, any other address (an address is not a name: nothing resolves it),

@@ -39,8 +39,7 @@
     opacity: 1;
   }
 }
-@media (hover: none), (max-width: 719px), (max-width: 839px) and (pointer: coarse),
-  (max-width: 839px) and (pointer: none) {
+@media (hover: none), (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .chat-time {
     display: none;
   }
@@ -195,11 +194,22 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .chat-bubble {
     max-width: 85%;
   }
   .chat-tools-sum {
     margin-left: -4px;
+  }
+}
+/* On a touch screen with room for more, the bubble stops at the measure a reply's prose
+   keeps (session.css); in a column under 640 pt, where a reply takes the whole width, it
+   keeps a phone's 85%. */
+@media (pointer: coarse) {
+  .chat-bubble {
+    max-width: min(85%, 33em);
+  }
+  .timeline[data-column="narrow"] .chat-bubble {
+    max-width: 85%;
   }
 }

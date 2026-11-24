@@ -62,10 +62,15 @@ function repoTest(v: string): Test {
   const want = v.toLowerCase();
   return (s) => {
     if (s.repo) {
+      // A prefix of the repo from any segment on: core sends a sessionpipe session's repo
+      // with its host (`github.com/acme/api`, `github-work/acme/api`), history's has none
+      // (`acme/api`), so `repo:acme/api` finds both, as `repo:api` finds the short name.
       const r = s.repo.toLowerCase();
-      if (r.startsWith(want)) return true;
-      const short = r.slice(r.lastIndexOf("/") + 1);
-      if (short.startsWith(want)) return true;
+      let i = 0;
+      do {
+        if (r.startsWith(want, i)) return true;
+        i = r.indexOf("/", i) + 1;
+      } while (i > 0);
     }
     if (s.cwd) {
       for (const seg of s.cwd.toLowerCase().split(/[\\/]+/)) if (seg?.startsWith(want)) return true;

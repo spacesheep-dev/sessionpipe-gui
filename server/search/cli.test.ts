@@ -7,6 +7,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ROUTES, type SessionSearchPage, sessionKey } from "../../shared/api.js";
+import { parseSearch } from "../../shared/searchQuery.js";
 import { tempDir } from "../../test/events.js";
 import { parseSearchArgs, runIndexCli, runSearchCli } from "./cli.js";
 import { fromDocs, type OracleDoc, type OracleFacts } from "./oracle.js";
@@ -105,6 +106,17 @@ describe("parseSearchArgs", () => {
     );
     expect((parseSearchArgs(["--machine", "this"]) as { q: string }).q).toBe("machine:this");
     expect((parseSearchArgs(["--", "--literal"]) as { q: string }).q).toBe("--literal");
+  });
+
+  it("keeps a flag a filter after a phrase left open", () => {
+    const q = (parseSearchArgs(['"rate limiter', "--agent", "codex"]) as { q: string }).q;
+    expect(q).toBe('"rate limiter" agent:codex');
+    expect(parseSearch(q).filters).toEqual({ agent: ["codex"] });
+    expect((parseSearchArgs(['"rate', "--agent", "codex", 'limiter"']) as { q: string }).q).toBe(
+      '"rate limiter" agent:codex',
+    );
+    expect((parseSearchArgs(['"rate ', "--agent", "codex"]) as { q: string }).q).toBe('"rate" agent:codex');
+    expect((parseSearchArgs(['"rate limiter']) as { q: string }).q).toBe('"rate limiter');
   });
 
   it("refuses what it cannot read", () => {

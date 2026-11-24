@@ -22,8 +22,10 @@ export const MIN_TIER: Record<string, Tier> = { ...TYPE_TIER, "turn.progress": 2
  *  from 01, minute and second below 60): whether its day is one its month has and its hour is
  *  below 24, as the schema's `time` pattern requires. Date.parse rolls 2026-02-30 into March
  *  and reads T24:00 as the next day. Day 0 of the next month is this month's last day;
- *  setUTCFullYear, unlike Date.UTC, keeps years 0-99, so 0000-02-29 reads (a leap year). */
-const isCalendarTime = (t: string): boolean => {
+ *  setUTCFullYear, unlike Date.UTC, keeps years 0-99, so 0000-02-29 reads (a leap year).
+ *  The other RFC 3339 readers (limitsCore's resets_at, a pool account's until, the demo's
+ *  times) check with it too. */
+export const isCalendarTime = (t: string): boolean => {
   const last = new Date(0);
   last.setUTCFullYear(Number(t.slice(0, 4)), Number(t.slice(5, 7)), 0);
   return Number(t.slice(8, 10)) <= last.getUTCDate() && Number(t.slice(11, 13)) < 24;

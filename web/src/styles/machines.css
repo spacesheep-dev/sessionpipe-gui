@@ -100,7 +100,7 @@
   max-width: 560px;
   min-width: 0;
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .machines {
     gap: 32px;
   }
@@ -125,7 +125,7 @@
 /* A phone's bar holds one text action, as iOS does: "Add a phone…" stays; Connect is a
    tab away under More, and two words-wide buttons would run into the centred title
    once the large title folds into the bar. */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .machines .bar-actions .btn + .btn {
     display: none;
   }
@@ -193,15 +193,17 @@
 /* A sentence row: a mark and words that wrap, or the inherit caution. */
 .machine-line .acct-state,
 .machines-phone .acct-state,
-.machines-phone-ask {
+.machines-phone-not {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--fg);
   font-size: var(--text-md);
   text-wrap: pretty;
 }
+/* Not approved: the sentence, then its way on, which never breaks across lines. */
 .machines-phone-ask {
   color: var(--tint-fg);
+  white-space: nowrap;
 }
 .machine-line .machine-caution {
   margin-top: 0;
@@ -271,7 +273,7 @@
     transition: none;
   }
 }
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   /* A pressed row is lit to the group's edge, under the inset its text keeps. */
   .machines .machine-line-link,
   .machine-more summary {

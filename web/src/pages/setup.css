@@ -475,7 +475,7 @@
 .setup-extras {
   padding: 0 12px;
 }
-@media (min-width: 840px), (min-width: 720px) and (pointer: fine) {
+@media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
   .steps {
     padding: 0 calc(12px - var(--hairline));
     border: var(--hairline) solid var(--line);
@@ -487,7 +487,7 @@
 }
 
 /* ----- the phone: the steps touch-sized, the way on under a hairline ----- */
-@media (max-width: 719px), (max-width: 839px) and (pointer: coarse), (max-width: 839px) and (pointer: none) {
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .steps {
     padding: 0 16px;
   }

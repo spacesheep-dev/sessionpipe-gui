@@ -101,11 +101,12 @@ describe("where this phone stands on Machines: one row above the computers, a li
     g.sessionpipeShell = { platform: "ios" };
     // Nothing known before the first look: no row.
     expect(phoneRow(null, null)).toBeNull();
-    // Not approved, or the request gone: the row is the ask itself, in the tint, with no mark.
+    // Not approved, or the request gone: the one sentence, then its way on in the tint, no mark.
     for (const kind of ["idle", "dropped"] as const)
       expect(phoneRow(view({ kind }, "not-yet"), null)).toEqual({
         mark: null,
-        words: "Approve this iPhone to send",
+        words: "This iPhone can't send yet.",
+        ask: "Approve this iPhone",
         link: true,
         state: kind,
       });

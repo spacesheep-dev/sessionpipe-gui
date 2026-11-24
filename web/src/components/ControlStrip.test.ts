@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import "../native/test-env";
 import type { Attention, MachineControl, SessionSummary } from "@shared/api";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { approvalOf, type SendState } from "../account/sendable";
 import { answerState } from "../control/useSend";
 import { markLate, openAttentions } from "../data/hooks";
@@ -9,6 +9,13 @@ import { ANSWER_WINDOW_MS, answerLate } from "../lib/answerWindow";
 import { answerable, blockedAnswer, keepPlanning, shownCommand } from "./ControlStrip";
 import { foldPlan } from "./PlanText";
 import { answerItems } from "./SessionCard";
+
+// Whether the window is a spacesheep account (lib/net.ts reads it once, from the shell).
+const net = vi.hoisted(() => ({ account: false }));
+vi.mock("../lib/net", async (actual) => ({
+  ...(await actual<typeof import("../lib/net")>()),
+  accountMode: () => net.account,
+}));
 
 describe("a shell prompt's command on its card", () => {
   // 139 characters; Claude Code's adapter puts the first 120 in the message, with no mark.
@@ -289,6 +296,7 @@ describe("an answer from a device that is not approved, or that its computer has
   const g = globalThis as Record<string, unknown>;
   afterEach(() => {
     delete g.sessionpipeShell;
+    net.account = false;
   });
   const AT = "2026-11-16T10:00:00Z";
   const now = Date.parse(AT) + 5_000;
@@ -308,10 +316,11 @@ describe("an answer from a device that is not approved, or that its computer has
 
   it("the app's key, not approved: off with one reason, and nothing to press, not even in a menu", () => {
     g.sessionpipeShell = { platform: "ios" };
+    net.account = true;
     for (const state of [unapproved, { kind: "waiting", code: "71" } as SendState]) {
       const st = answerState(s, a, control, { ...send, approval: app(state) }, now);
       expect(st).toEqual({
-        reason: "This iPhone can't answer yet",
+        reason: "This iPhone can't send yet",
         off: true,
         status: undefined,
         tag: "unapproved",
@@ -320,6 +329,12 @@ describe("an answer from a device that is not approved, or that its computer has
       });
       expect(answerItems(a.tool, st, () => {})).toEqual([]);
     }
+    // Off an account the sentence is the one it always was there (a Mac's, a browser's).
+    net.account = false;
+    g.sessionpipeShell = { platform: "macos" };
+    expect(answerState(s, a, control, { ...send, approval: app(unapproved) }, now).reason).toBe(
+      "This Mac can't answer yet",
+    );
   });
 
   it("inside the hour a newly approved phone waits, the hour's line wins", () => {

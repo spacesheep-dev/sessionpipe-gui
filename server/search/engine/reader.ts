@@ -1474,11 +1474,14 @@ function firstDocs(r: SegRef): Int32Array {
   return out;
 }
 
-/** `~/.claude` for `/Users/x/.claude/projects/…` (the home a history file came from). */
-function homeOf(path: string, home: string): string | undefined {
-  const h = home.endsWith("/") ? home : `${home}/`;
-  if (!path.startsWith(h)) return undefined;
-  const seg = path.slice(h.length).split(/[\\/]/)[0];
+/** `~/.claude` for `/Users/x/.claude/projects/…` or `C:\Users\x\.claude\projects\…`. */
+export function homeOf(p: string, home: string): string | undefined {
+  if (!home) return undefined;
+  const win = process.platform === "win32" || /^[A-Za-z]:[\\/]/.test(home) || /^[A-Za-z]:[\\/]/.test(p);
+  const h = (win ? home.replace(/\\/g, "/") : home).replace(/\/+$/, "");
+  const full = win ? p.replace(/\\/g, "/") : p;
+  if (!full.startsWith(`${h}/`)) return undefined;
+  const seg = full.slice(h.length + 1).split(/[\\/]/)[0];
   return seg ? `~/${seg}` : undefined;
 }
 

@@ -51,7 +51,7 @@ import { setupLabel } from "../control/signer";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useFirstLoad, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
-import { usePhoneLayout } from "../lib/device";
+import { usePhoneLayout, useTouchKeys } from "../lib/device";
 import {
   ATTENTION_LABEL,
   askFitsRow,
@@ -67,7 +67,9 @@ import { inPanel, panelAnswers, useListNav } from "../lib/keys";
 import { anyLabel, type LabelFilter, labelItems, labelPasses } from "../lib/labels";
 import { copyItem, sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
+import { accountMode } from "../lib/net";
 import { setNotifyPref, useNotifyPref } from "../lib/notify";
+import { pageBarBottom, useResizeAnchor } from "../lib/resizeAnchor";
 import { Link, openSettings, sessionPath } from "../lib/router";
 import { type Lens, useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
@@ -159,6 +161,14 @@ export function Inbox() {
   const phone = usePhoneLayout();
   const page = useRef<HTMLDivElement>(null);
   useStickyTop(page);
+  // A phone unfolded, folded or turned: the prompt being read stays where it was under the
+  // bar (lib/resizeAnchor.ts).
+  useResizeAnchor({
+    rows: ".inbox-row[data-flip]",
+    key: "data-flip",
+    root: () => page.current,
+    barBottom: pageBarBottom(() => page.current),
+  });
 
   // Why Allow / Deny are off, reported by each answerable row and said once for all, each
   // in a notice of its own above Notifications: this device not approved, with the way to
@@ -300,7 +310,7 @@ export function Inbox() {
                 </Link>
               }
             >
-              {`${NEW_WORDS.answerNotYet(ThisPhone())}.`}
+              {accountMode() ? NEW_WORDS.notApproved(ThisPhone()) : `${NEW_WORDS.offAccountNotYet(ThisPhone())}.`}
             </Notice>
           )}
           {said.map((o) => (
@@ -580,6 +590,10 @@ function Answer({
   const { reason, off, status, tag, approve, sentence, receipt } = st;
   // A plan review's pair asks the plan's question (lib/format.ts isPlanReview).
   const plan = isPlanReview(a);
+  // Under a finger, a prompt this device cannot answer until its computer adds it has no
+  // Allow and Deny that would only be refused, as on the session's card: the page's notice
+  // says why, with Approve this iPhone, and the row still opens. A mouse keeps them, greyed.
+  const noPair = useTouchKeys() && send.approval === "catching-up";
   /** The answer pressed here, from the press until it is out (or the send fails). */
   const [chosen, setChosen] = useState<boolean | null>(null);
   /** Pressed here: the receipt takes the focus the pressed button had. */
@@ -630,7 +644,7 @@ function Answer({
   }, [id, standing, tag, approve, sentence, s.machine, report]);
   useEffect(() => () => report(id, null), [id, report]);
   useLayoutEffect(() => {
-    into.current = whole ? answerItems(a.tool, st, answer, INBOX_KEYS) : [];
+    into.current = whole && !noPair ? answerItems(a.tool, st, answer, INBOX_KEYS) : [];
   });
   const noteId = useId();
   const note = send.error ? (
@@ -692,7 +706,7 @@ function Answer({
           {NEW_WORDS.inboxOpen}
         </button>
       )}
-      {!status && tag !== "unapproved" && whole && (
+      {!status && tag !== "unapproved" && whole && !noPair && (
         <>
           <ActionButton
             className="btn btn--sm btn--deny"

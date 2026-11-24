@@ -63,6 +63,11 @@ interface Running {
 
 export class PluginHost {
   private running = new Map<string, Running>();
+  /** Activations still under way, so a second one of the same plugin waits for the first. */
+  private starting = new Map<string, Promise<void>>();
+  /** What each activation under way is for: deactivate drops it, and an activation whose
+   *  token is gone when activate() returns stops the plugin again instead of keeping it. */
+  private wanted = new Map<string, object>();
   private errors = new Map<string, string>();
   private suggestions = new Map<string, Suggestion>();
   private listeners = new Set<(m: StreamMessage) => void>();
@@ -82,6 +87,8 @@ export class PluginHost {
 
   /** Deactivate everything, re-read the folder, import afresh and activate again. */
   async reload(): Promise<void> {
+    // Nothing starts meanwhile from the entries read before the rescan: start() below does.
+    this.started = false;
     await this.deactivateAll();
     this.deps.registry.scan();
     await this.start();
@@ -89,11 +96,11 @@ export class PluginHost {
 
   /** Deactivate everything; at shutdown. */
   async stop(): Promise<void> {
+    this.started = false;
     await this.deactivateAll();
     this.offStore?.();
     this.offStore = null;
     this.suggestions.clear();
-    this.started = false;
   }
 
   /** The listing: manifests with status, error and masked settings; `dir` to this machine only. */
@@ -128,6 +135,8 @@ export class PluginHost {
     const entry = this.deps.registry.get(id);
     if (!entry?.manifest) throw new Error(`no plugin "${id}"`);
     const values = this.deps.settings.save(entry.manifest, patch);
+    // One still starting is told too, once it is up.
+    await this.starting.get(id);
     const run = this.running.get(id);
     if (run) {
       for (const l of run.onSettings) {
@@ -188,9 +197,29 @@ export class PluginHost {
 
   // ---------- lifecycle ----------
 
-  private async activate(entry: PluginEntry): Promise<void> {
-    if (!entry.manifest || entry.disabled || this.running.has(entry.id)) return;
-    const manifest = entry.manifest;
+  private async activate(given: PluginEntry): Promise<void> {
+    // The registry's entry, not the caller's: a caller that awaited first (a settings save
+    // waiting for a start, the setEnabled loop) may hold one from before a Disable's rescan.
+    const entry = this.deps.registry.get(given.id);
+    if (!this.started || !entry?.manifest || entry.disabled || this.running.has(entry.id)) return;
+    const under = this.starting.get(entry.id);
+    if (under) {
+      // Already starting: wait for it, then look again, as it may have been turned off (or
+      // stopped by deactivate) meanwhile. One that failed is not tried a second time.
+      await under;
+      if (!this.errors.has(entry.id)) await this.activate(entry);
+      return;
+    }
+    const token = {};
+    this.wanted.set(entry.id, token);
+    const started: Promise<void> = this.load(entry, entry.manifest, token).finally(() => {
+      if (this.starting.get(entry.id) === started) this.starting.delete(entry.id);
+    });
+    this.starting.set(entry.id, started);
+    await started;
+  }
+
+  private async load(entry: PluginEntry, manifest: PluginManifest, token: object): Promise<void> {
     this.errors.delete(entry.id);
     const timeoutMs = this.deps.activateTimeoutMs ?? ACTIVATE_TIMEOUT_MS;
     const run: Running = { manifest, handle: { deactivate() {} }, offs: new Set(), onSettings: new Set() };
@@ -211,10 +240,18 @@ export class PluginHost {
         throw new Error("activate(api) did not return { deactivate() }");
       }
       run.handle = handle;
+      if (this.wanted.get(entry.id) !== token) {
+        // Turned off (or the host stopped) while it was starting: it does not stay running.
+        await this.undo(entry.id, run);
+        return;
+      }
+      this.wanted.delete(entry.id);
       this.running.set(entry.id, run);
       this.log(entry.id, "info", `active (${manifest.name} ${manifest.version})`);
     } catch (e) {
       for (const off of run.offs) off();
+      if (this.wanted.get(entry.id) !== token) return;
+      this.wanted.delete(entry.id);
       const message = (e as Error)?.message ?? String(e);
       this.errors.set(entry.id, message);
       this.log(entry.id, "error", `failed to start: ${message}`);
@@ -222,14 +259,25 @@ export class PluginHost {
   }
 
   private async deactivateAll(): Promise<void> {
-    const ids = [...this.running.keys()];
+    const ids = new Set([...this.running.keys(), ...this.starting.keys()]);
     for (const id of ids) await this.deactivate(id);
   }
 
   private async deactivate(id: string): Promise<void> {
+    // One still starting is told it is no longer wanted, and stops itself once activate()
+    // returns; this waits for that, so the plugin is off when the caller goes on.
+    // A start that begins after this one (a later Enable) is left alone: reload() and Disable
+    // keep a waiting activate from restarting it (`started` is off, or the entry disabled).
+    this.wanted.delete(id);
+    const under = this.starting.get(id);
+    if (under) await under;
     const run = this.running.get(id);
     if (!run) return;
     this.running.delete(id);
+    await this.undo(id, run);
+  }
+
+  private async undo(id: string, run: Running): Promise<void> {
     try {
       await withTimeout(Promise.resolve(run.handle.deactivate()), 5000, "deactivate() did not finish in 5 s");
     } catch (e) {

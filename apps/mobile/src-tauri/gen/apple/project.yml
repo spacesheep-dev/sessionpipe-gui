@@ -59,11 +59,22 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleDisplayName: sessionpipe
-        CFBundleShortVersionString: 0.2.0
-        CFBundleVersion: "0.2.0"
+        # Each build writes the version from package.json (tauri.conf.json); these only keep
+        # a regenerated Info.plist the same as the one checked in.
+        CFBundleShortVersionString: 0.4.1
+        CFBundleVersion: "0.4.1"
         ITSAppUsesNonExemptEncryption: false
         UIStatusBarStyle: UIStatusBarStyleDefault
-        UIViewControllerBasedStatusBarAppearance: false
+        # The two keys of ../../Info.ios.plist, which every build puts over Info.plist: the
+        # status bar follows the root view controller (uikit.rs set_appearance), and the one
+        # scene tao makes, without which an iOS 27 SDK build does not launch.
+        UIViewControllerBasedStatusBarAppearance: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+                UISceneDelegateClassName: TaoSceneDelegate
         # Receivers on the local network (a computer's receiver over http, by IP or .local).
         NSLocalNetworkUsageDescription: sessionpipe connects to the receiver on your computer over your local network.
         # The QR scanner (tauri-plugin-barcode-scanner refuses to scan without this key).

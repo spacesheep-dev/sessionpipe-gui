@@ -272,6 +272,76 @@ test.describe("phone", () => {
     await expect(page).toHaveURL(/\/machines$/);
   });
 
+  test("held wide, a tablet or a phone on its side has the same app: a session as its own page, no panel beside the list; the sidebar where it is tall too, the tab bar where not", async ({
+    page,
+  }) => {
+    // An iPad and an Android tablet on their sides, and an Android phone on its: each wider
+    // than the width at which a window with a mouse takes the sidebar's layout. The two
+    // tablets have the touch app's own sidebar; the phone is too short for one.
+    const chrome = async (at: string, regular: boolean) => {
+      if (!regular) return tabBarIsOn(page);
+      await expect(page.locator("nav.rail"), at).toBeVisible();
+      await expect(page.locator("nav.tabbar"), at).toBeHidden();
+      await expect(page.locator(".shell--side"), at).toHaveCount(0);
+    };
+    for (const [size, regular] of [
+      [{ width: 1180, height: 820 }, true],
+      [{ width: 1280, height: 800 }, true],
+      [{ width: 915, height: 412 }, false],
+    ] as const) {
+      const at = `${size.width}x${size.height}`;
+      await page.setViewportSize(size);
+      await openBoard(page);
+      await chrome(at, regular);
+      await noSidewaysScroll(page);
+      // New session: the page bar's, or the sidebar's head.
+      await expect(
+        page.locator(regular ? "nav.rail .rail-compose" : ".page.board .compose-btn--phone"),
+        at,
+      ).toBeVisible();
+      // A row pushes its session's page, with Board behind Back: never a panel beside the list.
+      await page.locator("article.card a.card-link").first().click();
+      await expect(page, at).toHaveURL(/\/s\//);
+      await expect(page.locator(".bar-back-label"), at).toHaveText("Board");
+      await expect(page.locator(".panel--open"), at).toHaveCount(0);
+      expect(page.url(), at).not.toContain("?s=");
+      await chrome(at, regular);
+      await noSidewaysScroll(page);
+    }
+  });
+
+  test("a sidebar with more rows than a short tablet holds scrolls its rows alone: Display and Settings stay at its foot", async ({
+    page,
+  }) => {
+    // Advanced, with the server's views under their headings: more rows than 600 pt hold.
+    await page.setViewportSize({ width: 820, height: 600 });
+    await openBoard(page);
+    await expect(page.locator("nav.rail")).toBeVisible();
+    await expect(page.locator("nav.rail .rail-section").first()).toBeVisible();
+    const measure = () =>
+      page.evaluate(() => {
+        const el = (s: string) => document.querySelector<HTMLElement>(s)!;
+        const rail = el("nav.rail");
+        const nav = el("nav.rail .rail-nav");
+        return {
+          railScrolls: rail.scrollHeight > rail.clientHeight,
+          rowsScroll: nav.scrollHeight > nav.clientHeight,
+          settings: el("nav.rail .rail-foot .nav-link[data-nav='settings']").getBoundingClientRect().bottom,
+          height: innerHeight,
+        };
+      });
+    const m = await measure();
+    expect(m.rowsScroll).toBe(true);
+    expect(m.railScrolls).toBe(false);
+    expect(m.settings).toBeLessThanOrEqual(m.height);
+    // The rows scrolled to their end: the foot has not moved.
+    await page.locator("nav.rail .rail-nav").evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    expect((await measure()).settings).toBe(m.settings);
+    await expect(page.locator("nav.rail").getByRole("link", { name: "Settings" })).toBeInViewport();
+  });
+
   test("a pull down the board past the arm distance reopens the stream; a short one does nothing", async ({ page }) => {
     await openBoard(page);
     const html = page.locator("html");
@@ -307,6 +377,54 @@ test.describe("phone", () => {
     await expect(page.locator("main#main")).not.toHaveAttribute("aria-busy", /./);
     await expect(conn).toHaveText("live");
     await noSidewaysScroll(page);
+  });
+
+  test("a row's long-press menu has no Cancel: a tap outside it, Esc or its Close shuts it", async ({ page }) => {
+    await openBoard(page);
+    const sheet = page.locator(".menu-sheet");
+    const hold = async () => {
+      // A finger held on the first row's title; again if the live board redrew it meanwhile.
+      await expect(async () => {
+        await page
+          .locator("article.card .card-title")
+          .first()
+          .evaluate((el) => {
+            const r = el.getBoundingClientRect();
+            el.dispatchEvent(
+              new PointerEvent("pointerdown", {
+                bubbles: true,
+                pointerType: "touch",
+                clientX: r.left + 4,
+                clientY: r.top + 4,
+              }),
+            );
+          });
+        await expect(sheet.getByRole("menuitem", { name: "Hide", exact: true })).toBeVisible({ timeout: 2_000 });
+      }).toPass();
+      // The finger lifts: its click is the hold's, not a tap on the row (ContextMenu.tsx).
+      await page.evaluate(() => {
+        document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" }));
+        document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    };
+    for (const how of ["tap outside", "Escape", "Close"] as const) {
+      await hold();
+      await expect(sheet.getByRole("button", { name: "Cancel" }), how).toHaveCount(0);
+      await expect(sheet, how).not.toContainText("Cancel");
+      if (how === "tap outside") {
+        // Above the sheet, on the dimmed page.
+        const top = (await sheet.boundingBox())!.y;
+        expect(top, how).toBeGreaterThan(40);
+        await page.touchscreen.tap(195, top / 2);
+      } else if (how === "Escape") {
+        await page.keyboard.press("Escape");
+      } else {
+        // What VoiceOver reaches and activates: the dimmed page is a button named Close.
+        await page.getByRole("button", { name: "Close", exact: true }).evaluate((el) => (el as HTMLElement).click());
+      }
+      await expect(sheet, how).toHaveCount(0);
+    }
   });
 });
 

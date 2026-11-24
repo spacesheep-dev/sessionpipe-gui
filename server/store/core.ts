@@ -450,9 +450,10 @@ export class StoreCore {
     const now = Date.now();
     const arrivedAt = new Date(now).toISOString();
     const result: IngestResult = { accepted: 0, duplicates: 0, rejected: [], stored: [] };
-    const groups = new Map<SessionKey, { harness: string; id: string; events: StoredEvent[] }>();
+    type BatchGroup = { harness: string; id: string; events: StoredEvent[]; forgotten?: boolean };
+    const groups = new Map<SessionKey, BatchGroup>();
+    const kept: { ev: StoredEvent; group: BatchGroup }[] = [];
     const upgrades: { key: SessionKey; harness: string; id: string; ev: StoredEvent; rec: Rec }[] = [];
-    const forgotten: SessionKey[] = [];
     for (const ev of events) {
       const id = ev && typeof ev.id === "string" ? ev.id : "";
       const problem = minimalProblem(ev);
@@ -465,8 +466,15 @@ export class StoreCore {
       const key = sessionKey(harness, sid);
       if (ev.type === "session.forgotten") {
         result.accepted++;
-        forgotten.push(key);
-        groups.delete(key);
+        const prev = groups.get(key);
+        if (prev) {
+          prev.forgotten = true;
+          groups.delete(key);
+        }
+        for (let i = upgrades.length - 1; i >= 0; i--) {
+          if (upgrades[i]!.key === key) upgrades.splice(i, 1);
+        }
+        this.forget(key);
         continue;
       }
       const seq = ev.session.seq;
@@ -488,13 +496,12 @@ export class StoreCore {
       }
       const stored: StoredEvent = { ...ev, arrivedAt, source };
       group.events.push(stored);
-      result.stored.push(stored);
+      kept.push({ ev: stored, group });
       result.accepted++;
     }
-    for (const key of forgotten) this.forget(key);
+    for (const item of kept) if (!item.group.forgotten) result.stored.push(item.ev);
     const machines = new Set<string>();
-    for (const [key, g] of groups) {
-      if (forgotten.includes(key)) continue;
+    for (const [, g] of groups) {
       const entry = this.entry(g.harness, g.id, arrivedAt, source);
       const { lines, size } = this.files.append(g.harness, g.id, g.events, entry.size);
       this.storageBytes += size - entry.size;
@@ -522,7 +529,6 @@ export class StoreCore {
       if (entry.summary.machine) machines.add(entry.summary.machine);
     }
     for (const u of upgrades) {
-      if (forgotten.includes(u.key)) continue;
       const entry = this.sessions.get(u.key);
       if (!entry) continue;
       const { lines, size } = this.files.append(u.harness, u.id, [u.ev], entry.size);

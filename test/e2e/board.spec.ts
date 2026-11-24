@@ -8,6 +8,7 @@
 // too), the Hidden header's own menu, and a row's menu that the click which opened it
 // chooses nothing from. One needs-you number: the Inbox badge, the title's "(n)" and Needs
 // you's own count agree.
+// A narrow window with a mouse: a row's menu is the sheet, with its Cancel.
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { SETTINGS_KEY } from "../../playwright.config.js";
@@ -984,5 +985,22 @@ test.describe("board: on a phone", () => {
     const more = page.locator(".board-more");
     await expect(more).toBeVisible();
     expect((await more.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  });
+});
+
+test.describe("board: a narrow window with a mouse", () => {
+  test.use({ viewport: { width: 700, height: 800 } });
+  test("a right-click on a row opens the sheet, and it keeps its Cancel (a finger's has none: mobile.spec)", async ({
+    page,
+  }) => {
+    await openBoard(page);
+    // Below 720 px a mouse window has the phone's layout, and a row's menu is its sheet.
+    await page.locator("article.card a.card-link").first().click({ button: "right" });
+    const sheet = page.locator(".menu-sheet");
+    await expect(sheet).toHaveCount(1);
+    const cancel = sheet.getByRole("button", { name: "Cancel", exact: true });
+    await expect(cancel).toBeVisible();
+    await cancel.click();
+    await expect(sheet).toHaveCount(0);
   });
 });

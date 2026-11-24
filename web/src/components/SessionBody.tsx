@@ -77,6 +77,7 @@ import { FilesButton } from "../files/FilesButton";
 import { BESIDE, FilesDrawer } from "../files/FilesDrawer";
 import { closeDrawer, FILE_PARAM, openDrawer, toggleDrawer, useDrawer } from "../files/state";
 import { useAskedInput } from "../lib/askedInput";
+import { useColumnRef } from "../lib/column";
 import { usePhoneLayout, wideLayout } from "../lib/device";
 import {
   ATTENTION_LABEL,
@@ -92,7 +93,6 @@ import {
   sessionTitle,
   toolLabel,
 } from "../lib/format";
-import { useKeyboardInset } from "../lib/keyboardInset";
 import { labelMenu } from "../lib/labels";
 import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
@@ -101,6 +101,7 @@ import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
 import { lastHeard } from "../lib/offline";
 import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
 import { cutReply, cutReplyStart, cutWords, said, stoppedWords, turnWords } from "../lib/replies";
+import { useResizeAnchor, windowSize } from "../lib/resizeAnchor";
 import { AGENT_PARAM, back, hrefFor, Link, navigate, sessionPath, setSearchParam, useSearchParam } from "../lib/router";
 import { backgroundFact, submittedLabel } from "../lib/runs";
 import { setTierLens, useAppSettings, useLens } from "../lib/settings";
@@ -359,11 +360,29 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const [away, setAway] = useState(false);
   /** Events that arrived while the person was scrolled up (the "n new" pill). */
   const [unseen, setUnseen] = useState(0);
+  /** The window's size when a scroll or a growth was last looked at. */
+  const sizeSeen = useRef<readonly [number, number] | null>(null);
+  /** Following at the end when the window began to change size: the end is kept until
+   *  the page has settled in the new one, whatever the scrolls in between say. */
+  const pinnedAtResize = useRef(false);
+  /** Whether the window is another size than when this was last asked. For another width,
+   *  whether the end was being followed is written down then, before a scroll the new size
+   *  causes can say otherwise. A change of height alone (a browser's toolbar) rewraps
+   *  nothing, so the end is not kept through it: the reader may be scrolling away. */
+  const resized = useCallback((): boolean => {
+    const was = sizeSeen.current;
+    const now = windowSize();
+    sizeSeen.current = now;
+    if (!was || (was[0] === now[0] && was[1] === now[1])) return false;
+    if (was[0] !== now[0] && followRef.current && pinned.current) pinnedAtResize.current = true;
+    return true;
+  }, []);
   /** The row a disclosure click asked to keep in place (Timeline.anchorOn). */
   const held = useRef<{ el: HTMLElement; top: number } | null>(null);
   const lastSeq = useRef(-1);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
+  const columnRef = useColumnRef(listRef);
 
   const [hasOlder, setHasOlder] = useState(false);
   const [olderBusy, setOlderBusy] = useState(false);
@@ -764,18 +783,48 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
         }
         return;
       }
-      if (followRef.current && pinned.current) scrollTo(scrollHeight());
+      resized();
+      if (pinnedAtResize.current || (followRef.current && pinned.current)) scrollTo(scrollHeight());
     });
     ro.observe(root);
     return () => ro.disconnect();
-  }, [shape, scrollTo, scrollBy, scrollHeight]);
+  }, [shape, scrollTo, scrollBy, scrollHeight, resized]);
+  // A phone unfolded, folded or turned, a window dragged narrower: the row being read
+  // stays where it was under the bar (lib/resizeAnchor.ts), by the paragraph inside a reply
+  // longer than the screen. Followed at its end, the end is the place.
+  const settlingInSize = useResizeAnchor({
+    rows: "[data-seq]:not(.turn-head)",
+    key: "data-seq",
+    blocks: ".md > *",
+    of: key,
+    root: () => rootRef.current,
+    scroller: sc,
+    barBottom: () => barBottom(rootRef.current, sc()),
+    enabled: () => !pinnedAtResize.current && !(followRef.current && pinned.current),
+    settle: (last) => {
+      resized();
+      if (!pinnedAtResize.current) return;
+      scrollTo(scrollHeight());
+      if (last) pinnedAtResize.current = false;
+    },
+  });
   // Where the person is: following resumes when they come back down to the end, and
-  // stops the moment they scroll up away from it.
+  // stops the moment they scroll up away from it. A scroll that comes with another window
+  // size is not theirs: the browser is fitting the page to its new window, and WebKit
+  // sends it first, with the end already out of reach. Nor is any scroll while the end is
+  // kept through that change, or while the page settles in the new size: in WebKit the
+  // layout the size class decides comes a frame or two later, and a folded phone's page,
+  // shorter for it, is clamped to its end, which is not the reader coming down to it.
   useEffect(() => {
     const target: EventTarget = sc() ?? window;
     let lastY = scrollY();
+    resized();
     const onScroll = () => {
       const y = scrollY();
+      if (resized() || pinnedAtResize.current || settlingInSize()) {
+        lastY = y;
+        return;
+      }
       const near = scrollHeight() - (y + viewHeight()) <= PIN_PX;
       pinned.current = near;
       setAway(!near);
@@ -793,7 +842,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
     };
     target.addEventListener("scroll", onScroll, { passive: true });
     return () => target.removeEventListener("scroll", onScroll);
-  }, [sc, scrollY, viewHeight, scrollHeight]);
+  }, [sc, scrollY, viewHeight, scrollHeight, resized, settlingInSize]);
   const anchorOn = useCallback((el: HTMLElement) => {
     followRef.current = false;
     pinned.current = false;
@@ -852,11 +901,6 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   useEffect(() => {
     if (s) onSession?.(s);
   }, [s, onSession]);
-
-  // The phone's keyboard: the docked composer rides on it (lib/keyboardInset.ts sets --kb
-  // from visualViewport; styles/session.css reads it), so the field and Send are never
-  // under the keys.
-  useKeyboardInset(mode === "page");
 
   // The docked bar's height, so a row scrolled into view (a jump, the focused prompt) is
   // never left under it (styles/session.css: scroll-padding-bottom).
@@ -1475,7 +1519,7 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
             </p>
           )}
 
-          <ol className={`timeline ${chat ? "timeline--chat" : ""}`} ref={listRef}>
+          <ol className={`timeline ${chat ? "timeline--chat" : ""}`} ref={columnRef}>
             {hasOlder && (
               <li className="older">
                 <button
@@ -1776,12 +1820,16 @@ async function newestWhole(
   }
 }
 
+/** The bottom of what covers the top of this view: its bar, or in a panel with none the
+ *  panel's own top edge. */
+const barBottom = (root: HTMLElement | null, scroller: HTMLElement | null): number =>
+  root?.querySelector(".bar")?.getBoundingClientRect().bottom ?? scroller?.getBoundingClientRect().top ?? 0;
+
 /** The first timeline row of this view whose top edge is on screen (below the bar and a
  *  stuck turn head), by seq. Turn heads are sticky, so they never anchor. */
 function firstVisibleRow(root: HTMLElement | null, scroller: HTMLElement | null): { seq: number | null; top: number } {
   if (!root) return { seq: null, top: 0 };
-  const bar = root.querySelector(".bar")?.getBoundingClientRect().bottom ?? scroller?.getBoundingClientRect().top ?? 0;
-  const headerBottom = bar + 28;
+  const headerBottom = barBottom(root, scroller) + 28;
   for (const el of root.querySelectorAll<HTMLElement>("[data-seq]:not(.turn-head)")) {
     const top = el.getBoundingClientRect().top;
     if (top >= headerBottom) return { seq: Number(el.dataset.seq), top };

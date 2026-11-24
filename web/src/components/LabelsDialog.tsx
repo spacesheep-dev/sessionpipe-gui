@@ -2,13 +2,14 @@
 // "Edit labels…": the seven colour labels and what the person calls them, as one grouped
 // form (ORGANIZE-SPEC.md §3.3). A 400 px dialog on a desktop, a sheet on a phone. Each row
 // is the colour's dot and a field holding its name (the colour's own name is the
-// placeholder); a field saves when it loses focus or on Enter, and an empty one goes back
-// to the colour's own name. Mounted once, in the shell; any "Edit labels…" item opens it
-// through `requestLabelRename`, at one colour's field or at the list.
+// placeholder); a field the person changed saves when it loses focus or on Enter, and an
+// empty one goes back to the colour's own name. Mounted once, in the shell; any
+// "Edit labels…" item opens it through `requestLabelRename`, at one colour's field or at
+// the list.
 import { LABEL_COLORS, LABEL_DEFAULT_NAMES, LABEL_NAME_MAX, type LabelColor } from "@shared/api";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useLabels, useStore } from "../data/hooks";
-import { phoneLayout } from "../lib/device";
+import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import { onLabelRename, renameLabel } from "../lib/labels";
 
@@ -27,104 +28,107 @@ export function LabelsDialog() {
   return <Dialog focus={open.color} onClose={() => setOpen(null)} />;
 }
 
+/** One tree for both forms: a window resized across the phone's width changes what is
+ *  around the rows and never the rows, so the field in hand keeps its focus and its text. */
 function Dialog({ focus, onClose }: { focus?: LabelColor; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  // Read once, at open: a sheet on a phone, a dialog elsewhere.
-  const [phone] = useState(phoneLayout);
+  // A sheet on a phone, a dialog elsewhere.
+  const phone = usePhoneLayout();
   useFocusTrap(ref, true, { onClose, initial: focus ? `[data-label="${focus}"] input` : "input" });
-  const rows = (
-    <ul className="labels-rows">
-      {LABEL_COLORS.map((c) => (
-        <LabelField key={c} color={c} />
-      ))}
-    </ul>
+  const title = (
+    <h2 className={phone ? "menu-sheet-title" : "confirm-title"} id="labels-title">
+      Labels
+    </h2>
   );
-  const done = (
-    <button
-      type="button"
-      className={phone ? "menu-sheet-item menu-sheet-cancel" : "btn btn--primary"}
-      onClick={onClose}
-    >
-      Done
-    </button>
-  );
-  if (phone)
-    return (
-      <>
-        <button type="button" className="menu-scrim" aria-label="Close" onClick={onClose} data-dismiss />
-        <div
-          className="menu-sheet labels-sheet"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="labels-title"
-          ref={ref}
-          tabIndex={-1}
-        >
-          <span className="menu-grab" aria-hidden="true" />
-          <div className="menu-sheet-head">
-            <h2 className="menu-sheet-title" id="labels-title">
-              Labels
-            </h2>
-          </div>
-          <div className="menu-sheet-group">{rows}</div>
-          <div className="menu-sheet-group">{done}</div>
-        </div>
-      </>
-    );
   return (
     <>
       <button
         type="button"
-        className="menu-scrim menu-scrim--dialog"
+        className={phone ? "menu-scrim" : "menu-scrim menu-scrim--dialog"}
         aria-label="Close"
         onClick={onClose}
         data-dismiss
       />
       <div
-        className="confirm labels-dialog"
+        className={phone ? "menu-sheet labels-sheet" : "confirm labels-dialog"}
         role="dialog"
         aria-modal="true"
         aria-labelledby="labels-title"
         ref={ref}
         tabIndex={-1}
       >
-        <h2 className="confirm-title" id="labels-title">
-          Labels
-        </h2>
-        {rows}
-        <div className="confirm-actions">{done}</div>
+        {phone && <span className="menu-grab" aria-hidden="true" />}
+        {phone ? <div className="menu-sheet-head">{title}</div> : title}
+        <div className={phone ? "menu-sheet-group" : "labels-group"}>
+          <ul className="labels-rows">
+            {LABEL_COLORS.map((c) => (
+              <LabelField key={c} color={c} />
+            ))}
+          </ul>
+        </div>
+        <div className={phone ? "menu-sheet-group" : "confirm-actions"}>
+          <button
+            type="button"
+            className={phone ? "menu-sheet-item menu-sheet-cancel" : "btn btn--primary"}
+            onClick={onClose}
+          >
+            Done
+          </button>
+        </div>
       </div>
     </>
   );
 }
 
-/** One label: its dot and its name, saved on blur or Enter; the server's refusal (or a name
- *  over the limit) shows under it and the field keeps the text. */
+/** One label: its dot and its name, saved on blur or Enter once the person has changed it;
+ *  the server's refusal (or a name over the limit) shows under it and the field keeps the
+ *  text. */
 function LabelField({ color }: { color: LabelColor }) {
   const store = useStore();
   const labels = useLabels();
   const saved = labels.names[color] ?? "";
   const [text, setText] = useState(saved);
   const [error, setError] = useState<string | null>(null);
+  /** The person changed the text and it is not saved yet. Having the focus is not that:
+   *  the dialog opens with a field in hand, and Tab passes through the others. */
   const editing = useRef(false);
+  /** How many times the person has changed the text: a save in flight that succeeds ends
+   *  the edit only if nothing was typed meanwhile. */
+  const edits = useRef(0);
+  /** A save is in flight: its name is shown as saved already, and may yet be refused. */
+  const sending = useRef(false);
   // Another device renamed it while this field was not being edited: show that.
   useEffect(() => {
     if (!editing.current) setText(saved);
   }, [saved]);
   const save = async () => {
-    editing.current = false;
+    // A field only looked at has nothing of the person's to save, and what it holds may
+    // be older than the name another device has given since.
+    if (!editing.current) return;
     const name = text.trim();
     if (name.length > LABEL_NAME_MAX) {
       setError(TOO_LONG);
       return;
     }
     setError(null);
-    if (name === saved) return;
+    if (name === saved) {
+      if (!sending.current) editing.current = false;
+      return;
+    }
+    // Still the person's until the server has it: a refusal puts the old name back in the
+    // store, and the field keeps what was typed, for Enter or leaving it to try again.
+    const at = edits.current;
+    sending.current = true;
     try {
       await renameLabel(store, color, name || null);
-      if (!name) setText("");
+      if (edits.current === at) {
+        editing.current = false;
+        if (!name) setText("");
+      }
     } catch (e) {
       setError((e as Error).message === "bad_name" ? TOO_LONG : "Not saved; try again");
+    } finally {
+      sending.current = false;
     }
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -148,11 +152,9 @@ function LabelField({ color }: { color: LabelColor }) {
         maxLength={LABEL_NAME_MAX * 2}
         autoComplete="off"
         spellCheck={false}
-        onFocus={() => {
-          editing.current = true;
-        }}
         onChange={(e) => {
           editing.current = true;
+          edits.current++;
           setText(e.target.value);
           if (error && e.target.value.trim().length <= LABEL_NAME_MAX) setError(null);
         }}
