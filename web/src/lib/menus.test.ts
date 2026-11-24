@@ -234,3 +234,31 @@ describe("sessionItems", () => {
     ]);
   });
 });
+
+describe("a child session's menu", () => {
+  // The board nests two kinds of child under a parent (pages/Board.tsx): a subagent's own
+  // session (`parentId`) and a session another one asked (`delegatedBy`). Each row's menu
+  // opens the session it works for; a session of its own has neither item.
+  const items = (o: Partial<SessionSummary>) =>
+    labels(
+      sessionItems(session({ key: "codex:s-2", harness: "codex", id: "s-2", ...o }), {
+        store: storeOf(asking),
+        surface: "list",
+      }),
+    );
+  it("opens the asking session from a session another one asked", () => {
+    const got = items({ delegatedBy: "claude-code:s-1" });
+    expect(got).toContain("Open the asking session");
+    expect(got).not.toContain("Open parent session");
+  });
+  it("opens the parent session from a subagent's own session", () => {
+    const got = items({ harness: "claude-code", key: "claude-code:s-2", parentId: "s-1" });
+    expect(got).toContain("Open parent session");
+    expect(got).not.toContain("Open the asking session");
+  });
+  it("has neither on a session of its own", () => {
+    const got = items({});
+    expect(got).not.toContain("Open the asking session");
+    expect(got).not.toContain("Open parent session");
+  });
+});

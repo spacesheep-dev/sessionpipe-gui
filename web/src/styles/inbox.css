@@ -198,6 +198,22 @@
 .inbox-where .glyph-wrap {
   color: var(--fg-4);
 }
+/* A child session's row says whom it works for: "for <that session's title>", quiet,
+   after the title on line 1, the title keeping up to 65% of it and "for …" at least 5em;
+   cut in its middle where the line is short (bits.tsx MidCut). Rows of their own keep
+   their two columns. */
+.inbox-main:has(> .inbox-for) {
+  grid-template-columns: 28px fit-content(65%) minmax(5em, 1fr) auto;
+  grid-template-areas:
+    "lead title for  age"
+    ".    what  what where";
+}
+.inbox-for {
+  grid-area: for;
+  justify-self: start;
+  max-width: 100%;
+  margin-left: 12px;
+}
 /* A prompt its hook stopped waiting on: why, under the rest of the row, at every width. */
 .inbox-late {
   grid-column: 2 / -1;
@@ -234,7 +250,7 @@
     pointer-events: auto;
   }
   .inbox-row--answerable:is(:hover, [aria-current="true"], :focus-within):has(.inbox-answer .btn):not(:has(.inbox-note))
-    :is(.inbox-age, .inbox-where) {
+    :is(.inbox-age, .inbox-where, .inbox-for) {
     visibility: hidden;
   }
 }
@@ -254,7 +270,7 @@
   opacity: 0.45;
 }
 @media (hover: hover) {
-  .inbox-row--answerable:has(.inbox-answer[data-chosen] .btn) :is(.inbox-age, .inbox-where) {
+  .inbox-row--answerable:has(.inbox-answer[data-chosen] .btn) :is(.inbox-age, .inbox-where, .inbox-for) {
     visibility: hidden;
   }
   .inbox-row:has(.inbox-answer[data-chosen]) .inbox-answer {
@@ -437,6 +453,23 @@
   }
   .inbox-where {
     justify-self: start;
+    max-width: 100%;
+    min-width: 0;
     margin-left: 0;
+  }
+  /* A child's: "for …" leads the line of where it runs, up to 65% of it, then "·". */
+  .inbox-main:has(> .inbox-for) {
+    grid-template-areas:
+      "lead title title age"
+      ".    what  what  what"
+      ".    for   where where";
+  }
+  .inbox-for {
+    margin-left: 0;
+  }
+  .inbox-for::after {
+    content: "·";
+    margin: 0 6px;
+    color: var(--fg-4);
   }
 }

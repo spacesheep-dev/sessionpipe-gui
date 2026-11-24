@@ -35,6 +35,7 @@ import { prefetchProps } from "../data/prefetch";
 import { agentFound, agentsChoice, agentsRunningFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
 import { useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
+import { askedComputer } from "../lib/delegated";
 import { usePhoneLayout, useTouchKeys } from "../lib/device";
 import {
   ATTENTION_LABEL,
@@ -68,7 +69,7 @@ import { useShortcut } from "../lib/shortcuts";
 import { type OpenHow, openSession, openSplit } from "../lib/split";
 import { durCoarse, ms } from "../lib/time";
 import { AgentRow, useAgentsOpen } from "./AgentRow";
-import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
+import { HarnessGlyph, MidCut, Redacted, Since, StateDot } from "./bits";
 import { type MenuItem, type MenuList, openMenu, useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
 import { NotifyOff } from "./NotifyOff";
@@ -594,8 +595,9 @@ function KidList({
 }
 
 /** A subagent, or a session this one asked (`delegatedBy`): one line under its parent,
- *  on the tree guide, with the session menu. One that needs you says so in the needs-you
- *  colour: it is why its parent's row is in Needs you (pages/Board.tsx). */
+ *  on the tree guide, with the session menu, and the computer it runs on (two lines where
+ *  the row is narrow). One that needs you says so in the needs-you colour: it is why its
+ *  parent's row is in Needs you (pages/Board.tsx). */
 function KidRow({
   c,
   needs,
@@ -629,7 +631,12 @@ function KidRow({
             <HarnessGlyph name={c.harness} size="sm" />
           </span>
         )}
-        <span className="kid-title ellipsis">{sessionTitle(c)}</span>
+        {/* The computer it runs on, also when it is its parent's: in the meta at the row's
+            end, under the title where the row is narrow (styles/board.css). */}
+        <span className="kid-text">
+          <span className="kid-title ellipsis">{sessionTitle(c)}</span>
+          <MidCut className="chip--machine kid-where" text={askedComputer(c)} />
+        </span>
         <NotifyOff s={c} under />
         {c.currentTool && c.state === "working" ? (
           <code className="kid-tool">{toolLabel(c.currentTool.tool)}</code>

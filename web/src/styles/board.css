@@ -528,6 +528,27 @@
   flex: 1;
   min-width: 0;
 }
+/* A child session's title, then the computer it runs on as a chip in the meta's tone at
+   the row's end, before its state ("studio-mac · working"): the title gives way first; the
+   computer keeps up to 40% of the line, cut in its middle past that. */
+.kid-text {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.kid-where {
+  flex: none;
+  max-width: 40%;
+  margin-left: auto;
+  line-height: inherit;
+}
+.kid-where::after {
+  content: "·";
+  margin-left: 6px;
+  color: var(--fg-4);
+}
 .kid-tool {
   color: var(--fg-3);
   font-family: var(--font-ui);
@@ -869,6 +890,27 @@
   /* Under the time, its right edge on the time's. */
   .card-foot {
     justify-content: flex-end;
+  }
+  /* A child session's row: two lines, its title over the computer it runs on, as its
+     parent's row puts where it runs on a line of its own. */
+  .kid:has(> .kid-text) {
+    padding-block: 5px;
+  }
+  .kid-text {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
+  }
+  .kid-text > .kid-title {
+    flex: none;
+  }
+  .kid-where {
+    align-self: flex-start;
+    max-width: 100%;
+    margin-left: 0;
+  }
+  .kid-where::after {
+    content: none;
   }
 }
 

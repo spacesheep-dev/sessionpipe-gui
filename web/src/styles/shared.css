@@ -331,6 +331,18 @@
 .chip--tier {
   font-variant-numeric: tabular-nums;
 }
+/* A chip cut in its middle (bits.tsx MidCut): its box is set where it is used; the line
+   in it measures what fits, and ends in "…" only below the few characters it keeps. */
+.chip.midcut {
+  display: flex;
+  min-width: 0;
+}
+.midcut-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chip--link {
   color: var(--fg-2);
 }

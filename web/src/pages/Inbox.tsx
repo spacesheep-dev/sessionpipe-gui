@@ -25,9 +25,20 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useBehind, useCatchingUp } from "../account/current";
-import { ActionButton, Ago, EmptyState, HarnessGlyph, Notice, Redacted, StateDot, WithName } from "../components/bits";
+import {
+  ActionButton,
+  Ago,
+  EmptyState,
+  HarnessGlyph,
+  MidCut,
+  Notice,
+  Redacted,
+  StateDot,
+  WithName,
+} from "../components/bits";
 import { type MenuList, openMenu, useContextMenu } from "../components/ContextMenu";
 import { FilterMenu, labelFilterMenu, labelFilterName } from "../components/FilterMenu";
 import { LabelChip, LabelDot, useLabelKeys } from "../components/LabelDot";
@@ -51,6 +62,7 @@ import { setupLabel } from "../control/signer";
 import { answerState, useSessionSend } from "../control/useSend";
 import { type OpenAttention, useAppState, useFirstLoad, useLabels, useOpenAttentions, useStore } from "../data/hooks";
 import { prefetchProps } from "../data/prefetch";
+import { parentOf } from "../lib/delegated";
 import { usePhoneLayout, useTouchKeys } from "../lib/device";
 import {
   ATTENTION_LABEL,
@@ -447,6 +459,13 @@ function InboxRow({
   // has the answerable rows' keys), and the panel has no Allow for it to pass them to.
   useRowKeys(cursor !== undefined && !row.answerable, null);
   const titleId = useId();
+  // The session it works for (the one that asked it, its subagent's parent, or the one
+  // that launched it), when the store holds that session: its title.
+  const readParent = useCallback(() => {
+    const p = parentOf(s, (k) => store.get().sessions.get(k));
+    return p ? sessionTitle(p) : null;
+  }, [store, s]);
+  const parent = useSyncExternalStore(store.subscribe, readParent, readParent);
   // With an answer out the orange glyph is the working ring, or a still hollow one while
   // the computer is offline (Answer says which).
   const [out, setOut] = useState<"going" | "held" | null>(null);
@@ -490,6 +509,9 @@ function InboxRow({
           </span>
           <LabelDot session={s.key} />
         </span>
+        {/* Whose child it is, in the words its own page's bar uses: another session's title,
+            so in the meta's tone, never the row's own. */}
+        {parent !== null && <MidCut className="inbox-for" text={`for ${parent}`} />}
         <span className="inbox-age">
           <Ago iso={a.at} />
         </span>
@@ -508,7 +530,7 @@ function InboxRow({
         </span>
         <span className="inbox-where">
           <HarnessGlyph name={s.harness} size="sm" />
-          {s.machine && <span className="inbox-machine">{s.machine}</span>}
+          {s.machine && <MidCut className="chip--machine inbox-machine" text={s.machine} />}
         </span>
         {/* Its hook stopped waiting: why it is down here, and where it can still be answered. */}
         {row.late && (

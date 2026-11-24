@@ -285,7 +285,8 @@ export async function askedPair(
 ): Promise<{
   parent: { key: string; id: string; title: string };
   child: { key: string; id: string; title: string };
-  raise: () => Promise<string>;
+  /** A prompt on the child (or, `"parent"`, on the parent: a session of its own). */
+  raise: (on?: "child" | "parent") => Promise<string>;
   clear: () => Promise<void>;
   end: () => Promise<void>;
 }> {
@@ -333,19 +334,20 @@ export async function askedPair(
     child.ev("session.started", { source: o.subagent ? "fork" : "startup" }, "SessionStart"),
     child.ev("turn.started", { turn_id: "t1", prompt_chars: 60 }, "UserPromptSubmit"),
   ]);
-  const open: string[] = [];
+  const open: { id: string; by: typeof child }[] = [];
   const clear = async () => {
-    for (const id of open.splice(0))
-      await post([child.ev("attention.cleared", { attention_id: id, how: "answered" }, "PreToolUse")]);
+    for (const { id, by } of open.splice(0))
+      await post([by.ev("attention.cleared", { attention_id: id, how: "answered" }, "PreToolUse")]);
   };
   return {
     parent: { key: parent.key, id: parent.id, title: parent.title },
     child: { key: child.key, id: child.id, title: child.title },
-    raise: async () => {
+    raise: async (on = "child") => {
       const id = `exec-${randomUUID()}`;
-      open.push(id);
+      const by = on === "parent" ? parent : child;
+      open.push({ id, by });
       await post([
-        child.ev(
+        by.ev(
           "attention.needed",
           { attention_id: id, kind: "permission", tool: "Bash", message: "npm run migrate" },
           "PermissionRequest",

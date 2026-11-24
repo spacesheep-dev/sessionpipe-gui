@@ -463,6 +463,20 @@ export function oneLine(s: string, max: number): string {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
+/** `s` in at most `max` characters, cut in its middle with "…": a name keeps its start and
+ *  its end, which are what tell two apart ("build-runner-e…-0042-ab"). Whole when it fits. */
+export function midCut(s: string, max: number): string {
+  const chars = [...s];
+  if (chars.length <= max) return s;
+  if (max < 3) return "…";
+  const head = Math.ceil((max - 1) / 2);
+  const tail = max - 1 - head;
+  return `${chars.slice(0, head).join("").trimEnd()}…${chars
+    .slice(chars.length - tail)
+    .join("")
+    .trimStart()}`;
+}
+
 export const eventKind = (type: string) => type.split(".")[0] ?? type;
 
 export const isSubagent = (s: SessionSummary) => !!s.parentId;

@@ -462,6 +462,50 @@ test.describe("phone", () => {
       await pair.end();
     }
   });
+
+  test("a nested child's row names its computer on its second line, cut in the middle when long; its prompt's Inbox row says whom it works for, and a tap opens the child", async ({
+    page,
+    request,
+  }) => {
+    // 40 characters, as the longest names in use.
+    const machine = `tree-${randomUUID().slice(0, 6)}-build-runner-eu-west-1-c5-xl`;
+    const pair = await askedPair(request, { machine, title: "Plan the migration" });
+    try {
+      await openBoard(page);
+      await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+      const kid = page.locator(`article.card[data-flip="${pair.parent.key}"] .kid`, { hasText: pair.child.title });
+      await expect(kid).toBeVisible({ timeout: 15_000 });
+      const where = kid.locator(".kid-where");
+      await expect(where).toHaveAttribute("title", machine);
+      const shown = (await where.locator(".midcut-text").textContent())!;
+      // Whole, or cut in its middle: its start and its end kept.
+      if (shown !== machine) {
+        expect(shown).toContain("…");
+        expect(machine.startsWith(shown.split("…")[0]!)).toBe(true);
+        expect(machine.endsWith(shown.split("…")[1]!)).toBe(true);
+      }
+      // Under the title, inside the row, and the row a finger's height.
+      const row = (await kid.boundingBox())!;
+      const title = (await kid.locator(".kid-title").boundingBox())!;
+      const chip = (await where.boundingBox())!;
+      expect(chip.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
+      expect(chip.x + chip.width).toBeLessThanOrEqual(row.x + row.width + 0.5);
+      expect(row.height).toBeGreaterThanOrEqual(44);
+
+      await pair.raise();
+      await openPage(page, "/inbox");
+      const child = page.locator(`li.inbox-row[data-session="${pair.child.key}"]`);
+      await expect(child.locator(".inbox-for")).toHaveAttribute("title", `for ${pair.parent.title}`, {
+        timeout: 15_000,
+      });
+      const main = child.locator(".inbox-main");
+      expect((await main.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await main.tap();
+      await expect(page).toHaveURL(new RegExp(sessionUrl("codex", pair.child.id)));
+    } finally {
+      await pair.end();
+    }
+  });
 });
 
 // New session on a phone (STEER-SPEC B.6): the compose glyph in the Board's bar opens a

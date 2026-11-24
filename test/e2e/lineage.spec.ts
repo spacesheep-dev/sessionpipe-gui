@@ -6,8 +6,9 @@
 // ask each other; the Feed words the two events. An asked session that needs you takes
 // its working parent's row into Needs you, marked under it, and the count is the Inbox
 // badge's (a subagent's own session too, its agent row marked even in a folded tree); a
-// parent set to Never quiets the session it asked. Desktop only (a finger's:
-// mobile.spec).
+// parent set to Never quiets the session it asked. A child's row on the board names the
+// computer it runs on, and the Inbox row of its prompt names the session it works for.
+// Desktop only (a finger's: mobile.spec).
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { askedPair, openBoard, openPage } from "./helpers.js";
@@ -237,4 +238,41 @@ test.describe("an asked session that needs you", () => {
       await loud.end();
     }
   });
+});
+
+test("a nested child's row names its computer at the row's end; its prompt's Inbox row says whom it works for, a session of its own's says nothing", async ({
+  page,
+  request,
+}) => {
+  const machine = `tree-${randomUUID().slice(0, 6)}`;
+  const pair = await askedPair(request, { machine, title: "Plan the migration" });
+  try {
+    await openBoard(page);
+    await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+    await page.mouse.move(0, 0);
+    const kid = page.locator(`article.card[data-flip="${pair.parent.key}"] .kid`, { hasText: pair.child.title });
+    await expect(kid).toBeVisible({ timeout: 15_000 });
+    // Named, though it is its parent's own computer; the whole name is its tooltip.
+    const where = kid.locator(".kid-where");
+    await expect(where).toHaveText(machine);
+    await expect(where).toHaveAttribute("title", machine);
+    // With a mouse at 1440 the row stays one line: the computer after the title, level with it.
+    const title = (await kid.locator(".kid-title").boundingBox())!;
+    const chip = (await where.boundingBox())!;
+    expect(Math.abs(title.y + title.height / 2 - (chip.y + chip.height / 2))).toBeLessThan(3);
+    expect(chip.x).toBeGreaterThan(title.x);
+    expect((await kid.boundingBox())!.height).toBeLessThan(40);
+
+    await pair.raise();
+    await pair.raise("parent");
+    await openPage(page, "/inbox");
+    const child = page.locator(`li.inbox-row[data-session="${pair.child.key}"]`);
+    await expect(child.locator(".inbox-for")).toHaveText(`for ${pair.parent.title}`, { timeout: 15_000 });
+    await expect(child.locator(".inbox-machine")).toHaveText(machine);
+    const own = page.locator(`li.inbox-row[data-session="${pair.parent.key}"]`);
+    await expect(own).toBeVisible();
+    await expect(own.locator(".inbox-for")).toHaveCount(0);
+  } finally {
+    await pair.end();
+  }
 });

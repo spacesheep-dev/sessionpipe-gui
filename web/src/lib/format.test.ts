@@ -9,6 +9,7 @@ import {
   CC_COMMAND_MAX,
   isPlanReview,
   isQuestion,
+  midCut,
   plainTitle,
   ROW_ASK_MAX,
   rowTime,
@@ -295,5 +296,26 @@ describe("sessionTitle", () => {
     };
     expect(sessionTitle(s)).toBe("Rename formatMoney to formatAmount everywhere");
     expect(sessionTitle({ ...s, lastUser: "something else" })).toBe("Rename formatMo…");
+  });
+});
+
+describe("midCut", () => {
+  it("keeps a name that fits whole", () => {
+    expect(midCut("studio-mac", 10)).toBe("studio-mac");
+    expect(midCut("studio-mac", 40)).toBe("studio-mac");
+  });
+  it("cuts a longer one in its middle, keeping its start and its end, in max characters", () => {
+    const name = "build-runner-eu-west-1-c5-xlarge-0042-ab";
+    expect(midCut(name, 21)).toBe("build-runn…ge-0042-ab");
+    expect([...midCut(name, 21)]).toHaveLength(21);
+    expect(midCut(name, 4)).toBe("bu…b");
+  });
+  it("leaves no space beside the cut, and counts a character outside the BMP as one", () => {
+    expect(midCut("for Plan the big billing migration", 13)).toBe("for Pl…ration");
+    expect(midCut("for a b c d e f", 6)).toBe("for…f");
+    expect(midCut("😀😀😀😀😀😀", 5)).toBe("😀😀…😀😀");
+  });
+  it("is the ellipsis alone under three", () => {
+    expect(midCut("studio-mac", 2)).toBe("…");
   });
 });

@@ -133,6 +133,22 @@ export function askedShown<T extends Pick<SessionSummary, "state">>(
   return { shown, more: list.length - shown.length };
 }
 
-/** The computer an asked session runs on, always named (a later stage runs one on another
- *  computer, and its row must say where), also when it is the asking session's own. */
+/** The session `s` works for, when `get` holds it: the one that asked it (`delegatedBy`),
+ *  whose subagent it is (`parentId`), or that launched it (`launchedBy`), in that order.
+ *  Undefined for a session of its own, or one whose parent is not known here. */
+export function parentOf(
+  s: Pick<SessionSummary, "key" | "harness" | "delegatedBy" | "parentId" | "launchedBy">,
+  get: (key: SessionKey) => SessionSummary | undefined,
+): SessionSummary | undefined {
+  const keys = [s.delegatedBy, s.parentId && (`${s.harness}:${s.parentId}` as SessionKey), s.launchedBy];
+  for (const k of keys) {
+    const p = k && k !== s.key ? get(k) : undefined;
+    if (p) return p;
+  }
+  return undefined;
+}
+
+/** The computer a child session runs on, always named (a later stage runs one on another
+ *  computer, and its row must say where), also when it is its parent's own: the page's
+ *  list of asked sessions, and a child's row under its parent on the board. */
 export const askedComputer = (s: Pick<SessionSummary, "machine">): string => s.machine?.trim() || "Unknown computer";

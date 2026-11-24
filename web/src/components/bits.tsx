@@ -18,7 +18,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/clipboard";
-import { harnessMark, STATE_HINT, STATE_LABEL } from "../lib/format";
+import { harnessMark, midCut, STATE_HINT, STATE_LABEL } from "../lib/format";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
 import { ago, durCoarse, ms, since, tickFor, useNow } from "../lib/time";
 import { Select } from "./Select";
@@ -129,6 +129,63 @@ export function Chip({
   return (
     <span className={`chip chip--${kind ?? "plain"}`} title={title}>
       {children}
+    </span>
+  );
+}
+
+/** One line of quiet text (a chip) that, where its box is too narrow, is cut in its middle
+ *  (lib/format.ts midCut) rather than at its end: a computer's name keeps the start and the
+ *  end that tell two apart. Its box is the stylesheet's (a max-width, a flex share); the
+ *  whole text is its tooltip and what a screen reader reads. Measured again when its row
+ *  (the `li` it is in) changes width. */
+export function MidCut({ text, className }: { text: string; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [fit, setFit] = useState(text);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const row = el?.closest("li") ?? el?.parentElement?.parentElement;
+    if (!row || typeof ResizeObserver !== "function") return;
+    const ro = new ResizeObserver(() => setWidth(Math.round(row.clientWidth)));
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, []);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const node = el?.firstChild;
+    if (!el || !node || node.nodeType !== Node.TEXT_NODE || width === 0) {
+      setFit(text);
+      return;
+    }
+    const fits = () => el.scrollWidth <= el.clientWidth;
+    node.nodeValue = text;
+    if (fits()) {
+      setFit(text);
+      return;
+    }
+    // The most characters that fit, "…" in the middle; under that the line's own end cut.
+    let lo = 3;
+    let hi = [...text].length - 1;
+    let best = 3;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      node.nodeValue = midCut(text, mid);
+      if (fits()) {
+        best = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    const out = midCut(text, best);
+    node.nodeValue = out;
+    setFit(out);
+  }, [text, width]);
+  const cut = fit !== text;
+  return (
+    <span className={`chip midcut ${className ?? ""}`} title={text}>
+      <span className="midcut-text" ref={ref} aria-hidden={cut || undefined}>
+        {fit}
+      </span>
+      {cut && <span className="sr-only">{text}</span>}
     </span>
   );
 }

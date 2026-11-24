@@ -14,6 +14,12 @@ All notable changes to `sessionpipe-gui`. The format follows
   the session; beside it, or in its menu, Open beside and Message, which asks that session
   through Ask another agent with the answer brought back. The launched runs that the bar
   named move into the list.
+- **A session's row under its parent names the computer it runs on, and its prompt in the
+  Inbox says whom it works for.** On the Board, a child session's row has its computer
+  before its state ("studio-mac · needs you"), under its title on a phone. In the Inbox,
+  a prompt from a session another one asked, launched or ran as a subagent says "for" and
+  that session's title after its own. A long name is cut in its middle, its start and end
+  kept.
 
 ### Fixed
 

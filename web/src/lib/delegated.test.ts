@@ -16,6 +16,7 @@ import {
   askedShown,
   foldsAway,
   nestDelegated,
+  parentOf,
   sectionOf,
   waitingIn,
 } from "./delegated";
@@ -235,5 +236,35 @@ describe("a child that needs you lifts its parent into Needs you", () => {
     const b = board([row("claude-code:p", "working"), row("codex:c", "working", "claude-code:p")]);
     expect(b).toMatchObject({ rows: [], count: 0, badge: 0 });
     expect(b.section["claude-code:p"]).toBe("working");
+  });
+});
+
+describe('parentOf (the Inbox\'s "for <parent>")', () => {
+  const all = new Map(
+    [
+      { key: "claude-code:p", harness: "claude-code", title: "Plan the migration" },
+      { key: "claude-code:q", harness: "claude-code", title: "Launch the batch" },
+    ].map((x) => [x.key, x as unknown as SessionSummary]),
+  );
+  const get = (k: string) => all.get(k);
+  const child = (o: Partial<SessionSummary>) =>
+    ({ key: "codex:c", harness: "codex", ...o }) as unknown as SessionSummary;
+  it("names the session that asked it, whose subagent it is, or that launched it", () => {
+    expect(parentOf(child({ delegatedBy: "claude-code:p" }), get)?.key).toBe("claude-code:p");
+    expect(parentOf(child({ harness: "claude-code", key: "claude-code:c", parentId: "p" }), get)?.key).toBe(
+      "claude-code:p",
+    );
+    expect(parentOf(child({ launchedBy: "claude-code:q" }), get)?.key).toBe("claude-code:q");
+    // Asked and launched: the one that asked.
+    expect(parentOf(child({ delegatedBy: "claude-code:p", launchedBy: "claude-code:q" }), get)?.key).toBe(
+      "claude-code:p",
+    );
+  });
+  it("names none for a session of its own, one whose parent is not known here, or itself", () => {
+    expect(parentOf(child({}), get)).toBeUndefined();
+    expect(parentOf(child({ delegatedBy: "claude-code:gone" }), get)).toBeUndefined();
+    // A subagent's parent is of its own harness: a Codex child's parentId names no Claude session.
+    expect(parentOf(child({ parentId: "p" }), get)).toBeUndefined();
+    expect(parentOf(child({ key: "claude-code:p", delegatedBy: "claude-code:p" }), get)).toBeUndefined();
   });
 });
