@@ -378,6 +378,54 @@ test.describe("phone", () => {
     await expect(conn).toHaveText("live");
     await noSidewaysScroll(page);
   });
+
+  test("a row's long-press menu has no Cancel: a tap outside it, Esc or its Close shuts it", async ({ page }) => {
+    await openBoard(page);
+    const sheet = page.locator(".menu-sheet");
+    const hold = async () => {
+      // A finger held on the first row's title; again if the live board redrew it meanwhile.
+      await expect(async () => {
+        await page
+          .locator("article.card .card-title")
+          .first()
+          .evaluate((el) => {
+            const r = el.getBoundingClientRect();
+            el.dispatchEvent(
+              new PointerEvent("pointerdown", {
+                bubbles: true,
+                pointerType: "touch",
+                clientX: r.left + 4,
+                clientY: r.top + 4,
+              }),
+            );
+          });
+        await expect(sheet.getByRole("menuitem", { name: "Hide", exact: true })).toBeVisible({ timeout: 2_000 });
+      }).toPass();
+      // The finger lifts: its click is the hold's, not a tap on the row (ContextMenu.tsx).
+      await page.evaluate(() => {
+        document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" }));
+        document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    };
+    for (const how of ["tap outside", "Escape", "Close"] as const) {
+      await hold();
+      await expect(sheet.getByRole("button", { name: "Cancel" }), how).toHaveCount(0);
+      await expect(sheet, how).not.toContainText("Cancel");
+      if (how === "tap outside") {
+        // Above the sheet, on the dimmed page.
+        const top = (await sheet.boundingBox())!.y;
+        expect(top, how).toBeGreaterThan(40);
+        await page.touchscreen.tap(195, top / 2);
+      } else if (how === "Escape") {
+        await page.keyboard.press("Escape");
+      } else {
+        // What VoiceOver reaches and activates: the dimmed page is a button named Close.
+        await page.getByRole("button", { name: "Close", exact: true }).evaluate((el) => (el as HTMLElement).click());
+      }
+      await expect(sheet, how).toHaveCount(0);
+    }
+  });
 });
 
 // New session on a phone (STEER-SPEC B.6): the compose glyph in the Board's bar opens a

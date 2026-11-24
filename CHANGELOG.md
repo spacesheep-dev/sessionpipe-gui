@@ -60,6 +60,13 @@ All notable changes to `sessionpipe-gui`. The format follows
   the Mac app "This Mac can't send yet.". Where a prompt's computer has not added the
   device yet, a touch screen no longer shows Allow and Deny greyed out, under the prompt or
   in the Inbox: the sentence and Approve this iPhone stand alone.
+- **Search on a touch screen has Cancel beside its field.** While the field is in use or
+  holds words, Cancel clears them, puts the keyboard away and brings the title and the
+  filters back; the small clear button in the field now takes a finger's whole tap. A
+  window with a mouse is unchanged.
+- **A row's menu and the Feed's Filter on a touch screen have no Cancel.** A tap anywhere
+  outside closes them, as iOS's menus do, so they are a row shorter. A confirm still asks
+  with Cancel, and a window with a mouse keeps it.
 
 ### Fixed
 

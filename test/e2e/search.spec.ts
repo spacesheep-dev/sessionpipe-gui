@@ -450,6 +450,30 @@ test.describe("search", () => {
     await expect(menu.getByRole("menuitem", { name: /^More from / }).first()).toBeVisible();
   });
 
+  test("a narrow window with a mouse has the phone's field as before: no Cancel, the clear button its own 22", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 700, height: 800 });
+    await page.goto("/search?mock=1&q=webhook");
+    await expect(page.locator(".sx--phone .sx-phonefield")).toBeVisible();
+    const f = field(page);
+    await f.click();
+    await expect(f).toBeFocused();
+    await expect(page.locator(".sx-cancel")).toHaveCount(0);
+    const clear = page.getByRole("button", { name: "Clear the field" });
+    const target = await clear.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const takes = (x: number, y: number) => {
+        const t = document.elementFromPoint(x, y);
+        return !!t && el.contains(t);
+      };
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      return { size: [r.width, r.height], beside: takes(cx + 15, cy) || takes(cx, cy + 15) };
+    });
+    expect(target).toEqual({ size: [22, 22], beside: false });
+  });
+
   test("⌘K finds what was said under In transcripts, and ⌘↵ searches all sessions", async ({ page }) => {
     await warmSearch(page, "board");
     await page.keyboard.press("ControlOrMeta+k");
@@ -567,7 +591,8 @@ test.describe("search: the phone", () => {
     const f = field(page);
     await f.fill("webhook");
     await expect(rows(page).first()).toBeVisible({ timeout: 15_000 });
-    const box = (await page.locator(".sx-search").boundingBox())!;
+    // The field's row is the page's width (the field shares it with Cancel while in use).
+    const box = (await page.locator(".sx-fieldwrap").boundingBox())!;
     expect(box.width).toBeGreaterThan(300);
     const { scrollWidth, innerWidth } = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
@@ -589,6 +614,89 @@ test.describe("search: the phone", () => {
       .first()
       .tap();
     await expect(page.getByRole("search", { name: "Find in this session" })).toBeVisible();
+  });
+
+  test("Cancel beside the field while it is in use ends the search: the words, the keyboard, and the title and the filters back; the clear button takes a finger's 44", async ({
+    page,
+  }) => {
+    // A folding phone's outer display: short enough that the keyboard folds the title away.
+    await page.setViewportSize({ width: 466, height: 678 });
+    // The keyboard as iOS raises it for the field, and lowers it when the field lets go:
+    // lib/keyboardInset.ts reads it from the visual viewport, which a test cannot shrink.
+    await page.addInitScript(() => {
+      const kb = (on: boolean) => {
+        const root = document.documentElement;
+        if (on) {
+          root.style.setProperty("--kb", "300px");
+          root.setAttribute("data-kb", "");
+        } else {
+          root.style.removeProperty("--kb");
+          root.removeAttribute("data-kb");
+        }
+      };
+      document.addEventListener("focusin", (e) => kb(!!(e.target as Element).matches?.("input[data-search]")));
+      document.addEventListener("focusout", () => kb(false));
+    });
+    await page.goto("/search?mock=1");
+    const f = field(page);
+    const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+    const title = page.locator(".sx--phone .bar-large");
+    const filters = page.locator(".sx--phone .sx-filters");
+    const row = page.locator(".sx-phonefield");
+    await expect(f).toBeVisible();
+    await expect(title).toBeVisible();
+    await expect(cancel).toHaveCount(0);
+    const was = (await row.boundingBox())!;
+    const wide = (await page.locator(".sx-search").boundingBox())!;
+    await f.tap();
+    await f.pressSequentially("webhook");
+    await expect(cancel).toBeVisible();
+    await expect(title).toBeHidden();
+    await expect(filters).toBeHidden();
+    // The field gives Cancel its room in its own row: nothing under it moves.
+    const box = (await f.locator("xpath=ancestor::label").boundingBox())!;
+    const c = (await cancel.boundingBox())!;
+    const now = (await row.boundingBox())!;
+    expect(now.height).toBe(was.height);
+    expect(box.width).toBeLessThan(wide.width);
+    expect(box.x + box.width).toBeLessThan(c.x);
+    expect(Math.abs(c.y + c.height / 2 - (box.y + box.height / 2))).toBeLessThan(1);
+    expect(c.height).toBeGreaterThanOrEqual(44);
+    // The clear button's glyph keeps its size; a finger anywhere in 44 by 44 round it lands.
+    const clear = page.getByRole("button", { name: "Clear the field" });
+    const target = await clear.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const glyph = el.querySelector("svg")!.getBoundingClientRect();
+      const takes = (x: number, y: number) => {
+        const t = document.elementFromPoint(x, y);
+        return !!t && el.contains(t);
+      };
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      return {
+        glyph: [glyph.width, glyph.height],
+        across: takes(cx - 21.5, cy) && takes(cx + 21.5, cy),
+        down: takes(cx, cy - 21.5) && takes(cx, cy + 21.5),
+      };
+    });
+    expect(target).toEqual({ glyph: [14, 14], across: true, down: true });
+    // Cancel: no words, the keyboard down, the focus on the page, the title and filters back.
+    await cancel.tap();
+    await expect(f).toHaveValue("");
+    await expect(page.locator("main#main")).toBeFocused();
+    await expect(page.locator("html")).not.toHaveAttribute("data-kb");
+    await expect(cancel).toHaveCount(0);
+    await expect(title).toBeVisible();
+    await expect(filters).not.toHaveCSS("display", "none");
+    await expect(page).not.toHaveURL(/q=/);
+    // Words and no keyboard: Cancel stays while the field holds them, as on iOS.
+    await f.tap();
+    await f.fill("webhook");
+    await f.blur();
+    await expect(cancel).toBeVisible();
+    await cancel.tap();
+    await expect(f).toHaveValue("");
+    await expect(cancel).toHaveCount(0);
   });
 
   test("at 320 wide a range of days keeps its two dates, Cancel and Apply inside its card", async ({ page }) => {
