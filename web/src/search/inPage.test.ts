@@ -82,6 +82,33 @@ describe("the search reader in the page", () => {
     expect((await c.sessions({ q: "machine:this" })).sessions).toEqual([]);
   });
 
+  it("handles in: and -in: field restrictions, empty field sets, and browse prompts consistently", async () => {
+    const c = client();
+    // Contradictory in: clauses search no field (not even titles) and offer to drop filters.
+    const empty = await c.sessions({ q: "webhook in:prompt -in:prompt" });
+    expect(empty.sessions).toEqual([]);
+    expect(empty.hint).toEqual({ kind: "filters", query: "webhook" });
+    expect((await c.sessions({ q: "retry in:prompt -in:prompt" })).sessions).toEqual([]);
+    // -in:prompt excludes prompts while keeping replies, tools, and titles.
+    const noPrompt = await c.sessions({ q: "retry -in:prompt" });
+    expect(noPrompt.sessions.map((s) => s.id)).toEqual(["aaaa1111"]);
+    expect(noPrompt.sessions[0]!.hits.map((h) => h.field)).toEqual(["tool", "reply"]);
+    const titleAndTool = await c.sessions({ q: "webhook -in:prompt" });
+    expect(titleAndTool.sessions.map((s) => s.id)).toEqual(["aaaa1111"]);
+    expect(titleAndTool.sessions[0]!.titleMarks).toEqual([[16, 23]]);
+    expect(titleAndTool.sessions[0]!.hits.map((h) => h.field)).toEqual(["tool"]);
+    const titleOnlyMatch = await c.sessions({ q: "invoice -in:prompt" });
+    expect(titleOnlyMatch.sessions.map((s) => s.id)).toEqual(["aaaa1111"]);
+    expect(titleOnlyMatch.sessions[0]!.titleMarks).toEqual([[8, 15]]);
+    expect(titleOnlyMatch.sessions[0]!.hits).toEqual([]);
+    // Title matches do not satisfy a query whose in: excludes "title".
+    expect((await c.sessions({ q: "webhook in:reply" })).sessions).toEqual([]);
+    // A browse query with an in: filter that leaves out prompts attaches no prompt hit.
+    const browseReply = await c.sessions({ q: "agent:codex in:reply" });
+    expect(browseReply.sessions.map((s) => s.id)).toEqual(["bbbb2222"]);
+    expect(browseReply.sessions[0]!.hits).toEqual([]);
+  });
+
   it("leaves out a date that does not read, also when it is excluded", async () => {
     const c = client();
     const ids = async (q: string) => (await c.sessions({ q: `${q} the` })).sessions.map((s) => s.id).sort();

@@ -136,6 +136,7 @@ function window(text: string, marks: SearchMark[], max = 160): { text: string; m
 }
 
 const WEIGHT: Record<SearchDocField, number> = { prompt: 2, reply: 1, tool: 0.7 };
+const FIELDS: readonly (SearchDocField | "title")[] = ["prompt", "reply", "tool", "title"];
 
 const refOf = (s: Sess, i: number) => `m${i}-${s.id.slice(0, 4)}`;
 const indexOfRef = (ref: string | undefined): number => {
@@ -230,7 +231,16 @@ export function pageSearch(src: PageSearchSource): SearchClient {
 
   const run = (q: string, sort: "best" | "newest", live: boolean, nHits: number, tz: number) => {
     const p = parseSearch(q, { live });
-    const fields = p.filters.in;
+    const inPos = p.filters.in ?? [];
+    const inNeg = p.notFilters.in ?? [];
+    const posF = FIELDS.filter((f) => inPos.includes(f));
+    const negF = FIELDS.filter((f) => inNeg.includes(f));
+    let fields: (SearchDocField | "title")[] | undefined;
+    if (posF.length || negF.length) {
+      const base = posF.length ? posF : [...FIELDS];
+      fields = base.filter((f) => !negF.includes(f));
+    }
+    const titleOk = !fields || fields.includes("title");
     const pos = p.clauses.filter((c) => !c.not);
     const neg = p.clauses.filter((c) => c.not);
     const browse = isBrowse(p);
@@ -239,10 +249,13 @@ export function pageSearch(src: PageSearchSource): SearchClient {
     for (const s of src.all()) {
       if (!allowed(s, p, tz)) continue;
       const docOk = (d: Doc) => !fields || fields.includes(d.field);
-      if (neg.some((c) => s.docs.some((d) => docOk(d) && find(d.text, c).length) || find(s.title, c).length)) continue;
+      if (
+        neg.some((c) => s.docs.some((d) => docOk(d) && find(d.text, c).length) || (titleOk && find(s.title, c).length))
+      )
+        continue;
       const titleMarks: SearchMark[] = [];
       let titleScore = 0;
-      if (!fields || fields.includes("title"))
+      if (titleOk)
         for (const c of pos) {
           const m = find(s.title, c);
           if (m.length) {
@@ -253,7 +266,7 @@ export function pageSearch(src: PageSearchSource): SearchClient {
       const scored: { i: number; score: number; marks: SearchMark[]; all: boolean }[] = [];
       const seen = new Set<number>();
       s.docs.forEach((d, i) => {
-        if (!docOk(d) || (fields?.length === 1 && fields[0] === "title")) return;
+        if (!docOk(d)) return;
         let score = 0;
         const marks: SearchMark[] = [];
         let n = 0;
@@ -268,27 +281,32 @@ export function pageSearch(src: PageSearchSource): SearchClient {
         }
         if (n) scored.push({ i, score, marks: marks.sort((a, b) => a[0] - b[0]), all: n === pos.length });
       });
-      pos.forEach((c, ci) => {
-        if (find(s.title, c).length) seen.add(ci);
-      });
+      if (titleOk)
+        pos.forEach((c, ci) => {
+          if (find(s.title, c).length) seen.add(ci);
+        });
       if (!browse && seen.size < pos.length) continue;
       let hits: SessionSearchHit[];
       let more = 0;
       let score: number;
       if (browse) {
-        const first = s.docs.findIndex((d) => d.field === "prompt");
-        const d = s.docs[Math.max(0, first)]!;
-        const w = window(d.text, []);
-        hits = [
-          {
-            field: d.field,
-            at: new Date(d.at).toISOString(),
-            text: w.text,
-            marks: [],
-            ref: refOf(s, Math.max(0, first)),
-            seq: d.seq,
-          },
-        ];
+        if (!fields || fields.includes("prompt")) {
+          const first = s.docs.findIndex((d) => d.field === "prompt");
+          const d = s.docs[Math.max(0, first)];
+          if (d) {
+            const w = window(d.text, []);
+            hits = [
+              {
+                field: d.field,
+                at: new Date(d.at).toISOString(),
+                text: w.text,
+                marks: [],
+                ref: refOf(s, Math.max(0, first)),
+                seq: d.seq,
+              },
+            ];
+          } else hits = [];
+        } else hits = [];
         score = 0;
       } else {
         const ranked = [...scored].sort((a, b) =>
