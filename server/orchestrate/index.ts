@@ -23,7 +23,19 @@ import type { Control } from "../control/index.js";
 import { EXPIRES_MAX_MS } from "../control/state.js";
 import { SIGNER_FAULTS } from "../control/ui.js";
 import { HttpError } from "../http/router.js";
-import { advance, cancel, claim, fail, newRun, type Online, RunError, runEnded, sent, settle } from "./runs.js";
+import {
+  advance,
+  cancel,
+  claim,
+  fail,
+  newRun,
+  type Online,
+  RunError,
+  runEnded,
+  sendingStep,
+  sent,
+  settle,
+} from "./runs.js";
 import { OrchestrateStore, readWorkflow, WorkflowError } from "./store.js";
 
 export interface OrchestrateDeps {
@@ -98,9 +110,7 @@ export function createOrchestrate(deps: OrchestrateDeps): Orchestrate {
   const stillSending = (run: WorkflowRun, stepId: string, rev: number): void => {
     if (rev > run.rev) throw new RunError(412, "conflict", "the run moved; read it again");
     if (runEnded(run)) throw new RunError(412, "conflict", `the run is ${run.status}`);
-    const s = run.steps[stepId];
-    if (!s) throw new RunError(404, "not_found", "no such step");
-    if (s.status !== "sending") throw new RunError(412, "conflict", "the step was not being sent");
+    sendingStep(run, stepId, rev);
   };
   const markSent = (runId: string, stepId: string, commandId: string, rev: number): WorkflowRun => {
     // The command as queued names the step's session from now on (a start's uuid, a

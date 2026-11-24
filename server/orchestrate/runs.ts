@@ -248,7 +248,7 @@ export function advance(run: WorkflowRun, now: number, online: Online): Workflow
         now - Date.parse(s.claimedAt ?? s.readyAt ?? at) > CLAIM_TTL_MS
       ) {
         const { claimedAt: _stale, ...rest } = s;
-        set(step.id, { ...rest, status: "ready", readyAt: at });
+        set(step.id, { ...rest, status: "ready", readyAt: at, claimedAfterRev: run.rev });
       } else if (s.status === "sent" && now - Date.parse(s.sentAt ?? at) > SENT_TTL_MS) {
         set(step.id, { ...s, status: "failed", error: NO_ANSWER, endedAt: at });
       }
@@ -298,6 +298,20 @@ export function claim(run: WorkflowRun, stepId: string, rev: number, now: number
  *  `session` is the one the command named (the uuid a start chose, the session a prompt
  *  goes to): known from this moment, so the run view can link it and a cancel can offer
  *  to stop it while the step runs; the ack's own session replaces it when it settles. */
+/** Step `stepId` when it is still `sending` for a claim at `rev`, rejecting stale revs from before expiry. */
+export function sendingStep(run: WorkflowRun, stepId: string, rev: number): StepRun {
+  if (rev > run.rev) throw new RunError(412, "conflict", "the run moved; read it again");
+  const s = stepOf(run, stepId);
+  if (s.status !== "sending") throw new RunError(412, "conflict", "the step was not being sent");
+  if (s.claimedAfterRev !== undefined && rev <= s.claimedAfterRev) {
+    throw new RunError(412, "conflict", "another tab has it");
+  }
+  return s;
+}
+
+/** A command was queued for the claimed step. Guarded against another tab having taken or
+ *  cancelled the claim in between; a rev from behind another step's move still lands unless
+ *  a previous claim on this step already expired at or after that rev. */
 export function sent(
   run: WorkflowRun,
   stepId: string,
@@ -307,15 +321,13 @@ export function sent(
   online: Online,
   session?: SessionKey,
 ): WorkflowRun {
-  if (rev > run.rev) throw new RunError(412, "conflict", "the run moved; read it again");
-  const s = stepOf(run, stepId);
-  if (s.status !== "sending") throw new RunError(412, "conflict", "the step was not being sent");
+  const { claimedAfterRev: _after, ...rest } = sendingStep(run, stepId, rev);
   const next: WorkflowRun = {
     ...run,
     rev: run.rev + 1,
     steps: {
       ...run.steps,
-      [stepId]: { ...s, status: "sent", commandId, sentAt: iso(now), ...(session ? { session } : {}) },
+      [stepId]: { ...rest, status: "sent", commandId, sentAt: iso(now), ...(session ? { session } : {}) },
     },
   };
   return advance(next, now, online);
@@ -334,10 +346,7 @@ export function fail(
   now: number,
   online: Online,
 ): WorkflowRun {
-  if (rev > run.rev) throw new RunError(412, "conflict", "the run moved; read it again");
-  const s = stepOf(run, stepId);
-  if (s.status !== "sending") throw new RunError(412, "conflict", "the step was not being sent");
-  const { claimedAt: _claimed, ...rest } = s;
+  const { claimedAt: _claimed, claimedAfterRev: _after, ...rest } = sendingStep(run, stepId, rev);
   const next: WorkflowRun = {
     ...run,
     rev: run.rev + 1,

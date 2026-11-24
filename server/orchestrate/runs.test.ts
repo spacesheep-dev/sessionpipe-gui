@@ -304,6 +304,19 @@ describe("waiting", () => {
     // The first tab's late command id no longer fits: the rev moved.
     expect(() => sent(run, "a", CMD, run.rev, T0, all)).not.toThrow();
     expect(() => sent(again, "a", CMD, run.rev, T0, all)).toThrow(RunError);
+    // And if a second tab has since re-claimed the step, the first tab's stale rev still fails
+    // both sent() and fail() rather than stealing or failing the second tab's active claim,
+    // while the second tab's rev still succeeds even if another step moved the run meanwhile.
+    const w2 = workflow([step("a", "A"), step("b", "B", { after: [] })]);
+    let par = newRun(w2, { id: "r2", now: T0, online: all });
+    par = claim(par, "a", par.rev, T0);
+    const staleRev = par.rev;
+    const parAgain = advance(par, T0 + CLAIM_TTL_MS + 1, all);
+    const second = claim(parAgain, "a", parAgain.rev, T0 + CLAIM_TTL_MS + 2);
+    const moved = claim(second, "b", second.rev, T0 + CLAIM_TTL_MS + 3);
+    expect(() => sent(moved, "a", CMD, staleRev, T0 + CLAIM_TTL_MS + 4, all)).toThrow(RunError);
+    expect(() => fail(moved, "a", "stale refusal", staleRev, T0 + CLAIM_TTL_MS + 4, all)).toThrow(RunError);
+    expect(() => sent(moved, "a", CMD2, second.rev, T0 + CLAIM_TTL_MS + 4, all)).not.toThrow();
   });
 });
 

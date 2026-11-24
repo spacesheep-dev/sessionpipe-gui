@@ -1750,6 +1750,8 @@ export interface StepRun {
    *  signer rule and for a claim that never came back. */
   readyAt?: string;
   claimedAt?: string;
+  /** Latest run rev before an expired claim was re-offered; rejects stale claims after re-claim. */
+  claimedAfterRev?: number;
   sentAt?: string;
   endedAt?: string;
 }
