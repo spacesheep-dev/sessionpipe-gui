@@ -528,6 +528,28 @@
   flex: 1;
   min-width: 0;
 }
+/* A child session's title, then the computer it runs on as a chip in the meta's tone at
+   the row's end, before its state ("studio-mac · working"): the title gives way first; the
+   computer keeps up to 40% of the line, cut in its middle past that. */
+.kid-text {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.kid-where {
+  flex: none;
+  max-width: 40%;
+  margin-left: auto;
+  line-height: inherit;
+}
+/* "·" between the computer and the state, a mark a screen reader skips. */
+/* As tight as the card's meta line: 4px each side, not the row's 8px gap. */
+.kid-sep {
+  margin-inline: -4px;
+  color: var(--fg-4);
+}
 .kid-tool {
   color: var(--fg-3);
   font-family: var(--font-ui);
@@ -535,6 +557,15 @@
 }
 .kid-state {
   color: var(--fg-3);
+}
+/* A child that needs you, the reason its parent's row is in Needs you: its title in ink,
+   its state in the needs-you colour, as a row's prompt kind is weighted. */
+.kid[data-needs] {
+  color: var(--fg);
+}
+.kid[data-needs] > .kid-state {
+  color: var(--needs-fg);
+  font-weight: 500;
 }
 .kid > .card-muted {
   margin-right: 0;
@@ -860,6 +891,27 @@
   /* Under the time, its right edge on the time's. */
   .card-foot {
     justify-content: flex-end;
+  }
+  /* A child session's row: two lines, its title over the computer it runs on, as its
+     parent's row puts where it runs on a line of its own. */
+  .kid:has(> .kid-text) {
+    padding-block: 5px;
+  }
+  .kid-text {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
+  }
+  .kid-text > .kid-title {
+    flex: none;
+  }
+  .kid-where {
+    align-self: flex-start;
+    max-width: 100%;
+    margin-left: 0;
+  }
+  .kid-sep {
+    display: none;
   }
 }
 

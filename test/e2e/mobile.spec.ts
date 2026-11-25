@@ -5,7 +5,8 @@
 // control strip sits above the tabs (its Return a new line, its line's way on a finger's
 // 44 points), New session is a full-height sheet, a pull down a
 // list refreshes it, and an inbox row pushes its session's page (never the desktop's
-// panel as a sheet, and nothing of that panel comes back on the next launch).
+// panel as a sheet, and nothing of that panel comes back on the next launch). An asked
+// session that needs you takes its parent's row into Needs you, the tab's badge its count.
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
@@ -17,7 +18,7 @@ import {
   seenSetupHere,
   sinkToken,
 } from "./control-helpers.js";
-import { composer, EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
+import { askedPair, composer, EVENTS, INFO, kidBoxes, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
 
 /** A finger down the page from its top, as touch events (page.touchscreen only taps):
  *  lands at y 200, moves `by` px in steps, and stays down until `lift` is called. */
@@ -424,6 +425,140 @@ test.describe("phone", () => {
         await page.getByRole("button", { name: "Close", exact: true }).evaluate((el) => (el as HTMLElement).click());
       }
       await expect(sheet, how).toHaveCount(0);
+    }
+  });
+
+  test("an asked session that needs you takes its working parent into Needs you, marked under it, a finger's row; the tab's badge is the count", async ({
+    page,
+    request,
+  }) => {
+    const pair = await askedPair(request, { machine: `tree-${randomUUID().slice(0, 6)}`, title: "Plan the migration" });
+    const parent = page.locator(`section.group--needs_you article.card[data-flip="${pair.parent.key}"]`);
+    try {
+      await openBoard(page);
+      await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+      await pair.raise();
+      await expect(parent).toBeVisible({ timeout: 15_000 });
+      await expect(parent).toHaveClass(/card--working/);
+      const kid = parent.locator(".kid[data-needs]");
+      await expect(kid).toContainText(pair.child.title);
+      expect((await kid.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const num = (sel: string) => Number(document.querySelector(sel)?.textContent ?? 0);
+              const badge = num("nav.tabbar a[data-nav='inbox'] .nav-badge");
+              const heading = num("section.group--needs_you .group-count");
+              return badge > 0 && badge === heading ? "agree" : JSON.stringify({ badge, heading });
+            }),
+          { timeout: 15_000 },
+        )
+        .toBe("agree");
+      // A tap on it pushes the asked session's page, where its prompt is answered.
+      await kid.tap();
+      await expect(page).toHaveURL(new RegExp(sessionUrl("codex", pair.child.id)));
+    } finally {
+      await pair.end();
+    }
+  });
+
+  test("a nested child's row names its computer on its second line, cut in the middle when long; its prompt's Inbox row says whom it works for, and a tap opens the child", async ({
+    page,
+    request,
+  }) => {
+    // 40 characters, as the longest names in use.
+    const machine = `tree-${randomUUID().slice(0, 6)}-build-runner-eu-west-1-c5-xl`;
+    const pair = await askedPair(request, { machine, title: "Plan the migration" });
+    try {
+      await openBoard(page);
+      await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+      const kid = page.locator(`article.card[data-flip="${pair.parent.key}"] .kid`, { hasText: pair.child.title });
+      await expect(kid).toBeVisible({ timeout: 15_000 });
+      const where = kid.locator(".kid-where");
+      await expect(where).toHaveAttribute("title", machine);
+      const shown = (await where.locator(".midcut-text").textContent())!;
+      // Whole, or cut in its middle: its start and its end kept.
+      if (shown !== machine) {
+        expect(shown).toContain("…");
+        expect(machine.startsWith(shown.split("…")[0]!)).toBe(true);
+        expect(machine.endsWith(shown.split("…")[1]!)).toBe(true);
+      }
+      // Under the title, inside the row, and the row a finger's height; read in one frame,
+      // as a sliding card moves all three together.
+      const { row, title, chip } = await kidBoxes(kid);
+      expect(chip.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
+      expect(chip.x + chip.width).toBeLessThanOrEqual(row.x + row.width + 0.5);
+      expect(row.height).toBeGreaterThanOrEqual(44);
+
+      await pair.raise();
+      await openPage(page, "/inbox");
+      const child = page.locator(`li.inbox-row[data-session="${pair.child.key}"]`);
+      await expect(child.locator(".inbox-for")).toHaveAttribute("title", `for ${pair.parent.title}`, {
+        timeout: 15_000,
+      });
+      // "for …" has the room the computer leaves on its line: a short one is whole. Nothing
+      // drawn is cut at its end or runs past its box.
+      const forLine = child.locator(".inbox-for .midcut-text");
+      await expect(forLine).toHaveText(`for ${pair.parent.title}`);
+      for (const line of [forLine, child.locator(".inbox-machine .midcut-text")]) {
+        expect((await line.textContent())!.endsWith("…")).toBe(false);
+        expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      }
+      // A 90-character parent is cut once, at its end after a whole word, "for " kept.
+      const long = await askedPair(request, {
+        machine: "lab-mac",
+        title: "Find every page the move to the new docs site broke and fix the links that point to them again",
+      });
+      try {
+        await long.raise();
+        const longFor = page.locator(`li.inbox-row[data-session="${long.child.key}"] .inbox-for`);
+        await expect(longFor).toHaveAttribute("title", `for ${long.parent.title}`, { timeout: 15_000 });
+        const line = longFor.locator(".midcut-text");
+        const cut = (await line.textContent())!;
+        expect(cut.split("…")).toHaveLength(2);
+        expect(cut.endsWith("…")).toBe(true);
+        expect(cut.startsWith("for ")).toBe(true);
+        expect(`for ${long.parent.title}`.startsWith(`${cut.slice(0, -1)} `)).toBe(true);
+        expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+        // Its line is as full as whole words allow: with the next word it would not fit.
+        // (Measured as the chip measures, in the line's own text node. The room left at the
+        // end is the next word's, so it is no fixed number of pixels: it differs by font.)
+        const next = await line.evaluate((el, whole) => {
+          const node = el.firstChild as Text;
+          const shown = node.nodeValue ?? "";
+          const head = shown.slice(0, -1);
+          const word = whole.slice(head.length).trim().split(/\s+/)[0] ?? "";
+          const room = el.parentElement!.getBoundingClientRect().width;
+          const r = document.createRange();
+          node.nodeValue = `${head} ${word}…`;
+          r.selectNodeContents(node);
+          const width = r.getBoundingClientRect().width;
+          node.nodeValue = shown;
+          return { word, width, room };
+        }, `for ${long.parent.title}`);
+        expect(next.word).not.toBe("");
+        expect(next.width).toBeGreaterThan(next.room + 0.5);
+        await expect(line).toHaveText(cut);
+        // Its box, not only its line, stays inside the row: at or left of the row's end and
+        // of the time's.
+        for (const row of [child, page.locator(`li.inbox-row[data-session="${long.child.key}"]`)]) {
+          const ends = await row.evaluate((li) => {
+            const end = (sel: string) => li.querySelector(sel)!.getBoundingClientRect().right;
+            return { for: end(".inbox-for"), main: end(".inbox-main"), age: end(".inbox-age") };
+          });
+          expect(ends.for).toBeLessThanOrEqual(ends.main + 0.5);
+          expect(ends.for).toBeLessThanOrEqual(ends.age + 0.5);
+        }
+      } finally {
+        await long.end();
+      }
+      const main = child.locator(".inbox-main");
+      expect((await main.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await main.tap();
+      await expect(page).toHaveURL(new RegExp(sessionUrl("codex", pair.child.id)));
+    } finally {
+      await pair.end();
     }
   });
 });

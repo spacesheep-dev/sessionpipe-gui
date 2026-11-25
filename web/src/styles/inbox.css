@@ -198,6 +198,32 @@
 .inbox-where .glyph-wrap {
   color: var(--fg-4);
 }
+/* A child session's row says whom it works for: "for <that session's title>", quiet,
+   after the title on line 1, in all the room up to the time (over the computer's column
+   too: the time has a track of its own). The title comes first: it gives way only so that
+   "for …" keeps 6em, and only past what the computer's column already leaves free. Short of
+   room, the title after "for " is cut after its last whole word that fits (bits.tsx EndCut). Rows of their own keep
+   their two columns. */
+.inbox-main:has(> .inbox-for) {
+  grid-template-columns:
+    28px fit-content(calc(100% - 28px - var(--meta-col) - 24px - 6em))
+    minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "lead title for  for   age"
+    ".    what  what where where";
+}
+.inbox-for {
+  grid-area: for;
+  justify-self: start;
+  /* The gap before it comes out of its room, so a cut "for …" keeps the time's 12px. */
+  max-width: calc(100% - 12px);
+  margin-left: 12px;
+}
+/* "·" after "for …" where it leads the computer's line (the narrow row, below). */
+.inbox-sep {
+  display: none;
+  color: var(--fg-4);
+}
 /* A prompt its hook stopped waiting on: why, under the rest of the row, at every width. */
 .inbox-late {
   grid-column: 2 / -1;
@@ -234,7 +260,7 @@
     pointer-events: auto;
   }
   .inbox-row--answerable:is(:hover, [aria-current="true"], :focus-within):has(.inbox-answer .btn):not(:has(.inbox-note))
-    :is(.inbox-age, .inbox-where) {
+    :is(.inbox-age, .inbox-where, .inbox-for) {
     visibility: hidden;
   }
 }
@@ -254,7 +280,7 @@
   opacity: 0.45;
 }
 @media (hover: hover) {
-  .inbox-row--answerable:has(.inbox-answer[data-chosen] .btn) :is(.inbox-age, .inbox-where) {
+  .inbox-row--answerable:has(.inbox-answer[data-chosen] .btn) :is(.inbox-age, .inbox-where, .inbox-for) {
     visibility: hidden;
   }
   .inbox-row:has(.inbox-answer[data-chosen]) .inbox-answer {
@@ -437,6 +463,26 @@
   }
   .inbox-where {
     justify-self: start;
+    max-width: 100%;
+    min-width: 0;
     margin-left: 0;
+  }
+  /* A child's: the line of where it runs, then "·" and "for …" in all the room the
+     computer leaves (the computer keeps up to 45% of the line, cut in its middle past it). */
+  .inbox-main:has(> .inbox-for) {
+    grid-template-columns: 28px fit-content(45%) minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "lead title title title age"
+      ".    what  what  what  what"
+      ".    where for   for   for";
+  }
+  /* Its box is laid out from the whole text, so the gap after "·" comes out of its room:
+     never past the row's end. */
+  .inbox-for {
+    margin-left: 6px;
+    max-width: calc(100% - 6px);
+  }
+  .inbox-sep {
+    display: inline;
   }
 }

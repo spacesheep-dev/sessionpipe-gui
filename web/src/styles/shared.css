@@ -331,6 +331,24 @@
 .chip--tier {
   font-variant-numeric: tabular-nums;
 }
+/* A chip cut in its middle (bits.tsx MidCut): its box is set where it is used and laid out
+   from the whole text, never seen; the line drawn over it is what fits, never end-cut. */
+.chip.midcut {
+  display: block;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+.chip.midcut::before {
+  content: attr(data-text);
+  visibility: hidden;
+}
+.midcut-text {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
 .chip--link {
   color: var(--fg-2);
 }

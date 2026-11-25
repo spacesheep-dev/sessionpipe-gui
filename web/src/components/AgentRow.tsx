@@ -19,7 +19,7 @@ import {
   openAgent,
   subscribeAgentsChoice,
 } from "../lib/agents";
-import { plainTitle, sessionTitle } from "../lib/format";
+import { plainTitle, STATE_LABEL, sessionTitle } from "../lib/format";
 import { agentItems, sessionItems, sessionMenuSubtitle } from "../lib/menus";
 import { agentPath, Link, sessionPath } from "../lib/router";
 import { useNow } from "../lib/time";
@@ -78,16 +78,20 @@ export function useAgentsOpen(s: SessionSummary): boolean {
 }
 
 /** One agent under its parent on the board: a 32 px row (44 on a phone) on the tree guide,
- *  outside the list's j/k order (Tab reaches it). `open` while its tab is the panel's. */
+ *  outside the list's j/k order (Tab reaches it). `open` while its tab is the panel's.
+ *  A child session that `needs` you says so in the needs-you colour, as a kid row does: it
+ *  is why its parent's row is in Needs you (pages/Board.tsx). */
 export function AgentRow({
   s,
   a,
+  needs = false,
   open = false,
   flip,
   gone = false,
 }: {
   s: SessionSummary;
   a: AgentRun;
+  needs?: boolean;
   open?: boolean;
   /** The tree's FLIP key (lib/motion.ts useFlip), and whether the held tree kept it after it left. */
   flip?: string;
@@ -112,20 +116,25 @@ export function AgentRow({
       <Link
         to={to}
         className="kid agent-row"
+        data-needs={needs ? "" : undefined}
         title={agentTip(a) ?? agentLabel(a)}
         plainClick={() => openAgent(s, a, "beside")}
         modClick={(o) => openAgent(s, a, "beside", { background: o.background })}
       >
-        <AgentGlyph a={a} />
+        {needs ? <StateDot state="needs_you" size={8} decorative /> : <AgentGlyph a={a} />}
         {/* A child session's own title says what it was asked, when its launch did not; its
             label follows it, as a board row's does. */}
         <span className="kid-head">
           <AgentText a={a} title={child ? sessionTitle(child) : undefined} />
           {a.session && <LabelDot session={a.session} />}
         </span>
-        <span className="sr-only">, {a.state === "running" ? "running" : a.state === "stale" ? "quiet" : "done"}</span>
+        {!needs && (
+          <span className="sr-only">
+            , {a.state === "running" ? "running" : a.state === "stale" ? "quiet" : "done"}
+          </span>
+        )}
         {child && <NotifyOff s={child} under />}
-        <AgentNow a={a} />
+        {needs ? <span className="kid-state">{STATE_LABEL.needs_you}</span> : <AgentNow a={a} />}
       </Link>
     </li>
   );

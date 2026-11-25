@@ -26,8 +26,8 @@ import { useBehind } from "../account/current";
 import { answerable } from "../components/ControlStrip";
 import { type AnswerOut, answersOut } from "../control/answers";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
-import { isQuestion, sessionTitle } from "../lib/format";
-import { isHidden, useHidden } from "../lib/hidden";
+import { isQuestion } from "../lib/format";
+import { type Hidden, isHidden, useHidden } from "../lib/hidden";
 import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
 import { useShortcut } from "../lib/shortcuts";
 import type { AppState, Store } from "./store";
@@ -131,24 +131,6 @@ export function useResyncs(): number {
 export function useSession(key: SessionKey): SessionSummary | undefined {
   const store = useStore();
   const read = useCallback(() => store.get().sessions.get(key), [store, key]);
-  return useSyncExternalStore(store.subscribe, read, read);
-}
-
-/** The sessions that name `key` as their launcher, newest first. The array is kept until
- *  the set, a title or a state changes, so a launcher's page follows runs that start later. */
-export function useLaunched(key: SessionKey): SessionSummary[] {
-  const store = useStore();
-  const last = useRef<{ sig: string; list: SessionSummary[] }>({ sig: "", list: [] });
-  const read = useCallback(() => {
-    const list: SessionSummary[] = [];
-    for (const s of store.get().sessions.values()) if (s.launchedBy === key && s.key !== key) list.push(s);
-    list.sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.key.localeCompare(b.key));
-    // What the header renders: the title as sessionTitle derives it, and the state.
-    // ...and the start, which the menu's "ago" and the order read.
-    const sig = list.map((s) => `${s.key}\u0000${sessionTitle(s)}\u0000${s.state}\u0000${s.startedAt}`).join("\u0001");
-    if (sig !== last.current.sig) last.current = { sig, list };
-    return last.current.list;
-  }, [store, key]);
   return useSyncExternalStore(store.subscribe, read, read);
 }
 
@@ -261,15 +243,22 @@ const STATE_RANK: Record<SessionState, number> = Object.fromEntries(SESSION_STAT
   number
 >;
 
+const newestFirst = (a: SessionSummary, b: SessionSummary) =>
+  b.startedAt.localeCompare(a.startedAt) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+
 /** The board's order: by state, then, within a state, newest session first by when it
  *  started, a key that never changes while it lives. Ordering by the last event made a
  *  group re-sort on every event (9 swaps in 20 s under the pointer); a row now moves only
  *  when it changes section. The key breaks a tie so two renders never disagree. The name
  *  is kept for its callers (the palette). */
 export const byStateThenRecent = (a: SessionSummary, b: SessionSummary) =>
-  STATE_RANK[a.state] - STATE_RANK[b.state] ||
-  b.startedAt.localeCompare(a.startedAt) ||
-  (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  STATE_RANK[a.state] - STATE_RANK[b.state] || newestFirst(a, b);
+
+/** The same order by the section a row is drawn in (`sectionOf`), which for a parent whose
+ *  child needs you is Needs you (pages/Board.tsx). */
+export const bySectionThenRecent =
+  (sectionOf: (s: SessionSummary) => SessionState) => (a: SessionSummary, b: SessionSummary) =>
+    STATE_RANK[sectionOf(a)] - STATE_RANK[sectionOf(b)] || newestFirst(a, b);
 
 /** The sessions a list or a picker offers: every one the store holds but those nothing has
  *  happened in yet (shared/api.ts `isEmptySession`). The same map, so `get` and `values`
@@ -385,10 +374,19 @@ export function useOpenAttentions(): OpenAttention[] {
 export const answeredAll = (s: SessionSummary, out: Readonly<Record<string, AnswerOut>>): boolean =>
   s.openAttentions.length > 0 && s.openAttentions.every((a) => !!out[a.attentionId]);
 
+/** Whether a session waits on you, as the badge counts it: it needs you, is not hidden on
+ *  this device in that state, and has no prompt left without an answer out. */
+export const needsYouNow = (
+  s: SessionSummary,
+  hidden: Readonly<Hidden>,
+  out: Readonly<Record<string, AnswerOut>>,
+): boolean => s.state === "needs_you" && !isHidden(hidden, s.key, s.stateSince, true) && !answeredAll(s, out);
+
 /** The sessions that need you: the inbox badge, the title's "(n)" and the app's badge, the
- *  same number the Board's Needs you, the Dock and the menu bar count. Every session in
- *  that state, the Board's filters or not, less one hidden on this device and one whose
- *  every prompt has its answer out, from the moment the answer went. */
+ *  same number the Board's Needs you (a child under its parent included), the Dock and the
+ *  menu bar count. Every session in that state, the Board's filters or not, less one
+ *  hidden on this device and one whose every prompt has its answer out, from the moment
+ *  the answer went. */
 export function useNeedsYouCount(): number {
   const store = useStore();
   const { sessions, control } = useAppState();
@@ -410,5 +408,5 @@ export function useNeedsYouCount(): number {
       ),
     [control, waiting],
   );
-  return waiting.filter((s) => !answeredAll(s, out)).length;
+  return waiting.filter((s) => needsYouNow(s, hidden, out)).length;
 }

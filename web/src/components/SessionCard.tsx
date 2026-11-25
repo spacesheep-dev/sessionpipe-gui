@@ -35,6 +35,7 @@ import { prefetchProps } from "../data/prefetch";
 import { agentFound, agentsChoice, agentsRunningFact, agentsShown, agentTabKey, setAgentsChoice } from "../lib/agents";
 import { useAnswerClock } from "../lib/answerWindow";
 import { useAskedInput } from "../lib/askedInput";
+import { askedComputer } from "../lib/delegated";
 import { usePhoneLayout, useTouchKeys } from "../lib/device";
 import {
   ATTENTION_LABEL,
@@ -56,7 +57,7 @@ import {
   sessionTitle,
   toolLabel,
 } from "../lib/format";
-import { hide, unhide } from "../lib/hidden";
+import { hide, isHidden, unhide, useHidden } from "../lib/hidden";
 import { inPanel, panelAnswers } from "../lib/keys";
 import { labelItems } from "../lib/labels";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
@@ -68,7 +69,7 @@ import { useShortcut } from "../lib/shortcuts";
 import { type OpenHow, openSession, openSplit } from "../lib/split";
 import { durCoarse, ms } from "../lib/time";
 import { AgentRow, useAgentsOpen } from "./AgentRow";
-import { HarnessGlyph, Redacted, Since, StateDot } from "./bits";
+import { HarnessGlyph, MidCut, Redacted, Since, StateDot } from "./bits";
 import { type MenuItem, type MenuList, openMenu, useContextMenu } from "./ContextMenu";
 import { LabelDot } from "./LabelDot";
 import { NotifyOff } from "./NotifyOff";
@@ -184,6 +185,15 @@ export const SessionCard = memo(function SessionCard({
   // A child session that is one of its agents shows once, as that agent's row.
   const twins = new Set(agents.map((a) => a.session).filter(Boolean));
   const kids = children?.filter((c) => !twins.has(c.key));
+  // The sessions under it that need you, by the Board's rule (pages/Board.tsx sectionFor):
+  // each is why this row is in Needs you, so its row says so, and an agent's shows even in
+  // a folded tree.
+  const hiddenNow = useHidden();
+  const needing = new Set(
+    children
+      ?.filter((c) => c.state === "needs_you" && !isHidden(hiddenNow, c.key, c.stateSince, true))
+      .map((c) => c.key),
+  );
   const chosen = useAgentsOpen(s);
   // A tree that opens by itself (an agent started) waits while the board holds still; one
   // the person opens or folds does it at once.
@@ -472,10 +482,11 @@ export const SessionCard = memo(function SessionCard({
         </Link>
         <BesideButton onClick={() => openSplit(s.key, { from: ref.current?.getBoundingClientRect() })} />
       </div>
-      {(showAgents || (kids && kids.length > 0)) && (
+      {(showAgents || (kids && kids.length > 0) || agents.some((a) => waitsIn(a, needing))) && (
         <KidList
           s={s}
           agents={showAgents}
+          needing={needing}
           match={agentsMatch}
           kids={kids ?? []}
           openTab={openTab}
@@ -495,18 +506,23 @@ export const SessionCard = memo(function SessionCard({
  *  the tree. */
 const DONE_SHOWN = 3;
 
+/** Whether an agent is a child session that needs you (`needing`). */
+const waitsIn = (a: AgentRun, needing: ReadonlySet<SessionKey>) => !!a.session && needing.has(a.session);
+
 type KidItem = { kind: "agent"; a: AgentRun } | { kind: "kid"; c: SessionSummary };
 const kidKey = (k: KidItem) => (k.kind === "agent" ? `a:${k.a.id}` : `c:${k.c.key}`);
 const kidGroup = (k: KidItem) => (k.kind === "agent" ? (k.a.state === "done" ? "done" : "open") : "kid");
 
 /** A parent's tree: its agents (the open ones, then the newest finished, then "Show n
  *  more"; on a phone, while any is open, the open ones and "Show n finished"; the finished
- *  ones a search found, when one did) and its child sessions. It holds still under the
+ *  ones a search found, when one did; folded, only the ones whose session `needing` holds)
+ *  and its child sessions. It holds still under the
  *  pointer like the board does: an agent that finishes stays where it is until the
  *  pointer leaves, then slides down to the finished ones. */
 function KidList({
   s,
   agents,
+  needing,
   match,
   kids,
   openTab,
@@ -517,6 +533,8 @@ function KidList({
 }: {
   s: SessionSummary;
   agents: boolean;
+  /** The sessions under it that need you: marked, and an agent's shown while folded. */
+  needing: ReadonlySet<SessionKey>;
   match?: string;
   kids: SessionSummary[];
   openTab: string | null;
@@ -531,7 +549,9 @@ function KidList({
   const unfinished = list.some((a) => a.state !== "done");
   const done = all ? Number.POSITIVE_INFINITY : phone && unfinished && !match ? 0 : DONE_SHOWN;
   const keep = match && !all ? (a: AgentRun) => agentFound(a, match) : undefined;
-  const { shown, more } = agents ? agentsShown(list, done, keep) : { shown: [], more: 0 };
+  const { shown, more } = agents
+    ? agentsShown(list, done, keep)
+    : { shown: list.filter((a) => waitsIn(a, needing)), more: 0 };
   // "Show 2 more" under finished rows, "Show 19 finished" where none is listed.
   const what = shown.some((a) => a.state === "done") ? "more" : "finished";
   const items: KidItem[] = [
@@ -554,12 +574,13 @@ function KidList({
             key={h.key}
             s={s}
             a={h.item.a}
+            needs={waitsIn(h.item.a, needing)}
             open={openTab === (h.item.a.session ?? agentTabKey(s.key as SessionKey, h.item.a.id))}
             flip={h.key}
             gone={h.gone}
           />
         ) : (
-          <KidRow key={h.key} c={h.item.c} flip={h.key} gone={h.gone} {...only} />
+          <KidRow key={h.key} c={h.item.c} needs={needing.has(h.item.c.key)} flip={h.key} gone={h.gone} {...only} />
         ),
       )}
       {more > 0 && (
@@ -574,13 +595,19 @@ function KidList({
 }
 
 /** A subagent, or a session this one asked (`delegatedBy`): one line under its parent,
- *  on the tree guide, with the session menu. */
+ *  on the tree guide, with the session menu, and the computer it runs on (two lines where
+ *  the row is narrow). One that needs you says so in the needs-you colour: it is why its
+ *  parent's row is in Needs you (pages/Board.tsx). */
 function KidRow({
   c,
+  needs,
   flip,
   gone = false,
   ...only
-}: { c: SessionSummary; flip?: string; gone?: boolean } & Pick<SessionCardProps, "onlyMachine" | "onlyHarness">) {
+}: { c: SessionSummary; needs: boolean; flip?: string; gone?: boolean } & Pick<
+  SessionCardProps,
+  "onlyMachine" | "onlyHarness"
+>) {
   const store = useStore();
   const menu = useContextMenu(() => sessionItems(c, { store, surface: "list", extra: onlyItems(c, only) }), {
     title: () => sessionMenuTitle(c),
@@ -591,6 +618,7 @@ function KidRow({
       <Link
         to={sessionPath(c.harness, c.id)}
         className="kid"
+        data-needs={needs ? "" : undefined}
         title={sessionTitle(c)}
         plainClick={() => openSession(c.key, "primary")}
         modClick={(o) => openSession(c.key, o.background ? "background" : "other")}
@@ -603,7 +631,15 @@ function KidRow({
             <HarnessGlyph name={c.harness} size="sm" />
           </span>
         )}
-        <span className="kid-title ellipsis">{sessionTitle(c)}</span>
+        {/* The computer it runs on, also when it is its parent's: in the meta at the row's
+            end, under the title where the row is narrow (styles/board.css). */}
+        <span className="kid-text">
+          <span className="kid-title ellipsis">{sessionTitle(c)}</span>
+          <MidCut className="kid-where" text={askedComputer(c)} />
+        </span>
+        <span className="kid-sep" aria-hidden="true">
+          ·
+        </span>
         <NotifyOff s={c} under />
         {c.currentTool && c.state === "working" ? (
           <code className="kid-tool">{toolLabel(c.currentTool.tool)}</code>

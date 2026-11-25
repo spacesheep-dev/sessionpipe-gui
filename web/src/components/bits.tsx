@@ -18,7 +18,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/clipboard";
-import { harnessMark, STATE_HINT, STATE_LABEL } from "../lib/format";
+import { endCuts, harnessMark, midCut, STATE_HINT, STATE_LABEL } from "../lib/format";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
 import { ago, durCoarse, ms, since, tickFor, useNow } from "../lib/time";
 import { Select } from "./Select";
@@ -129,6 +129,109 @@ export function Chip({
   return (
     <span className={`chip chip--${kind ?? "plain"}`} title={title}>
       {children}
+    </span>
+  );
+}
+
+/** One line of quiet text (a chip) that, where its box is too narrow, is cut in its middle
+ *  (lib/format.ts midCut) rather than at its end: a computer's name keeps the start and the
+ *  end that tell two apart. Its box is the stylesheet's (a max-width, a flex share, a grid
+ *  track) and is always laid out from the whole text (styles/shared.css `.midcut::before`),
+ *  so what is cut never changes the room it is cut to. The line drawn over it is measured
+ *  in fractional pixels, again when the box changes width and once the fonts are in. The
+ *  whole text is its tooltip and what a screen reader reads. */
+export function MidCut({ text, className }: { text: string; className?: string }) {
+  return <CutChip text={text} className={className} count={[...text].length - 1} at={(n) => midCut(text, n)} />;
+}
+
+/** The same chip cut at its end, after the last whole word that fits (or, for a text of
+ *  one word, its last character: lib/format.ts endCuts), with "…": a title reads as the
+ *  start of a sentence, not two fragments. `lead` ("for ") is always drawn whole. */
+export function EndCut({ lead = "", text, className }: { lead?: string; text: string; className?: string }) {
+  const cuts = endCuts(text);
+  return <CutChip text={lead + text} className={className} count={cuts.length} at={(n) => lead + cuts[n - 1]} />;
+}
+
+/** A chip drawn whole where it fits, else as the longest of `at(1)`…`at(count)` (each
+ *  longer than the one before) that does, else as `at(1)`. */
+function CutChip({
+  text,
+  className,
+  count,
+  at,
+}: {
+  text: string;
+  className?: string;
+  count: number;
+  at: (n: number) => string;
+}) {
+  const cutAt = useRef(at);
+  cutAt.current = at;
+  const box = useRef<HTMLSpanElement>(null);
+  const line = useRef<HTMLSpanElement>(null);
+  const [fit, setFit] = useState({ text, shown: text });
+  const [measure, setMeasure] = useState(0);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver !== "function") return;
+    let width = -1;
+    const ro = new ResizeObserver(([e]) => {
+      const w = e?.contentRect.width ?? 0;
+      if (w !== width) {
+        width = w;
+        setMeasure((n) => n + 1);
+      }
+    });
+    ro.observe(el);
+    let live = true;
+    document.fonts?.ready.then(() => live && setMeasure((n) => n + 1));
+    return () => {
+      live = false;
+      ro.disconnect();
+    };
+  }, []);
+  // `measure` changes with the box's width and the fonts.
+  useLayoutEffect(() => {
+    const el = box.current;
+    // React's own text node, written in place while measuring and set back to what React
+    // renders next: it must stay the line's only child.
+    const node = line.current?.firstChild;
+    if (!el || !node || node.nodeType !== Node.TEXT_NODE) return;
+    // Both read as drawn (a row's slide moves them alike); a chip has no padding.
+    const room = el.getBoundingClientRect().width;
+    if (!(room > 0)) return;
+    const range = document.createRange();
+    const fits = (s: string) => {
+      node.nodeValue = s;
+      range.selectNodeContents(node);
+      return range.getBoundingClientRect().width <= room + 0.5;
+    };
+    let shown = text;
+    if (count > 0 && !fits(text)) {
+      // The longest cut that fits.
+      let lo = 1;
+      let hi = count;
+      let best = 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (fits(cutAt.current(mid))) {
+          best = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      shown = cutAt.current(best);
+    }
+    node.nodeValue = shown;
+    setFit((f) => (f.text === text && f.shown === shown ? f : { text, shown }));
+  }, [text, count, measure]);
+  const shown = fit.text === text ? fit.shown : text;
+  const cut = shown !== text;
+  return (
+    <span ref={box} className={`chip midcut ${className ?? ""}`} title={text} data-text={text}>
+      <span className="midcut-text" ref={line} aria-hidden={cut || undefined}>
+        {shown}
+      </span>
+      {cut && <span className="sr-only">{text}</span>}
     </span>
   );
 }

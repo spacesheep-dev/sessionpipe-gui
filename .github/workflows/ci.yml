@@ -20,7 +20,9 @@ jobs:
   checks:
     name: typecheck · lint · unit · build · e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # On GitHub's own runners the whole job takes 27 to 30 minutes (Playwright alone 24):
+    # at 30 it was cut off before it could say pass or fail, on main too.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 

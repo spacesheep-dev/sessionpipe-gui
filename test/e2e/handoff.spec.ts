@@ -423,3 +423,265 @@ test("an older machine, and one that is not paired: neither the strip nor a menu
   await expect(ask).toHaveCount(0);
   await expect(page.locator(".menu > .menu-sep + .menu-sep")).toHaveCount(0);
 });
+
+/** A session started for `parent` (sessionpipe ask: `delegated_by` on its events), in a
+ *  state: one that needs you (a Bash prompt open), one working (a turn open), one done. */
+async function postAsked(
+  token: string,
+  o: { machine: string; harness: string; title: string; parent: string; state: "needs_you" | "working" | "done" },
+): Promise<{ harness: string; id: string; key: string }> {
+  const id = randomUUID();
+  let seq = 0;
+  let clock = Date.now() - 20_000;
+  const ev = (type: string, data: Record<string, unknown>) => {
+    clock += 500;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: o.harness, version: "2.1.296", event: "Hook" },
+      session: {
+        id,
+        seq: seq++,
+        machine: o.machine,
+        cwd: "/Users/e2e/code",
+        title: o.title,
+        title_source: "custom",
+        delegated_by: o.parent,
+      },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const events = [ev("session.started", { source: "startup" }), ev("turn.started", { turn_id: "t1" })];
+  if (o.state === "needs_you")
+    events.push(ev("attention.needed", { attention_id: `att_${id}`, kind: "permission", tool: "Bash" }));
+  if (o.state === "done") events.push(ev("turn.ended", { turn_id: "t1" }), ev("session.ended", { reason: "exit" }));
+  await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
+    body: JSON.stringify({ events }),
+  });
+  return { harness: o.harness, id, key: `${o.harness}:${id}` };
+}
+
+/** The parent's own word that it asked `to` and has its answer (or, `open`, waits for it):
+ *  a delegation that names it. */
+async function postDelegation(
+  token: string,
+  p: { harness: string; id: string; machine: string },
+  to: string,
+  o: { open?: boolean } = {},
+) {
+  let seq = 1;
+  let clock = Date.now() - 10_000;
+  const ev = (type: string, data: Record<string, unknown>) => {
+    clock += 500;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: p.harness, version: "2.1.296", event: "Hook" },
+      session: { id: p.id, seq: seq++, machine: p.machine, cwd: "/Users/e2e/code" },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const ask = { ask_id: `ask_${randomUUID()}`, via: "ask", harness: harnessOfKey(to), to };
+  await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
+    body: JSON.stringify({
+      events: [ev("delegation.started", ask), ...(o.open ? [] : [ev("delegation.ended", { ...ask, ok: true })])],
+    }),
+  });
+}
+const harnessOfKey = (k: string) => k.slice(0, k.indexOf(":"));
+
+test("a parent's Asked sessions: each with its state, agent and computer, the one that needs you first; Open and Message", async ({
+  page,
+}) => {
+  const name = `ho-kids-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const p = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Parent ${name}` });
+  const parent = `${p.harness}:${p.id}`;
+  // Started in this order: the newest is the working one, the oldest the one that needs you.
+  const needs = await postAsked(sink, {
+    machine: name,
+    harness: "codex",
+    title: "Run the suite",
+    parent,
+    state: "needs_you",
+  });
+  // One on another computer, which the parent's own delegation names: a later stage's
+  // shape, which today's data can already carry.
+  const done = await postAsked(sink, {
+    machine: `${name}-b`,
+    harness: "codex",
+    title: "Review the copy",
+    parent,
+    state: "done",
+  });
+  await postDelegation(sink, { ...p, machine: name }, done.key);
+  // One on another computer that only its own hooks say was started for this parent: no
+  // lineage today, so not listed.
+  await postAsked(sink, { machine: `${name}-c`, harness: "codex", title: "Says so", parent, state: "working" });
+  const work = await postAsked(sink, {
+    machine: name,
+    harness: "claude-code",
+    title: "Draft the note",
+    parent,
+    state: "working",
+  });
+  await page.goto(`${CONTROL_BASE}/s/${p.harness}/${p.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+
+  const kids = page.locator("section.kids");
+  await expect(kids.getByRole("heading", { name: /Asked sessions/ })).toBeVisible();
+  const rows = kids.locator("li.kids-row");
+  await expect(rows).toHaveCount(3);
+  // The one that needs you first, marked; then the newest started.
+  await expect(rows.nth(0)).toHaveAttribute("data-kid", needs.key);
+  await expect(rows.nth(0)).toHaveAttribute("data-state", "needs_you");
+  await expect(rows.nth(1)).toHaveAttribute("data-kid", work.key);
+  await expect(rows.nth(2)).toHaveAttribute("data-kid", done.key);
+  // Each says its state, its agent and its computer (this session's own, named all the same).
+  for (const [i, state, agent, title, computer] of [
+    [0, "needs you", "Codex", "Run the suite", name],
+    [1, "working", "Claude Code", "Draft the note", name],
+    [2, "done", "Codex", "Review the copy", `${name}-b`],
+  ] as const) {
+    await expect(rows.nth(i).locator(".kids-word")).toHaveText(state);
+    await expect(rows.nth(i).locator(".kids-agent")).toHaveText(agent);
+    await expect(rows.nth(i).locator(".kids-where")).toHaveText(computer);
+    await expect(rows.nth(i).locator(".kids-title")).toHaveText(title);
+  }
+
+  // A mouse's Open beside and Message stand over the row's end, in place of the age, so they
+  // hold no room of their own: the row's columns have it. Shown on hover, inside the row.
+  const box = (sel: string) =>
+    rows.nth(1).evaluate((li, s) => {
+      const r = (s ? li.querySelector(s)! : li).getBoundingClientRect();
+      return { x: r.x, w: r.width };
+    }, sel);
+  const [row, link] = [await box(""), await box(".kids-link")];
+  expect(Math.abs(link.w - row.w)).toBeLessThan(1);
+  await expect(rows.nth(1).locator(".kids-acts")).toHaveCSS("opacity", "0");
+  await rows.nth(1).hover();
+  await expect(rows.nth(1).locator(".kids-acts")).toHaveCSS("opacity", "1");
+  const acts = await box(".kids-acts");
+  expect(acts.x + acts.w).toBeLessThanOrEqual(row.x + row.w + 0.5);
+
+  // Message: Ask another agent… aimed at that session, the answer brought back.
+  await rows.nth(1).hover();
+  // Its name says which session: two of one agent are two names.
+  await rows.nth(1).getByRole("button", { name: "Message Draft the note" }).click();
+  await expect(sheet(page)).toBeVisible();
+  await expect(rowValue(page, "agent")).toContainText("Draft the note");
+  await expect(sheet(page).locator("[data-hs-row=back] [role=switch]")).toHaveAttribute("aria-checked", "true");
+  await expect(sheet(page).locator("[data-hs-text]")).toHaveValue("");
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  // The one on another computer is no agent this session can ask today: no Message there,
+  // in the row or its menu.
+  await rows.nth(2).hover();
+  await expect(rows.nth(2).getByRole("button", { name: /^Message/ })).toHaveCount(0);
+  await rows.nth(2).click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Open beside" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /^Message/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // In the working one's menu, Message is there too.
+  await rows.nth(1).click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Message…" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Open: the row goes to the child's page, whose bar says whom it works for.
+  await rows.nth(0).locator("a.kids-link").click();
+  await expect(page).toHaveURL(new RegExp(`/s/codex/${needs.id}`));
+  await expect(page.locator(".sess-for a")).toHaveText(`Parent ${name}`);
+  // One level: the child asked nobody, and a session that asked none has no list at all.
+  await expect(page.locator("section.kids")).toHaveCount(0);
+});
+
+test("Message on an asked session leaves the parent's own kept Ask draft as it was", async ({ page }) => {
+  const name = `ho-msg-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const p = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Parent ${name}` });
+  const kid = await postAsked(sink, {
+    machine: name,
+    harness: "codex",
+    title: "Draft the note",
+    parent: `${p.harness}:${p.id}`,
+    state: "working",
+  });
+  await page.goto(`${CONTROL_BASE}/s/${p.harness}/${p.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+  const text = sheet(page).locator("[data-hs-text]");
+  const back = sheet(page).locator("[data-hs-row=back] [role=switch]");
+
+  // The parent's own ask, kept on Esc.
+  await page.locator("[data-ctl-ask]").click();
+  await expect(sheet(page)).toBeVisible();
+  await text.fill("Keep this draft.");
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+
+  const row = page.locator(`section.kids li.kids-row[data-kid="${kid.key}"]`);
+  const message = async () => {
+    await row.hover();
+    await row.getByRole("button", { name: /^Message/ }).click();
+    await expect(sheet(page)).toBeVisible();
+    await expect(rowValue(page, "agent")).toContainText("Draft the note");
+    await expect(text).toHaveValue("");
+  };
+  // Opened, edited, toggled and closed: nothing of it is kept, the draft is untouched.
+  await message();
+  await text.fill("Not a draft.");
+  await back.click();
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  // Opened again, edited, toggled and sent.
+  await message();
+  await text.fill("Is the note done?");
+  await back.click();
+  await expect(back).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(sheet(page)).toHaveCount(0, { timeout: 15_000 });
+  await expect
+    .poll(() => m.seen.find((c) => c.kind === "prompt" && c.text === "Is the note done?"), { timeout: 15_000 })
+    .toBeTruthy();
+
+  // The parent's own Ask comes back with its draft and the agent it had.
+  await page.locator("[data-ctl-ask]").click();
+  await expect(sheet(page)).toBeVisible();
+  await expect(text).toHaveValue("Keep this draft.");
+  await expect(rowValue(page, "agent")).toContainText("Codex · new session");
+});
+
+test("the parent's row of an ask under way says the asked session's state as its list does", async ({ page }) => {
+  const name = `ho-word-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const p = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Parent ${name}` });
+  const parent = `${p.harness}:${p.id}`;
+  const kid = await postAsked(sink, {
+    machine: name,
+    harness: "codex",
+    title: "Run the suite",
+    parent,
+    state: "needs_you",
+  });
+  await postDelegation(sink, { ...p, machine: name }, kid.key, { open: true });
+  await page.goto(`${CONTROL_BASE}/s/${p.harness}/${p.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+  await expect(page.locator(`section.kids li.kids-row[data-kid="${kid.key}"] .kids-word`)).toHaveText("needs you");
+  const ask = page.locator(".ask").first();
+  await expect(ask.locator(".ask-title")).toHaveText("Run the suite");
+  await expect(ask.locator(".ask-state")).toHaveText(/^needs you\b/);
+});

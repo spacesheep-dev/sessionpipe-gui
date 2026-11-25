@@ -6,6 +6,21 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A session's page lists the sessions it asked.** Under the bar, "Asked sessions": each
+  agent it asked or launched, with its state, its agent, its title, the computer it runs
+  on and when it last moved; one that needs you first, five and "Show all". A row opens
+  the session; beside it, or in its menu, Open beside and Message, which asks that session
+  through Ask another agent with the answer brought back. The launched runs that the bar
+  named move into the list.
+- **A session's row under its parent names the computer it runs on, and its prompt in the
+  Inbox says whom it works for.** On the Board, a child session's row has its computer
+  before its state ("studio-mac · needs you"), under its title on a phone. In the Inbox,
+  a prompt from a session another one asked, launched or ran as a subagent says "for" and
+  that session's title after its own. A long computer name is cut in its middle, its start
+  and end kept; a long title after "for" ends after a whole word.
+
 ### Fixed
 
 - **Search's `in:` with nothing left searches nothing.** `in:prompt -in:prompt`, or every
@@ -19,6 +34,10 @@ All notable changes to `sessionpipe-gui`. The format follows
   a question from before the session ended, or before its answer or the next step,
   arriving last, showed "needs you" and its toast on a session that had finished or gone
   on, for up to a day. Each now reads as it happened.
+- **A session another one asked takes its parent into Needs you, and is quiet when its
+  parent is.** Needs you's count now matches the Inbox badge.
+- **A computer's name too long for an Inbox row is cut in its middle instead of running
+  off the row.** Its start and end stay, and the whole name is its tooltip.
 
 ## [0.8.8] - 2026-11-24
 

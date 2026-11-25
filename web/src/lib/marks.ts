@@ -98,25 +98,44 @@ const quieter = (a: NotifyLevel, b: NotifyLevel): NotifyLevel => (LOUDNESS.index
 /** A session's own level, as the person set it; absent is the default, "needs". */
 export const ownNotify = (marks: Marks, key: SessionKey): NotifyLevel => marks.notify?.[key] ?? "needs";
 
+type Lineage = Pick<SessionSummary, "key" | "harness" | "parentId" | "delegatedBy">;
+/** A session's parents: the session whose subagent it is (`parentId`, in its own harness)
+ *  and the session that asked it (`delegatedBy`, any harness, on any machine). The Board
+ *  nests an asked session only under a parent on its own machine (lib/delegated.ts), so
+ *  one that names a muted asker on another computer is quiet while drawn as a row of its
+ *  own: on purpose, as a session only ever quiets itself here, and the way later stages
+ *  (a child on another computer) want it. */
+const parentsOf = (s: Omit<Lineage, "key">): SessionKey[] => {
+  const out: SessionKey[] = [];
+  if (s.parentId) out.push(sessionKey(s.harness, s.parentId));
+  if (s.delegatedBy) out.push(s.delegatedBy);
+  return out;
+};
+
 /** What caps a session: the quietest level set on purpose among its ancestors, and
  *  whether that one is its own parent; undefined when no ancestor has one. An ancestor
- *  left on the default caps nothing. The parents are `parentId`, in the same harness.
- *  When #38's `delegatedBy` lands, it joins `parentId` as a parent here. */
+ *  left on the default caps nothing. The parents are a subagent's (`parentId`) and the
+ *  asker's (`delegatedBy`), alike: a person who quiets a session quiets what it asked.
+ *  Nearest first, so of two equally quiet ones the nearer says why. */
 export function notifyCap(
-  s: Pick<SessionSummary, "key" | "harness" | "parentId">,
+  s: Lineage,
   marks: Marks,
   sessions: ReadonlyMap<SessionKey, SessionSummary>,
 ): { level: NotifyLevel; parent: boolean } | undefined {
   let cap: { level: NotifyLevel; parent: boolean } | undefined;
   const seen = new Set<SessionKey>([s.key]);
-  let id = s.parentId;
-  while (id) {
-    const key = sessionKey(s.harness, id);
-    if (seen.has(key)) break;
-    seen.add(key);
-    const set = marks.notify?.[key];
-    if (set && (!cap || quieter(set, cap.level) !== cap.level)) cap = { level: set, parent: seen.size === 2 };
-    id = sessions.get(key)?.parentId;
+  let ring = parentsOf(s);
+  for (let depth = 1; ring.length > 0; depth++) {
+    const next: SessionKey[] = [];
+    for (const key of ring) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const set = marks.notify?.[key];
+      if (set && (!cap || quieter(set, cap.level) !== cap.level)) cap = { level: set, parent: depth === 1 };
+      const p = sessions.get(key);
+      if (p) next.push(...parentsOf(p));
+    }
+    ring = next;
   }
   return cap;
 }
@@ -124,7 +143,7 @@ export function notifyCap(
 /** How loud a session is: its own level, capped by its ancestors'. A parent can quiet its
  *  children, never make them louder. */
 export function effectiveNotify(
-  s: Pick<SessionSummary, "key" | "harness" | "parentId">,
+  s: Lineage,
   marks: Marks,
   sessions: ReadonlyMap<SessionKey, SessionSummary>,
 ): NotifyLevel {
@@ -134,17 +153,20 @@ export function effectiveNotify(
 }
 
 /** Whether a row draws the bell with a slash: its session is at Never. A row nested
- *  under its parent (`under`) draws it only when the parent isn't, so a muted parent's
- *  children don't each repeat it. */
+ *  under its parent (`under`) draws it only when no parent of its is at Never, so a muted
+ *  parent's children don't each repeat it. */
 export function showsNever(
-  s: Pick<SessionSummary, "key" | "harness" | "parentId">,
+  s: Lineage,
   marks: Marks,
   sessions: ReadonlyMap<SessionKey, SessionSummary>,
   under = false,
 ): boolean {
   if (effectiveNotify(s, marks, sessions) !== "never") return false;
-  const parent = under && s.parentId ? sessions.get(sessionKey(s.harness, s.parentId)) : undefined;
-  return !parent || effectiveNotify(parent, marks, sessions) !== "never";
+  if (!under) return true;
+  return !parentsOf(s).some((key) => {
+    const p = sessions.get(key);
+    return !!p && effectiveNotify(p, marks, sessions) === "never";
+  });
 }
 
 /** Whether a banner about `session` may show: none for a session set to Never (itself or

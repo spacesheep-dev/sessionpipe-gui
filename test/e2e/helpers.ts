@@ -2,7 +2,8 @@
 // Shared pieces for the end-to-end suite: page openers that wait for the live stream, a
 // window resized, the session's message field, a check for a full stop that starts a line, a hand-rolled ULID
 // (so the specs need nothing but @playwright/test), a tier-1 batch a sink would send, with
-// a fresh session id per call, and a session posted with a permission prompt open.
+// a fresh session id per call, a session posted with a permission prompt open, and a
+// working session with the one it asked (sessionpipe ask), whose prompt opens and clears.
 import { randomUUID } from "node:crypto";
 import { type APIRequestContext, expect, type Locator, type Page } from "@playwright/test";
 
@@ -143,6 +144,21 @@ export function strandedMarks(el: Locator): Promise<number[]> {
   });
 }
 
+type Box = { x: number; y: number; width: number; height: number };
+
+/** A Board kid row's box, its title's and its computer's, read in one frame: a card that
+ *  slides to a new place (useFlip's translate) moves all three together, so two reads
+ *  apart could see it half way. */
+export function kidBoxes(kid: Locator): Promise<{ row: Box; title: Box; chip: Box }> {
+  return kid.evaluate((el: HTMLElement) => {
+    const box = (n: Element) => {
+      const r = n.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    };
+    return { row: box(el), title: box(el.querySelector(".kid-title")!), chip: box(el.querySelector(".kid-where")!) };
+  });
+}
+
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** A ULID (26 Crockford base32 chars: 48-bit ms time + 80 random bits). */
@@ -269,6 +285,103 @@ export async function openPrompt(
     key: `${harness}:${sessionId}`,
     attention,
     clear: () => post([ev("attention.cleared", { attention_id: attention, how: "answered" }, "PreToolUse")]),
+  };
+}
+
+/** A Claude Code session working on `machine` and the Codex session it asked (`delegated_by`,
+ *  as the daemon starts it: same machine, same folder), both mid-turn, posted the way
+ *  their hooks send them. `raise()` opens a permission prompt in the asked one and
+ *  `clear()` closes it; `end()` ends both, so no other spec finds them. With `subagent`
+ *  the child is the parent's own subagent session instead (`parent_id`, Claude Code, so
+ *  also one of its agents). */
+export async function askedPair(
+  request: APIRequestContext,
+  o: { machine: string; title: string; subagent?: boolean },
+): Promise<{
+  parent: { key: string; id: string; title: string };
+  child: { key: string; id: string; title: string };
+  /** A prompt on the child (or, `"parent"`, on the parent: a session of its own). */
+  raise: (on?: "child" | "parent") => Promise<string>;
+  clear: () => Promise<void>;
+  end: () => Promise<void>;
+}> {
+  const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  const post = async (events: unknown[]) => {
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: { events },
+    });
+    expect(res.status()).toBe(202);
+  };
+  let clock = Date.now() - 10_000;
+  const sess = (harness: string, title: string, extra: Record<string, unknown> = {}) => {
+    const id = randomUUID();
+    let seq = 0;
+    const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+      clock = Math.max(clock + 200, type === "attention.needed" || type === "attention.cleared" ? Date.now() : 0);
+      return {
+        protocol: 1,
+        id: ulid(clock),
+        type,
+        time: new Date(clock).toISOString(),
+        tier: 1,
+        harness: { name: harness, version: harness === "codex" ? "0.98.0" : "2.1.296", event: hook },
+        session: { id, seq: seq++, machine: o.machine, cwd: "~/code/tree", title, title_source: "custom", ...extra },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data,
+      };
+    };
+    return { id, key: `${harness}:${id}`, title, ev };
+  };
+  const parent = sess("claude-code", o.title);
+  const child = o.subagent
+    ? sess("claude-code", `${o.title}: the subagent`, { parent_id: parent.id })
+    : sess("codex", `${o.title}: the asked one`, { delegated_by: parent.key });
+  await post([
+    parent.ev("session.started", { source: "startup" }, "SessionStart"),
+    parent.ev("turn.started", { turn_id: "t1", prompt_chars: 30 }, "UserPromptSubmit"),
+  ]);
+  await post([
+    child.ev("session.started", { source: o.subagent ? "fork" : "startup" }, "SessionStart"),
+    child.ev("turn.started", { turn_id: "t1", prompt_chars: 60 }, "UserPromptSubmit"),
+  ]);
+  const open: { id: string; by: typeof child }[] = [];
+  const clear = async () => {
+    for (const { id, by } of open.splice(0))
+      await post([by.ev("attention.cleared", { attention_id: id, how: "answered" }, "PreToolUse")]);
+  };
+  return {
+    parent: { key: parent.key, id: parent.id, title: parent.title },
+    child: { key: child.key, id: child.id, title: child.title },
+    raise: async (on = "child") => {
+      const id = `exec-${randomUUID()}`;
+      const by = on === "parent" ? parent : child;
+      open.push({ id, by });
+      await post([
+        by.ev(
+          "attention.needed",
+          { attention_id: id, kind: "permission", tool: "Bash", message: "npm run migrate" },
+          "PermissionRequest",
+        ),
+      ]);
+      return id;
+    },
+    clear,
+    end: async () => {
+      await clear();
+      await post([
+        child.ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 2000 }, "Stop"),
+        child.ev("session.ended", { reason: "exit" }, "SessionEnd"),
+      ]);
+      await post([
+        parent.ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 9000 }, "Stop"),
+        parent.ev("session.ended", { reason: "exit" }, "SessionEnd"),
+      ]);
+    },
   };
 }
 

@@ -196,3 +196,258 @@ a.ask-link:active {
     text-underline-offset: 2px;
   }
 }
+
+/* The sessions this one asked or launched (components/AskedSessions.tsx), under the bar:
+   the heading over one inset panel (Settings' group grammar), a row each on hairlines.
+   Where the list has room a row is one line in fixed columns (the state's glyph and word,
+   the agent, the title in up to two lines, the computer, the age), with a mouse Open
+   beside and Message over its end on hover, in place of the age; narrower it is two
+   lines; under a finger the actions are in its long-press menu. */
+.kids {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kids-head {
+  margin: 0;
+  padding: 0 12px;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.kids-count {
+  margin-left: 4px;
+  color: var(--fg-3);
+  font-weight: 400;
+}
+.kids-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pop);
+  background: var(--bg-2);
+  overflow: hidden;
+  container: kids / inline-size;
+}
+.kids-list > li + li {
+  border-top: var(--hairline) solid var(--line);
+}
+.kids-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.kids-link {
+  flex: 1 1 auto;
+  display: grid;
+  /* The age's column holds "23 h 59 m", its longest. */
+  grid-template-columns: 10px 5.5em 8.5em minmax(0, 1fr) minmax(0, max-content) 5em;
+  grid-template-areas: "dot word agent title where age";
+  align-items: center;
+  column-gap: 12px;
+  min-width: 0;
+  min-height: var(--row-sm);
+  padding: 6px 12px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  text-decoration: none;
+}
+.kids-meta {
+  display: contents;
+}
+.kids-dot {
+  grid-area: dot;
+  display: inline-flex;
+  /* The glyph and its word read as one unit: 8 px apart, not a column's 12. */
+  margin-right: -4px;
+}
+.kids-word {
+  grid-area: word;
+  white-space: nowrap;
+}
+/* The one that needs you comes first, and its word says so in the accent. */
+.kids-row[data-state="needs_you"] .kids-word {
+  color: var(--needs-fg);
+  font-weight: 500;
+}
+.kids-agent {
+  grid-area: agent;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.kids-agent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Two lines at most, cut after a whole word (AskedSessions' useWordFit). */
+.kids-title {
+  grid-area: title;
+  display: block;
+  max-height: calc(2em * var(--lh-tight));
+  overflow: hidden;
+  color: var(--fg);
+  overflow-wrap: break-word;
+}
+/* The computer, cut in its middle (MidCut), takes up to 40% of the room the title and it
+   share: the row less its fixed columns, gaps and padding (19em + 86px). */
+.kids-where {
+  grid-area: where;
+  min-width: 0;
+  max-width: calc((100cqi - 19em - 86px) * 0.4);
+}
+.kids-age {
+  grid-area: age;
+  justify-self: end;
+  white-space: nowrap;
+}
+/* Over the row's end, in place of the age, so they hold no room of their own: the title
+   has it. The row's hovered colour under them. */
+.kids-acts {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 8px;
+  background: linear-gradient(var(--hover), var(--hover)), var(--bg-2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.kids-row:hover .kids-acts,
+.kids-row:focus-within .kids-acts {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: hover) {
+  .kids-row:hover {
+    background: var(--hover);
+  }
+  .kids-row:hover .kids-title {
+    color: var(--fg);
+  }
+}
+.kids-row[data-menu-open] {
+  background: var(--sel);
+}
+.kids-row:active:not(:has(.kids-act:active)) {
+  background: var(--press);
+  transition: none;
+}
+.kids-more-btn {
+  display: block;
+  width: 100%;
+  min-height: var(--row-sm);
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .kids-more-btn:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+/* Under a finger: a finger's heights, and the actions in the row's long-press menu. */
+@media (pointer: coarse) {
+  .kids-link {
+    min-height: var(--tap);
+  }
+  .kids-acts {
+    display: none;
+  }
+  .kids-more-btn {
+    min-height: var(--tap);
+  }
+}
+/* A list narrower than the columns need (a phone, a narrow window, a session beside):
+   two lines, the glyph and the title, then the state's word, the agent, the computer and
+   the age. */
+@container kids (max-width: 679px) {
+  .kids-link {
+    grid-template-columns: 10px minmax(0, 1fr);
+    grid-template-areas:
+      "dot title"
+      ". meta";
+    row-gap: 2px;
+    column-gap: 10px;
+    padding: 8px 12px;
+  }
+  .kids-dot {
+    align-self: start;
+    align-items: center;
+    /* Centred on the title's first line. */
+    height: calc(1em * var(--lh-tight));
+    margin-right: 0;
+  }
+  .kids-meta {
+    grid-area: meta;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .kids-meta > * {
+    flex: none;
+  }
+  .kids-meta > * + *::before {
+    content: "·";
+    margin: 0 6px;
+    color: var(--fg-4);
+  }
+  /* The agent's glyph keeps its own 6 px after the dot. */
+  .kids-meta > .kids-agent::before {
+    margin-right: 0;
+  }
+  /* The computer gives way last but one: the age stays whole. */
+  .kids-meta > .kids-where {
+    display: flex;
+    flex: 0 1 auto;
+    max-width: none;
+  }
+  .kids-where::before {
+    flex: none;
+  }
+  .kids-where > .midcut {
+    flex: 0 1 auto;
+  }
+  /* Two lines have no age column to stand over: the actions keep their own room. */
+  .kids-acts {
+    position: static;
+    background: none;
+  }
+  /* Show all starts where the titles do. */
+  .kids-more-btn {
+    padding-left: 32px;
+  }
+}
+/* A phone's narrowest rows: the computer before the agent's name, which its glyph still
+   says (read out, not drawn), as the board's rows have it. */
+@container kids (max-width: 340px) {
+  .kids-agent-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
