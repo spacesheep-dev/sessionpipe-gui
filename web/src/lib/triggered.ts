@@ -7,12 +7,14 @@
 // how to see it there. Lineage, never authority: nothing reads this to allow, hide, group
 // or sort anything.
 import { type SessionSummary, TRIGGER_NAME_RE } from "@shared/api";
+import { dropInvisible } from "@shared/reason";
 
 /** The card's mark is this lead and then the name: the lead is always drawn whole. */
 export const TRIGGER_LEAD = "trigger ";
 
-/** A name as text inside a sentence, isolated (U+2068 … U+2069): a computer's name that
- *  holds a direction mark cannot turn the sentence around it. */
+/** A name as text inside a sentence, isolated (U+2068 … U+2069) and without the characters
+ *  that do not show as themselves: a computer's name that holds a direction mark, or a
+ *  close of the isolation of its own, cannot turn the sentence around it. */
 const isolate = (s: string) => `⁨${s}⁩`;
 
 export interface TriggerWords {
@@ -22,7 +24,8 @@ export interface TriggerWords {
   lead: string;
   /** The line under the session's title: "Started by trigger card-todo". */
   sentence: string;
-  /** Its tooltip: what ran it, where the rule lives and what a person can do there. */
+  /** Its tooltip: what ran it, where the rule lives and what a person can do there, a
+   *  sentence a line. */
   tip: string;
 }
 
@@ -34,7 +37,8 @@ export function triggerWords(
 ): TriggerWords | null {
   const name = s.triggeredBy;
   if (!name || !TRIGGER_NAME_RE.test(name)) return null;
-  const where = s.machine?.trim() ? `on ${isolate(s.machine.trim())}` : "on this session's computer";
+  const machine = dropInvisible(s.machine ?? "").trim();
+  const where = machine ? `on ${isolate(machine)}` : "on its computer";
   const [verb, did] =
     s.triggeredFrom === "start"
       ? ["Started", "started this session"]
@@ -46,6 +50,11 @@ export function triggerWords(
     name,
     lead,
     sentence: `${lead}${name}`,
-    tip: `A rule named ${name} ${where} ${did}. Rules are made, paused and removed only at that computer. To see them there: sessionpipe trigger list`,
+    // A sentence a line (Tip.tsx data-tip-wrap), so the command is never split.
+    tip: [
+      `A rule named ${name} ${where} ${did}.`,
+      "Rules are made, paused and removed only at that computer.",
+      "To see them there: sessionpipe trigger list",
+    ].join("\n"),
   };
 }

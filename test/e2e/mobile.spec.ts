@@ -21,6 +21,7 @@ import {
 import {
   askedPair,
   composer,
+  dotGaps,
   EVENTS,
   fits,
   INFO,
@@ -29,8 +30,12 @@ import {
   openBoard,
   openPage,
   postRuled,
+  resizeWindow,
+  ringCut,
   sessionUrl,
   ulid,
+  wordsEnd,
+  wordsRoom,
 } from "./helpers.js";
 
 /** A finger down the page from its top, as touch events (page.touchscreen only taps):
@@ -579,25 +584,25 @@ test.describe("phone", () => {
     page,
     request,
   }) => {
-    // 40 characters, the longest name a rule can have, and a nine-character one.
-    const long = `rot-${randomUUID().slice(0, 6)}-nightly-certs-staging-eu-west`;
-    const short = `ab-${randomUUID().slice(0, 6)}`;
+    // Names of their own, so what a cut leaves over is the same in every run: the longest a
+    // rule can have (40 characters) and a nine-character one.
+    const long = "nightly-cert-rotation-staging-eu-west-01";
+    const short = "ab-8f3c2e";
     expect(long).toHaveLength(40);
     expect(short).toHaveLength(9);
     // And a line that cannot hold it all though the name could keep its width: a long repo.
-    const mid = `weekly-backfill-${randomUUID().slice(0, 4)}`;
+    const mid = "weekly-backfill-7d2e";
     const a = await postRuled(request, { rule: short, repo: "github.com/acme/infra" });
-    const b = await postRuled(request, { rule: long, repo: "github.com/acme/infra" });
+    const b = await postRuled(request, { rule: long, repo: "github.com/acme/infra", branch: "main" });
     const c = await postRuled(request, { rule: mid, repo: "github.com/acme/data-pipeline-backfills-eu" });
     // A repo too long for the line beside a short name: it is cut, keeping a few characters.
-    const d = await postRuled(request, {
-      rule: `cd-${randomUUID().slice(0, 6)}`,
-      repo: "github.com/acme/infra-terraform-mod",
-    });
+    const d = await postRuled(request, { rule: "cd-5a9b1f", repo: "github.com/acme/infra-terraform-mod" });
+    // No repo at all: a line the phone holds whole.
+    const e = await postRuled(request, { rule: short });
     try {
       await openBoard(page);
       await page.addStyleTag({ content: ".toasts { display: none !important; }" });
-      for (const r of [a, b, c, d]) {
+      for (const r of [a, b, c, d, e]) {
         const card = page.locator(`article.card[data-flip="claude-code:${r.id}"]`);
         await expect(card).toBeVisible({ timeout: 15_000 });
         await card.scrollIntoViewIfNeeded();
@@ -605,30 +610,27 @@ test.describe("phone", () => {
         await expect(meta.locator(".card-trigger")).toHaveAttribute("title", `trigger ${r.rule}`);
         const whole = await fits(meta);
         const parts = await metaParts(meta);
-        const part = (c: string) => parts.find((p) => p.cls.includes(c))!;
-        const [machine, repo, name] = [part("card-machine"), part("card-repo"), part("card-trigger")];
+        const part = (c: string) => parts.find((p) => p.cls.includes(c));
+        const [machine, repo, name] = [part("card-machine")!, part("card-repo"), part("card-trigger")!];
         expect(name.whole).toBe(`trigger ${r.rule}`);
+        // A line with no repo holds it all at 390: what follows is checked, not skipped.
+        if (r === e) expect(whole, "a line with no repo holds it all").toBe(true);
         if (whole) for (const p of parts) expect(p.cut || p.gone, `${p.cls} on a line that holds it`).toBe(false);
         else {
           // The repo gives way first, the name next, the computer last.
-          if (name.cut) expect(repo.gone, "the name is cut only once the repo has gone").toBe(true);
+          if (name.cut) expect(repo?.gone ?? true, "the name is cut only once the repo has gone").toBe(true);
           if (machine.cut) expect(name.cut).toBe(true);
         }
-        // A repo that stays is never a stub: whole, or a few characters' room (GIVE_WAY_EM).
-        if (!repo.gone && repo.cut) {
-          const stub = await meta.locator(".card-repo").evaluate((el) => ({
-            width: el.getBoundingClientRect().width,
-            font: Number.parseFloat(getComputedStyle(el).fontSize),
-          }));
-          expect(stub.width).toBeGreaterThanOrEqual(3 * stub.font);
-        }
+        // A repo that stays is never a stub: whole, or its words a few characters' room.
+        if (repo && !repo.gone && repo.cut)
+          expect(await wordsRoom(meta.locator(".card-repo"))).toBeGreaterThanOrEqual(3);
         // The long repo cannot stay whole: it is the part that gives way, cut or gone (and the
         // name is cut only once it has gone, above).
         if (r === c) {
           expect(whole).toBe(false);
-          expect(repo.cut || repo.gone).toBe(true);
+          expect(repo!.cut || repo!.gone).toBe(true);
         }
-        // The 40-character name never fits its 18em: cut, "trigger " whole, both ends kept.
+        // The 40-character name does not fit a phone's row: cut, "trigger " whole, both ends kept.
         if (r === b) {
           expect(name.cut).toBe(true);
           expect(name.shown.startsWith("trigger ")).toBe(true);
@@ -637,10 +639,13 @@ test.describe("phone", () => {
           expect(head!.length).toBeGreaterThan(0);
           expect(long.startsWith(head!)).toBe(true);
           expect(long.endsWith(tail!)).toBe(true);
+          // A repo that left is still read where it stood, and the branch after it.
+          await expect(card.locator(".card-link")).toHaveAccessibleName(/build-box · acme\/infra @ main trigger /);
         }
-        // What it draws stays in its box, and a cut name still ends on the row's right edge.
+        // What it draws stays in its box, and a cut name ends on the row's right edge, under
+        // the time: its words set flush right, its box as far as the time's.
         expect(name.textRight).toBeLessThanOrEqual(name.right + 0.5);
-        if (name.cut) expect(name.textRight).toBeGreaterThanOrEqual(name.right - 1);
+        if (name.cut) expect(Math.abs(await wordsEnd(meta.locator(".card-trigger")))).toBeLessThanOrEqual(0.5);
         // The row: the mark inside the card and the screen, the title before the time, the
         // state and the time on screen. Read in one frame.
         const box = await card.evaluate((el: HTMLElement) => {
@@ -657,6 +662,8 @@ test.describe("phone", () => {
             vw: window.innerWidth,
           };
         });
+        if (name.cut)
+          expect(Math.abs(box.mark.right - box.time.right), "a cut name ends under the time").toBeLessThanOrEqual(0.5);
         expect(box.mark.right).toBeLessThanOrEqual(Math.min(box.card.right, box.vw) + 0.5);
         expect(box.mark.left).toBeGreaterThanOrEqual(box.card.left);
         expect(box.title.width).toBeGreaterThan(0);
@@ -678,7 +685,7 @@ test.describe("phone", () => {
       await expect(chip).toHaveAttribute("data-text", `Started by trigger ${long}`);
       await expect(chip).toHaveAttribute(
         "data-tip",
-        new RegExp(`^A rule named ${long} on \u2068build-box\u2069 started this session\\. `),
+        new RegExp(`^A rule named ${long} on \u2068build-box\u2069 started this session\\.\n`),
       );
       const pageParts = await metaParts(where);
       const sentence = pageParts.find((p) => p.cls.includes("sess-trigger"))!;
@@ -691,12 +698,22 @@ test.describe("phone", () => {
       expect(long.startsWith(head!)).toBe(true);
       expect(long.endsWith(tail!)).toBe(true);
       expect(tail!.length).toBeGreaterThan(0);
-      // The name is cut, so the repo went first, whole: no "· …" left of it.
+      // The name is cut, so the repo went first, whole: no "· …" left of it, and it takes no
+      // room. A screen reader still reads it, where it stood.
       expect(pageRepo?.gone ?? true).toBe(true);
-      expect(await where.locator(".sess-repo:visible").count()).toBe(0);
+      const gone = await where.locator(".sess-repo").evaluate((el) => el.getBoundingClientRect().width);
+      expect(gone).toBeLessThanOrEqual(1);
+      expect(await where.ariaSnapshot()).toMatch(
+        new RegExp(`build-box\\s*·\\s*acme/infra @ main\\s*·\\s*Started by trigger ${long}`),
+      );
       expect(sentence.textRight).toBeLessThanOrEqual(sentence.right + 0.5);
       const end = await where.evaluate((el) => ({ right: el.getBoundingClientRect().right, vw: window.innerWidth }));
       expect(end.right).toBeLessThanOrEqual(end.vw);
+      // Its focus ring drawn whole on the phone's line too.
+      await page.keyboard.press("Shift");
+      await chip.focus();
+      expect(await ringCut(chip)).toEqual([]);
+      await chip.blur();
       await noSidewaysScroll(page);
       // The same order on the page: with the long repo, the sentence is whole or the repo
       // has gone, never both cut.
@@ -707,18 +724,197 @@ test.describe("phone", () => {
       const cSentence = cParts.find((p) => p.cls.includes("sess-trigger"))!;
       const cRepo = cParts.find((p) => p.cls.includes("sess-repo"))!;
       if (cSentence.cut) expect(cRepo.gone, "the sentence is cut only once the repo has gone").toBe(true);
-      if (!cRepo.gone && cRepo.cut) {
-        const stub = await cWhere.locator(".sess-repo").evaluate((el) => ({
-          width: el.getBoundingClientRect().width,
-          font: Number.parseFloat(getComputedStyle(el).fontSize),
-        }));
-        expect(stub.width).toBeGreaterThanOrEqual(3 * stub.font);
-      }
+      if (!cRepo.gone && cRepo.cut) expect(await wordsRoom(cWhere.locator(".sess-repo"))).toBeGreaterThanOrEqual(3);
+      // And a line the phone holds whole is drawn whole: no repo, a short name.
+      await openPage(page, `/s/claude-code/${e.id}`);
+      const eWhere = page.locator(".sess-where").first();
+      await expect(eWhere.locator(".sess-trigger .chip")).toHaveAttribute("data-text", `Started by trigger ${short}`);
+      expect(await fits(eWhere)).toBe(true);
+      for (const p of await metaParts(eWhere)) expect(p.cut || p.gone, `${p.cls} on a line that holds it`).toBe(false);
     } finally {
       await a.end();
       await b.end();
       await c.end();
       await d.end();
+      await e.end();
+    }
+  });
+
+  test("a rule's mark on a phone is never cut by a cap while the line holds it: the 40-character name whole on the widest phone that holds it", async ({
+    page,
+    request,
+  }) => {
+    const long = "nightly-cert-rotation-staging-eu-west-01";
+    const run = await postRuled(request, { rule: long });
+    try {
+      // The board's row and the session's line, each at the first width (by 10 px, from
+      // 390) where the line holds it all: there, nothing is cut.
+      for (const [path, line] of [
+        ["/", `article.card[data-flip="claude-code:${run.id}"] .card-meta`],
+        [`/s/claude-code/${run.id}`, ".sess-where"],
+      ] as const) {
+        await openPage(page, path);
+        await resizeWindow(page, { width: 390, height: 844 });
+        const el = page.locator(line).first();
+        await expect(el).toBeVisible({ timeout: 15_000 });
+        let held = 0;
+        for (let width = 390; width <= 700 && !held; width += 10) {
+          await resizeWindow(page, { width, height: 844 });
+          if (await fits(el)) held = width;
+        }
+        expect(held, `${path}: a width that holds it`).toBeGreaterThan(0);
+        for (const p of await metaParts(el)) expect(p.cut || p.gone, `${path} at ${held}: ${p.cls}`).toBe(false);
+      }
+    } finally {
+      await run.end();
+    }
+  });
+
+  test("a repo on a phone's line is whole, or keeps its words a few characters' room, or is gone: never a dot and a letter", async ({
+    page,
+    request,
+  }) => {
+    // Two hundred pixels, two frames each, on two lines.
+    test.setTimeout(90_000);
+    const run = await postRuled(request, { rule: "cd-5a9b1f", repo: "github.com/acme/infra-terraform-mod" });
+    try {
+      // The board's row and the session's line, narrowed two pixels at a time (a letter is
+      // six or seven).
+      for (const [path, line, room] of [
+        [
+          "/",
+          `article.card[data-flip="claude-code:${run.id}"] .card-meta`,
+          `article.card[data-flip="claude-code:${run.id}"]`,
+        ],
+        [`/s/claude-code/${run.id}`, ".sess-where", ".bar-sub"],
+      ] as const) {
+        await openPage(page, path);
+        const el = page.locator(line).first();
+        await expect(el).toBeVisible({ timeout: 15_000 });
+        // In the page: the room box narrowed, then the line read as drawn.
+        const stubs = await page
+          .locator(room)
+          .first()
+          .evaluate(async (box: HTMLElement, sel: string) => {
+            const out: string[] = [];
+            const line = document.querySelector(sel)!;
+            const from = Math.round(box.getBoundingClientRect().width);
+            for (let width = from; width >= from - 200; width -= 2) {
+              box.style.setProperty("width", `${width}px`);
+              await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+              const repo = line.querySelector<HTMLElement>("[data-give-way]")!;
+              if (repo.hasAttribute("data-gone") || repo.scrollWidth <= repo.clientWidth + 0.5) continue;
+              // Its words' room: from where they start (after the dot) to where it is cut off.
+              let text: Text | null = null;
+              for (let n = repo.lastChild; n && !text; n = n.previousSibling)
+                if (n.nodeType === Node.TEXT_NODE && n.nodeValue?.trim()) text = n as Text;
+              const range = document.createRange();
+              range.selectNodeContents(text!);
+              const ems =
+                (repo.getBoundingClientRect().right - range.getBoundingClientRect().left) /
+                Number.parseFloat(getComputedStyle(repo).fontSize);
+              if (ems < 3) out.push(`${width}: ${ems.toFixed(2)}em of "${repo.textContent}"`);
+            }
+            return out;
+          }, line);
+        expect(stubs, path).toEqual([]);
+      }
+    } finally {
+      await run.end();
+    }
+  });
+
+  test("a rule's run on a computer with no name: the line starts with its first word, a dot only between two", async ({
+    page,
+    request,
+  }) => {
+    const run = await postRuled(request, {
+      rule: "nightly-cert-rotation-staging-eu-west-01",
+      machine: "",
+      repo: "github.com/acme/data-pipeline-backfills-eu",
+    });
+    try {
+      // The row: the repo has given way, so nothing comes before the name but the glyph,
+      // as far from it as the glyph is from a computer's name.
+      await openBoard(page);
+      const meta = page.locator(`article.card[data-flip="claude-code:${run.id}"] .card-meta`);
+      await expect(meta).toBeVisible({ timeout: 15_000 });
+      await meta.scrollIntoViewIfNeeded();
+      await expect(meta.locator(".card-repo")).toHaveAttribute("data-gone", "");
+      expect(await dotGaps(meta)).toEqual([]);
+      const gap = await meta.evaluate((el) => {
+        const glyph = el.querySelector(".glyph-wrap")!.getBoundingClientRect();
+        const chip = el.querySelector(".card-trigger")!.getBoundingClientRect();
+        return chip.left - glyph.right;
+      });
+      expect(gap).toBeLessThanOrEqual(6.5);
+      // The page: the sentence first, no dot before it.
+      await openPage(page, `/s/claude-code/${run.id}`);
+      const where = page.locator(".sess-where").first();
+      await expect(where.locator(".sess-repo")).toHaveAttribute("data-gone", "");
+      const lead = await where.locator(".sess-trigger").evaluate((el) => getComputedStyle(el, "::before").content);
+      expect(lead).toBe("none");
+    } finally {
+      await run.end();
+    }
+  });
+
+  test("on a phone a cut chip is never drawn past its box, not even in the frame in which its line's repo gives way", async ({
+    page,
+    request,
+  }) => {
+    // Each time a line's repo leaves or comes back, read before anything is drawn (a
+    // mutation observer runs before the frame is): a chip of that line whose words run past
+    // its box, cut off with no "…" where it is cut.
+    await page.addInitScript(() => {
+      const bad: string[] = [];
+      (window as unknown as { overrun: string[]; flips: number }).overrun = bad;
+      (window as unknown as { flips: number }).flips = 0;
+      new MutationObserver((records) => {
+        for (const r of records) {
+          (window as unknown as { flips: number }).flips++;
+          const line = (r.target as Element).closest(".sess-where, .card-meta");
+          for (const chip of Array.from(line?.querySelectorAll(".chip.midcut") ?? []) as HTMLElement[]) {
+            const text = chip.querySelector(".midcut-text");
+            const node = text?.firstChild;
+            if (!text || !node || text.hasAttribute("data-over")) continue;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const over = range.getBoundingClientRect().width - chip.getBoundingClientRect().width;
+            if (over > 0.5) bad.push(`${chip.dataset.text}: ${over.toFixed(1)} px past its box`);
+          }
+        }
+      }).observe(document, { subtree: true, attributes: true, attributeFilter: ["data-gone"] });
+    });
+    const long = "nightly-cert-rotation-staging-eu-west-01";
+    const run = await postRuled(request, { rule: long, repo: "github.com/acme/infra", branch: "main" });
+    try {
+      const read = () =>
+        page.evaluate(() => {
+          const w = window as unknown as { overrun: string[]; flips: number };
+          return { flips: w.flips > 0, overrun: w.overrun };
+        });
+      await openBoard(page);
+      await expect(page.locator(`article.card[data-flip="claude-code:${run.id}"] .card-trigger`)).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(page.locator(`article.card[data-flip="claude-code:${run.id}"] .card-repo`)).toHaveAttribute(
+        "data-gone",
+        "",
+      );
+      expect(await read()).toEqual({ flips: true, overrun: [] });
+      await openPage(page, `/s/claude-code/${run.id}`);
+      await expect(page.locator(".sess-where .sess-repo")).toHaveAttribute("data-gone", "");
+      expect(await read()).toEqual({ flips: true, overrun: [] });
+      // And as the line's room changes under it: the repo back, then gone again.
+      const sub = page.locator(".bar-sub").first();
+      for (const width of [1200, 300]) {
+        await sub.evaluate((el, w) => el.style.setProperty("width", `${w}px`), width);
+        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+      }
+      expect(await read()).toEqual({ flips: true, overrun: [] });
+    } finally {
+      await run.end();
     }
   });
 });

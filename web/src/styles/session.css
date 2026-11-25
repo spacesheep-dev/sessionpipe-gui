@@ -74,13 +74,15 @@ html:has(.main > .session) {
 .sess-bar .bar-tools {
   flex: 0 1 auto;
 }
+/* The meta clips too: the same room for a ring, its 4 px after the title padding now. */
 .sess-bar .bar-meta {
   flex: 0 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-left: 4px;
+  margin: -4px -4px -4px 0;
+  padding: 4px;
 }
 /* The stream down, in a column with no room for the title beside the status (the Files
    drawer and a session beside, both open): nothing is shown in part. Where the title would
@@ -142,10 +144,15 @@ html:has(.main > .session) {
     text-underline-offset: 2px;
   }
 }
-/* Where it runs: the machine never truncates; the repo gives way first. */
+/* Where it runs: the machine never truncates; the repo gives way first. Its links and the
+   rule's sentence are as tall as the line and may end it, so it keeps the room a focus
+   ring takes (2 px, 2 px off the edge) inside its own clip, and gives it back in margin:
+   the line sits where it did. */
 .sess-where {
   display: flex;
   min-width: 0;
+  margin: -4px;
+  padding: 4px;
   overflow: hidden;
   white-space: nowrap;
   color: var(--fg-3);
@@ -157,6 +164,10 @@ html:has(.main > .session) {
   content: "·";
   margin: 0 6px;
   color: var(--fg-4);
+}
+/* Nothing on the line before it but a repo that gave way: no dot to lead the line. */
+.sess-where > [data-gone]:first-child + *::before {
+  content: none;
 }
 .sess-repo,
 .sess-where > .sess-copy {
@@ -171,13 +182,19 @@ html:has(.main > .session) {
 }
 /* "Started by trigger card-todo": words, not a link, whole while the line holds it. Where it
    does not, the repo gives way first (gone whole below a few characters, lib/giveWay.ts),
-   then the rule's name, cut in its middle (MidCut), "Started
-   by trigger " kept. Lengths, not shares: the line is as wide as what it holds. */
+   then the rule's name, cut in its middle (MidCut), "Started by trigger " kept. Lengths,
+   not shares: the line is as wide as what it holds. Beside the desktop bar's title the
+   sentence is cut past 24em whatever the room. */
 .sess-where > .sess-trigger {
   display: flex;
   flex: 0 1 auto;
   min-width: 0;
   max-width: 24em;
+}
+/* The phone's line under the bar: its width is the only limit, so nothing is cut while the
+   line holds it all (the 24em is the desktop bar's, beside a title). */
+.bar-sub .sess-where > .sess-trigger {
+  max-width: none;
 }
 /* While the repo is on the line the sentence keeps its width: a share of the shortfall,
    however small, would cut it before the repo had gone. */

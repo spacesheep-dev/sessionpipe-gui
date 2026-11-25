@@ -311,7 +311,7 @@ export const SessionCard = memo(function SessionCard({
   const repo = repoShort(s.repo);
   const trigger = triggerWords(s);
   const metaRef = useRef<HTMLSpanElement>(null);
-  useGiveWay(metaRef, !!trigger);
+  useGiveWay(metaRef, !!trigger, ".card-link");
   const { iso: time, tip: timeTip } = rowTime(s);
   // Its own age only when the tool began a minute or more after the row's time: otherwise
   // the number at the row's end already says it ("Edit · 4 m … 4 m").
@@ -468,23 +468,27 @@ export const SessionCard = memo(function SessionCard({
             {trigger ? (
               // A rule ran it (session.triggered_by): its name after where it runs. Nothing is
               // cut while the line holds it all; where it does not, the repo gives way first
-              // (and leaves whole below a few characters: lib/giveWay.ts), then the rule's
-              // name, cut in its middle; the computer stays whole up to 16em. Lineage, never authority.
+              // (and leaves the line whole below a few characters, read still by a screen
+              // reader: lib/giveWay.ts), then the rule's name, cut in its middle; the computer
+              // stays whole up to 16em. The dot before the name is drawn with it, so a cut's
+              // room is left before the dot, not between the dot and "trigger". Lineage,
+              // never authority.
               <>
-                <span className="card-where card-machine ellipsis">
-                  {s.machine}
-                  {s.branch && <span className="sr-only"> @ {s.branch}</span>}
-                </span>
+                {s.machine && <span className="card-where card-machine ellipsis">{s.machine}</span>}
                 {repo && (
                   <span className="card-repo ellipsis" data-give-way="">
                     {s.machine ? "· " : ""}
                     {repo}
                   </span>
                 )}
-                <span className="card-sep" aria-hidden="true">
-                  ·
-                </span>
-                <MidCut className="card-trigger" lead={TRIGGER_LEAD} text={trigger.name} />
+                {/* The branch stays for search and a screen reader, after the repo it is of. */}
+                {s.branch && <span className="sr-only"> @ {s.branch}</span>}
+                {!s.machine && repo && (
+                  <span className="card-sep" aria-hidden="true">
+                    ·
+                  </span>
+                )}
+                <MidCut className="card-trigger" sep={s.machine ? "· " : ""} lead={TRIGGER_LEAD} text={trigger.name} />
               </>
             ) : (
               <span className="card-where ellipsis">

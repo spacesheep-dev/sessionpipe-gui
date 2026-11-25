@@ -1646,7 +1646,9 @@ function SessionMeta({
   const askedBy = s.delegatedBy ? splitKey(s.delegatedBy) : null;
   const trigger = triggerWords(s);
   const whereRef = useRef<HTMLSpanElement>(null);
-  useGiveWay(whereRef, !!trigger);
+  // The room is the bar's lead beside the title (the phone's line under it), never this
+  // line's own box, which is as wide as what it holds.
+  useGiveWay(whereRef, !!trigger, ".bar-lead, .bar-sub");
   const more = [
     STATE_LABEL[s.state],
     fact,

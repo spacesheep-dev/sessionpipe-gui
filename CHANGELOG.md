@@ -24,10 +24,15 @@ All notable changes to `sessionpipe-gui`. The format follows
   continues a session on your computer, the line under its title says "Started by trigger
   card-todo" or "Continued by trigger card-todo" ("Run by trigger card-todo" when the
   app did not see how that run began), and its card on the Board carries "trigger
-  card-todo" after where it runs. A long name is cut in its middle, after the repo has
-  made room. Its tooltip, also from the keyboard, says the rule lives on that computer
-  and is made, paused and removed only there (`sessionpipe trigger list`). Only the
-  rule's name reaches the app; nothing is allowed, hidden or sorted because of it.
+  card-todo" after where it runs. On a phone or in a narrow column nothing on either line
+  is cut while the line holds it all; where it does not, the repo makes room first, then
+  the name is cut in its middle, keeping its end. On a wide Board row a name is cut past
+  18em (about 28 characters) and beside a desktop session's title past 24em, whatever
+  the room. On the session's page the sentence's tooltip, also from the keyboard and read
+  by a screen reader, says the rule lives on that computer and is made, paused and
+  removed only there (`sessionpipe trigger list`); the card's mark has the whole name as
+  its tooltip. Only the rule's name reaches the app; nothing is allowed, hidden or sorted
+  because of it.
 
 ### Fixed
 

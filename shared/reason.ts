@@ -21,6 +21,9 @@ const BREAKS = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
  *  modifiers U+1DA9B-1DA9F and U+1DAA1-1DAAF). */
 const INVISIBLE =
   /[\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}\u{115F}\u{1160}\u{3164}\u{FFA0}\u{2800}\u{16FE4}\u{1D159}\u{1DA9B}-\u{1DA9F}\u{1DAA1}-\u{1DAAF}]/gu;
+/** `s` without the characters that do not show as themselves (INVISIBLE: bidi controls,
+ *  zero-width characters, fillers) nor control characters (a line break, a tab). */
+export const dropInvisible = (s: string): string => s.replace(INVISIBLE, "").replace(/\p{Cc}/gu, "");
 /** A run of combining marks past two: the rest would draw over the lines around it. */
 const MARK_FLOOD = /(\p{M}{2})\p{M}+/gu;
 

@@ -167,7 +167,8 @@ export function fits(line: Locator): Promise<boolean> {
 }
 
 /** What a row of facts with a rule's mark draws of each part: the text each would show
- *  whole and what it shows, and whether a part left (`data-gone`). Read in one frame. */
+ *  whole and what it shows (a chip's without the dot it draws before its words), and
+ *  whether a part left (`data-gone`). Read in one frame. */
 export function metaParts(line: Locator): Promise<
   {
     cls: string;
@@ -182,14 +183,15 @@ export function metaParts(line: Locator): Promise<
   return line.evaluate((el: HTMLElement) =>
     Array.from(el.children)
       .filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("glyph-wrap"))
-      .filter((c) => !c.matches(".card-sep, [aria-hidden='true']"))
+      .filter((c) => !c.matches(".card-sep, [aria-hidden='true'], .sr-only"))
       .map((c) => {
         const chip = c.matches(".chip") ? c : c.querySelector<HTMLElement>(".chip");
         const text = chip?.querySelector<HTMLElement>(".midcut-text");
         const range = document.createRange();
         if (text) range.selectNodeContents(text);
-        const whole = chip ? (chip.dataset.text ?? "") : (c.textContent ?? "");
-        const shown = text ? (text.textContent ?? "") : (c.textContent ?? "");
+        const sep = chip?.dataset.sep?.length ?? 0;
+        const whole = chip ? (chip.dataset.text ?? "").slice(sep) : (c.textContent ?? "");
+        const shown = text ? (text.textContent ?? "").slice(sep) : (c.textContent ?? "");
         return {
           cls: c.className,
           whole,
@@ -203,6 +205,102 @@ export function metaParts(line: Locator): Promise<
         };
       }),
   );
+}
+
+/** Where a cut chip's words end in its box, whatever the cut left over: a short word is
+ *  put in place of them for one read, and how far its end is from the box's right edge is
+ *  given (0 when the words are set flush right). Set back as it was in the same frame. */
+export function wordsEnd(chip: Locator): Promise<number> {
+  return chip.evaluate((el: HTMLElement) => {
+    const line = el.querySelector<HTMLElement>(".midcut-text")!;
+    const node = line.firstChild as Text;
+    const was = node.nodeValue;
+    node.nodeValue = "x";
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const gap = line.getBoundingClientRect().right - range.getBoundingClientRect().right;
+    node.nodeValue = was;
+    return gap;
+  });
+}
+
+/** The room a part of a row of facts gives its own words, in ems of its font: from where
+ *  they start (after the "· " or the dot drawn before them) to where the part is cut off. */
+export function wordsRoom(part: Locator): Promise<number> {
+  return part.evaluate((el: HTMLElement) => {
+    let text: Text | null = null;
+    for (let n = el.lastChild; n && !text; n = n.previousSibling)
+      if (n.nodeType === Node.TEXT_NODE && n.nodeValue?.trim()) text = n as Text;
+    const right = el.getBoundingClientRect().right;
+    const range = document.createRange();
+    if (text) range.selectNodeContents(text);
+    const start = text ? range.getBoundingClientRect().left : right;
+    return (right - start) / Number.parseFloat(getComputedStyle(el).fontSize);
+  });
+}
+
+/** The room between each "·" of a row of facts and the word after it, in order: the dots
+ *  the line draws as text, a separator element's, and a chip's own. Read in one frame. */
+export function dotGaps(line: Locator): Promise<number[]> {
+  return line.evaluate((el: HTMLElement) => {
+    const out: number[] = [];
+    const nodes: Text[] = [];
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const p = n.parentElement!;
+      if (p.closest(".sr-only, [data-gone]") || getComputedStyle(p).display === "none") continue;
+      if (n.nodeValue?.trim()) nodes.push(n as Text);
+    }
+    const box = (n: Text, i: number) => {
+      const r = document.createRange();
+      r.setStart(n, i);
+      r.setEnd(n, i + 1);
+      return r.getBoundingClientRect();
+    };
+    nodes.forEach((n, k) => {
+      const v = n.nodeValue!;
+      for (let i = 0; i < v.length; i++) {
+        if (v[i] !== "·") continue;
+        // The next letter: in this text, or the first of the next one.
+        let j = i + 1;
+        while (j < v.length && v[j] === " ") j++;
+        const next =
+          j < v.length ? box(n, j) : nodes[k + 1] ? box(nodes[k + 1]!, nodes[k + 1]!.nodeValue!.search(/\S/)) : null;
+        if (next) out.push(next.left - box(n, i).right);
+      }
+    });
+    return out;
+  });
+}
+
+/** How far a focus ring drawn round `el` (its outline, off its edge by its offset) is cut
+ *  off by the boxes it sits in that clip what overflows them: one line per side cut. */
+export function ringCut(el: Locator): Promise<string[]> {
+  return el.evaluate((node: HTMLElement) => {
+    const cs = getComputedStyle(node);
+    const out = Number.parseFloat(cs.outlineWidth) + Number.parseFloat(cs.outlineOffset);
+    const r = node.getBoundingClientRect();
+    const ring = { left: r.left - out, right: r.right + out, top: r.top - out, bottom: r.bottom + out };
+    const cut: string[] = [];
+    for (let a = node.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+      const s = getComputedStyle(a);
+      const b = a.getBoundingClientRect();
+      const left = b.left + a.clientLeft;
+      const top = b.top + a.clientTop;
+      const box = { left, top, right: left + a.clientWidth, bottom: top + a.clientHeight };
+      const by = (side: keyof typeof box, d: number) =>
+        d > 0.5 && cut.push(`${a.className} ${side} by ${d.toFixed(1)}`);
+      if (s.overflowX !== "visible") {
+        by("left", box.left - ring.left);
+        by("right", ring.right - box.right);
+      }
+      if (s.overflowY !== "visible") {
+        by("top", box.top - ring.top);
+        by("bottom", ring.bottom - box.bottom);
+      }
+    }
+    return cut;
+  });
 }
 
 /** A Board kid row's box, its title's and its computer's, read in one frame: a card that
@@ -502,12 +600,13 @@ export function wellKnownProblems(doc: unknown): string[] {
   return out;
 }
 
-/** A Claude Code session on build-box that a rule named `rule` started, mid-turn, posted
- *  the way its hooks send it (tier 1); `end()` ends it, so no other spec finds it. */
+/** A Claude Code session on build-box (or `machine`; "" for none) that a rule named `rule`
+ *  started, mid-turn, posted the way its hooks send it (tier 1); `end()` ends it, so no
+ *  other spec finds it. No `repo`, none. */
 export async function postRuled(
   request: APIRequestContext,
-  o: { rule: string; repo: string },
-): Promise<{ id: string; rule: string; title: string; end: () => Promise<void> }> {
+  o: { rule: string; repo?: string; machine?: string; branch?: string },
+): Promise<{ id: string; rule: string; title: string; more: (n: number) => Promise<void>; end: () => Promise<void> }> {
   const { sinkToken: token } = (await (await request.get(INFO)).json()) as { sinkToken: string };
   const id = randomUUID();
   const title = "Rotate the staging certificates";
@@ -525,9 +624,10 @@ export async function postRuled(
       session: {
         id,
         seq: seq++,
-        machine: "build-box",
+        ...(o.machine === "" ? {} : { machine: o.machine ?? "build-box" }),
         cwd: "~/work/infra",
-        repo: o.repo,
+        ...(o.repo ? { repo: o.repo } : {}),
+        ...(o.branch ? { branch: o.branch } : {}),
         title,
         title_source: "custom",
         triggered_by: o.rule,
@@ -548,5 +648,17 @@ export async function postRuled(
     ev("turn.started", { turn_id: "t1", prompt_chars: 60 }, "UserPromptSubmit"),
     ev("tool.started", { tool: "Bash", call_id: `toolu_${id.slice(0, 8)}`, turn_id: "t1" }, "PreToolUse"),
   ]);
-  return { id, rule: o.rule, title, end: () => post([ev("session.ended", { reason: "exit" }, "SessionEnd")]) };
+  /** `n` more of the run's tools, each started and ended. */
+  const more = (n: number) =>
+    post(
+      Array.from({ length: n }, (_, i) => [
+        ev(
+          "tool.ended",
+          { tool: "Bash", call_id: `toolu_${id.slice(0, 8)}${i || ""}`, turn_id: "t1", ok: true },
+          "PostToolUse",
+        ),
+        ev("tool.started", { tool: "Bash", call_id: `toolu_${id.slice(0, 8)}${i + 1}`, turn_id: "t1" }, "PreToolUse"),
+      ]).flat(),
+    );
+  return { id, rule: o.rule, title, more, end: () => post([ev("session.ended", { reason: "exit" }, "SessionEnd")]) };
 }

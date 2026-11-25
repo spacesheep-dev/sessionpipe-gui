@@ -338,8 +338,9 @@
    share of a width (the line is as wide as what it holds, so a share would cut what fits),
    only lengths and the order in which the parts give way when it does not: the repo first
    (it leaves whole below a few characters, lib/giveWay.ts), then the name, cut in its
-   middle with "trigger " kept (MidCut), the computer whole up to 16em. Past 18em the name is cut
-   whatever the room; the whole of it is its tooltip and what a screen reader reads. */
+   middle with "trigger " kept (MidCut), the computer whole up to 16em. On the wide row
+   the name is cut past 18em whatever the room (the narrow grid has no such cap); the whole
+   of it is its tooltip and what a screen reader reads. */
 .card-meta:has(> .card-trigger) {
   max-width: 500px;
 }
@@ -356,11 +357,19 @@
   flex: none;
   margin-inline: -2px;
 }
+/* Nothing before the separator but a repo that gave way: no dot to lead the line. */
+.card-meta > .card-repo[data-gone] ~ .card-sep {
+  display: none;
+}
 .card-meta > .chip.card-trigger {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 18em;
   line-height: inherit;
+}
+/* Its dot drawn with it ("· trigger card-todo"), as close to what is before as the repo's. */
+.card-meta > .chip.card-trigger[data-sep] {
+  margin-left: -2px;
 }
 /* While the repo is on the line the name keeps its width: a share of the shortfall, however
    small, would cut it before the repo had gone. */
@@ -905,6 +914,11 @@
       "lead title title time"
       ".    tool  meta  foot";
   }
+  .card-link:not(:has(.card-text, .card-attn, .card-agents, .card-flags)):not(:has(> .card-foot)) {
+    grid-template-areas:
+      "lead title title time"
+      ".    tool  meta  meta";
+  }
   .card-link:not(:has(.card-text, .card-attn, .card-agents, .card-flags)) > .card-line {
     display: none;
   }
@@ -924,6 +938,19 @@
     /* Its area, not its text: a long repo or branch is cut, never widens the row. */
     max-width: 100%;
     margin-left: 0;
+  }
+  /* The area is the only limit here: a rule's name is cut only when the line cannot hold
+     it all, never at the wide row's 18em. */
+  .card-meta > .chip.card-trigger {
+    max-width: none;
+  }
+  /* No counts under the time (simple): the where line runs on under it, so a line that is
+     cut ends on the row's right edge, as the time does. */
+  .card-link:not(:has(> .card-foot)) {
+    grid-template-areas:
+      "lead title title time"
+      ".    tool  line  line"
+      ".    meta  meta  meta";
   }
   .card-foot > span {
     min-width: 0;

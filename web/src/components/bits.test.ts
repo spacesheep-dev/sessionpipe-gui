@@ -40,6 +40,25 @@ describe("MidCut", () => {
     expect(html).toContain('title=""');
     expect(html).toContain('data-text="Started by trigger card-todo"');
   });
+  it("with a tip, gives a screen reader the tip as its description: the app's tooltip is drawn for eyes only", () => {
+    const html = renderToStaticMarkup(
+      createElement(MidCut, { lead: "Started by trigger ", text: "card-todo", tip: "A rule named card-todo ran it." }),
+    );
+    const id = html.match(/aria-describedby="([^"]+)"/)?.[1];
+    expect(id).toBeTruthy();
+    expect(html).toContain(`<span id="${id}" hidden="">A rule named card-todo ran it.</span>`);
+    // Without one, nothing to describe and no stop.
+    const plain = renderToStaticMarkup(createElement(MidCut, { lead: "trigger ", text: "card-todo" }));
+    expect(plain).not.toContain("aria-describedby");
+    expect(plain).not.toContain("tabindex");
+  });
+  it("draws its separator before the lead, whole, and leaves it out of the tooltip and of what is read", () => {
+    const html = renderToStaticMarkup(createElement(MidCut, { sep: "· ", lead: "trigger ", text: "card-todo" }));
+    expect(html).toContain('data-text="· trigger card-todo"');
+    expect(html).toContain('title="trigger card-todo"');
+    expect(html).toContain('<span class="midcut-text" aria-hidden="true">· trigger card-todo</span>');
+    expect(html).toContain('<span class="sr-only">trigger card-todo</span>');
+  });
 });
 
 describe("EndCut", () => {
