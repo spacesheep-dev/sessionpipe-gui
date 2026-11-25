@@ -148,7 +148,8 @@ a.ask-link:active {
 /* The asked session's bar (§3.3): "for <the asking session>", a link, first in the meta. */
 .sess-for {
   flex: 0 1 auto;
-  max-width: 30%;
+  /* 4 px of it the room for a focus ring after the words (session.css), given back. */
+  max-width: calc(30% + 4px);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -167,7 +168,7 @@ a.ask-link:active {
 }
 @media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .sess-for {
-    max-width: 60%;
+    max-width: calc(60% + 4px);
   }
 }
 

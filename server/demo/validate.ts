@@ -4,7 +4,7 @@
 // per-type data (schemas/v1/event-data.json) and the tier a type needs (§4, §5). The
 // tests run it on every generated event; the replay uses it to drop lines that are not
 // events. It returns the problems it found, so a test failure names the field.
-import type { ProtocolEvent } from "../../shared/api.js";
+import { type ProtocolEvent, TRIGGER_NAME_RE } from "../../shared/api.js";
 import { isCalendarTime } from "../receiver/validate.js";
 
 /** The lowest tier that carries each type (PROTOCOL.md §4). */
@@ -289,6 +289,8 @@ export function validate(event: unknown): string[] {
     if (s.attended !== undefined && typeof s.attended !== "boolean") out.push("session.attended: not a boolean");
     if (s.delegated_by !== undefined && (typeof s.delegated_by !== "string" || !SESSION_REF_RE.test(s.delegated_by)))
       out.push("session.delegated_by: not <harness>:<id>");
+    if (s.triggered_by !== undefined && (typeof s.triggered_by !== "string" || !TRIGGER_NAME_RE.test(s.triggered_by)))
+      out.push("session.triggered_by: not a rule's name");
   }
 
   if (!isObj(e.privacy)) out.push("privacy: not an object");

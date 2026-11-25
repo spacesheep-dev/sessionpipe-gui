@@ -33,9 +33,14 @@ import {
   SCHEDULED_TURNS,
   SILENT_TURN,
   type SubagentScript,
+  TRIGGER_CARD,
+  TRIGGER_CARD_TURN,
+  TRIGGER_WEEKLY,
+  TRIGGER_WEEKLY_TURN,
   type TurnScript,
   UNATTENDED_TURN,
   V010_MACHINE,
+  WEEKLY_FIRST,
 } from "./content.js";
 import { Rng } from "./rng.js";
 
@@ -642,6 +647,7 @@ export class Simulation {
     this.spawn(parallel(), 10_000);
     this.spawn(this.limitsScene());
     this.spawn(this.poolScene(), 45_000);
+    this.spawn(this.triggerScene(), 3_000);
 
     let lastShowcase = this.now;
     yield OPENING_MS;
@@ -1131,6 +1137,105 @@ export class Simulation {
       sess.emit("limits.observed", { account_id: own, windows: this.labWindows(this.wall()) }, "StatusLine");
       yield i === 0 ? 20_000 : 4 * MINUTE + 20_000 * (i % 2);
     }
+  }
+
+  /** Two runs a person's rules made (sessionpipe triggers, CONTROL.md §14), on the first
+   *  machine: a card moved to TODO starts Claude Code on it (`card-todo`, `triggered_by` on
+   *  every event from the session's first), and a Monday clock continues the weekly report
+   *  Sam wrote by hand last week (`monday-report`, on that run's events only, after a run
+   *  without it). The daemon keeps each session open after its run, so both stay on the
+   *  board as idle; an event after a run would carry no mark. Ids, timings and words are
+   *  the scene's own (a stream of its own, fixed waits), so the cast draws what it always drew. */
+  private *triggerScene(): Script {
+    const studio = this.machines[0] as string;
+    const rng = new Rng(this.seed + 3);
+    while (!this.accounts.has(`${studio}/claude-code`)) yield 1000;
+    const repo = REPOS[0] as Repo;
+    const block = {
+      machine: studio,
+      cwd: repo.cwd,
+      repo: repo.repo,
+      branch: "main",
+      model: MODELS["claude-code"][1],
+      account_id: this.accounts.get(`${studio}/claude-code`),
+    };
+    // Last Monday's report, by hand: started, one turn, ended.
+    const weekly = new Sess(this, PROFILES["claude-code"], rng.uuid(), {
+      ...block,
+      title: "Weekly billing report",
+      title_source: "custom",
+    });
+    const ev = weekly.profile.ev;
+    const was = this.wall() - 7 * DAY;
+    const turnId = rng.uuid();
+    weekly.emit("session.started", { source: "startup" }, ev.start, true, was);
+    const prompt = WEEKLY_FIRST.prompt;
+    weekly.emit("turn.started", { turn_id: turnId, prompt_chars: [...prompt].length }, ev.prompt, true, was + 4000);
+    weekly.emit("turn.ended", { turn_id: turnId, reason: "stop", ms: 52_000 }, ev.stop, true, was + 56_000);
+    const at = new Date(was + 56_000).toISOString();
+    weekly.emit(
+      "turn.transcript",
+      { turn: 0, user: prompt, assistant: WEEKLY_FIRST.reply, at },
+      ev.stop,
+      true,
+      was + 56_000,
+    );
+    weekly.emit("session.ended", { reason: "exit" }, ev.end, true, was + 2 * MINUTE);
+
+    const card = new Sess(this, PROFILES["claude-code"], rng.uuid(), { ...block, triggered_by: TRIGGER_CARD });
+    this.spawn(this.ruleRun(card, rng, TRIGGER_CARD_TURN, 0, "startup"));
+    yield 30_000;
+    weekly.learn({ triggered_by: TRIGGER_WEEKLY });
+    yield* this.ruleRun(weekly, rng, TRIGGER_WEEKLY_TURN, 1, "resume");
+  }
+
+  /** One run a rule made: its start (`source`), one turn of `script` played at fixed waits,
+   *  and the mark taken off the session's block after it, as the daemon's run ends there. */
+  private *ruleRun(sess: Sess, rng: Rng, script: TurnScript, turn: number, source: "startup" | "resume"): Script {
+    const ev = sess.profile.ev;
+    const user = script.prompt;
+    const wall = () => new Date(this.wall()).toISOString();
+    sess.emit("session.started", { source }, ev.start);
+    if (source === "startup") sess.learn({ title: firstAsk(user), title_source: "first-ask" });
+    yield 2500;
+    const turnId = rng.uuid();
+    const begun = this.now;
+    sess.emit("turn.started", { turn_id: turnId, prompt_chars: [...user].length }, ev.prompt);
+    let said = "";
+    let lastProgress = this.now;
+    sess.emit("turn.progress", { turn, user, assistant: said, at: wall() }, ev.prompt);
+    yield 3500;
+    for (const [i, step] of script.steps.entries()) {
+      const callId = rng.toolu();
+      sess.emit("tool.started", { tool: step.tool, call_id: callId, turn_id: turnId, input: step.input }, ev.preTool);
+      yield step.ms;
+      sess.emit(
+        "tool.ended",
+        {
+          tool: step.tool,
+          call_id: callId,
+          turn_id: turnId,
+          ms: step.ms,
+          ok: true,
+          input: step.input,
+          output: step.output ?? null,
+        },
+        ev.postTool,
+      );
+      if (step.paths) sess.emit("files.changed", { paths: step.paths }, ev.postTool);
+      if (i === 0 && script.title) sess.learn({ title: script.title.text, title_source: script.title.source });
+      if (step.say && step.say !== said) {
+        said = step.say;
+        if (this.now - lastProgress >= PROGRESS_EVERY_MS) {
+          sess.emit("turn.progress", { turn, user, assistant: said, at: wall() }, ev.postTool);
+          lastProgress = this.now;
+        }
+      }
+      yield 9000;
+    }
+    sess.emit("turn.ended", { turn_id: turnId, reason: "stop", ms: this.now - begun }, ev.stop);
+    sess.emit("turn.transcript", { turn, user, assistant: script.final, at: wall() }, ev.stop);
+    delete sess.block.triggered_by;
   }
 
   /** lab-mac's Claude Code windows as its status line reports them at `now`. */

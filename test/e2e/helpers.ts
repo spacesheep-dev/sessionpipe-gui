@@ -146,6 +146,220 @@ export function strandedMarks(el: Locator): Promise<number[]> {
 
 type Box = { x: number; y: number; width: number; height: number };
 
+/** Whether a one-line row of facts holds all its parts whole: its width with every part at
+ *  its whole width (each part's own box, as the layout sizes it from the whole text) is no
+ *  more than the width the layout gave it. Read in one frame, set back as it was. */
+export function fits(line: Locator): Promise<boolean> {
+  return line.evaluate((el: HTMLElement) => {
+    const given = el.getBoundingClientRect().width;
+    const was = el.getAttribute("style");
+    const gone = Array.from(el.querySelectorAll<HTMLElement>("[data-gone]"));
+    for (const g of gone) g.removeAttribute("data-gone");
+    el.style.setProperty("width", "max-content", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("flex", "none", "important");
+    const whole = el.getBoundingClientRect().width;
+    for (const g of gone) g.setAttribute("data-gone", "");
+    if (was === null) el.removeAttribute("style");
+    else el.setAttribute("style", was);
+    return whole <= given + 0.5;
+  });
+}
+
+/** What a row of facts with a rule's mark draws of each part: the text each would show
+ *  whole and what it shows (a chip's without the dot it draws before its words), and
+ *  whether a part left (`data-gone`). Read in one frame. */
+export function metaParts(line: Locator): Promise<
+  {
+    cls: string;
+    whole: string;
+    shown: string;
+    cut: boolean;
+    gone: boolean;
+    right: number;
+    textRight: number;
+  }[]
+> {
+  return line.evaluate((el: HTMLElement) =>
+    Array.from(el.children)
+      .filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("glyph-wrap"))
+      .filter((c) => !c.matches(".card-sep, [aria-hidden='true'], .sr-only"))
+      .map((c) => {
+        const chip = c.matches(".chip") ? c : c.querySelector<HTMLElement>(".chip");
+        const text = chip?.querySelector<HTMLElement>(".midcut-text");
+        const range = document.createRange();
+        if (text) range.selectNodeContents(text);
+        const sep = chip?.dataset.sep?.length ?? 0;
+        const whole = chip ? (chip.dataset.text ?? "").slice(sep) : (c.textContent ?? "");
+        const shown = text ? (text.textContent ?? "").slice(sep) : (c.textContent ?? "");
+        return {
+          cls: c.className,
+          whole,
+          shown,
+          // A chip is cut when it draws less than its text; an ellipsis span, when its text
+          // runs past its box.
+          cut: text ? shown !== whole : c.scrollWidth > c.clientWidth + 0.5,
+          gone: c.hasAttribute("data-gone"),
+          right: (chip ?? c).getBoundingClientRect().right,
+          textRight: text ? range.getBoundingClientRect().right : c.getBoundingClientRect().right,
+        };
+      }),
+  );
+}
+
+/** Where a cut chip's words end in its box, whatever the cut left over: a short word is
+ *  put in place of them for one read, and how far its end is from the box's right edge is
+ *  given (0 when the words are set flush right). Set back as it was in the same frame. */
+export function wordsEnd(chip: Locator): Promise<number> {
+  return chip.evaluate((el: HTMLElement) => {
+    const line = el.querySelector<HTMLElement>(".midcut-text")!;
+    const node = line.firstChild as Text;
+    const was = node.nodeValue;
+    node.nodeValue = "x";
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const gap = line.getBoundingClientRect().right - range.getBoundingClientRect().right;
+    node.nodeValue = was;
+    return gap;
+  });
+}
+
+/** The room a part of a row of facts gives its own words, in ems of its font: from where
+ *  they start (after the "· " or the dot drawn before them) to where the part is cut off. */
+export function wordsRoom(part: Locator): Promise<number> {
+  return part.evaluate((el: HTMLElement) => {
+    let text: Text | null = null;
+    for (let n = el.lastChild; n && !text; n = n.previousSibling)
+      if (n.nodeType === Node.TEXT_NODE && n.nodeValue?.trim()) text = n as Text;
+    const right = el.getBoundingClientRect().right;
+    const range = document.createRange();
+    if (text) range.selectNodeContents(text);
+    const start = text ? range.getBoundingClientRect().left : right;
+    return (right - start) / Number.parseFloat(getComputedStyle(el).fontSize);
+  });
+}
+
+/** The room between each "·" of a row of facts and the word after it, in order: the dots
+ *  the line draws as text, a separator element's, and a chip's own. Read in one frame. */
+export function dotGaps(line: Locator): Promise<number[]> {
+  return line.evaluate((el: HTMLElement) => {
+    const out: number[] = [];
+    const nodes: Text[] = [];
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const p = n.parentElement!;
+      if (p.closest(".sr-only, [data-gone]") || getComputedStyle(p).display === "none") continue;
+      if (n.nodeValue?.trim()) nodes.push(n as Text);
+    }
+    const box = (n: Text, i: number) => {
+      const r = document.createRange();
+      r.setStart(n, i);
+      r.setEnd(n, i + 1);
+      return r.getBoundingClientRect();
+    };
+    nodes.forEach((n, k) => {
+      const v = n.nodeValue!;
+      for (let i = 0; i < v.length; i++) {
+        if (v[i] !== "·") continue;
+        // The next letter: in this text, or the first of the next one.
+        let j = i + 1;
+        while (j < v.length && v[j] === " ") j++;
+        const next =
+          j < v.length ? box(n, j) : nodes[k + 1] ? box(nodes[k + 1]!, nodes[k + 1]!.nodeValue!.search(/\S/)) : null;
+        if (next) out.push(next.left - box(n, i).right);
+      }
+    });
+    return out;
+  });
+}
+
+/** What a one-line row of facts whose repo gives way draws in each frame for `ms`, while
+ *  `during` runs (more events posted, so the page renders again): a frame's drawing (the
+ *  repo whole, cut to its words' room or gone, what the cut chip shows, how far the line
+ *  runs past its end), what a frame drew against the line's rules (past its end, a repo
+ *  kept as a stub, the name cut with the repo still on the line), and how many renders
+ *  were seen: the values `mark` (an attribute of the line or of what it is in, `[closest,
+ *  attr]`) took, which each render that counts the session's events writes anew. */
+export async function drawnFrames(
+  line: Locator,
+  ms: number,
+  mark: readonly [string, string],
+  during: () => Promise<void>,
+): Promise<{ frames: string[]; bad: string[]; renders: number }> {
+  const sampled = line.evaluate(
+    (el: HTMLElement, [ms, closest, attr]: [number, string, string]) =>
+      new Promise<{ frames: string[]; bad: string[]; renders: number }>((done) => {
+        const frames: string[] = [];
+        const bad = new Set<string>();
+        const marks = new Set<string | null>();
+        const t0 = performance.now();
+        const frame = () => {
+          const part = el.querySelector<HTMLElement>("[data-give-way]");
+          const chip = el.querySelector<HTMLElement>(".chip.midcut");
+          const shown = chip?.querySelector(".midcut-text")?.textContent ?? "";
+          const over = el.scrollWidth - el.clientWidth;
+          let repo = "no repo";
+          if (part?.hasAttribute("data-gone")) repo = "gone";
+          else if (part && part.scrollWidth > part.clientWidth + 0.5) {
+            // Its words' room: from where they start to where the part is cut off.
+            let text: Text | null = null;
+            for (let n = part.lastChild; n && !text; n = n.previousSibling)
+              if (n.nodeType === Node.TEXT_NODE && n.nodeValue?.trim()) text = n as Text;
+            const range = document.createRange();
+            if (text) range.selectNodeContents(text);
+            const start = text ? range.getBoundingClientRect().left : part.getBoundingClientRect().right;
+            const em =
+              (part.getBoundingClientRect().right - start) / Number.parseFloat(getComputedStyle(part).fontSize);
+            repo = `cut to ${em.toFixed(1)} em`;
+            if (em < 3) bad.add(`a repo kept as a stub, ${repo}`);
+          } else if (part) repo = "whole";
+          if (over > 1) bad.add(`${over} px past the line's end`);
+          if (chip && shown !== chip.dataset.text && part && !part.hasAttribute("data-gone"))
+            bad.add(`the name cut with the repo on the line (${repo})`);
+          frames.push(`${repo} | ${shown} | ${over} px over`);
+          marks.add(el.closest(closest)?.getAttribute(attr) ?? null);
+          if (performance.now() - t0 < ms) requestAnimationFrame(frame);
+          else done({ frames, bad: [...bad], renders: marks.size - 1 });
+        };
+        requestAnimationFrame(frame);
+      }),
+    [ms, mark[0], mark[1]] as [number, string, string],
+  );
+  const [drawn] = await Promise.all([sampled, during()]);
+  return drawn;
+}
+
+/** How far a focus ring drawn round `el` (its outline, off its edge by its offset) is cut
+ *  off by the boxes it sits in that clip what overflows them: one line per side cut.
+ *  `cutEnd`: a box that cuts `el` itself off at its end ("…") may cut the ring's end too. */
+export function ringCut(el: Locator, o: { cutEnd?: boolean } = {}): Promise<string[]> {
+  return el.evaluate((node: HTMLElement, cutEnd: boolean) => {
+    const cs = getComputedStyle(node);
+    const out = Number.parseFloat(cs.outlineWidth) + Number.parseFloat(cs.outlineOffset);
+    const r = node.getBoundingClientRect();
+    const ring = { left: r.left - out, right: r.right + out, top: r.top - out, bottom: r.bottom + out };
+    const cut: string[] = [];
+    for (let a = node.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+      const s = getComputedStyle(a);
+      const b = a.getBoundingClientRect();
+      const left = b.left + a.clientLeft;
+      const top = b.top + a.clientTop;
+      const box = { left, top, right: left + a.clientWidth, bottom: top + a.clientHeight };
+      const by = (side: keyof typeof box, d: number) =>
+        d > 0.5 && cut.push(`${a.className} ${side} by ${d.toFixed(1)}`);
+      if (s.overflowX !== "visible") {
+        by("left", box.left - ring.left);
+        if (!(cutEnd && r.right > box.right + 0.5)) by("right", ring.right - box.right);
+      }
+      if (s.overflowY !== "visible") {
+        by("top", box.top - ring.top);
+        by("bottom", ring.bottom - box.bottom);
+      }
+    }
+    return cut;
+  }, !!o.cutEnd);
+}
+
 /** A Board kid row's box, its title's and its computer's, read in one frame: a card that
  *  slides to a new place (useFlip's translate) moves all three together, so two reads
  *  apart could see it half way. */
@@ -441,4 +655,67 @@ export function wellKnownProblems(doc: unknown): string[] {
     }
   }
   return out;
+}
+
+/** A Claude Code session on build-box (or `machine`; "" for none) that a rule named `rule`
+ *  started, mid-turn, posted the way its hooks send it (tier 1); `end()` ends it, so no
+ *  other spec finds it. No `repo`, none. */
+export async function postRuled(
+  request: APIRequestContext,
+  o: { rule: string; repo?: string; machine?: string; branch?: string },
+): Promise<{ id: string; rule: string; title: string; more: (n: number) => Promise<void>; end: () => Promise<void> }> {
+  const { sinkToken: token } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  const id = randomUUID();
+  const title = "Rotate the staging certificates";
+  let seq = 0;
+  let clock = Date.now() - 20_000;
+  const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+    clock += 1000;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: "claude-code", version: "2.1.296", event: hook },
+      session: {
+        id,
+        seq: seq++,
+        ...(o.machine === "" ? {} : { machine: o.machine ?? "build-box" }),
+        cwd: "~/work/infra",
+        ...(o.repo ? { repo: o.repo } : {}),
+        ...(o.branch ? { branch: o.branch } : {}),
+        title,
+        title_source: "custom",
+        triggered_by: o.rule,
+      },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const post = async (events: unknown[]) => {
+    const res = await request.post(EVENTS, {
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
+      data: { events },
+    });
+    expect(res.status()).toBe(202);
+  };
+  await post([
+    ev("session.started", { source: "startup" }, "SessionStart"),
+    ev("turn.started", { turn_id: "t1", prompt_chars: 60 }, "UserPromptSubmit"),
+    ev("tool.started", { tool: "Bash", call_id: `toolu_${id.slice(0, 8)}`, turn_id: "t1" }, "PreToolUse"),
+  ]);
+  /** `n` more of the run's tools, each started and ended. */
+  const more = (n: number) =>
+    post(
+      Array.from({ length: n }, (_, i) => [
+        ev(
+          "tool.ended",
+          { tool: "Bash", call_id: `toolu_${id.slice(0, 8)}${i || ""}`, turn_id: "t1", ok: true },
+          "PostToolUse",
+        ),
+        ev("tool.started", { tool: "Bash", call_id: `toolu_${id.slice(0, 8)}${i + 1}`, turn_id: "t1" }, "PreToolUse"),
+      ]).flat(),
+    );
+  return { id, rule: o.rule, title, more, end: () => post([ev("session.ended", { reason: "exit" }, "SessionEnd")]) };
 }

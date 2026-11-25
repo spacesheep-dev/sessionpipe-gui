@@ -8,10 +8,23 @@
 // badge's (a subagent's own session too, its agent row marked even in a folded tree); a
 // parent set to Never quiets the session it asked. A child's row on the board names the
 // computer it runs on, and the Inbox row of its prompt names the session it works for.
+// A run a person's rule made (sessionpipe triggers) says so on its page, started or
+// continued, in words that are no link, and its card carries the rule's name.
 // Desktop only (a finger's: mobile.spec).
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
-import { askedPair, kidBoxes, openBoard, openPage } from "./helpers.js";
+import {
+  askedPair,
+  dotGaps,
+  fits,
+  kidBoxes,
+  metaParts,
+  openBoard,
+  openPage,
+  postRuled,
+  ringCut,
+  wordsEnd,
+} from "./helpers.js";
 
 test.skip(({ isMobile }) => isMobile, "desktop project");
 
@@ -24,9 +37,181 @@ interface Snap {
     delegatedBy?: string;
     machine?: string;
     delegations?: { via: string; harness: string; to?: string; endedAt?: string; relayed?: string }[];
+    triggeredBy?: string;
+    triggeredFrom?: string;
   }[];
 }
 const snap = async (page: Page): Promise<Snap> => (await (await page.request.get("/api/ui/snapshot")).json()) as Snap;
+
+test("a run a rule made says so: started or continued by its trigger, words and no link; its card names the rule", async ({
+  page,
+}) => {
+  await openPage(page, "/");
+  // The demo's two (another spec may post runs of its own rules meanwhile).
+  const ruled = async () =>
+    (await snap(page)).sessions.filter((s) => s.triggeredBy === "card-todo" || s.triggeredBy === "monday-report");
+  await expect.poll(async () => (await ruled()).length, { timeout: 60_000 }).toBe(2);
+  const all = await ruled();
+  const card = all.find((s) => s.triggeredBy === "card-todo")!;
+  const weekly = all.find((s) => s.triggeredBy === "monday-report")!;
+  expect(card.triggeredFrom).toBe("start");
+  expect(weekly.triggeredFrom).toBe("continue");
+  for (const [s, sentence, did] of [
+    [card, "Started by trigger card-todo", "started"],
+    [weekly, "Continued by trigger monday-report", "continued"],
+  ] as const) {
+    await openPage(page, `/s/${s.harness}/${s.id}`);
+    const line = page.locator(".sess-where .sess-trigger .chip");
+    await expect(line).toBeVisible();
+    await expect(line).toHaveAttribute("data-text", sentence);
+    // Where the rule lives and how to see it there (the computer's name isolated), a
+    // sentence a line; the receiver never sees the rule, so no link anywhere.
+    const tip = `A rule named ${s.triggeredBy} on \u2068${s.machine}\u2069 ${did} this session.\nRules are made, paused and removed only at that computer.\nTo see them there: sessionpipe trigger list`;
+    await expect(line).toHaveAttribute("data-tip", tip);
+    await expect(line.locator("a")).toHaveCount(0);
+    expect(await line.evaluate((el) => el.closest("a"))).toBeNull();
+    // Whole while the line holds it: at 1440 it does.
+    expect(await fits(page.locator(".sess-where").first())).toBe(true);
+    await expect(line.locator(".midcut-text")).toHaveText(sentence);
+    // A mouse resting on it: the app's tooltip, and the line's own (the session's facts)
+    // never beside it: the chip's empty title stays while the tip is up.
+    await page.mouse.move(5, 600);
+    await line.hover();
+    await expect(page.locator(".tip .tip-name")).toHaveText(tip);
+    expect(
+      await line.evaluate((el) => {
+        const titled = el.closest("[title]");
+        return titled === el ? `its own: "${el.getAttribute("title")}"` : `${titled?.className}'s`;
+      }),
+      "the title a browser would show",
+    ).toBe('its own: ""');
+    await page.mouse.move(5, 600);
+    // A screen reader hears the tip as the sentence's description (the tooltip is drawn
+    // for eyes only).
+    expect(
+      await line.evaluate((el) => document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent),
+    ).toBe(tip);
+    // Without a mouse: a stop for the keyboard, where the app's tooltip says it at once,
+    // and its focus ring drawn whole, inside the lines that clip.
+    await page.keyboard.press("Shift");
+    await line.focus();
+    await expect(page.locator(".tip .tip-name")).toHaveText(tip);
+    expect(await ringCut(line)).toEqual([]);
+    await line.blur();
+  }
+  // A session no rule ran says nothing of the kind.
+  const plain = (await snap(page)).sessions.find((s) => !s.triggeredBy && !s.delegatedBy)!;
+  await openPage(page, `/s/${plain.harness}/${plain.id}`);
+  await expect(page.locator(".sess-where").first()).toBeVisible();
+  await expect(page.locator(".sess-trigger")).toHaveCount(0);
+
+  await openBoard(page);
+  for (const s of [card, weekly]) {
+    const meta = page.locator(`article.card[data-flip="${s.key}"] .card-meta`);
+    const mark = meta.locator(".card-trigger");
+    await expect(mark).toHaveAttribute("title", `trigger ${s.triggeredBy}`);
+    // Whole when the line holds it all, which a desktop row with a short name does, its
+    // dot drawn with it.
+    expect(await fits(meta)).toBe(true);
+    await expect(mark.locator(".midcut-text")).toHaveText(`· trigger ${s.triggeredBy}`);
+  }
+  // A card no rule ran has no mark.
+  await expect(page.locator(`article.card[data-flip="${plain.key}"] .card-trigger`)).toHaveCount(0);
+});
+
+test("a rule's 40-character name on a desktop row: cut in its middle past 18em, ending on the row's right edge as the others do", async ({
+  page,
+  request,
+}) => {
+  // A name of its own: what a cut leaves over (its room before the words) is the same in
+  // every run.
+  const long = "nightly-cert-rotation-staging-eu-west-01";
+  const run = await postRuled(request, { rule: long, repo: "github.com/acme/infra" });
+  try {
+    await openBoard(page);
+    const card = page.locator(`article.card[data-flip="claude-code:${run.id}"]`);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    const meta = card.locator(".card-meta");
+    const name = (await metaParts(meta)).find((p) => p.cls.includes("card-trigger"))!;
+    expect(name.cut).toBe(true);
+    const [head, tail] = name.shown.slice("trigger ".length).split("…");
+    expect(long.startsWith(head!) && long.endsWith(tail!)).toBe(true);
+    // Its words end where its box does, on the row's right edge, as a row's whole meta
+    // does: set flush right, whatever the cut left over.
+    const edges = await card.evaluate((el) => ({
+      meta: el.querySelector(".card-meta")!.getBoundingClientRect().right,
+      time: el.querySelector(".card-time")!.getBoundingClientRect().right,
+    }));
+    expect(name.textRight).toBeLessThanOrEqual(name.right + 0.5);
+    expect(Math.abs(await wordsEnd(meta.locator(".card-trigger")))).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(name.right - edges.meta)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(edges.meta - edges.time)).toBeLessThanOrEqual(0.5);
+    // What the cut left over goes before the dot, not between the dot and "trigger": each
+    // dot of the row is as close to the word after it as the others.
+    const gaps = await dotGaps(meta);
+    expect(gaps).toHaveLength(2);
+    expect(Math.abs(gaps[1]! - gaps[0]!), gaps.join(", ")).toBeLessThanOrEqual(1);
+  } finally {
+    await run.end();
+  }
+});
+
+test("a rule's sentence with no room even for its shortest cut ends in an ellipsis, never mid-letter", async ({
+  page,
+}) => {
+  await openPage(page, "/");
+  const ruled = async () => (await snap(page)).sessions.find((x) => x.triggeredBy === "card-todo");
+  await expect.poll(async () => !!(await ruled()), { timeout: 60_000 }).toBe(true);
+  const s = (await ruled())!;
+  await openPage(page, `/s/${s.harness}/${s.id}`);
+  const chip = page.locator(".sess-where .sess-trigger .chip");
+  await expect(chip).toBeVisible();
+  // A column narrower than "Started by trigger …" (a split, a long title beside it).
+  await page.locator(".sess-where .sess-trigger").evaluate((el) => el.style.setProperty("max-width", "60px"));
+  const text = chip.locator(".midcut-text");
+  await expect(text).toHaveText("Started by trigger …");
+  await expect(text).toHaveAttribute("data-over", "");
+  expect(await text.evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");
+  // With room again, the mark goes.
+  await page.locator(".sess-where .sess-trigger").evaluate((el) => el.style.removeProperty("max-width"));
+  await expect(text).toHaveText("Started by trigger card-todo");
+  await expect(text).not.toHaveAttribute("data-over");
+});
+
+test("the line under a session's title is checked once a render, against the room the bar gives it", async ({
+  page,
+  request,
+}) => {
+  // Every box a ResizeObserver is set on, as it is set.
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    (window as unknown as { observed: string[] }).observed = seen;
+    const observe = ResizeObserver.prototype.observe;
+    ResizeObserver.prototype.observe = function (target: Element, options?: ResizeObserverOptions) {
+      seen.push(target.className);
+      return observe.call(this, target, options);
+    };
+  });
+  const run = await postRuled(request, { rule: "card-todo-observe", repo: "github.com/acme/infra" });
+  try {
+    await openPage(page, `/s/claude-code/${run.id}`);
+    await expect(page.locator(".sess-where .sess-trigger .chip")).toBeVisible();
+    const observed = () =>
+      page.evaluate(() =>
+        (window as unknown as { observed: string[] }).observed.filter((c) => /^bar-(lead|meta|sub)$/.test(c)),
+      );
+    // The room is the bar's lead beside the title, whose width is not the line's: the
+    // line's own box narrows as its repo leaves.
+    await expect.poll(observed).toEqual(["bar-lead"]);
+    // The session changes, so the line renders again: no new observer each time.
+    const ends = await page.locator(".sess-where").first().getAttribute("data-events");
+    await run.more(3);
+    await expect(page.locator(".sess-where").first()).not.toHaveAttribute("data-events", ends ?? "");
+    expect(await observed()).toEqual(["bar-lead"]);
+  } finally {
+    await run.end();
+  }
+});
 
 /** The demo's asking session (its delegation has reached the receiver) and the asked one. */
 async function lineage(page: Page) {
@@ -59,6 +244,12 @@ test("the asking session shows the row; the asked session says who asked", async
     await openPage(page, `/s/${child.harness}/${child.id}`);
     await expect(page.locator(".sess-for")).toContainText("for ");
     await expect(page.locator(`.sess-for a[href*="${asker.id}"]`)).toBeVisible();
+    // Its focus ring is drawn inside the parts of the line that clip: whole, but for its
+    // end where a long title is cut off with "…" (the link runs on past it).
+    await page.keyboard.press("Shift");
+    await page.locator(".sess-for a").focus();
+    expect(await ringCut(page.locator(".sess-for a"), { cutEnd: true })).toEqual([]);
+    await page.locator(".sess-for a").blur();
     await page.getByRole("button", { name: "More actions" }).click();
     await expect(page.getByRole("menuitem", { name: "Open the asking session" })).toBeVisible();
     await page.keyboard.press("Escape");

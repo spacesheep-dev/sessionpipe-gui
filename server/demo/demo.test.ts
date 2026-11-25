@@ -365,8 +365,11 @@ describe("Simulation: a 10-minute run", () => {
     expect(new Set(backfill.map((e) => e.harness.name))).toEqual(
       new Set(["claude-code", "codex", "gemini-cli", "antigravity"]),
     );
-    // One of them comes back to life as a resumed session with its seq continuing from 1.
-    const resumed = events.find((e) => e.type === "session.started" && e.data.source === "resume") as ProtocolEvent;
+    // One of them comes back to life as a resumed session with its seq continuing from 1
+    // (the weekly report a clock rule resumes is a session of its own, triggerScene).
+    const resumed = events.find(
+      (e) => e.type === "session.started" && e.data.source === "resume" && !e.session.triggered_by,
+    ) as ProtocolEvent;
     expect(backfill.some((b) => b.session.id === resumed.session.id)).toBe(true);
     expect(resumed.session.seq).toBe(1);
   });
@@ -836,6 +839,62 @@ describe("the pool at work", () => {
   it("leaves the cast as it was: the same machines, and no other session on that login", () => {
     expect(new Set(events.map((e) => e.session.machine))).toEqual(new Set(["studio-mac", "build-box", "lab-mac"]));
     expect(new Set(scene.map((e) => e.session.id)).size).toBe(1);
+  });
+});
+
+describe("runs a person's rules made (sessionpipe triggers)", () => {
+  const events = run();
+  const read = (k: string) => {
+    const list = events.filter((e) => key(e) === k);
+    const rec = newRecord(list[0]!.harness.name, list[0]!.session.id, list[0]!.time, "demo");
+    for (const e of list) applyEvent(rec, e, e.time, "demo");
+    return rec.summary;
+  };
+  const marked = (name: string) => events.filter((e) => e.session.triggered_by === name);
+
+  it("starts a Claude Code session for a card rule, the mark on every event from its first", () => {
+    const run = marked("card-todo");
+    expect(run.length).toBeGreaterThan(5);
+    const k = key(run[0]!);
+    const all = events.filter((e) => key(e) === k);
+    expect(all.every((e) => e.session.triggered_by === "card-todo")).toBe(true);
+    expect(all[0]).toMatchObject({ type: "session.started", data: { source: "startup" } });
+    expect(all[0]!.harness.name).toBe("claude-code");
+    expect(all[0]!.session.machine).toBe("studio-mac");
+    expect(all.some((e) => e.type === "tool.ended" && e.data.tool === "mcp__board__records_get")).toBe(true);
+    expect(read(k)).toMatchObject({
+      triggeredBy: "card-todo",
+      triggeredFrom: "start",
+      title: "ACME-142: wrong VAT rate on invoice PDFs",
+    });
+    // The daemon keeps the session open after its run: no end, so it stays on the board.
+    expect(all.some((e) => e.type === "session.ended")).toBe(false);
+    for (const e of all) expect(validate(e)).toEqual([]);
+  });
+
+  it("continues the weekly report for a clock rule: last week's run carries no mark, this run's does", () => {
+    const run = marked("monday-report");
+    expect(run.length).toBeGreaterThan(3);
+    const k = key(run[0]!);
+    const all = events.filter((e) => key(e) === k);
+    const first = all.findIndex((e) => e.session.triggered_by === "monday-report");
+    expect(first).toBeGreaterThan(0);
+    expect(all.slice(0, first).some((e) => e.session.triggered_by)).toBe(false);
+    expect(all.slice(first).every((e) => e.session.triggered_by === "monday-report")).toBe(true);
+    expect(all[first]).toMatchObject({ type: "session.started", data: { source: "resume" } });
+    expect(Date.parse(all[0]!.time)).toBeLessThan(T0 - 6 * 86_400_000);
+    expect(read(k)).toMatchObject({
+      triggeredBy: "monday-report",
+      triggeredFrom: "continue",
+      title: "Weekly billing report",
+    });
+    for (const e of all) expect(validate(e)).toEqual([]);
+  });
+
+  it("marks no other session, and no rule is ever a launcher", () => {
+    const names = new Set(events.map((e) => e.session.triggered_by).filter(Boolean));
+    expect(names).toEqual(new Set(["card-todo", "monday-report"]));
+    expect(events.filter((e) => e.session.triggered_by).every((e) => e.session.launched_by === undefined)).toBe(true);
   });
 });
 

@@ -18,7 +18,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/clipboard";
-import { endCuts, harnessMark, midCut, STATE_HINT, STATE_LABEL } from "../lib/format";
+import { endCuts, harnessMark, leadMidCut, STATE_HINT, STATE_LABEL } from "../lib/format";
+import { MEASURE_EVENT } from "../lib/giveWay";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
 import { ago, durCoarse, ms, since, tickFor, useNow } from "../lib/time";
 import { Select } from "./Select";
@@ -139,9 +140,37 @@ export function Chip({
  *  track) and is always laid out from the whole text (styles/shared.css `.midcut::before`),
  *  so what is cut never changes the room it is cut to. The line drawn over it is measured
  *  in fractional pixels, again when the box changes width and once the fonts are in. The
- *  whole text is its tooltip and what a screen reader reads. */
-export function MidCut({ text, className }: { text: string; className?: string }) {
-  return <CutChip text={text} className={className} count={[...text].length - 1} at={(n) => midCut(text, n)} />;
+ *  whole text is its tooltip and what a screen reader reads. `lead` ("trigger ") is always
+ *  drawn whole, and only the text after it is cut (lib/format.ts leadMidCut). `sep` ("· ")
+ *  is drawn before the lead, whole, and is no part of the tooltip or of what is read: a
+ *  row's dot before it, kept beside the words when a cut leaves room in the box. With `tip`
+ *  the chip is a stop of its own for the keyboard, and the app's tooltip (Tip.tsx, at once
+ *  on keyboard focus) says `tip` in place of the browser's; a screen reader hears it as the
+ *  chip's description: never inside a link or a row that is one tab stop. */
+export function MidCut({
+  sep = "",
+  lead = "",
+  text,
+  className,
+  tip,
+}: {
+  sep?: string;
+  lead?: string;
+  text: string;
+  className?: string;
+  tip?: string;
+}) {
+  return (
+    <CutChip
+      text={sep + lead + text}
+      label={lead + text}
+      sep={sep}
+      className={className}
+      count={[...text].length - 1}
+      at={(n) => sep + leadMidCut(lead, text, n)}
+      tip={tip}
+    />
+  );
 }
 
 /** The same chip cut at its end, after the last whole word that fits (or, for a text of
@@ -153,27 +182,80 @@ export function EndCut({ lead = "", text, className }: { lead?: string; text: st
 }
 
 /** A chip drawn whole where it fits, else as the longest of `at(1)`…`at(count)` (each
- *  longer than the one before) that does, else as `at(1)`. */
+ *  longer than the one before) that does, else as `at(1)`, which then ends in the
+ *  stylesheet's "…" (`data-over`) rather than mid-letter. */
 function CutChip({
   text,
+  label = text,
+  sep = "",
   className,
   count,
   at,
+  tip,
 }: {
   text: string;
+  /** What it says, for the tooltip and a screen reader: the text without `sep`. */
+  label?: string;
+  sep?: string;
   className?: string;
   count: number;
   at: (n: number) => string;
+  tip?: string;
 }) {
   const cutAt = useRef(at);
   cutAt.current = at;
   const box = useRef<HTMLSpanElement>(null);
   const line = useRef<HTMLSpanElement>(null);
-  const [fit, setFit] = useState({ text, shown: text });
+  const tipId = useId();
+  const [fit, setFit] = useState({ text, shown: text, over: false });
   const [measure, setMeasure] = useState(0);
+  /** Measure the box and write the longest cut that fits into the line in place: what is
+   *  drawn is right as soon as this returns, and React is told after. */
+  const measureNow = useRef(() => {});
+  measureNow.current = () => {
+    const el = box.current;
+    const lineEl = line.current;
+    // React's own text node, written in place while measuring and set back to what React
+    // renders next: it must stay the line's only child.
+    const node = lineEl?.firstChild;
+    if (!el || !lineEl || !node || node.nodeType !== Node.TEXT_NODE) return;
+    // Both read as drawn (a row's slide moves them alike); a chip has no padding.
+    const room = el.getBoundingClientRect().width;
+    if (!(room > 0)) return;
+    const range = document.createRange();
+    const fits = (s: string) => {
+      node.nodeValue = s;
+      range.selectNodeContents(node);
+      return range.getBoundingClientRect().width <= room + 0.5;
+    };
+    let shown = text;
+    let over = false;
+    if (count > 0 && !fits(text)) {
+      // The longest cut that fits.
+      let lo = 1;
+      let hi = count;
+      let best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (fits(cutAt.current(mid))) {
+          best = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      // Not even the shortest: it is drawn all the same, and ends in "…" where it is cut off.
+      over = best === 0;
+      shown = cutAt.current(Math.max(best, 1));
+    }
+    node.nodeValue = shown;
+    lineEl.toggleAttribute("data-over", over);
+    setFit((f) => (f.text === text && f.shown === shown && f.over === over ? f : { text, shown, over }));
+  };
   useLayoutEffect(() => {
     const el = box.current;
-    if (!el || typeof ResizeObserver !== "function") return;
+    if (!el) return;
+    const again = () => measureNow.current();
+    el.addEventListener(MEASURE_EVENT, again);
+    if (typeof ResizeObserver !== "function") return () => el.removeEventListener(MEASURE_EVENT, again);
     let width = -1;
     const ro = new ResizeObserver(([e]) => {
       const w = e?.contentRect.width ?? 0;
@@ -188,50 +270,49 @@ function CutChip({
     return () => {
       live = false;
       ro.disconnect();
+      el.removeEventListener(MEASURE_EVENT, again);
     };
   }, []);
   // `measure` changes with the box's width and the fonts.
-  useLayoutEffect(() => {
-    const el = box.current;
-    // React's own text node, written in place while measuring and set back to what React
-    // renders next: it must stay the line's only child.
-    const node = line.current?.firstChild;
-    if (!el || !node || node.nodeType !== Node.TEXT_NODE) return;
-    // Both read as drawn (a row's slide moves them alike); a chip has no padding.
-    const room = el.getBoundingClientRect().width;
-    if (!(room > 0)) return;
-    const range = document.createRange();
-    const fits = (s: string) => {
-      node.nodeValue = s;
-      range.selectNodeContents(node);
-      return range.getBoundingClientRect().width <= room + 0.5;
-    };
-    let shown = text;
-    if (count > 0 && !fits(text)) {
-      // The longest cut that fits.
-      let lo = 1;
-      let hi = count;
-      let best = 1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (fits(cutAt.current(mid))) {
-          best = mid;
-          lo = mid + 1;
-        } else hi = mid - 1;
-      }
-      shown = cutAt.current(best);
-    }
-    node.nodeValue = shown;
-    setFit((f) => (f.text === text && f.shown === shown ? f : { text, shown }));
-  }, [text, count, measure]);
-  const shown = fit.text === text ? fit.shown : text;
-  const cut = shown !== text;
-  return (
-    <span ref={box} className={`chip midcut ${className ?? ""}`} title={text} data-text={text}>
-      <span className="midcut-text" ref={line} aria-hidden={cut || undefined}>
-        {shown}
+  useLayoutEffect(() => measureNow.current(), [text, count, measure]);
+  const now = fit.text === text ? fit : { shown: text, over: false };
+  const cut = now.shown !== text;
+  // A separator is never read: with one, the words are always the screen reader's own copy.
+  const quiet = cut || !!sep;
+  const body = (
+    <>
+      <span className="midcut-text" ref={line} aria-hidden={quiet || undefined} data-over={now.over ? "" : undefined}>
+        {now.shown}
       </span>
-      {cut && <span className="sr-only">{text}</span>}
+      {quiet && <span className="sr-only">{label}</span>}
+    </>
+  );
+  const cls = `chip midcut ${className ?? ""}`;
+  if (tip)
+    return (
+      // An empty title: no line's own tooltip shows through from around it (Tip.tsx keeps
+      // an empty one in place while its own is up).
+      <span
+        ref={box}
+        className={cls}
+        title=""
+        data-text={text}
+        data-sep={sep || undefined}
+        data-tip={tip}
+        data-tip-wrap=""
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: its tooltip says what its words do not (where the rule lives, how to see it), so a keyboard must reach it; a screen reader hears it as the description
+        tabIndex={0}
+        aria-describedby={tipId}
+      >
+        {body}
+        <span id={tipId} hidden>
+          {tip}
+        </span>
+      </span>
+    );
+  return (
+    <span ref={box} className={cls} title={label} data-text={text} data-sep={sep || undefined}>
+      {body}
     </span>
   );
 }

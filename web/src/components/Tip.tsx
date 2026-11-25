@@ -12,7 +12,8 @@
 //   data-tip-wrap                   a few short lines (a sentence a line) in place of one.
 // Every icon-only button (`.icon-btn` / `.theme-btn` with an aria-label) gets one for
 // free: its aria-label is the name, and its native `title` is held back while the tip is
-// up so the browser's own never shows beside it. Mounted once, by the Shell.
+// up so the browser's own never shows beside it; an empty `title` is left in place, as it
+// keeps a title around from showing. Mounted once, by the Shell.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -76,8 +77,10 @@ export function TipHost() {
       if (!t) return;
       if (el.getAttribute("aria-expanded") === "true") return;
       window.clearTimeout(timer);
-      // Hold the native title back while ours is pending or up.
-      if (el.hasAttribute("title")) {
+      // Hold the native title back while ours is pending or up. An empty one stays: it is
+      // there so that no tooltip of a line around shows through (bits.tsx CutChip), and
+      // without it the nearest title around would be the browser's to show.
+      if (el.getAttribute("title")) {
         heldTitle = el.getAttribute("title");
         el.removeAttribute("title");
       }

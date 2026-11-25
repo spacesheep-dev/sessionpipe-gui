@@ -349,6 +349,22 @@
   overflow: hidden;
   white-space: nowrap;
 }
+/* Not even a chip's shortest cut fits ("Started by trigger …" in a narrow column): it ends
+   in "…" where it is cut off, never mid-letter. */
+.midcut-text[data-over] {
+  text-overflow: ellipsis;
+}
+/* The part of a line of facts that gives way first, off the line once it would be a stub
+   (lib/giveWay.ts): out of the flow and drawn nowhere, as .sr-only is, so a screen reader
+   still reads it where it stood. */
+[data-give-way][data-gone] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 .chip--link {
   color: var(--fg-2);
 }

@@ -57,6 +57,7 @@ import {
   sessionTitle,
   toolLabel,
 } from "../lib/format";
+import { useGiveWay } from "../lib/giveWay";
 import { hide, isHidden, unhide, useHidden } from "../lib/hidden";
 import { inPanel, panelAnswers } from "../lib/keys";
 import { labelItems } from "../lib/labels";
@@ -68,6 +69,7 @@ import { LENSES, type Lens, setTierLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
 import { type OpenHow, openSession, openSplit } from "../lib/split";
 import { durCoarse, ms } from "../lib/time";
+import { TRIGGER_LEAD, triggerWords } from "../lib/triggered";
 import { AgentRow, useAgentsOpen } from "./AgentRow";
 import { HarnessGlyph, MidCut, Redacted, Since, StateDot } from "./bits";
 import { type MenuItem, type MenuList, openMenu, useContextMenu } from "./ContextMenu";
@@ -307,6 +309,9 @@ export const SessionCard = memo(function SessionCard({
     { title: () => sessionMenuTitle(s), subtitle: () => sessionMenuSubtitle(s) },
   );
   const repo = repoShort(s.repo);
+  const trigger = triggerWords(s);
+  const metaRef = useRef<HTMLSpanElement>(null);
+  useGiveWay(metaRef, !!trigger, ".card-link");
   const { iso: time, tip: timeTip } = rowTime(s);
   // Its own age only when the tool began a minute or more after the row's time: otherwise
   // the number at the row's end already says it ("Edit · 4 m … 4 m").
@@ -458,15 +463,42 @@ export const SessionCard = memo(function SessionCard({
             <Flags flags={s.flags} tool={tool?.tool ?? attnTool} />
           </span>
 
-          <span className="card-meta">
+          <span className="card-meta" ref={metaRef}>
             <HarnessGlyph name={s.harness} size="sm" />
-            <span className="card-where ellipsis">
-              {s.machine}
-              {s.machine && repo ? " · " : ""}
-              {repo}
-              {/* The branch stays for search and the tooltip; the row shows the repo. */}
-              {s.branch && <span className="sr-only"> @ {s.branch}</span>}
-            </span>
+            {trigger ? (
+              // A rule ran it (session.triggered_by): its name after where it runs. Nothing is
+              // cut while the line holds it all; where it does not, the repo gives way first
+              // (and leaves the line whole below a few characters, read still by a screen
+              // reader: lib/giveWay.ts), then the rule's name, cut in its middle; the computer
+              // stays whole up to 16em. The dot before the name is drawn with it, so a cut's
+              // room is left before the dot, not between the dot and "trigger". Lineage,
+              // never authority.
+              <>
+                {s.machine && <span className="card-where card-machine ellipsis">{s.machine}</span>}
+                {repo && (
+                  <span className="card-repo ellipsis" data-give-way="">
+                    {s.machine ? "· " : ""}
+                    {repo}
+                  </span>
+                )}
+                {/* The branch stays for search and a screen reader, after the repo it is of. */}
+                {s.branch && <span className="sr-only"> @ {s.branch}</span>}
+                {!s.machine && repo && (
+                  <span className="card-sep" aria-hidden="true">
+                    ·
+                  </span>
+                )}
+                <MidCut className="card-trigger" sep={s.machine ? "· " : ""} lead={TRIGGER_LEAD} text={trigger.name} />
+              </>
+            ) : (
+              <span className="card-where ellipsis">
+                {s.machine}
+                {s.machine && repo ? " · " : ""}
+                {repo}
+                {/* The branch stays for search and the tooltip; the row shows the repo. */}
+                {s.branch && <span className="sr-only"> @ {s.branch}</span>}
+              </span>
+            )}
           </span>
 
           {!simple && counts && (

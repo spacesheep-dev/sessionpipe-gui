@@ -52,6 +52,24 @@ const internField = <T extends object>(o: T, k: keyof T): void => {
   if (typeof v === "string") (o as Record<string, unknown>)[k as string] = intern(v);
 };
 
+/** The session block's strings every event of a session repeats, shared in the slim copy.
+ *  Every string field of the block is here but `id` (the session's own key, kept by the
+ *  index already) and `url` (one session's link). */
+export const SESSION_SHARED = [
+  "machine",
+  "cwd",
+  "repo",
+  "branch",
+  "model",
+  "title",
+  "title_source",
+  "account_id",
+  "parent_id",
+  "launched_by",
+  "delegated_by",
+  "triggered_by",
+] as const;
+
 /** The slim copy with its repeated short strings shared (see `intern`). The event's own
  *  blocks are copied, never written through. */
 function internEvent(ev: SlimEvent): SlimEvent {
@@ -61,20 +79,7 @@ function internEvent(ev: SlimEvent): SlimEvent {
   internField(out.harness, "name");
   internField(out.harness, "version");
   internField(out.harness, "event");
-  for (const k of [
-    "machine",
-    "cwd",
-    "repo",
-    "branch",
-    "model",
-    "title",
-    "title_source",
-    "account_id",
-    "parent_id",
-    "launched_by",
-    "delegated_by",
-  ] as const)
-    internField(out.session, k);
+  for (const k of SESSION_SHARED) internField(out.session, k);
   if (ev.privacy && Array.isArray(ev.privacy.rulesets))
     out.privacy = { ...ev.privacy, rulesets: ev.privacy.rulesets.map((r) => (typeof r === "string" ? intern(r) : r)) };
   return out;

@@ -101,4 +101,13 @@ describe("validate", () => {
     );
     expect(validate({ ...good(), session: { id: "a", seq: 0, parent_id: null } })).toEqual([]);
   });
+
+  it("takes a trigger's name only in a rule's shape", () => {
+    for (const name of ["card-todo", "monday-report", "0", "x".repeat(40)])
+      expect(validate({ ...good(), session: { id: "a", seq: 0, triggered_by: name } }), name).toEqual([]);
+    for (const name of ["Card-Todo", "x".repeat(41), "card todo", "card:todo", "-card", "", 7])
+      expect(validate({ ...good(), session: { id: "a", seq: 0, triggered_by: name } }), String(name)).toContain(
+        "session.triggered_by: not a rule's name",
+      );
+  });
 });

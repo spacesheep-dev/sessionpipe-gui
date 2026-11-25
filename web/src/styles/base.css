@@ -293,10 +293,19 @@ kbd {
   transition: none !important;
 }
 
+/* Reduced motion: what moves lands at once, and still ends (its events fire). The app's
+   transitions are shortened, never added: an element that names none keeps the initial
+   transition-property, `all`, and the duration alone would tween whatever it changes over
+   0.01 ms, a layout property too, so a read in the same task still sees the old value.
+   The line under a session's title (lib/giveWay.ts) read the rule's sentence still
+   shrinking when its repo came back, kept a repo with no room, and flipped on each render.
+   So here what names no transition has none, as with motion on; any rule that names one is
+   more specific than `*` or comes later, and wins. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
+    transition-property: none;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
