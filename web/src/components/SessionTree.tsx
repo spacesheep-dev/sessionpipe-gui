@@ -389,7 +389,10 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
     const isFolded = kids.length > 0 && folded.has(key);
     const shown = isFolded ? [] : allKids.has(key) ? kids : kids.slice(0, KIDS_SHOWN);
     const hiddenKids = kids.length - (isFolded ? kids.length : shown.length);
-    const away = parent ? !!s.machine && !!parent.s.machine && s.machine !== parent.s.machine : many && !!s.machine;
+    // Against the session it really hangs under (a row drawn flat at the last level hangs
+    // under the row before it, not the row its list is under).
+    const above = n.parent ? (tree.nodes.get(n.parent)?.s ?? parent?.s) : undefined;
+    const away = above ? !!s.machine && !!above.machine && s.machine !== above.machine : many && !!s.machine;
     const id = `${groupId}-${group}-${key}`;
     return (
       <TreeRow
@@ -504,7 +507,7 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
             Sessions
           </h2>
           {empty ? (
-            <p className="stree-none">None yet</p>
+            <p className="stree-none">{all.length > 0 ? "All hidden on this device" : "None yet"}</p>
           ) : (
             <div
               className="stree-list"

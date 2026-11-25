@@ -75,6 +75,7 @@ function Picker({ moving, onClose }: { moving: SessionKey; onClose: () => void }
     if (e.key === "ArrowDown") setAt(Math.min(choice + 1, shown.length - 1));
     else if (e.key === "ArrowUp") setAt(Math.max(choice - 1, 0));
     else if (e.key === "Enter") take(shown[choice]);
+    else if (e.key === "Escape") onClose();
     else return;
     e.preventDefault();
   };
@@ -109,7 +110,7 @@ function Picker({ moving, onClose }: { moving: SessionKey; onClose: () => void }
         </p>
         <input
           className="field pick-field"
-          type="search"
+          type="text"
           value={q}
           placeholder="Find a session"
           aria-label="Find a session"
