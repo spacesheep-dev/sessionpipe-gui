@@ -18,7 +18,7 @@ import {
   seenSetupHere,
   sinkToken,
 } from "./control-helpers.js";
-import { askedPair, composer, EVENTS, INFO, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
+import { askedPair, composer, EVENTS, INFO, kidBoxes, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
 
 /** A finger down the page from its top, as touch events (page.touchscreen only taps):
  *  lands at y 200, moves `by` px in steps, and stays down until `lift` is called. */
@@ -484,10 +484,9 @@ test.describe("phone", () => {
         expect(machine.startsWith(shown.split("…")[0]!)).toBe(true);
         expect(machine.endsWith(shown.split("…")[1]!)).toBe(true);
       }
-      // Under the title, inside the row, and the row a finger's height.
-      const row = (await kid.boundingBox())!;
-      const title = (await kid.locator(".kid-title").boundingBox())!;
-      const chip = (await where.boundingBox())!;
+      // Under the title, inside the row, and the row a finger's height; read in one frame,
+      // as a sliding card moves all three together.
+      const { row, title, chip } = await kidBoxes(kid);
       expect(chip.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
       expect(chip.x + chip.width).toBeLessThanOrEqual(row.x + row.width + 0.5);
       expect(row.height).toBeGreaterThanOrEqual(44);

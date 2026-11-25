@@ -144,6 +144,21 @@ export function strandedMarks(el: Locator): Promise<number[]> {
   });
 }
 
+type Box = { x: number; y: number; width: number; height: number };
+
+/** A Board kid row's box, its title's and its computer's, read in one frame: a card that
+ *  slides to a new place (useFlip's translate) moves all three together, so two reads
+ *  apart could see it half way. */
+export function kidBoxes(kid: Locator): Promise<{ row: Box; title: Box; chip: Box }> {
+  return kid.evaluate((el: HTMLElement) => {
+    const box = (n: Element) => {
+      const r = n.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    };
+    return { row: box(el), title: box(el.querySelector(".kid-title")!), chip: box(el.querySelector(".kid-where")!) };
+  });
+}
+
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** A ULID (26 Crockford base32 chars: 48-bit ms time + 80 random bits). */

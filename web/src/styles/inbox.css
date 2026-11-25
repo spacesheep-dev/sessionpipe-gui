@@ -215,7 +215,8 @@
 .inbox-for {
   grid-area: for;
   justify-self: start;
-  max-width: 100%;
+  /* The gap before it comes out of its room, so a cut "for …" keeps the time's 12px. */
+  max-width: calc(100% - 12px);
   margin-left: 12px;
 }
 /* "·" after "for …" where it leads the computer's line (the narrow row, below). */

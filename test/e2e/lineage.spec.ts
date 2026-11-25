@@ -11,7 +11,7 @@
 // Desktop only (a finger's: mobile.spec).
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
-import { askedPair, openBoard, openPage } from "./helpers.js";
+import { askedPair, kidBoxes, openBoard, openPage } from "./helpers.js";
 
 test.skip(({ isMobile }) => isMobile, "desktop project");
 
@@ -257,11 +257,11 @@ test("a nested child's row names its computer at the row's end; its prompt's Inb
     await expect(where).toHaveText(machine);
     await expect(where).toHaveAttribute("title", machine);
     // With a mouse at 1440 the row stays one line: the computer after the title, level with it.
-    const title = (await kid.locator(".kid-title").boundingBox())!;
-    const chip = (await where.boundingBox())!;
+    // Read in one frame: other sessions moving between sections slide this card.
+    const { row, title, chip } = await kidBoxes(kid);
     expect(Math.abs(title.y + title.height / 2 - (chip.y + chip.height / 2))).toBeLessThan(3);
     expect(chip.x).toBeGreaterThan(title.x);
-    expect((await kid.boundingBox())!.height).toBeLessThan(40);
+    expect(row.height).toBeLessThan(40);
 
     await pair.raise();
     await pair.raise("parent");
@@ -287,6 +287,24 @@ test("a nested child's row names its computer at the row's end; its prompt's Inb
     expect(await forLine.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     e = await ends();
     expect(e.for).toBeLessThanOrEqual(Math.min(e.main, e.age) + 0.5);
+    // A long parent's, cut in its middle, keeps the time's 12px gap before the time's box.
+    const long = await askedPair(request, {
+      machine: "lab-mac",
+      title: "Find every page the move to the new docs site broke and fix the links that point to them again",
+    });
+    try {
+      await long.raise();
+      const row = page.locator(`li.inbox-row[data-session="${long.child.key}"]`);
+      await expect(row.locator(".inbox-for .midcut-text")).toContainText("…", { timeout: 15_000 });
+      const gap = await row.evaluate(
+        (li) =>
+          li.querySelector(".inbox-age")!.getBoundingClientRect().left -
+          li.querySelector(".inbox-for")!.getBoundingClientRect().right,
+      );
+      expect(gap).toBeGreaterThanOrEqual(11.5);
+    } finally {
+      await long.end();
+    }
   } finally {
     await pair.end();
   }
