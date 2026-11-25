@@ -12,7 +12,7 @@ import { Rng } from "../demo/rng.js";
 import { eventProblem } from "../receiver/validate.js";
 import { SESSION_SHARED, slimEvent } from "./slim.js";
 import { Store } from "./store.js";
-import { newTriggerTrack, noteTrigger, triggerReading } from "./triggers.js";
+import { newTriggerTrack, noteTrigger, type TriggerTrack, triggerReading } from "./triggers.js";
 
 let tmp: { dir: string; cleanup: () => void };
 let store: Store;
@@ -449,14 +449,43 @@ describe("the reading itself: every order, every prefix", () => {
   });
 
   it("an event that is no start copies no stretch's starts", () => {
-    const t = newTriggerTrack();
-    noteTrigger(t, { type: "session.started", session: { seq: 0, triggered_by: "aaa" }, data: { source: "startup" } });
-    const starts = t.stretches[0]!.starts;
-    for (let seq = 1; seq < 50; seq++)
+    const tool = (t: TriggerTrack, seq: number) =>
       noteTrigger(t, { type: "tool.started", session: { seq, triggered_by: "aaa" }, data: {} });
-    expect(t.stretches).toHaveLength(1);
-    expect(t.stretches[0]!.starts).toBe(starts);
-    expect(starts).toEqual([{ seq: 0, source: "startup" }]);
+    const started = (t: TriggerTrack, seq: number, source: string) =>
+      noteTrigger(t, { type: "session.started", session: { seq, triggered_by: "aaa" }, data: { source } });
+    // Extended at its newest end, seq after seq.
+    const up = newTriggerTrack();
+    started(up, 0, "startup");
+    const upStarts = up.stretches[0]!.starts;
+    for (let seq = 1; seq < 50; seq++) tool(up, seq);
+    expect(up.stretches).toHaveLength(1);
+    expect(up.stretches[0]!.starts).toBe(upStarts);
+    expect(upStarts).toEqual([{ seq: 0, source: "startup" }]);
+    // Extended at its oldest end, read newest first; then a start there is put first, in place.
+    const down = newTriggerTrack();
+    started(down, 50, "resume");
+    const downStarts = down.stretches[0]!.starts;
+    for (let seq = 49; seq > 0; seq--) tool(down, seq);
+    expect(down.stretches).toHaveLength(1);
+    expect(down.stretches[0]!.starts).toBe(downStarts);
+    expect(downStarts).toEqual([{ seq: 50, source: "resume" }]);
+    started(down, 0, "startup");
+    expect(down.stretches).toHaveLength(1);
+    expect(down.stretches[0]!.starts).toBe(downStarts);
+    expect(downStarts).toEqual([
+      { seq: 0, source: "startup" },
+      { seq: 50, source: "resume" },
+    ]);
+    expect(triggerReading(down)).toEqual({ name: "aaa", from: "start" });
+    // Filled in from inside: its first and last read, then what lies between, in any order.
+    const inside = newTriggerTrack();
+    started(inside, 0, "startup");
+    tool(inside, 50);
+    const insideStarts = inside.stretches[0]!.starts;
+    for (const seq of [25, 1, 49, 12, 37, 2, 48]) tool(inside, seq);
+    expect(inside.stretches).toHaveLength(1);
+    expect(inside.stretches[0]!.starts).toBe(insideStarts);
+    expect(insideStarts).toEqual([{ seq: 0, source: "startup" }]);
   });
 
   it("matches the oracle after every event of 20 000 generated sessions read in shuffled orders", () => {
