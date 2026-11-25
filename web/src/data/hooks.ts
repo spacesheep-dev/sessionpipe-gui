@@ -42,6 +42,7 @@ import {
 import { inPanel } from "../lib/keys";
 import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
 import { useShortcut } from "../lib/shortcuts";
+import { syncSpins } from "../lib/spin";
 import type { AppState, Store } from "./store";
 
 export const StoreContext = createContext<Store | null>(null);
@@ -123,7 +124,11 @@ export function useStreamMark(): void {
   useEffect(() => {
     const root = document.documentElement;
     if (down) root.dataset.stream = "down";
-    else delete root.dataset.stream;
+    else {
+      delete root.dataset.stream;
+      // Back: the rings that stopped turn again, all on one phase.
+      syncSpins();
+    }
     return () => {
       delete root.dataset.stream;
     };

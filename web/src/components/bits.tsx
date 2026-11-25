@@ -21,6 +21,7 @@ import { copyText } from "../lib/clipboard";
 import { endCuts, harnessMark, leadMidCut, STATE_HINT, STATE_LABEL } from "../lib/format";
 import { MEASURE_EVENT } from "../lib/giveWay";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
+import { syncSpins } from "../lib/spin";
 import { ago, durCoarse, ms, since, tickFor, useNow } from "../lib/time";
 import { Select } from "./Select";
 
@@ -48,6 +49,10 @@ export function StateDot({
     prev.current = state;
     setChanges((n) => n + 1);
   }, [state]);
+  // A ring that starts turns on the one clock every other ring keeps (lib/motion.ts).
+  useLayoutEffect(() => {
+    if (state === "working") syncSpins();
+  }, [state, changes]);
   const style = { width: size, height: size };
   const filled = unread && (state === "idle" || state === "done");
   const cls = `dot dot--${state}${filled ? " dot--unread" : ""}${changes ? " dot--arrive" : ""}`;
