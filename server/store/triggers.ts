@@ -49,6 +49,36 @@ export function triggerName(v: unknown): string | null {
   return typeof v === "string" && TRIGGER_NAME_RE.test(v) ? v : null;
 }
 
+/** The events a machine writes into a session on its own, not the run's hooks (PROTOCOL.md
+ *  §4): the daemon's `delegation.started` and `delegation.ended` for an ask or a handoff the
+ *  session made, `limits.observed` (the account's numbers, which the account pool reads off
+ *  a request the session made, not only its status line), and a `session.backfill` sent
+ *  again with the session's next seq once a better name is known. Only the hooks stamp
+ *  `triggered_by` (CONTROL.md §14.9), so these land in the middle of a rule's run with no
+ *  name, and they say nothing of who runs the session. One without a name is passed over:
+ *  it neither carries a run on nor ends one, as a seq never read. With a name it is read as
+ *  any event is. */
+const MACHINE_WRITES = new Set(["delegation.started", "delegation.ended", "limits.observed", "session.backfill"]);
+
+/** What the reading takes of one protocol event, or null for one it passes over. */
+export function triggerInput(ev: {
+  type: string;
+  session: { seq: number; triggered_by?: unknown };
+  data: Record<string, unknown>;
+}): { seq: number; name: string | null; source?: string } | null {
+  const name = triggerName(ev.session.triggered_by);
+  if (name === null && MACHINE_WRITES.has(ev.type)) return null;
+  if (ev.type !== "session.started") return { seq: ev.session.seq, name };
+  const source = ev.data.source;
+  return { seq: ev.session.seq, name, source: typeof source === "string" ? source : "" };
+}
+
+/** Read one protocol event (triggerInput, then noteTriggerEvent). */
+export function noteTrigger(t: TriggerTrack, ev: Parameters<typeof triggerInput>[0]): void {
+  const x = triggerInput(ev);
+  if (x) noteTriggerEvent(t, x.seq, x.name, x.source);
+}
+
 /** The first index whose interval or stretch ends at or after `seq`. */
 function firstEndingAtOrAfter<T>(list: T[], end: (x: T) => number, seq: number): number {
   let lo = 0;

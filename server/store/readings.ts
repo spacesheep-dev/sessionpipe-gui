@@ -28,7 +28,7 @@ import {
 import { SESSION_REF } from "../control/refs.js";
 import { changedPaths } from "./paths.js";
 import { detach, PREVIEW_CHARS } from "./slim.js";
-import { newTriggerTrack, noteTriggerEvent, type TriggerTrack, triggerName, triggerReading } from "./triggers.js";
+import { newTriggerTrack, noteTrigger as noteTriggerOf, type TriggerTrack, triggerReading } from "./triggers.js";
 
 const TITLE_RANK: Record<string, number> = { custom: 3, harness: 2, "first-ask": 1 };
 /** `<harness>:<id>` in the protocol's own shapes (schemas/v1/event.json): a harness name is
@@ -431,12 +431,12 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
  *  protocol's shape is kept (tier 0 is not redacted); anything else is no name, as for
  *  `launched_by`. The run is the newest unbroken stretch, in seq order, of events that
  *  carry one name; how it began is its own first `session.started` (startup: started,
- *  resume: continued, anything else or none: not known). A function of the events in
- *  their own order and nothing else (triggers.ts), so the order they arrive in, a rebuild
- *  and a restart all read the same. */
+ *  resume: continued, anything else or none: not known). What the machine writes into a
+ *  run on its own (an ask, the pool's numbers, a backfill), unnamed, is passed over. A
+ *  function of the events in their own order and nothing else (triggers.ts), so the order
+ *  they arrive in, a rebuild and a restart all read the same. */
 function noteTrigger(s: SessionSummary, t: Tracking, ev: ProtocolEvent): void {
-  const source = ev.type === "session.started" ? (str(ev.data.source) ?? "") : undefined;
-  noteTriggerEvent(t.trigger, ev.session.seq, triggerName(ev.session.triggered_by), source);
+  noteTriggerOf(t.trigger, ev);
   const r = triggerReading(t.trigger);
   if (r) {
     s.triggeredBy = r.name;

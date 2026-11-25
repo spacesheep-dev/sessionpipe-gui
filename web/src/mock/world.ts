@@ -24,7 +24,7 @@ import type {
   Tier,
 } from "@shared/api";
 import { DONE_AFTER_MS, SNIPPET_CHARS, STALE_AFTER_MS, sessionKey } from "@shared/api";
-import { newTriggerTrack, noteTriggerEvent, triggerName, triggerReading } from "../../../server/store/triggers";
+import { newTriggerTrack, noteTrigger, triggerReading } from "../../../server/store/triggers";
 
 /** The summary's two trigger fields from the store's reading, or none. */
 const ruled = (r: ReturnType<typeof triggerReading>): Pick<SessionSummary, "triggeredBy" | "triggeredFrom"> =>
@@ -483,8 +483,7 @@ export class World {
         if (v !== undefined && v !== null && v !== "" && k !== "seq")
           (block as unknown as Record<string, unknown>)[k] = v;
       }
-      const startedFrom = e.type === "session.started" ? String(e.data.source ?? "") : undefined;
-      noteTriggerEvent(rules, e.session.seq, triggerName(e.session.triggered_by), startedFrom);
+      noteTrigger(rules, e);
       if (e.harness.version) harnessVersion = e.harness.version;
       if (e.tier > maxTier) maxTier = e.tier;
       source = e.source;

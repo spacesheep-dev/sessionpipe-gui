@@ -36,27 +36,44 @@ const restart = async () => {
   store = new Store(tmp.dir, { tickMs: 60_000, statsMs: 60_000 });
 };
 
-/** One event of a fixture: its seq, the rule it names (or none) and, for a start, its source. */
+/** What the machine writes into a session on its own, not the run's hooks (triggers.ts
+ *  MACHINE_WRITES), each with data the receiver takes. */
+const MACHINE = {
+  "limits.observed": { windows: [{ id: "five_hour", used_percent: 41 }] },
+  "delegation.started": { ask_id: "01JDELEGATION0000000000001", via: "ask", harness: "codex" },
+  "delegation.ended": { ask_id: "01JDELEGATION0000000000001", ok: true, ms: 4200 },
+  "session.backfill": { started_at: "2026-11-25T07:00:00.000Z", last_at: "2026-11-25T07:20:00.000Z" },
+} as const;
+type MachineType = keyof typeof MACHINE;
+
+/** One event of a fixture: its seq, the rule it names (or none) and, for a start, its source;
+ *  `machine`, one the machine writes on its own. */
 interface Spec {
   seq: number;
   name?: string;
   start?: string;
+  machine?: MachineType;
 }
 const events = (id: string, specs: Spec[], tier: (seq: number) => 1 | 3 = () => 3): ProtocolEvent[] => {
   const s = new Session(id);
   return specs.map((x) =>
-    s.ev(x.start ? "session.started" : "turn.started", x.start ? { source: x.start } : {}, {
-      seq: x.seq,
-      tier: tier(x.seq),
-      ...(x.name ? by(x.name) : {}),
-    }),
+    s.ev(
+      x.start ? "session.started" : (x.machine ?? "turn.started"),
+      x.start ? { source: x.start } : x.machine ? { ...MACHINE[x.machine] } : {},
+      {
+        seq: x.seq,
+        tier: tier(x.seq),
+        ...(x.name ? by(x.name) : {}),
+      },
+    ),
   );
 };
 
-/** What the reading must say, worked out the plain way: the events in seq order, the last
- *  one that names a rule, the stretch of that name around it, its first start. */
+/** What the reading must say, worked out the plain way: the events in seq order but what
+ *  the machine wrote on its own with no name, the last one that names a rule, the stretch
+ *  of that name around it, its first start. */
 function oracle(specs: Spec[]): { by: string; from: string } | null {
-  const list = [...specs].sort((a, b) => a.seq - b.seq);
+  const list = specs.filter((x) => !(x.machine && !x.name)).sort((a, b) => a.seq - b.seq);
   let top = -1;
   for (let i = 0; i < list.length; i++) if (list[i]!.name) top = i;
   if (top < 0) return null;
@@ -260,13 +277,20 @@ describe("the run: the newest unbroken stretch, in seq order", () => {
     const rng = new Rng(20261125);
     const names = ["aaa", "bbb", undefined] as const;
     const sources = ["startup", "resume", "compact", undefined, undefined, undefined] as const;
+    const machine = [...Object.keys(MACHINE), undefined, undefined, undefined, undefined] as (
+      | MachineType
+      | undefined
+    )[];
     const cases: { id: string; specs: Spec[] }[] = [];
     for (let c = 0; c < 150; c++) {
       const n = rng.int(1, 9);
       // Seqs with holes, as a sink that joined late or a batch still on its way leaves them.
       const seqs = new Set<number>();
       while (seqs.size < n) seqs.add(rng.int(0, 14));
-      const specs = [...seqs].map((seq) => ({ seq, name: rng.pick(names), start: rng.pick(sources) }));
+      const specs = [...seqs].map((seq): Spec => {
+        const start = rng.pick(sources);
+        return { seq, name: rng.pick(names), start, machine: start ? undefined : rng.pick(machine) };
+      });
       const order = specs.map((_, i) => i);
       for (let i = order.length - 1; i > 0; i--) {
         const j = rng.int(0, i);
@@ -288,5 +312,54 @@ describe("the run: the newest unbroken stretch, in seq order", () => {
     const a = new Session("slim");
     const ev = a.ev("turn.ended", {}, by("card-todo"));
     expect(slimEvent({ ...ev, arrivedAt: ev.time, source: "http" }).session.triggered_by).toBe("card-todo");
+  });
+});
+
+describe("what the machine writes into a rule's run on its own", () => {
+  // The pool's numbers for a request the run made, an ask the run made (the daemon writes
+  // delegation.* on the asking session) and a backfill sent again: no hook writes them, so
+  // they carry no name, with seqs between the run's own.
+  for (const machine of Object.keys(MACHINE) as MachineType[])
+    it(`${machine} with no name inside the run leaves the rule and its word, in every order`, async () => {
+      const specs: Spec[] = [
+        { seq: 0, name: "card-todo", start: "startup" },
+        { seq: 1, name: "card-todo" },
+        { seq: 2, name: "card-todo" },
+        { seq: 3, machine },
+        { seq: 4, name: "card-todo" },
+      ];
+      expect(oracle(specs)).toEqual({ by: "card-todo", from: "start" });
+      const all = orders([0, 1, 2, 3, 4]);
+      for (const [n, order] of all.entries())
+        expect(await readThrough(`${machine}-${n}`, specs, order), order.join(",")).toEqual({
+          live: { by: "card-todo", from: "start" },
+          rebuilt: { by: "card-todo", from: "start" },
+        });
+      await restart();
+      for (let n = 0; n < all.length; n++)
+        expect(reading(`${machine}-${n}`)).toEqual({ by: "card-todo", from: "start" });
+    });
+
+  it("one that carries a name is read as any event", () => {
+    const s = new Session("named-pool");
+    store.ingest([s.ev("session.started", { source: "resume" }, by("monday-report"))], "http");
+    store.ingest([s.ev("limits.observed", { ...MACHINE["limits.observed"] }, by("card-todo"))], "http");
+    expect(reading("named-pool")).toEqual({ by: "card-todo", from: "unknown" });
+  });
+
+  it("the person's own events still end the rule's run around it, and a later rule's run is its own", () => {
+    const s = new Session("then-person");
+    store.ingest(
+      [
+        s.ev("session.started", { source: "startup" }, by("card-todo")),
+        s.ev("turn.started", {}, by("card-todo")),
+        s.ev("delegation.ended", { ...MACHINE["delegation.ended"] }),
+        s.ev("session.started", { source: "resume" }),
+        s.ev("limits.observed", { ...MACHINE["limits.observed"] }),
+        s.ev("session.started", { source: "resume" }, by("card-todo")),
+      ],
+      "http",
+    );
+    expect(reading("then-person")).toEqual({ by: "card-todo", from: "continue" });
   });
 });

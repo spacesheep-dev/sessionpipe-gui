@@ -182,7 +182,10 @@ function names above.
   for, sessionpipe CONTROL.md §14.9) is `triggeredBy`, kept only in the rule name's shape
   (`TRIGGER_NAME_RE`; anything else is no name). The run is the newest unbroken stretch,
   in `seq` order, of events that carry one name: an event without it, or with another,
-  ends a stretch, a seq never read does not. `triggeredFrom` is that stretch's own first
+  ends a stretch, a seq never read does not. What the machine writes into a session on its
+  own, not the run's hooks (`delegation.*`, `limits.observed`, a `session.backfill` sent
+  again), comes with no name in the middle of a run: unnamed, it is passed over as a seq
+  never read. `triggeredFrom` is that stretch's own first
   `session.started`: `startup` is `start`, `resume` is `continue`, any other source or no
   start read is `unknown`. A function of the session's events in their own order and of
   nothing else (`server/store/triggers.ts`: the seqs read as intervals and the stretches,
