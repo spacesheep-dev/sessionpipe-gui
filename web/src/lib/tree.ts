@@ -187,6 +187,58 @@ export function arrangeTree(input: TreeInput): Tree {
   return { roots: tops, nodes, childrenOf, sectionOf: section };
 }
 
+/** How loud a session is, as the sidebar's lamp tells it: what needs you, then what works,
+ *  then what is quiet, then news unread, then nothing. */
+export type Loud = "needs_you" | "working" | "stale" | "unread" | "none";
+const LOUD_RANK: Record<Loud, number> = { needs_you: 4, working: 3, stale: 2, unread: 1, none: 0 };
+export const louder = (a: Loud, b: Loud): Loud => (LOUD_RANK[b] > LOUD_RANK[a] ? b : a);
+
+/** A session's own loudness. */
+export function loudOf(s: SessionSummary, unread: (s: SessionSummary) => boolean): Loud {
+  if (s.state === "needs_you" || s.state === "working" || s.state === "stale") return s.state;
+  return unread(s) ? "unread" : "none";
+}
+
+/** What is under a row, rolled up: the loudest of the sessions under it, and how many
+ *  there are of each kind (each counted once, at any depth). */
+export interface Rolled {
+  /** The loudest of the sessions under it (not itself). */
+  loud: Loud;
+  inside: number;
+  needs: number;
+  working: number;
+  stale: number;
+  unread: number;
+}
+
+/** One post-order walk over the tree: per session, what is under it (rolled up). `drawn`
+ *  leaves out sessions this surface does not draw (hidden here), and everything under them. */
+export function rollUp(
+  roots: readonly TreeNode[],
+  o: { unread: (s: SessionSummary) => boolean; drawn?: (s: SessionSummary) => boolean },
+): Map<SessionKey, Rolled> {
+  const drawn = o.drawn ?? (() => true);
+  const out = new Map<SessionKey, Rolled>();
+  const walk = (n: TreeNode): Rolled => {
+    const r: Rolled = { loud: "none", inside: 0, needs: 0, working: 0, stale: 0, unread: 0 };
+    for (const k of n.kids) {
+      if (!drawn(k.s)) continue;
+      const own = loudOf(k.s, o.unread);
+      const below = walk(k);
+      r.inside += 1 + below.inside;
+      r.needs += below.needs + (own === "needs_you" ? 1 : 0);
+      r.working += below.working + (own === "working" ? 1 : 0);
+      r.stale += below.stale + (own === "stale" ? 1 : 0);
+      r.unread += below.unread + (own === "unread" ? 1 : 0);
+      r.loud = louder(louder(r.loud, own), below.loud);
+    }
+    out.set(n.s.key, r);
+    return r;
+  };
+  for (const r of roots) walk(r);
+  return out;
+}
+
 /** Whether a row is drawn with the computer mark: its session runs on another computer
  *  than the session it hangs under. A top-level row (a pinned one too) never is: its
  *  computer is in its tooltip. */

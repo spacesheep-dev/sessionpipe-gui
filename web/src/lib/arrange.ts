@@ -145,9 +145,15 @@ export function personTree(state: Pick<AppState, "sessions" | "arrangement">): {
 
 // ----- what is said, for the tree's live region -----
 
-const spokenListeners = new Set<(words: string) => void>();
-/** The sidebar's tree says what a move did through its live region (SessionTree.tsx). */
-export function onArranged(l: (words: string) => void): () => void {
+/** What a move was, for the tree to show its result (unfold the parent it went under). */
+export interface Arranged {
+  key: SessionKey;
+  move: Move;
+}
+const spokenListeners = new Set<(words: string, what?: Arranged) => void>();
+/** The sidebar's tree says what a move did through its live region (SessionTree.tsx), and
+ *  opens what the move put the row under. */
+export function onArranged(l: (words: string, what?: Arranged) => void): () => void {
   spokenListeners.add(l);
   return () => {
     spokenListeners.delete(l);
@@ -191,7 +197,7 @@ export function arrange(store: Store, key: SessionKey, move: Move): boolean {
       for (const l of spokenListeners) l(`Undone. ${title(key)} is back where it was.`);
     },
   });
-  for (const l of spokenListeners) l(plan.spoken);
+  for (const l of spokenListeners) l(plan.spoken, { key, move });
   return true;
 }
 

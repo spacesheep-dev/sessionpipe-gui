@@ -54,7 +54,18 @@ import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { hrefFor, sessionPath } from "../lib/router";
 import { useShortcut } from "../lib/shortcuts";
 import { howOf, openSession, openSplit } from "../lib/split";
-import { arrangeTree, descendants, runsElsewhere, type Tree, type TreeNode } from "../lib/tree";
+import {
+  arrangeTree,
+  descendants,
+  type Loud,
+  louder,
+  loudOf,
+  type Rolled,
+  rollUp,
+  runsElsewhere,
+  type Tree,
+  type TreeNode,
+} from "../lib/tree";
 import {
   dragStarts,
   edgeScroll,
@@ -132,7 +143,12 @@ interface Drag {
 }
 
 /** The lamp at a row's end: the board's glyph where the state asks for one. */
-function Lamp({ s, unread, size }: { s: SessionSummary; unread: boolean; size: number }) {
+function Lamp({ s, unread, rolled, size }: { s: SessionSummary; unread: boolean; rolled?: Loud; size: number }) {
+  // From under a folded row: the loudest there, drawn as its own row would draw it.
+  if (rolled === "needs_you" || rolled === "working" || rolled === "stale")
+    return <StateDot state={rolled} size={size} decorative />;
+  if (rolled === "unread")
+    return <StateDot state={s.state === "done" ? "done" : "idle"} size={size} decorative unread />;
   if (s.state === "needs_you" || s.state === "working" || s.state === "stale")
     return <StateDot state={s.state} size={size} decorative />;
   // News unread: the Board's own mark for it, the glyph drawn as an ink disc.
@@ -151,6 +167,24 @@ const stateWords = (s: SessionSummary, unread: boolean): string =>
         : unread
           ? ", unread"
           : "";
+
+/** What a folded row holds, in words: how many, and how many of the loudest kind. */
+function foldWords(r: Rolled): string {
+  if (r.inside === 0) return "";
+  const n = r.inside;
+  const kind =
+    r.loud === "needs_you"
+      ? `${r.needs} ${r.needs === 1 ? "needs" : "need"} you`
+      : r.loud === "working"
+        ? `${r.working} working`
+        : r.loud === "stale"
+          ? `${r.stale} quiet`
+          : r.loud === "unread"
+            ? `${r.unread} unread`
+            : "";
+  return `, ${n} inside${kind ? `, ${kind}` : ""}`;
+}
+const NO_ROWS: readonly SessionSummary[] = [];
 
 /** The Machines page's own mark, small: this session runs on another computer. */
 function AwayMark({ machine }: { machine: string }) {
@@ -254,8 +288,28 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
   const more = heldRoots.length - shownRoots.length;
 
   const [folded, setFolded] = useFolded();
+  const latestFolds = useRef(folded);
+  latestFolds.current = folded;
   const [allKids, setAllKids] = useState<ReadonlySet<SessionKey>>(new Set());
   const kidsOf = useCallback((n: TreeNode) => n.kids.filter((k) => !hid(k.s)), [hid]);
+  // What is under each row, rolled up: a folded row carries the loudest of it (lib/tree.ts).
+  const unreadOf = useCallback((x: SessionSummary) => isUnread(x, marks), [marks]);
+  const roll = useMemo(() => rollUp(tree.roots, { unread: unreadOf, drawn: (x) => !hid(x) }), [tree, unreadOf, hid]);
+  /** The sessions a folded row stands for: every one under it this device draws. */
+  const underOf = useCallback(
+    (key: SessionKey): SessionSummary[] => {
+      const out: SessionSummary[] = [];
+      const walk = (n: TreeNode | undefined) => {
+        for (const k of n ? kidsOf(n) : []) {
+          out.push(k.s);
+          walk(k);
+        }
+      };
+      walk(tree.nodes.get(key));
+      return out;
+    },
+    [tree, kidsOf],
+  );
 
   // The rows as drawn, for the keys and the drag.
   const drawn = useMemo(() => {
@@ -283,6 +337,11 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
   /** The row element that last had the focus: only its leaving the page (a move drew the
    *  row anew) sends the focus after the row; a Tab or a click away leaves it connected. */
   const focusedEl = useRef<HTMLElement | null>(null);
+  /** Where the focused row was in the rows as drawn: a row that leaves the list (hidden,
+   *  forgotten) hands the focus to the row that took its place. */
+  const lastIndex = useRef(0);
+  const focusAt = drawn.findIndex((d) => d.node.s.key === focusKey);
+  if (focusAt >= 0) lastIndex.current = focusAt;
   useLayoutEffect(() => {
     if (!focusKey || !hadFocus.current) return;
     if (focusedEl.current?.isConnected) return;
@@ -291,7 +350,15 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
       if (!box.current?.contains(a)) hadFocus.current = false;
       return;
     }
-    rowEl(focusKey)?.focus();
+    const here = rowEl(focusKey);
+    if (here) {
+      here.focus();
+      return;
+    }
+    const next = drawn[Math.min(lastIndex.current, drawn.length - 1)]?.node.s.key;
+    if (!next) return;
+    setFocusKey(next);
+    rowEl(next)?.focus();
   });
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     const here = e.target as HTMLElement;
@@ -393,27 +460,69 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
   );
   useUnreadKeys(() => {
     const s = focusedRow();
-    return s ? [s] : [];
+    if (!s) return [];
+    // A folded row: what its glyph stands for is read or unread with it.
+    if (!latestFolds.current.has(s.key)) return [s];
+    const marks = store.get().marks;
+    // Every one with news, read at once; with no news there, the row's own toggle.
+    const news = [s, ...underOf(s.key)].filter((x) => isUnread(x, marks));
+    return news.length ? news : [s];
   }, own);
-  useHideKeys(focusedRow, () => leaveRow.current(), own);
+  // The row leaves the list: the focus goes to the one that took its place (below).
+  useHideKeys(focusedRow, () => {}, own);
   useLabelKeys(() => {
     const s = focusedRow();
     return s ? [s.key] : [];
   }, own);
-  /** Before a row leaves the list by a key (e, ⇧E): where the focus goes after it. */
-  const leaveRow = useRef(() => {});
 
   // ----- what a move did, said -----
   const [said, setSaid] = useState("");
   useEffect(
     () =>
-      onArranged((words) => {
+      onArranged((words, what) => {
         // The same words twice are said twice.
         setSaid("");
         requestAnimationFrame(() => setSaid(words));
+        // Moved under a parent: the parent opens, and its ancestors, so the row is in sight.
+        if (what?.move.kind === "under") revealRef.current(what.move.parent, what.key);
       }),
     [],
   );
+
+  // ----- a row is never lost: opening or moving one shows it -----
+  /** Unfolds `key` and every row above it; with `also`, the row under it is drawn too
+   *  (past Show N more, past the thirty top rows). */
+  const reveal = (key: SessionKey, also?: SessionKey) => {
+    const chain: SessionKey[] = [];
+    for (let k: SessionKey | undefined = key; k; k = tree.nodes.get(k)?.parent) chain.push(k);
+    for (const k of chain) setFolded(k, false);
+    const target = also ?? key;
+    const parent = tree.nodes.get(target)?.parent;
+    if (parent) {
+      const at = (tree.nodes.get(parent)?.kids ?? []).findIndex((x) => x.s.key === target);
+      if (at >= KIDS_SHOWN) setAllKids((was) => new Set(was).add(parent));
+    }
+    const top = chain[chain.length - 1] ?? key;
+    const i = heldRoots.findIndex((h) => h.key === top);
+    if (i >= limit) setLimit(i + 1);
+  };
+  const revealRef = useRef(reveal);
+  revealRef.current = reveal;
+  // The session opened (from here, the Board, a notification): its row is drawn, filled and
+  // in sight. Only on opening: state or arrangement changes never fold, unfold or scroll.
+  const toShow = useRef<SessionKey | null>(null);
+  useEffect(() => {
+    if (!open || !tree.nodes.has(open)) return;
+    revealRef.current(open);
+    toShow.current = open;
+  }, [open]);
+  useEffect(() => {
+    if (!toShow.current || hold) return;
+    const el = rowEl(toShow.current);
+    if (!el) return;
+    toShow.current = null;
+    el.scrollIntoView({ block: "nearest" });
+  });
 
   // ----- the drag -----
   const scroller = useRef<HTMLDivElement>(null);
@@ -469,6 +578,17 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
     const isFolded = kids.length > 0 && folded.has(key);
     const shown = isFolded ? [] : allKids.has(key) ? kids : kids.slice(0, KIDS_SHOWN);
     const hiddenKids = kids.length - (isFolded ? kids.length : shown.length);
+    // What the row stands for that is not drawn: all under it when folded, the rows past
+    // Show N more when not. Its glyph is the loudest of that and itself.
+    const r = roll.get(key);
+    let below: Loud = "none";
+    if (isFolded) below = r?.loud ?? "none";
+    else
+      for (const k of kids.slice(shown.length))
+        below = louder(louder(below, loudOf(k.s, unreadOf)), roll.get(k.s.key)?.loud ?? "none");
+    const own = loudOf(s, unreadOf);
+    const rolled = louder(own, below) !== own ? below : undefined;
+    const inside = isFolded && r ? foldWords(r) : "";
     // Only a row under a session on another computer is marked (lib/tree.ts runsElsewhere).
     const away = runsElsewhere(tree, key);
     const id = `${groupId}-${group}-${key}`;
@@ -482,6 +602,9 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
         open={key === open}
         tab={key === tabKey}
         unread={isUnread(s, marks)}
+        rolled={rolled}
+        inside={inside}
+        under={isFolded ? underOf(key) : NO_ROWS}
         away={away}
         hasKids={kids.length > 0}
         folded={isFolded}
@@ -685,6 +808,12 @@ interface RowProps {
   tab: boolean;
   /** News since the person looked (lib/marks.ts), as the Board reads it. */
   unread: boolean;
+  /** The glyph comes from under the row (folded, or past Show N more): the loudest there. */
+  rolled?: Loud;
+  /** What a folded row holds, in words (", 3 inside, 1 needs you"). */
+  inside: string;
+  /** The sessions a folded row stands for (Mark as read reads them too). */
+  under: readonly SessionSummary[];
   away: boolean;
   hasKids: boolean;
   folded: boolean;
@@ -712,6 +841,9 @@ function TreeRow({ children, ...p }: RowProps & { children?: ReactNode }) {
         open={p.open}
         tab={p.tab}
         unread={p.unread}
+        rolled={p.rolled}
+        inside={p.inside}
+        under={p.under}
         away={p.away}
         hasKids={p.hasKids}
         folded={p.folded}
@@ -737,6 +869,9 @@ const RowLine = memo(function RowLine({
   open,
   tab,
   unread,
+  rolled,
+  inside,
+  under,
   away,
   hasKids,
   folded,
@@ -748,7 +883,7 @@ const RowLine = memo(function RowLine({
 }: Omit<RowProps, "n" | "lifted"> & { s: SessionSummary; level: number; placed: boolean }) {
   const store = useStore();
   const title = sessionTitle(s);
-  const menu = useContextMenu(() => sessionItems(s, { store, surface: "list" }), {
+  const menu = useContextMenu(() => sessionItems(s, { store, surface: "list", under }), {
     title: () => sessionMenuTitle(s),
     subtitle: () => sessionMenuSubtitle(s),
   });
@@ -790,6 +925,7 @@ const RowLine = memo(function RowLine({
       data-group={group}
       data-state={s.state}
       data-unread={unread ? "" : undefined}
+      data-rolled={rolled}
       data-open={open ? "" : undefined}
       data-placed={placed ? "" : undefined}
       data-target={target ? "" : undefined}
@@ -812,11 +948,12 @@ const RowLine = memo(function RowLine({
       </span>
       {away && s.machine && <AwayMark machine={s.machine} />}
       <span className="stree-lamp">
-        <Lamp s={s} unread={unread} size={touch ? 12 : 10} />
+        <Lamp s={s} unread={unread} rolled={rolled} size={touch ? 12 : 10} />
       </span>
       {touch && disclose}
       <span className="sr-only">
         {stateWords(s, unread)}
+        {inside}
         {placed ? ", placed here by you" : ""}
         {away && s.machine ? `, on ${s.machine}` : ""}
       </span>

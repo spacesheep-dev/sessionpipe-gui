@@ -480,6 +480,8 @@ test.describe("the keys stay with the tree's row", () => {
       await page.evaluate((k) => JSON.parse(localStorage.getItem("sessionpipe-gui.hidden") ?? "{}")[k], boardKey ?? ""),
     ).toBeUndefined();
     // Enter: opens this row's session.
+    // (While the keyboard is in the tree it holds still: a new row waits until it leaves.)
+    await page.locator("main#main").focus();
     const [m] = await sessions(request, [{ title: `Keys ${tag} open` }]);
     await row(page, m!.key).focus();
     await page.keyboard.press("Enter");
@@ -497,7 +499,7 @@ test("unread: the same sessions as the Board, with the Board's own mark", async 
   // Every session in both lists: unread in one exactly when unread in the other.
   const both = await page.evaluate(() => {
     const out: [string, boolean, boolean][] = [];
-    for (const r of document.querySelectorAll<HTMLElement>(".stree [data-tree-row]")) {
+    for (const r of Array.from(document.querySelectorAll<HTMLElement>(".stree [data-tree-row]"))) {
       const k = r.dataset.treeRow!;
       const card = document.querySelector(`article.card[data-flip="${CSS.escape(k)}"] .card-state`);
       if (card) out.push([k, r.hasAttribute("data-unread"), !!card.querySelector(".dot--unread")]);
@@ -513,7 +515,7 @@ test("unread: the same sessions as the Board, with the Board's own mark", async 
   // No orange but for what needs you.
   const orange = await page.evaluate(
     () =>
-      [...document.querySelectorAll<HTMLElement>(".stree *")].filter((el) => {
+      Array.from(document.querySelectorAll<HTMLElement>(".stree *")).filter((el) => {
         const c = getComputedStyle(el);
         return (
           [c.color, c.backgroundColor, c.borderTopColor].some((v) => /rgb\(255, 90, 31\)/.test(v)) &&
@@ -522,6 +524,85 @@ test("unread: the same sessions as the Board, with the Board's own mark", async 
       }).length,
   );
   expect(orange).toBe(0);
+});
+
+test.describe("a row is never lost", () => {
+  /** Folds a parent row by its disclosure. */
+  const fold = async (page: Page, key: string) => {
+    await row(page, key).focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(row(page, key)).toHaveAttribute("aria-expanded", "false");
+  };
+
+  test("a folded parent carries what needs you under it, in its glyph and its name", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [p] = await sessions(request, [{ title: `Lost ${tag} parent` }]);
+    await sessions(request, [{ title: `Lost ${tag} child`, asks: p!.key, state: "needs" }]);
+    await openPage(page, "/");
+    await fold(page, p!.key);
+    await expect(row(page, p!.key)).toHaveAttribute("data-rolled", "needs_you");
+    await expect(row(page, p!.key).locator(".stree-lamp .dot--needs_you")).toHaveCount(1);
+    await expect(row(page, p!.key)).toHaveAccessibleName(/1 needs you/);
+  });
+
+  test("u on a folded parent showing a child's news reads the child", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [p] = await sessions(request, [{ title: `Lost ${tag} quiet parent`, state: "done" }]);
+    const [c] = await sessions(request, [{ title: `Lost ${tag} news`, asks: p!.key, state: "idle" }]);
+    await openPage(page, "/");
+    await expect(row(page, c!.key)).toHaveAttribute("data-unread", "");
+    // Read the parent itself first: the glyph is then the child's.
+    await row(page, p!.key).focus();
+    if ((await row(page, p!.key).getAttribute("data-unread")) !== null) await page.keyboard.press("u");
+    await expect(row(page, p!.key)).not.toHaveAttribute("data-unread", "");
+    await fold(page, p!.key);
+    await expect(row(page, p!.key)).toHaveAttribute("data-rolled", "unread");
+    await page.keyboard.press("u");
+    await expect(row(page, p!.key)).not.toHaveAttribute("data-rolled", "unread");
+    await row(page, p!.key).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(row(page, c!.key)).not.toHaveAttribute("data-unread", "");
+  });
+
+  test("opening a child from the Board unfolds its parent and shows its row filled", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [p] = await sessions(request, [{ title: `Lost ${tag} board parent` }]);
+    const [c] = await sessions(request, [{ title: `Lost ${tag} board child`, asks: p!.key }]);
+    await openPage(page, "/");
+    await fold(page, p!.key);
+    await page.locator(`article.card[data-flip="${p!.key}"] .kid`, { hasText: `Lost ${tag} board child` }).click();
+    await expect(page).toHaveURL(new RegExp(c!.id));
+    await expect(row(page, p!.key)).toHaveAttribute("aria-expanded", "true");
+    await expect(row(page, c!.key)).toHaveAttribute("data-open", "");
+    await expect(row(page, c!.key)).toBeInViewport();
+  });
+
+  test("a move under a folded parent opens it, focused; Hide hands the focus on", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [p, x, y] = await sessions(request, [
+      { title: `Lost ${tag} home` },
+      { title: `Lost ${tag} mover` },
+      { title: `Lost ${tag} hider` },
+    ]);
+    await sessions(request, [{ title: `Lost ${tag} home child`, asks: p!.key }]);
+    await openPage(page, "/");
+    await fold(page, p!.key);
+    await row(page, x!.key).focus();
+    await page.keyboard.press("Shift+F10");
+    await page.getByRole("menuitem", { name: "Move under…" }).click();
+    await page.getByRole("combobox", { name: "Find a session" }).fill(`${tag} home`);
+    await page.keyboard.press("Enter");
+    await expect(row(page, p!.key)).toHaveAttribute("aria-expanded", "true");
+    await expect(row(page, x!.key)).toBeFocused();
+    // Hide from the row's menu: the focus goes to the row that took its place.
+    await row(page, y!.key).focus();
+    await page.keyboard.press("Shift+F10");
+    await page.getByRole("menuitem", { name: "Hide", exact: true }).click();
+    await expect(row(page, y!.key)).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => !!document.activeElement?.closest(".stree [data-tree-row]")))
+      .toBe(true);
+  });
 });
 
 test.describe("the phone", () => {

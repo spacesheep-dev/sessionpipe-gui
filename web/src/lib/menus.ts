@@ -80,6 +80,9 @@ export interface SessionMenuContext {
   extra?: MenuList;
   /** The session's subagents, when the surface knows them. */
   children?: readonly SessionSummary[];
+  /** Sessions a folded row stands for (its glyph rolled up from under it): Mark as read
+   *  acts on them too (components/SessionTree.tsx). */
+  under?: readonly SessionSummary[];
   /** After a successful forget, beyond the default (close its tab, leave its page). */
   onForgotten?: () => void;
 }
@@ -213,7 +216,7 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
         run: () => hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key }),
       },
     hideHere && hidden && { label: "Unhide", action: onBoard ? "list.hide" : undefined, run: () => unhide(s.key) },
-    unreadItem(ctx.store, s, list),
+    unreadItem(ctx.store, s, list, ctx.under),
     { sep: true },
     {
       label: "Copy",
@@ -234,13 +237,21 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
 
 /** "Mark as read" on an unread session, else "Mark as unread" (lib/marks.ts), on a row
  *  that can draw unread. Its key, `u`, works on a list's cursor, so a list shows it. */
-function unreadItem(store: Store, s: SessionSummary, list: boolean): MenuItem | null {
-  if (!canMark(s)) return null;
-  const unread = isUnread(s, store.get().marks);
+function unreadItem(
+  store: Store,
+  s: SessionSummary,
+  list: boolean,
+  under: readonly SessionSummary[] = [],
+): MenuItem | null {
+  const marks = store.get().marks;
+  // A folded row's news below it is read with it; nothing below is ever marked unread by it.
+  const below = under.filter((x) => canMark(x) && isUnread(x, marks));
+  if (!canMark(s) && below.length === 0) return null;
+  const unread = (canMark(s) && isUnread(s, marks)) || below.length > 0;
   return {
     label: unread ? "Mark as read" : "Mark as unread",
     action: list ? "list.unread" : undefined,
-    run: () => setUnread(store, [s], !unread),
+    run: () => setUnread(store, unread ? [...(canMark(s) ? [s] : []), ...below] : [s], !unread),
   };
 }
 

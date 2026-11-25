@@ -247,15 +247,19 @@ export function rememberToastReturn(el: Element | null): void {
 }
 /** Focus back where it was before the stack (or on the page, #main, when that is gone). */
 export function returnFromToasts(): void {
-  const el = back;
+  let el = back;
   back = null;
+  // A sidebar row drawn anew since (an Undo moved it): the same session's row.
+  const row = el instanceof HTMLElement ? el.getAttribute("data-tree-row") : null;
+  if (el && !el.isConnected && row)
+    el = document.querySelector<HTMLElement>(`.stree [data-tree-row="${CSS.escape(row)}"]`) ?? el;
   const there =
     el instanceof HTMLElement &&
     el !== document.body &&
     el.isConnected &&
     !el.closest("[inert]") &&
     (typeof el.checkVisibility === "function" ? el.checkVisibility() : el.getClientRects().length > 0);
-  const to = there ? el : document.getElementById("main");
+  const to = there ? (el as HTMLElement) : document.getElementById("main");
   to?.focus({ preventScroll: true });
   holdToasts("focus", false);
 }

@@ -12,6 +12,7 @@ import {
   arrangeTree,
   descendants,
   eventParent,
+  rollUp,
   runsElsewhere,
   TREE_LEVELS,
   type TreeInput,
@@ -183,6 +184,23 @@ describe("the person's arrangement", () => {
     ]);
     expect(descendants(t, "claude-code:l0").size).toBe(6);
     expect(t.childrenOf.get("claude-code:l0")).toHaveLength(6);
+  });
+});
+
+describe("rollUp", () => {
+  it("gives a folded parent the loudest under it at any depth, and how many of each", () => {
+    const p = s("claude-code:rp", { state: "working" });
+    const c = s("codex:rc", { state: "idle", delegatedBy: p.key });
+    const g = s("codex:rg", { state: "needs_you", delegatedBy: c.key });
+    const u = s("codex:ru", { state: "done", delegatedBy: p.key });
+    const t = arrangeTree({ all: [p, c, g, u], arrangement: NONE });
+    const r = rollUp(t.roots, { unread: (x) => x.key === u.key });
+    expect(r.get(p.key)).toEqual({ loud: "needs_you", inside: 3, needs: 1, working: 0, stale: 0, unread: 1 });
+    expect(r.get(c.key)).toMatchObject({ loud: "needs_you", inside: 1, needs: 1 });
+    expect(r.get(g.key)).toMatchObject({ loud: "none", inside: 0 });
+    // A session this surface does not draw (hidden here) counts for nothing, nor what is under it.
+    const hid = rollUp(t.roots, { unread: () => false, drawn: (x) => x.key !== c.key });
+    expect(hid.get(p.key)).toEqual({ loud: "none", inside: 1, needs: 0, working: 0, stale: 0, unread: 0 });
   });
 });
 
