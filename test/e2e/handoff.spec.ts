@@ -571,7 +571,8 @@ test("a parent's Asked sessions: each with its state, agent and computer, the on
 
   // Message: Ask another agent… aimed at that session, the answer brought back.
   await rows.nth(1).hover();
-  await rows.nth(1).getByRole("button", { name: "Message Claude Code" }).click();
+  // Its name says which session: two of one agent are two names.
+  await rows.nth(1).getByRole("button", { name: "Message Draft the note" }).click();
   await expect(sheet(page)).toBeVisible();
   await expect(rowValue(page, "agent")).toContainText("Draft the note");
   await expect(sheet(page).locator("[data-hs-row=back] [role=switch]")).toHaveAttribute("aria-checked", "true");

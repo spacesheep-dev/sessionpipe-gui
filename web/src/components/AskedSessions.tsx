@@ -117,7 +117,7 @@ function AskedRow({ parent, c }: { parent: SessionSummary; c: SessionSummary }) 
           <button
             type="button"
             className="icon-btn kids-act"
-            aria-label={`Message ${agent}`}
+            aria-label={`Message ${title}`}
             title="Message"
             tabIndex={-1}
             onClick={(e) => {
