@@ -28,9 +28,10 @@
   min-height: auto;
   overflow: visible;
 }
-.rail > .rail-group--tree {
+/* The sidebar's dividers share one inset; this one sits in the scroll with the pages. */
+.rail-scroll > .rail-group--tree {
   flex: none;
-  margin: 0 16px;
+  margin: 6px 16px;
 }
 .stree {
   flex: none;
@@ -57,12 +58,12 @@
 }
 @media (hover: hover) {
   .stree-new:hover {
-    background: var(--hover);
+    background-color: var(--hover);
     color: var(--fg);
   }
 }
 .stree-new:active {
-  background: var(--press);
+  background-color: var(--press);
   transition: none;
 }
 .stree-new:focus-visible {
@@ -108,6 +109,7 @@
 /* Above the rows they pass while they make room (lib/motion.ts useFlip). */
 .stree-item[data-flip-moving] {
   z-index: 1;
+  background-color: var(--chrome);
 }
 
 .stree-row {
@@ -125,24 +127,41 @@
   -webkit-touch-callout: none;
   transition: background-color var(--dur-release) linear;
 }
-.stree-row:focus-visible {
-  outline-offset: -2px;
-}
 @media (hover: hover) {
   .stree-row:hover {
-    background: var(--hover);
+    background-color: var(--hover);
     color: var(--fg);
   }
 }
 .stree-row:active {
-  background: var(--press);
+  background-color: var(--press);
   transition: none;
 }
-.stree-row[data-open],
-.stree-row[data-open]:hover,
 .stree-row[data-menu-open] {
-  background: var(--sel);
+  background-color: var(--sel);
   color: var(--fg);
+}
+/* The open session: the one filled row in the sidebar, firm enough to find at a glance. */
+.stree-row[data-open],
+.stree-row[data-open]:hover {
+  background-color: var(--press);
+  color: var(--fg);
+}
+.stree-row[data-open]:active {
+  background-color: color-mix(in oklch, var(--fg) 17%, transparent);
+  transition: none;
+}
+/* The keyboard's cursor: the app's list cursor (the --sel fill and a hairline edge,
+   tokens.css --cursor-edge), never the 2 px ring buttons have. */
+.stree-row:focus-visible,
+.stree-more:focus-visible,
+.stree-more-all:focus-visible {
+  outline: none;
+  background-color: var(--sel);
+  box-shadow: var(--cursor-edge);
+}
+.stree-row[data-open]:focus-visible {
+  background-color: var(--press);
 }
 /* Three inks, colour only: full for what needs you (its own, or rolled up from under a
    folded row), the middle for the rest and for news unread, the faintest for what is done
@@ -194,7 +213,7 @@
 }
 @media (hover: hover) {
   .stree-disc:hover {
-    background: var(--hover);
+    background-color: var(--hover);
     color: var(--fg);
   }
   .stree-row:hover .stree-disc {
@@ -276,7 +295,7 @@
 @media (hover: hover) {
   .stree-more:hover,
   .stree-more-all:hover {
-    background: var(--hover);
+    background-color: var(--hover);
     color: var(--fg);
   }
 }
@@ -302,7 +321,7 @@
 }
 /* Its place stays as a quiet gap; what hangs under it waits, faded. */
 .stree-item[data-lifted] > .stree-row {
-  background: var(--hover);
+  background-color: var(--hover);
 }
 .stree-item[data-lifted] > .stree-row > * {
   visibility: hidden;
@@ -311,27 +330,31 @@
   opacity: 0.4;
 }
 /* On a row: under it. */
+/* A drop target: a 2 px ring and no fill of its own, so it is told from the open row (a
+   fill), the menu's row (a fill) and the cursor (a fill and a hairline) by its shape. */
 .stree-row[data-target],
 .stree-label[data-target],
-.stree-pin-zone[data-target] {
-  background: var(--hover);
-  box-shadow: inset 0 0 0 1.5px var(--fg-2);
+.stree-pin-zone[data-target],
+[data-zone="pin"][data-target] {
+  box-shadow: inset 0 0 0 2px var(--fg-2);
   color: var(--fg);
 }
 /* Between top-level rows: the line, from the top-level mark to the list's end. */
 .stree-line {
   position: absolute;
   top: 0;
-  left: 18px;
-  right: 10px;
+  left: 26px;
+  right: 14px;
   z-index: 2;
   height: 2px;
   border-radius: 1px;
   background: var(--fg);
   pointer-events: none;
 }
+/* The knob: an 8 px ring centred on the mark column (x 24) and on the line. */
 .stree-line::before {
   content: "";
+  box-sizing: content-box;
   position: absolute;
   top: -3px;
   left: -6px;
@@ -464,6 +487,6 @@
   font-size: var(--text-sm);
 }
 .stree--touch .stree-line {
-  left: 18px;
-  right: 4px;
+  left: 24px;
+  right: 16px;
 }

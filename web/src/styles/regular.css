@@ -117,6 +117,10 @@ html[data-size-class="regular"] .rail .nav-link--on,
 html[data-size-class="regular"] .rail .nav-link[data-menu-open] {
   background: var(--sel);
 }
+/* One filled row: with a session open, its row in the tree; its page is ink only. */
+html[data-size-class="regular"] .rail:has(.stree-row[data-open]) .rail-nav .nav-link--on {
+  background-color: transparent;
+}
 html[data-size-class="regular"] .rail .nav-glyph {
   width: 20px;
   height: 20px;

@@ -526,6 +526,36 @@ test("unread: the same sessions as the Board, with the Board's own mark", async 
   expect(orange).toBe(0);
 });
 
+test("one filled row, the list's own cursor, and a drop ring told apart by shape", async ({ page, request }) => {
+  const tag = randomUUID().slice(0, 6);
+  const [a, b] = await sessions(request, [{ title: `States ${tag} open` }, { title: `States ${tag} other` }]);
+  await openPage(page, "/");
+  // Open beside the Board: the tree's row is the one filled row in the sidebar.
+  await row(page, a!.key).click({ modifiers: ["Shift"] });
+  await expect(row(page, a!.key)).toHaveAttribute("data-open", "");
+  await page.mouse.move(900, 600);
+  const filled = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("nav.rail .nav-link, nav.rail .stree-row"))
+        .filter((el) => getComputedStyle(el).backgroundColor !== "rgba(0, 0, 0, 0)")
+        .map((el) => el.getAttribute("data-tree-row") ?? el.getAttribute("data-nav")),
+    );
+  // (Past the fills' own 80 ms release.)
+  await expect.poll(filled).toEqual([a!.key]);
+  // The keyboard's cursor: a fill and a hairline edge, no 2 px ring.
+  await row(page, b!.key).focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  const cursor = await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement;
+    const c = getComputedStyle(el);
+    return { outline: c.outlineStyle, shadow: c.boxShadow, fill: c.backgroundColor };
+  });
+  expect(cursor.outline).toBe("none");
+  expect(cursor.shadow).toContain("inset");
+  expect(cursor.fill).not.toBe("rgba(0, 0, 0, 0)");
+});
+
 test.describe("a row is never lost", () => {
   /** Folds a parent row by its disclosure. */
   const fold = async (page: Page, key: string) => {

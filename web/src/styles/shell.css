@@ -542,6 +542,21 @@
     background: var(--sel);
     color: var(--fg);
   }
+  /* The labelled sidebar's selection is the session rows' (sidetree.css), and only one row
+     is filled: with a session open, its row; the page it was opened from is ink only. */
+  .shell--side .rail .nav-link--on,
+  .shell--side .rail .nav-link--on:hover {
+    background-color: var(--press);
+  }
+  .rail:has(.stree-row[data-open]) .rail-nav .nav-link--on {
+    background-color: transparent;
+    color: var(--fg);
+  }
+  @media (hover: hover) {
+    .rail:has(.stree-row[data-open]) .rail-nav .nav-link--on:hover {
+      background-color: var(--hover);
+    }
+  }
   .rail .nav-link:focus-visible {
     outline-offset: -2px;
   }
