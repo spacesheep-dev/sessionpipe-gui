@@ -635,7 +635,10 @@ function KidRow({
             end, under the title where the row is narrow (styles/board.css). */}
         <span className="kid-text">
           <span className="kid-title ellipsis">{sessionTitle(c)}</span>
-          <MidCut className="chip--machine kid-where" text={askedComputer(c)} />
+          <MidCut className="kid-where" text={askedComputer(c)} />
+        </span>
+        <span className="kid-sep" aria-hidden="true">
+          ·
         </span>
         <NotifyOff s={c} under />
         {c.currentTool && c.state === "working" ? (

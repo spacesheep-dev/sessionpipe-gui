@@ -272,6 +272,11 @@ test("a nested child's row names its computer at the row's end; its prompt's Inb
     const own = page.locator(`li.inbox-row[data-session="${pair.parent.key}"]`);
     await expect(own).toBeVisible();
     await expect(own.locator(".inbox-for")).toHaveCount(0);
+    // On a narrow window too it is whole where it fits, and nothing drawn runs past its box.
+    await page.setViewportSize({ width: 760, height: 800 });
+    const forLine = child.locator(".inbox-for .midcut-text");
+    await expect(forLine).toHaveText(`for ${pair.parent.title}`);
+    expect(await forLine.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   } finally {
     await pair.end();
   }

@@ -544,9 +544,8 @@
   margin-left: auto;
   line-height: inherit;
 }
-.kid-where::after {
-  content: "·";
-  margin-left: 6px;
+/* "·" between the computer and the state, a mark a screen reader skips. */
+.kid-sep {
   color: var(--fg-4);
 }
 .kid-tool {
@@ -909,8 +908,8 @@
     max-width: 100%;
     margin-left: 0;
   }
-  .kid-where::after {
-    content: none;
+  .kid-sep {
+    display: none;
   }
 }
 

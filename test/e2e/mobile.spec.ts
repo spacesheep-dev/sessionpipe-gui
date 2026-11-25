@@ -498,6 +498,39 @@ test.describe("phone", () => {
       await expect(child.locator(".inbox-for")).toHaveAttribute("title", `for ${pair.parent.title}`, {
         timeout: 15_000,
       });
+      // "for …" has the room the computer leaves on its line: a short one is whole. Nothing
+      // drawn is cut at its end or runs past its box.
+      const forLine = child.locator(".inbox-for .midcut-text");
+      await expect(forLine).toHaveText(`for ${pair.parent.title}`);
+      for (const line of [forLine, child.locator(".inbox-machine .midcut-text")]) {
+        expect((await line.textContent())!.endsWith("…")).toBe(false);
+        expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      }
+      // A 90-character parent is cut once, in its middle, and fills its line.
+      const long = await askedPair(request, {
+        machine: "lab-mac",
+        title: "Find every page the move to the new docs site broke and fix the links that point to them again",
+      });
+      try {
+        await long.raise();
+        const longFor = page.locator(`li.inbox-row[data-session="${long.child.key}"] .inbox-for`);
+        await expect(longFor).toHaveAttribute("title", `for ${long.parent.title}`, { timeout: 15_000 });
+        const line = longFor.locator(".midcut-text");
+        const cut = (await line.textContent())!;
+        expect(cut.split("…")).toHaveLength(2);
+        expect(cut.endsWith("…")).toBe(false);
+        expect(`for ${long.parent.title}`.startsWith(cut.split("…")[0]!)).toBe(true);
+        expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+        // Its line is full: under two characters' room is left at its end.
+        const left = await line.evaluate((el) => {
+          const r = document.createRange();
+          r.selectNodeContents(el);
+          return el.getBoundingClientRect().width - r.getBoundingClientRect().width;
+        });
+        expect(left).toBeLessThan(16);
+      } finally {
+        await long.end();
+      }
       const main = child.locator(".inbox-main");
       expect((await main.boundingBox())!.height).toBeGreaterThanOrEqual(44);
       await main.tap();

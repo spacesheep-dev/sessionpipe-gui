@@ -530,7 +530,13 @@ function InboxRow({
         </span>
         <span className="inbox-where">
           <HarnessGlyph name={s.harness} size="sm" />
-          {s.machine && <MidCut className="chip--machine inbox-machine" text={s.machine} />}
+          {s.machine && <MidCut className="inbox-machine" text={s.machine} />}
+          {/* Before "for …" where that follows on this line (a narrow row). */}
+          {parent !== null && (
+            <span className="inbox-sep" aria-hidden="true">
+              ·
+            </span>
+          )}
         </span>
         {/* Its hook stopped waiting: why it is down here, and where it can still be answered. */}
         {row.late && (

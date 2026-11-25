@@ -135,55 +135,73 @@ export function Chip({
 
 /** One line of quiet text (a chip) that, where its box is too narrow, is cut in its middle
  *  (lib/format.ts midCut) rather than at its end: a computer's name keeps the start and the
- *  end that tell two apart. Its box is the stylesheet's (a max-width, a flex share); the
- *  whole text is its tooltip and what a screen reader reads. Measured again when its row
- *  (the `li` it is in) changes width. */
+ *  end that tell two apart. Its box is the stylesheet's (a max-width, a flex share, a grid
+ *  track) and is always laid out from the whole text (styles/shared.css `.midcut::before`),
+ *  so what is cut never changes the room it is cut to. The line drawn over it is measured
+ *  in fractional pixels, again when the box changes width and once the fonts are in. The
+ *  whole text is its tooltip and what a screen reader reads. */
 export function MidCut({ text, className }: { text: string; className?: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [fit, setFit] = useState(text);
-  const [width, setWidth] = useState(0);
+  const box = useRef<HTMLSpanElement>(null);
+  const line = useRef<HTMLSpanElement>(null);
+  const [fit, setFit] = useState({ text, shown: text });
+  const [measure, setMeasure] = useState(0);
   useLayoutEffect(() => {
-    const el = ref.current;
-    const row = el?.closest("li") ?? el?.parentElement?.parentElement;
-    if (!row || typeof ResizeObserver !== "function") return;
-    const ro = new ResizeObserver(() => setWidth(Math.round(row.clientWidth)));
-    ro.observe(row);
-    return () => ro.disconnect();
+    const el = box.current;
+    if (!el || typeof ResizeObserver !== "function") return;
+    let width = -1;
+    const ro = new ResizeObserver(([e]) => {
+      const w = e?.contentRect.width ?? 0;
+      if (w !== width) {
+        width = w;
+        setMeasure((n) => n + 1);
+      }
+    });
+    ro.observe(el);
+    let live = true;
+    document.fonts?.ready.then(() => live && setMeasure((n) => n + 1));
+    return () => {
+      live = false;
+      ro.disconnect();
+    };
   }, []);
+  // `measure` changes with the box's width and the fonts.
   useLayoutEffect(() => {
-    const el = ref.current;
-    const node = el?.firstChild;
-    if (!el || !node || node.nodeType !== Node.TEXT_NODE || width === 0) {
-      setFit(text);
-      return;
+    const el = box.current;
+    const node = line.current?.firstChild;
+    if (!el || !node || node.nodeType !== Node.TEXT_NODE) return;
+    // Both read as drawn (a row's slide moves them alike); a chip has no padding.
+    const room = el.getBoundingClientRect().width;
+    if (!(room > 0)) return;
+    const range = document.createRange();
+    const fits = (s: string) => {
+      node.nodeValue = s;
+      range.selectNodeContents(node);
+      return range.getBoundingClientRect().width <= room + 0.5;
+    };
+    let shown = text;
+    if (!fits(text)) {
+      // The most characters that fit, with "…" in their middle.
+      let lo = 1;
+      let hi = [...text].length - 1;
+      let best = 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (fits(midCut(text, mid))) {
+          best = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      shown = midCut(text, best);
     }
-    const fits = () => el.scrollWidth <= el.clientWidth;
-    node.nodeValue = text;
-    if (fits()) {
-      setFit(text);
-      return;
-    }
-    // The most characters that fit, "…" in the middle; under that the line's own end cut.
-    let lo = 3;
-    let hi = [...text].length - 1;
-    let best = 3;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      node.nodeValue = midCut(text, mid);
-      if (fits()) {
-        best = mid;
-        lo = mid + 1;
-      } else hi = mid - 1;
-    }
-    const out = midCut(text, best);
-    node.nodeValue = out;
-    setFit(out);
-  }, [text, width]);
-  const cut = fit !== text;
+    node.nodeValue = shown;
+    setFit((f) => (f.text === text && f.shown === shown ? f : { text, shown }));
+  }, [text, measure]);
+  const shown = fit.text === text ? fit.shown : text;
+  const cut = shown !== text;
   return (
-    <span className={`chip midcut ${className ?? ""}`} title={text}>
-      <span className="midcut-text" ref={ref} aria-hidden={cut || undefined}>
-        {fit}
+    <span ref={box} className={`chip midcut ${className ?? ""}`} title={text} data-text={text}>
+      <span className="midcut-text" ref={line} aria-hidden={cut || undefined}>
+        {shown}
       </span>
       {cut && <span className="sr-only">{text}</span>}
     </span>

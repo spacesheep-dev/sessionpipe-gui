@@ -199,20 +199,29 @@
   color: var(--fg-4);
 }
 /* A child session's row says whom it works for: "for <that session's title>", quiet,
-   after the title on line 1, the title keeping up to 65% of it and "for …" at least 5em;
-   cut in its middle where the line is short (bits.tsx MidCut). Rows of their own keep
+   after the title on line 1, in all the room up to the time (over the computer's column
+   too: the time has a track of its own). The title comes first: it gives way only so that
+   "for …" keeps 6em, and only past what the computer's column already leaves free. "for …"
+   is cut in its middle where it is short of room (bits.tsx MidCut). Rows of their own keep
    their two columns. */
 .inbox-main:has(> .inbox-for) {
-  grid-template-columns: 28px fit-content(65%) minmax(5em, 1fr) auto;
+  grid-template-columns:
+    28px fit-content(calc(100% - 28px - var(--meta-col) - 24px - 6em))
+    minmax(0, 1fr) auto auto;
   grid-template-areas:
-    "lead title for  age"
-    ".    what  what where";
+    "lead title for  for   age"
+    ".    what  what where where";
 }
 .inbox-for {
   grid-area: for;
   justify-self: start;
   max-width: 100%;
   margin-left: 12px;
+}
+/* "·" after "for …" where it leads the computer's line (the narrow row, below). */
+.inbox-sep {
+  display: none;
+  color: var(--fg-4);
 }
 /* A prompt its hook stopped waiting on: why, under the rest of the row, at every width. */
 .inbox-late {
@@ -457,19 +466,19 @@
     min-width: 0;
     margin-left: 0;
   }
-  /* A child's: "for …" leads the line of where it runs, up to 65% of it, then "·". */
+  /* A child's: the line of where it runs, then "·" and "for …" in all the room the
+     computer leaves (the computer keeps up to 45% of the line, cut in its middle past it). */
   .inbox-main:has(> .inbox-for) {
+    grid-template-columns: 28px fit-content(45%) minmax(0, 1fr) auto auto;
     grid-template-areas:
-      "lead title title age"
-      ".    what  what  what"
-      ".    for   where where";
+      "lead title title title age"
+      ".    what  what  what  what"
+      ".    where for   for   for";
   }
   .inbox-for {
-    margin-left: 0;
+    margin-left: 6px;
   }
-  .inbox-for::after {
-    content: "·";
-    margin: 0 6px;
-    color: var(--fg-4);
+  .inbox-sep {
+    display: inline;
   }
 }
