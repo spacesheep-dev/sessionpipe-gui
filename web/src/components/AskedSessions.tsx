@@ -7,8 +7,10 @@
 // the whole row opens its page, and over its end, on hover, Open beside and Message (the Handoff sheet aimed at
 // it, the answer brought back). A phone stacks the row in two lines and keeps the actions
 // in its long-press menu. One level: a child's own asked sessions are on its page. What a
-// child says is never drawn here: only its title, as the board draws it.
-import type { SessionSummary } from "@shared/api";
+// child says is never drawn here: only its title, as the board draws it. A session the
+// person put under this one in their tree (lib/tree.ts) is listed too, saying "placed by
+// you": it was not asked, it runs for whom its events say, and it hears nothing from here.
+import { isEmptySession, type SessionKey, type SessionSummary } from "@shared/api";
 import { type RefObject, useCallback, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useStore } from "../data/hooks";
 import { askedComputer, askedSessions, askedShown } from "../lib/delegated";
@@ -21,23 +23,40 @@ import { HarnessGlyph, MidCut, Since, StateDot } from "./bits";
 import { tidy, useContextMenu } from "./ContextMenu";
 import { BesideButton } from "./SessionCard";
 
-/** The sessions `parent` asked, kept as one array until a row would draw differently. */
-function useAsked(parent: SessionSummary): SessionSummary[] {
+interface Asked {
+  list: SessionSummary[];
+  /** Those the person placed under it, which it did not ask. */
+  placed: ReadonlySet<SessionKey>;
+}
+
+/** The sessions `parent` asked, then those the person placed under it (display only), kept
+ *  as one value until a row would draw differently. */
+function useAsked(parent: SessionSummary): Asked {
   const store = useStore();
-  const last = useRef<{ sig: string; list: SessionSummary[] }>({ sig: "", list: [] });
+  const last = useRef<{ sig: string; asked: Asked }>({ sig: "", asked: { list: [], placed: new Set() } });
   const read = useCallback(() => {
-    const list = askedSessions(parent, store.get().sessions.values());
+    const { sessions, arrangement } = store.get();
+    const asked = askedSessions(parent, sessions.values());
+    const real = new Set(asked.map((s) => s.key));
+    const placed = Object.entries(arrangement.placed)
+      .filter(([k, p]) => p === parent.key && !real.has(k) && !arrangement.pinned.includes(k))
+      .map(([k]) => sessions.get(k))
+      .filter((s): s is SessionSummary => !!s && !isEmptySession(s) && s.key !== parent.key);
+    const list = [...asked, ...placed];
+    const mine = new Set(placed.map((s) => s.key));
     const sig = list
-      .map((s) => [s.key, sessionTitle(s), s.state, s.lastAt, s.machine ?? "", s.harness].join("\u0000"))
+      .map((s) =>
+        [s.key, sessionTitle(s), s.state, s.lastAt, s.machine ?? "", s.harness, mine.has(s.key)].join("\u0000"),
+      )
       .join("\u0001");
-    if (sig !== last.current.sig) last.current = { sig, list };
-    return last.current.list;
+    if (sig !== last.current.sig) last.current = { sig, asked: { list, placed: mine } };
+    return last.current.asked;
   }, [store, parent]);
   return useSyncExternalStore(store.subscribe, read, read);
 }
 
 export function AskedSessions({ s }: { s: SessionSummary }) {
-  const list = useAsked(s);
+  const { list, placed } = useAsked(s);
   const [all, setAll] = useState(false);
   const head = useId();
   if (list.length === 0) return null;
@@ -49,7 +68,7 @@ export function AskedSessions({ s }: { s: SessionSummary }) {
       </h2>
       <ul className="kids-list">
         {shown.map((c) => (
-          <AskedRow key={c.key} parent={s} c={c} />
+          <AskedRow key={c.key} parent={s} c={c} placed={placed.has(c.key)} />
         ))}
         {askedShown(list, false).more > 0 && (
           <li className="kids-more">
@@ -63,7 +82,7 @@ export function AskedSessions({ s }: { s: SessionSummary }) {
   );
 }
 
-function AskedRow({ parent, c }: { parent: SessionSummary; c: SessionSummary }) {
+function AskedRow({ parent, c, placed }: { parent: SessionSummary; c: SessionSummary; placed: boolean }) {
   const store = useStore();
   const path = sessionPath(c.harness, c.id);
   const title = sessionTitle(c);
@@ -87,8 +106,8 @@ function AskedRow({ parent, c }: { parent: SessionSummary; c: SessionSummary }) 
     <li className="kids-row" data-kid={c.key} data-state={c.state} {...menu}>
       <Link
         to={path}
-        className="kids-link"
-        title={title}
+        className={`kids-link${placed ? " kids-link--placed" : ""}`}
+        title={placed ? `${title}\nPlaced here by you` : title}
         modClick={(o) => openSplit(c.key, { background: o.background })}
       >
         <span className="kids-dot">
@@ -106,6 +125,7 @@ function AskedRow({ parent, c }: { parent: SessionSummary; c: SessionSummary }) 
           <span className="kids-where">
             <MidCut text={computer} />
           </span>
+          {placed && <span className="kids-how">placed by you</span>}
           <span className="kids-age">
             <Since iso={c.lastAt} />
           </span>

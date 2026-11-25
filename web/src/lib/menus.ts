@@ -3,7 +3,8 @@
 // reads the same on a board row, an inbox row, a panel tab, a toast and the session's own
 // "⋯": whatever the surface can answer, first; open (as a page, beside, in the background,
 // in a new window), New session here, Ask another agent (the Handoff sheet), its colour
-// label, go to the parent or a subagent, copy, forget. Only actions that exist, and none
+// label, where it sits in the person's tree (Pin, Move under…, Move to top level: display
+// only, lib/arrange.ts), go to the parent or a subagent, copy, forget. Only actions that exist, and none
 // that would only be refused; a key beside an item only where pressing it there does that
 // to this session. A surface adds its own groups around these. Builders run when a menu
 // opens, so they read the current URL and settings, never a stale render.
@@ -15,6 +16,7 @@ import type { Store } from "../data/store";
 import { askableSessions, canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
+import { arrangeItems } from "./arrange";
 import { copyText } from "./clipboard";
 import { phoneLayout, wideLayout } from "./device";
 import { harnessMark, repoBranch, sessionTitle } from "./format";
@@ -161,6 +163,8 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     { sep: true },
     labelMenu(ctx.store, [s.key]),
     notifyMenu(ctx.store, s),
+    { sep: true },
+    ...arrangeItems(s, ctx.store),
     { sep: true },
     s.parentId && {
       label: "Open parent session",

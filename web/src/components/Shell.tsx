@@ -54,6 +54,7 @@ import type { MoreSheetProps } from "./MoreSheet";
 import { openPalette } from "./Palette";
 import { PULL_PAGES, PullRefresh } from "./PullRefresh";
 import { GearIcon, QuickSettings } from "./QuickSettings";
+import { MoveUnderHost } from "./MoveUnder";
 import { SessionPanel } from "./SessionPanel";
 import { Settings } from "./Settings";
 import { ShortcutHelp } from "./ShortcutHelp";
@@ -880,6 +881,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <SessionPanel phone={phone} />
       <ShortcutHelp />
       <LabelsHost />
+      <MoveUnderHost />
       <NewSessionHost />
       {/* The workflows' signer: claims and signs a run's ready steps, whichever page is open. */}
       <RunnerHost />

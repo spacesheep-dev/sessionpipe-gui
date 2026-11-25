@@ -57,6 +57,7 @@ const storeOf = (c: MachineControl | undefined, sessions: SessionSummary[] = [se
       sessions: new Map(sessions.map((s) => [s.key, s])),
       labels: { names: {}, sessions: {} },
       marks: { since: null, read: {}, unread: {}, notify: {} },
+      arrangement: { rev: 0, placed: {}, pinned: [] },
     }),
   }) as unknown as Store;
 
