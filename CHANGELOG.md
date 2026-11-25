@@ -19,7 +19,8 @@ names in the Inbox.
 
 - **The sidebar lists your sessions as a tree you can arrange.** Under the pages, New
   session, then Pinned and Sessions: one line a session, its agent's mark, its title, a
-  small computer mark where it runs elsewhere, and its state at the end (the turning ring
+  small computer mark where it runs on another computer than the session above it, and
+  its state at the end (the turning ring
   while it works, the orange disc while it needs you). A session another one asked or ran
   sits under it on one rail; a parent folds, and stays folded on this device. The list is
   the Board's, in the Board's order, less what you hid: thirty, then Show more. Drag a row
@@ -29,6 +30,10 @@ names in the Inbox.
   nests the same way, and every device shows the same arrangement. It is how you see the
   tree, nothing more: nothing is sent to a computer, and a session's page still says whom
   it works for; a session you placed under another is listed there as "placed by you".
+- **The sidebar can be made wider.** Drag its edge, from 220 to 400 points; it starts at
+  288 and this device keeps what you chose. A double-click on the edge puts it back, and
+  with the keyboard the edge moves 16 points an arrow. On a tablet on its side the
+  sidebar is 320 points.
 - **A session's page lists the sessions it asked.** Under the bar, "Asked sessions": each
   agent it asked or launched, with its state, its agent, its title, the computer it runs
   on and when it last moved; one that needs you first, five and "Show all". A row opens

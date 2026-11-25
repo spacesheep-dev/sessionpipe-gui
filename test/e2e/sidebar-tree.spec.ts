@@ -187,6 +187,9 @@ test("a pointer drag attaches, moves, detaches and pins; the Board agrees; Undo 
   // Placed, and on another computer than its parent: its tooltip says both.
   await expect(row(page, b!.key)).toHaveAttribute("title", /Placed here by you/);
   await expect(row(page, b!.key).locator(".stree-away")).toHaveCount(1);
+  // A top-level row has no mark, whatever computer it runs on: its tooltip says where.
+  await expect(row(page, a!.key).locator(".stree-away")).toHaveCount(0);
+  await expect(row(page, a!.key)).toHaveAttribute("title", /Runs on studio-mac/);
   await expect(page.locator("[data-tree-said]")).toHaveText(`Tree ${tag} B moved under Tree ${tag} A.`);
   // The Board nests by the same tree.
   await expect(page.locator(`article.card[data-flip="${a!.key}"] .card-kids`)).toContainText(`Tree ${tag} B`);
@@ -346,6 +349,46 @@ test("display only: the page still says whom it works for, and the parent's list
   await expect(realRow.locator(".kids-how")).toHaveCount(0);
 });
 
+test("the sidebar's edge: dragged, by the keys, a double-click back to its width, kept", async ({ page }) => {
+  await openPage(page, "/");
+  const rail = page.locator("nav.rail");
+  const edge = page.getByRole("separator", { name: "Sidebar width" });
+  await expect(edge).toHaveAttribute("aria-orientation", "vertical");
+  const width = async () => Math.round((await rail.boundingBox())!.width);
+  // Back to where a device starts, whatever an earlier run left.
+  await edge.dblclick();
+  await expect(edge).toHaveAttribute("aria-valuenow", "288");
+  expect(await width()).toBe(288);
+  // The keys: 16 px a press, held to 220 to 400.
+  await edge.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(edge).toHaveAttribute("aria-valuenow", "304");
+  expect(await width()).toBe(304);
+  await page.keyboard.press("End");
+  await expect(edge).toHaveAttribute("aria-valuenow", "400");
+  await page.keyboard.press("ArrowRight");
+  await expect(edge).toHaveAttribute("aria-valuenow", "400");
+  await page.keyboard.press("Home");
+  await expect(edge).toHaveAttribute("aria-valuenow", "220");
+  // A drag, and the page takes the rest.
+  const box = (await edge.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 100, box.y + 300, { steps: 6 });
+  await page.mouse.up();
+  await expect(edge).toHaveAttribute("aria-valuenow", "320");
+  const main = (await page.locator("main#main").boundingBox())!;
+  expect(Math.round(main.x)).toBe(320);
+  // Kept on this device, before the first paint of the next load.
+  await page.reload();
+  expect(
+    await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--rail-wide").trim()),
+  ).toBe("320px");
+  await expect(edge).toHaveAttribute("aria-valuenow", "320");
+  await edge.dblclick();
+  await expect(edge).toHaveAttribute("aria-valuenow", "288");
+});
+
 test.describe("the phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
@@ -354,6 +397,7 @@ test.describe("the phone", () => {
     const [a] = await sessions(request, [{ title: `Tree ${tag} phone` }]);
     await openPage(page, "/");
     await expect(page.locator(".stree")).toHaveCount(0);
+    await expect(page.getByRole("separator", { name: "Sidebar width" })).toHaveCount(0);
     const card = page.locator(`article.card[data-flip="${a!.key}"]`);
     await expect(card).toBeVisible();
     // A finger held on the row: its menu, as a sheet.

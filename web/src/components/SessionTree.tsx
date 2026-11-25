@@ -3,8 +3,8 @@
 // while something is pinned) and Sessions, as one tree each (lib/tree.ts, the Board's own
 // tree and order, less what this device hid). A row is one line: the agent's mark, the
 // title cut at its end, a small computer mark where the session runs on another computer
-// than the row above it in the tree (or, at the top level, wherever more than one computer
-// is listed), and the state's lamp at the end (the board's glyphs: the turning ring while
+// than the session it hangs under (a top-level row has its computer in its tooltip), and
+// the state's lamp at the end (the board's glyphs: the turning ring while
 // it works, the orange disc while it needs you, the dashed ring while it is quiet; nothing
 // for the rest, so a long list stays calm). The open session's row is filled. A parent
 // has a disclosure, in the mark's place under the pointer or the keyboard (at the row's
@@ -50,7 +50,7 @@ import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menu
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { hrefFor, sessionPath } from "../lib/router";
 import { howOf, openSession } from "../lib/split";
-import { arrangeTree, descendants, type Tree, type TreeNode } from "../lib/tree";
+import { arrangeTree, descendants, runsElsewhere, type Tree, type TreeNode } from "../lib/tree";
 import {
   dragStarts,
   edgeScroll,
@@ -223,8 +223,6 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
     [arrangement.pinned, tree, hid],
   );
   const roots = useMemo(() => tree.roots.filter((n) => !pinSet.has(n.s.key) && !hid(n.s)), [tree, pinSet, hid]);
-  // More than one computer listed: a top-level row names where it runs.
-  const many = useMemo(() => new Set(all.filter((s) => !hid(s)).map((s) => s.machine ?? "")).size > 1, [all, hid]);
 
   // Held still under the hand, as the board is: no row moves while the pointer is over
   // the list, the keyboard is in it or a row's menu is up; the person's own move lands at once.
@@ -389,10 +387,8 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
     const isFolded = kids.length > 0 && folded.has(key);
     const shown = isFolded ? [] : allKids.has(key) ? kids : kids.slice(0, KIDS_SHOWN);
     const hiddenKids = kids.length - (isFolded ? kids.length : shown.length);
-    // Against the session it really hangs under (a row drawn flat at the last level hangs
-    // under the row before it, not the row its list is under).
-    const above = n.parent ? (tree.nodes.get(n.parent)?.s ?? parent?.s) : undefined;
-    const away = above ? !!s.machine && !!above.machine && s.machine !== above.machine : many && !!s.machine;
+    // Only a row under a session on another computer is marked (lib/tree.ts runsElsewhere).
+    const away = runsElsewhere(tree, key);
     const id = `${groupId}-${group}-${key}`;
     return (
       <TreeRow
@@ -668,7 +664,7 @@ const RowLine = memo(function RowLine({
     title: () => sessionMenuTitle(s),
     subtitle: () => sessionMenuSubtitle(s),
   });
-  const tip = [title, placed ? "Placed here by you" : "", away && s.machine ? `Runs on ${s.machine}` : ""]
+  const tip = [title, placed ? "Placed here by you" : "", s.machine ? `Runs on ${s.machine}` : ""]
     .filter(Boolean)
     .join("\n");
   const disclose = hasKids && (

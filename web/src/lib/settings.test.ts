@@ -71,3 +71,18 @@ describe("Open sessions", () => {
     expect(s.getSettings()).toMatchObject({ mode: "advanced", openSessions: "beside", defaultPage: "/" });
   });
 });
+
+describe("the sidebar's width", () => {
+  it("starts at 288, keeps what was dragged, and holds to 220 to 400 in whole pixels", async () => {
+    layout(false);
+    const m = await load();
+    expect(m.getSettings().sidebarWidth).toBe(288);
+    m.setSettings({ sidebarWidth: 330 });
+    expect(kept()?.sidebarWidth).toBe(330);
+    expect((await load()).getSettings().sidebarWidth).toBe(330);
+    expect((await load({ sidebarWidth: 1000 })).getSettings().sidebarWidth).toBe(400);
+    expect((await load({ sidebarWidth: 12.6 })).getSettings().sidebarWidth).toBe(220);
+    expect((await load({ sidebarWidth: "wide" })).getSettings().sidebarWidth).toBe(288);
+    expect(m.sidebarClamp(301.4)).toBe(301);
+  });
+});

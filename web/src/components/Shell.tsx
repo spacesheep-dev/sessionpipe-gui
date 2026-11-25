@@ -42,7 +42,17 @@ import {
   useSearchParam,
 } from "../lib/router";
 import { useReadyUpdate } from "../lib/selfUpdate";
-import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
+import {
+  getSettings as getAppSettings,
+  SIDEBAR_DEFAULT,
+  SIDEBAR_MAX,
+  SIDEBAR_MIN,
+  setMode,
+  setSettings,
+  sidebarClamp,
+  useAppSettings,
+  useSimple,
+} from "../lib/settings";
 import { hintFor, isTyping, KeysOff, useShortcut, useShortcutMap } from "../lib/shortcuts";
 import { getSkins, isPlain } from "../lib/skins";
 import { closeSplit, leaveSplit, restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
@@ -579,6 +589,10 @@ function MoreSheetHost(p: MoreSheetProps) {
   return m ? <m.MoreSheet {...p} /> : null;
 }
 
+/** The narrowest the page gets beside the labelled sidebar and the panel: what 1360 px
+ *  left it beside a 220 px sidebar and a 44 % panel, where the labelled form begins. */
+const SIDE_PAGE_MIN = 1360 - SIDEBAR_MIN - Math.round(1360 * 0.44);
+
 /** The sidebar's two forms: the labelled one from 1200 px (1360 with the panel open). */
 function useSideForm(splitOpen: boolean): boolean {
   const wide = useMedia("(min-width: 1200px)");
@@ -642,6 +656,12 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const splitOpen = useSplitKey() !== null;
   const splitWidth = useSplitWidth();
   const side = useSideForm(splitOpen && !phone);
+  // With a session beside the page, the labelled sidebar gives way before the page does: it
+  // is as wide as the person chose, less what would leave the page under its narrowest
+  // (the 220 px sidebar's page at 1360 px), never under SIDEBAR_MIN. Their width comes back
+  // when the panel closes or the window widens.
+  const railCap =
+    splitOpen && !phone ? Math.max(SIDEBAR_MIN, window.innerWidth - splitWidth - SIDE_PAGE_MIN) : SIDEBAR_MAX;
   const railMenuProps = useContextMenu(railMenu, { title: () => "sessionpipe gui" });
   // A route change moves focus to the page (not on the first paint, where Tab must start
   // at the skip link), unless the new page put the caret in a field of its own (Search's),
@@ -833,6 +853,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           pagesNav
         )}
         {glance && <UsageGlance here={route.name === "usage"} />}
+        {side && !phone && !regular && <RailEdge cap={railCap} />}
         <div className="rail-foot">
           {regular && (
             <SideFoot
@@ -911,6 +932,83 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <MenuHost />
       <TipHost />
     </div>
+  );
+}
+
+/** How far an arrow key moves the sidebar's edge. */
+const EDGE_STEP = 16;
+
+/** The labelled sidebar's edge, dragged to make it wider or narrower (SIDEBAR_MIN to
+ *  SIDEBAR_MAX), as a Mac's sidebar is: a double-click puts it back at SIDEBAR_DEFAULT, and
+ *  it is a window splitter for the keyboard (its value in pixels, ← and → by 16, Home and
+ *  End). The width is this device's (lib/settings.ts), set on <html> as --rail-wide, which
+ *  the labelled form reads as its --rail (shell.css); index.html sets it before the first
+ *  paint. While the edge is dragged the width follows the pointer and is kept on release. */
+function RailEdge({ cap }: { cap: number }) {
+  const { sidebarWidth } = useAppSettings();
+  const [live, setLive] = useState<number | null>(null);
+  // What is drawn: the width chosen, or being dragged, as far as the page beside it allows.
+  const shown = Math.min(live ?? sidebarWidth, cap);
+  useEffect(() => {
+    document.documentElement.style.setProperty("--rail-wide", `${shown}px`);
+  }, [shown]);
+  const keep = (px: number) => setSettings({ sidebarWidth: sidebarClamp(px) });
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a window splitter (WAI-ARIA), which <hr> cannot be: it takes the focus and a value
+    <div
+      className="rail-edge"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Sidebar width"
+      aria-valuemin={SIDEBAR_MIN}
+      aria-valuemax={Math.min(SIDEBAR_MAX, cap)}
+      aria-valuenow={shown}
+      aria-valuetext={`${shown} pixels`}
+      tabIndex={0}
+      data-resizing={live !== null ? "" : undefined}
+      onDoubleClick={() => keep(SIDEBAR_DEFAULT)}
+      onKeyDown={(e) => {
+        const to =
+          e.key === "ArrowLeft"
+            ? shown - EDGE_STEP
+            : e.key === "ArrowRight"
+              ? shown + EDGE_STEP
+              : e.key === "Home"
+                ? SIDEBAR_MIN
+                : e.key === "End"
+                  ? SIDEBAR_MAX
+                  : null;
+        if (to === null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        keep(to);
+      }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const el = e.currentTarget;
+        const start = e.clientX;
+        const from = shown;
+        let now = from;
+        el.setPointerCapture(e.pointerId);
+        document.documentElement.setAttribute("data-rail-resizing", "");
+        const move = (ev: PointerEvent) => {
+          now = sidebarClamp(from + ev.clientX - start);
+          setLive(now);
+        };
+        const up = () => {
+          el.removeEventListener("pointermove", move);
+          el.removeEventListener("pointerup", up);
+          el.removeEventListener("pointercancel", up);
+          document.documentElement.removeAttribute("data-rail-resizing");
+          if (now !== from) keep(now);
+          setLive(null);
+        };
+        el.addEventListener("pointermove", move);
+        el.addEventListener("pointerup", up);
+        el.addEventListener("pointercancel", up);
+      }}
+    />
   );
 }
 

@@ -187,6 +187,15 @@ export function arrangeTree(input: TreeInput): Tree {
   return { roots: tops, nodes, childrenOf, sectionOf: section };
 }
 
+/** Whether a row is drawn with the computer mark: its session runs on another computer
+ *  than the session it hangs under. A top-level row (a pinned one too) never is: its
+ *  computer is in its tooltip. */
+export function runsElsewhere(tree: Pick<Tree, "nodes">, key: SessionKey): boolean {
+  const n = tree.nodes.get(key);
+  const up = n?.parent ? tree.nodes.get(n.parent)?.s : undefined;
+  return !!n && !!up && !!n.s.machine && !!up.machine && n.s.machine !== up.machine;
+}
+
 /** Every session drawn under `key`, at any depth (the drops it may not take). */
 export function descendants(tree: Pick<Tree, "nodes">, key: SessionKey): Set<SessionKey> {
   const kids = new Map<SessionKey, SessionKey[]>();

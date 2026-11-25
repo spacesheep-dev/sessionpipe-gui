@@ -102,7 +102,11 @@
           const L = localStorage;
           a = L.getItem("sessionpipe-gui.theme");
           skin = JSON.parse(L.getItem("sessionpipe-gui.skin") || "null");
-          mode = JSON.parse(L.getItem("sessionpipe-gui.settings") || "{}").mode || mode;
+          const st = JSON.parse(L.getItem("sessionpipe-gui.settings") || "{}");
+          mode = st.mode || mode;
+          // The labelled sidebar's width (lib/settings.ts sidebarWidth), before the first paint.
+          const w = Number(st.sidebarWidth);
+          if (Number.isFinite(w)) d.style.setProperty("--rail-wide", `${Math.min(400, Math.max(220, Math.round(w)))}px`);
           size = Number(L.getItem("sessionpipe-gui.textSize")) || 1;
           seen = !!L.getItem("sessionpipe-gui.setup.seen");
         } catch {}

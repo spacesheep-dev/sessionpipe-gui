@@ -392,8 +392,56 @@
     grid-template-columns: var(--rail) minmax(0, 1fr);
   }
   /* The labelled sidebar when there is room (Shell.tsx sets the class). */
+  /* Its width is the person's, dragged at its edge (Shell.tsx RailEdge): --rail-wide, set
+     on <html> before the first paint. */
   .shell--side {
-    --rail: 220px;
+    --rail: var(--rail-wide, 288px);
+  }
+  /* The edge: a 7 px strip over the sidebar's hairline, its line drawn darker under the
+     pointer, while dragged and with the keyboard's focus. */
+  .rail-edge {
+    display: none;
+  }
+  .shell--side .rail-edge {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -4px;
+    z-index: 1;
+    display: block;
+    width: 7px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .shell--side .rail-edge::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: var(--hairline);
+    background: transparent;
+    transition: background-color var(--dur-fast) var(--ease-out);
+  }
+  .shell--side .rail-edge:hover::after,
+  .shell--side .rail-edge[data-resizing]::after {
+    left: 2px;
+    width: 3px;
+    background: var(--line-2);
+  }
+  .shell--side .rail-edge:focus-visible {
+    outline: none;
+  }
+  .shell--side .rail-edge:focus-visible::after {
+    left: 2px;
+    width: 3px;
+    background: var(--focus);
+  }
+  html[data-rail-resizing],
+  html[data-rail-resizing] * {
+    cursor: col-resize;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .tabbar {
     display: none;

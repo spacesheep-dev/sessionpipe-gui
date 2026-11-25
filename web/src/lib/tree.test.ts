@@ -8,7 +8,15 @@ import type { Arrangement, SessionState, SessionSummary } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import { bySectionThenRecent } from "../data/hooks";
 import { foldsAway } from "./delegated";
-import { arrangeTree, descendants, eventParent, TREE_LEVELS, type TreeInput, type TreeNode } from "./tree";
+import {
+  arrangeTree,
+  descendants,
+  eventParent,
+  runsElsewhere,
+  TREE_LEVELS,
+  type TreeInput,
+  type TreeNode,
+} from "./tree";
 
 let n = 0;
 const s = (key: string, o: Partial<SessionSummary> = {}): SessionSummary =>
@@ -175,6 +183,36 @@ describe("the person's arrangement", () => {
     ]);
     expect(descendants(t, "claude-code:l0").size).toBe(6);
     expect(t.childrenOf.get("claude-code:l0")).toHaveLength(6);
+  });
+});
+
+describe("the computer mark", () => {
+  it("marks a row under a session on another computer, never a top-level row, a pinned one included", () => {
+    const a = s("claude-code:ma");
+    const b = s("codex:mb", { machine: "build-box" });
+    const c = s("claude-code:mc");
+    const all = [a, b, c];
+    const t = arrangeTree({ all, arrangement: { placed: { [b.key]: a.key, [c.key]: a.key }, pinned: [] } });
+    expect(runsElsewhere(t, b.key)).toBe(true);
+    expect(runsElsewhere(t, c.key)).toBe(false);
+    // On another computer than the rest, at the top level: no mark (its tooltip says where).
+    expect(runsElsewhere(arrangeTree({ all, arrangement: NONE }), b.key)).toBe(false);
+    // A placed child pinned, so drawn at the top level: no mark.
+    const pinned = arrangeTree({ all, arrangement: { placed: { [b.key]: a.key }, pinned: [b.key] } });
+    expect(runsElsewhere(pinned, b.key)).toBe(false);
+    // Drawn flat at the last level, it is judged against the session it really hangs under.
+    const chain = [
+      s("claude-code:f0"),
+      s("claude-code:f1"),
+      s("claude-code:f2"),
+      s("claude-code:f3"),
+      s("codex:f4", { machine: "build-box" }),
+      s("codex:f5", { machine: "build-box" }),
+    ];
+    const placed = Object.fromEntries(chain.slice(1).map((x, i) => [x.key, chain[i]!.key]));
+    const flat = arrangeTree({ all: chain, arrangement: { placed, pinned: [] } });
+    expect(runsElsewhere(flat, "codex:f4")).toBe(true);
+    expect(runsElsewhere(flat, "codex:f5")).toBe(false);
   });
 });
 

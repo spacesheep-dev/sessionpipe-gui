@@ -3,7 +3,7 @@
 // most people never touch; Advanced is everything), the page the app opens on, whether
 // Forget asks first, whether a session opens beside the page or as the page, the tier
 // lens the whole app looks through (`null` = everything), and whether the sidebar shows
-// what each account has left. The appearance, the color theme and the text size stay in
+// what each account has left, and how wide the labelled sidebar is. The appearance, the color theme and the text size stay in
 // lib/theme.ts (the appearance popover). Only what the person set is stored, so a default
 // can change under a device that never chose (as NSUserDefaults registers defaults).
 // Reading is tolerant: an unknown or malformed field falls back to its default, so a
@@ -27,7 +27,18 @@ export interface AppSettings {
   tierLens: Lens;
   /** The sidebar's Usage lines (Shell.tsx UsageGlance), on this device. */
   usageInSidebar: boolean;
+  /** The labelled sidebar's width in px (SIDEBAR_MIN to SIDEBAR_MAX), dragged at its edge. */
+  sidebarWidth: number;
 }
+
+/** The labelled sidebar's widths: from the narrowest its rows were drawn for to where the
+ *  page would give up too much, and the width a device starts at. */
+export const SIDEBAR_MIN = 220;
+export const SIDEBAR_MAX = 400;
+export const SIDEBAR_DEFAULT = 288;
+/** A width as the sidebar takes it: whole pixels, inside its range. */
+export const sidebarClamp = (px: number): number =>
+  Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(Number.isFinite(px) ? px : SIDEBAR_DEFAULT)));
 
 export const KEY = "sessionpipe-gui.settings";
 export const DEFAULT_PAGES: { value: DefaultPage; label: string }[] = [
@@ -51,6 +62,7 @@ const defaults = (phone: boolean): AppSettings => ({
   openSessions: phone ? "page" : "beside",
   tierLens: null,
   usageInSidebar: true,
+  sidebarWidth: SIDEBAR_DEFAULT,
 });
 
 const isLens = (v: unknown): v is Lens => v === null || v === 0 || v === 1 || v === 2 || v === 3;
@@ -91,6 +103,7 @@ function resolve(p: Stored, d: AppSettings): AppSettings {
     openSessions: p.openSessions === "beside" || p.openSessions === "page" ? p.openSessions : d.openSessions,
     tierLens: isLens(p.tierLens) ? p.tierLens : d.tierLens,
     usageInSidebar: typeof p.usageInSidebar === "boolean" ? p.usageInSidebar : d.usageInSidebar,
+    sidebarWidth: typeof p.sidebarWidth === "number" ? sidebarClamp(p.sidebarWidth) : d.sidebarWidth,
   };
 }
 

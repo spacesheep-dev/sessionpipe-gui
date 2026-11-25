@@ -16,6 +16,14 @@ html[data-size-class="regular"] {
   --edge-l: var(--gutter);
 }
 
+/* Where the page keeps 600 pt beside it (a tablet on its side), the sidebar is 320 pt, so
+   the sessions' titles have room; upright, a 820 pt tablet keeps 220 and its 600 pt page. */
+@media (min-width: 920px) {
+  html[data-size-class="regular"] {
+    --rail: 320px;
+  }
+}
+
 html[data-size-class="regular"] .shell {
   grid-template-columns: var(--side-w) minmax(0, 1fr);
   grid-template-rows: none;
