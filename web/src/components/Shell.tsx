@@ -86,7 +86,7 @@ import { SessionTree } from "./SessionTree";
 import { Settings } from "./Settings";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { TipHost } from "./Tip";
-import { UsageLine, useGlanceShown } from "./UsageGlance";
+import { UsageGlance, UsageLine, useGlanceShown } from "./UsageGlance";
 
 /** Whether Setup had steps to go at the last visit: the rail draws its entry from this
  *  until the status answers, so nothing below it moves ~100 ms after the first paint. A
@@ -606,6 +606,11 @@ function MoreSheetHost(p: MoreSheetProps) {
 /** The icon rail's width: the tokens' 72, the Mac app's 80 (its traffic lights sit over it). */
 const railWidth = (): number => (document.documentElement.dataset.shell === "macos" ? 80 : 72);
 
+/** The sidebar's usage: one line, the account with the least left (the director's answer
+ *  to the polish plan's question 3), or false for every account with its bar. */
+const USAGE_ONE_LINE = true;
+const SideUsage = USAGE_ONE_LINE ? UsageLine : UsageGlance;
+
 const LISTS = new Set(["board", "inbox", "search", "feed", "review", "workflows"]);
 let fromList = "board";
 /** The list a session page was opened from (PageBar's BackButton names it). */
@@ -915,7 +920,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
                   <MoreTab items={padMore} active={active} views={views} regular={regular} inSidebar />
                 </div>
               }
-              foot={glance ? <UsageLine here={route.name === "usage"} /> : null}
+              foot={glance ? <SideUsage here={route.name === "usage"} /> : null}
             />
           )}
           <div className="rail-foot">
@@ -977,7 +982,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
             <SessionTree
               open={openKey}
               touch={false}
-              foot={glance ? <UsageLine here={route.name === "usage"} /> : null}
+              foot={glance ? <SideUsage here={route.name === "usage"} /> : null}
             />
           </section>
         )}
