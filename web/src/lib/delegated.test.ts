@@ -147,6 +147,18 @@ describe("askedSessions (a session's page)", () => {
     expect(keys(askedSessions(parent, all))).toEqual(["a:new-needs", "a:old-needs", "a:new-done", "a:mid-working"]);
   });
 
+  it("counts a session started for it on its own machine only; one its delegations name, on any", () => {
+    const all = [
+      parent,
+      kid("codex:here", { delegatedBy: parent.key, startedAt: at(1) }),
+      // Another computer's hooks say so: no lineage in this stage.
+      kid("codex:there", { delegatedBy: parent.key, machine: "build-box", startedAt: at(2) }),
+      // The parent's own delegation names it: listed wherever it runs.
+      kid("codex:asked", { machine: "build-box", startedAt: at(3) }),
+    ];
+    expect(keys(askedSessions(parent, all))).toEqual(["codex:asked", "codex:here"]);
+  });
+
   it("shows five and leaves the rest for Show all; never hides one that needs you", () => {
     const list = (n: number, needs = 0) =>
       Array.from({ length: n }, (_, i) => kid(`a:${i}`, { state: i < needs ? "needs_you" : "done" }));
@@ -266,5 +278,12 @@ describe('parentOf (the Inbox\'s "for <parent>")', () => {
     // A subagent's parent is of its own harness: a Codex child's parentId names no Claude session.
     expect(parentOf(child({ parentId: "p" }), get)).toBeUndefined();
     expect(parentOf(child({ key: "claude-code:p", delegatedBy: "claude-code:p" }), get)).toBeUndefined();
+  });
+  it("takes an asker's say-so only on its own machine", () => {
+    const on = (m: string) =>
+      new Map([["claude-code:p", { key: "claude-code:p", harness: "claude-code", machine: m }]]);
+    const kid = child({ delegatedBy: "claude-code:p", machine: "lab-mac" });
+    expect(parentOf(kid, (k) => on("lab-mac").get(k) as SessionSummary | undefined)?.key).toBe("claude-code:p");
+    expect(parentOf(kid, (k) => on("build-box").get(k) as SessionSummary | undefined)).toBeUndefined();
   });
 });

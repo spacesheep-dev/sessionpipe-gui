@@ -467,6 +467,33 @@ async function postAsked(
   return { harness: o.harness, id, key: `${o.harness}:${id}` };
 }
 
+/** The parent's own word that it asked `to` and has its answer: a delegation that names it. */
+async function postDelegation(token: string, p: { harness: string; id: string; machine: string }, to: string) {
+  let seq = 1;
+  let clock = Date.now() - 10_000;
+  const ev = (type: string, data: Record<string, unknown>) => {
+    clock += 500;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: p.harness, version: "2.1.296", event: "Hook" },
+      session: { id: p.id, seq: seq++, machine: p.machine, cwd: "/Users/e2e/code" },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const ask = { ask_id: `ask_${randomUUID()}`, via: "ask", harness: harnessOfKey(to), to };
+  await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
+    body: JSON.stringify({ events: [ev("delegation.started", ask), ev("delegation.ended", { ...ask, ok: true })] }),
+  });
+}
+const harnessOfKey = (k: string) => k.slice(0, k.indexOf(":"));
+
 test("a parent's Asked sessions: each with its state, agent and computer, the one that needs you first; Open and Message", async ({
   page,
 }) => {
@@ -483,7 +510,8 @@ test("a parent's Asked sessions: each with its state, agent and computer, the on
     parent,
     state: "needs_you",
   });
-  // One on another computer: a later stage's shape, which today's data can already carry.
+  // One on another computer, which the parent's own delegation names: a later stage's
+  // shape, which today's data can already carry.
   const done = await postAsked(sink, {
     machine: `${name}-b`,
     harness: "codex",
@@ -491,6 +519,10 @@ test("a parent's Asked sessions: each with its state, agent and computer, the on
     parent,
     state: "done",
   });
+  await postDelegation(sink, { ...p, machine: name }, done.key);
+  // One on another computer that only its own hooks say was started for this parent: no
+  // lineage today, so not listed.
+  await postAsked(sink, { machine: `${name}-c`, harness: "codex", title: "Says so", parent, state: "working" });
   const work = await postAsked(sink, {
     machine: name,
     harness: "claude-code",
