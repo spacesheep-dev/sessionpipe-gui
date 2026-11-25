@@ -144,7 +144,13 @@
   background: var(--sel);
   color: var(--fg);
 }
-.stree-row[data-state="done"]:not([data-open], :hover) {
+/* Three inks, colour only: full for what needs you (its own, or rolled up from under a
+   folded row), the middle for the rest and for news unread, the faintest for what is done
+   and read. Hover and the open row take full ink. */
+.stree-row:is([data-state="needs_you"], [data-rolled="needs_you"]):not([data-open]) {
+  color: var(--fg);
+}
+.stree-row[data-state="done"]:not([data-open], :hover, [data-unread], [data-rolled]) {
   color: var(--fg-3);
 }
 
@@ -419,7 +425,7 @@
   color: var(--fg);
   font-size: max(1rem, 16px);
 }
-.stree--touch .stree-row[data-state="done"]:not([data-open]) {
+.stree--touch .stree-row[data-state="done"]:not([data-open], [data-unread], [data-rolled]) {
   color: var(--fg-2);
 }
 .stree--touch .stree-lead {

@@ -5,8 +5,10 @@
 // title cut at its end, a small computer mark where the session runs on another computer
 // than the session it hangs under (a top-level row has its computer in its tooltip), and
 // the state's lamp at the end (the board's glyphs: the turning ring while
-// it works, the orange disc while it needs you, the dashed ring while it is quiet; nothing
-// for the rest, so a long list stays calm). The open session's row is filled. A parent
+// it works, the orange disc while it needs you, the dashed ring while it is quiet, the ink
+// disc for news unread, as the Board draws it; nothing for the rest). Titles keep three
+// inks: full only for what needs you, the middle for the rest and for news, the faintest
+// for what is done and read. The open session's row is filled. A parent
 // has a disclosure, in the mark's place under the pointer or the keyboard (at the row's
 // end on a touch screen), and what it folds is remembered on this device. Thirty top
 // rows, then Show more; eight under a parent, then Show N more.
@@ -46,6 +48,7 @@ import { arrange, onArranged, planMove } from "../lib/arrange";
 import { sessionTitle } from "../lib/format";
 import { haptic } from "../lib/haptics";
 import { isHidden, useHidden } from "../lib/hidden";
+import { isUnread } from "../lib/marks";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { hrefFor, sessionPath } from "../lib/router";
@@ -129,15 +132,25 @@ interface Drag {
 }
 
 /** The lamp at a row's end: the board's glyph where the state asks for one. */
-function Lamp({ s, size }: { s: SessionSummary; size: number }) {
+function Lamp({ s, unread, size }: { s: SessionSummary; unread: boolean; size: number }) {
   if (s.state === "needs_you" || s.state === "working" || s.state === "stale")
     return <StateDot state={s.state} size={size} decorative />;
+  // News unread: the Board's own mark for it, the glyph drawn as an ink disc.
+  if (unread) return <StateDot state={s.state} size={size} decorative unread />;
   return null;
 }
 
 /** What a screen reader hears after the title. */
-const stateWords = (s: SessionSummary): string =>
-  s.state === "needs_you" ? ", needs you" : s.state === "working" ? ", working" : s.state === "stale" ? ", quiet" : "";
+const stateWords = (s: SessionSummary, unread: boolean): string =>
+  s.state === "needs_you"
+    ? ", needs you"
+    : s.state === "working"
+      ? ", working"
+      : s.state === "stale"
+        ? ", quiet"
+        : unread
+          ? ", unread"
+          : "";
 
 /** The Machines page's own mark, small: this session runs on another computer. */
 function AwayMark({ machine }: { machine: string }) {
@@ -202,6 +215,7 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
   // Only what the tree draws: a control frame, a viewer or the stats redraw nothing here.
   const sessions = useSyncExternalStore(store.subscribe, () => store.get().sessions);
   const arrangement = useSyncExternalStore(store.subscribe, () => store.get().arrangement);
+  const marks = useSyncExternalStore(store.subscribe, () => store.get().marks);
   const hidden = useHidden();
   const hid = useCallback(
     (s: SessionSummary) => isHidden(hidden, s.key, s.stateSince, s.state === "needs_you"),
@@ -467,6 +481,7 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
         size={size}
         open={key === open}
         tab={key === tabKey}
+        unread={isUnread(s, marks)}
         away={away}
         hasKids={kids.length > 0}
         folded={isFolded}
@@ -668,6 +683,8 @@ interface RowProps {
   size: number;
   open: boolean;
   tab: boolean;
+  /** News since the person looked (lib/marks.ts), as the Board reads it. */
+  unread: boolean;
   away: boolean;
   hasKids: boolean;
   folded: boolean;
@@ -694,6 +711,7 @@ function TreeRow({ children, ...p }: RowProps & { children?: ReactNode }) {
         size={p.size}
         open={p.open}
         tab={p.tab}
+        unread={p.unread}
         away={p.away}
         hasKids={p.hasKids}
         folded={p.folded}
@@ -718,6 +736,7 @@ const RowLine = memo(function RowLine({
   size,
   open,
   tab,
+  unread,
   away,
   hasKids,
   folded,
@@ -770,6 +789,7 @@ const RowLine = memo(function RowLine({
       data-level={level}
       data-group={group}
       data-state={s.state}
+      data-unread={unread ? "" : undefined}
       data-open={open ? "" : undefined}
       data-placed={placed ? "" : undefined}
       data-target={target ? "" : undefined}
@@ -792,11 +812,11 @@ const RowLine = memo(function RowLine({
       </span>
       {away && s.machine && <AwayMark machine={s.machine} />}
       <span className="stree-lamp">
-        <Lamp s={s} size={touch ? 12 : 10} />
+        <Lamp s={s} unread={unread} size={touch ? 12 : 10} />
       </span>
       {touch && disclose}
       <span className="sr-only">
-        {stateWords(s)}
+        {stateWords(s, unread)}
         {placed ? ", placed here by you" : ""}
         {away && s.machine ? `, on ${s.machine}` : ""}
       </span>

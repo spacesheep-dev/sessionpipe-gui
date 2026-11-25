@@ -487,6 +487,43 @@ test.describe("the keys stay with the tree's row", () => {
   });
 });
 
+test("unread: the same sessions as the Board, with the Board's own mark", async ({ page, request }) => {
+  const tag = randomUUID().slice(0, 6);
+  const [idle] = await sessions(request, [{ title: `Unread ${tag} news`, state: "idle" }]);
+  await openPage(page, "/");
+  await expect(row(page, idle!.key)).toHaveAttribute("data-unread", "");
+  await expect(row(page, idle!.key).locator(".stree-lamp .dot--unread")).toHaveCount(1);
+  await expect(row(page, idle!.key)).toHaveAccessibleName(/unread/);
+  // Every session in both lists: unread in one exactly when unread in the other.
+  const both = await page.evaluate(() => {
+    const out: [string, boolean, boolean][] = [];
+    for (const r of document.querySelectorAll<HTMLElement>(".stree [data-tree-row]")) {
+      const k = r.dataset.treeRow!;
+      const card = document.querySelector(`article.card[data-flip="${CSS.escape(k)}"] .card-state`);
+      if (card) out.push([k, r.hasAttribute("data-unread"), !!card.querySelector(".dot--unread")]);
+    }
+    return out;
+  });
+  expect(both.length).toBeGreaterThan(0);
+  for (const [k, side, board] of both) expect(side, k).toBe(board);
+  // Read, it goes, by the Board's own rule (here: u on the row).
+  await row(page, idle!.key).focus();
+  await page.keyboard.press("u");
+  await expect(row(page, idle!.key)).not.toHaveAttribute("data-unread", "");
+  // No orange but for what needs you.
+  const orange = await page.evaluate(
+    () =>
+      [...document.querySelectorAll<HTMLElement>(".stree *")].filter((el) => {
+        const c = getComputedStyle(el);
+        return (
+          [c.color, c.backgroundColor, c.borderTopColor].some((v) => /rgb\(255, 90, 31\)/.test(v)) &&
+          !el.closest(".dot--needs_you, .dot.dot--needs_you")
+        );
+      }).length,
+  );
+  expect(orange).toBe(0);
+});
+
 test.describe("the phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
