@@ -521,13 +521,25 @@ test.describe("phone", () => {
         expect(cut.startsWith("for ")).toBe(true);
         expect(`for ${long.parent.title}`.startsWith(`${cut.slice(0, -1)} `)).toBe(true);
         expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-        // Its line is full: under two characters' room is left at its end.
-        const left = await line.evaluate((el) => {
+        // Its line is as full as whole words allow: with the next word it would not fit.
+        // (Measured as the chip measures, in the line's own text node. The room left at the
+        // end is the next word's, so it is no fixed number of pixels: it differs by font.)
+        const next = await line.evaluate((el, whole) => {
+          const node = el.firstChild as Text;
+          const shown = node.nodeValue ?? "";
+          const head = shown.slice(0, -1);
+          const word = whole.slice(head.length).trim().split(/\s+/)[0] ?? "";
+          const room = el.parentElement!.getBoundingClientRect().width;
           const r = document.createRange();
-          r.selectNodeContents(el);
-          return el.getBoundingClientRect().width - r.getBoundingClientRect().width;
-        });
-        expect(left).toBeLessThan(16);
+          node.nodeValue = `${head} ${word}…`;
+          r.selectNodeContents(node);
+          const width = r.getBoundingClientRect().width;
+          node.nodeValue = shown;
+          return { word, width, room };
+        }, `for ${long.parent.title}`);
+        expect(next.word).not.toBe("");
+        expect(next.width).toBeGreaterThan(next.room + 0.5);
+        await expect(line).toHaveText(cut);
         // Its box, not only its line, stays inside the row: at or left of the row's end and
         // of the time's.
         for (const row of [child, page.locator(`li.inbox-row[data-session="${long.child.key}"]`)]) {
