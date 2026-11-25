@@ -773,7 +773,9 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     under.current = { path, covered: covers };
     if (was?.covered && was.path !== path && lastMove() === "navigate") leaveSplit();
   }, [path, covers]);
-  const shellStyle = { "--split-width": `${splitOpen && !phone && !covers ? splitWidth : 0}px` } as CSSProperties;
+  // Beside the sessions column the panel narrows first (treeColumn), so the column stays.
+  const panelWidth = columnShown ? column.panel : splitWidth;
+  const shellStyle = { "--split-width": `${splitOpen && !phone && !covers ? panelWidth : 0}px` } as CSSProperties;
   const entry = (n: NavItem, tip: boolean) => (
     <NavEntry
       key={n.key}

@@ -95,7 +95,7 @@ describe("the sessions column beside the rail", () => {
   });
   const at = (window: number, chosen = 288, panel = 0) => treeColumn({ window, rail: 72, chosen, panel });
   it("keeps the chosen width while the page keeps 600", () => {
-    expect(at(1440)).toEqual({ fits: true, width: 288, cap: 400 });
+    expect(at(1440)).toEqual({ fits: true, width: 288, cap: 400, panel: 0 });
     expect(at(1280).width).toBe(288);
     expect(at(1200).width).toBe(288);
     expect(at(1024).width).toBe(288);
@@ -106,8 +106,10 @@ describe("the sessions column beside the rail", () => {
     expect(at(892)).toMatchObject({ fits: true, width: 220 });
     expect(at(891).fits).toBe(false);
   });
-  it("with a session open beside the page, the panel and a 360 page come first", () => {
-    expect(at(1440, 288, 560)).toMatchObject({ fits: true, width: 288 });
-    expect(at(1200, 288, 560).fits).toBe(false);
+  it("with a session open beside the page, the panel narrows to 420 for the column, then the column goes", () => {
+    expect(at(1440, 288, 610)).toEqual({ fits: true, width: 288, cap: 400, panel: 538 });
+    expect(at(1280, 288, 563)).toMatchObject({ fits: true, width: 246, panel: 420 });
+    expect(at(1200, 288, 528).fits).toBe(false);
+    expect(at(1200, 288, 528).panel).toBe(528);
   });
 });

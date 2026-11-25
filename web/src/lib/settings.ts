@@ -42,24 +42,35 @@ export const SIDEBAR_DEFAULT = 288;
 export const sidebarClamp = (px: number): number =>
   Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(Number.isFinite(px) ? px : SIDEBAR_DEFAULT)));
 
-/** The page beside the rail and the sessions column keeps at least this; with a session
- *  open beside it, the panel's own floor (lib/split.ts PAGE_MIN) is the page's. */
+/** The page beside the rail and the sessions column keeps at least this. */
 export const PAGE_ROOM = 600;
-const PANEL_PAGE_MIN = 360;
+/** With a session open beside it, the page keeps this (its bar stays one row), and the
+ *  panel gives way down to its own floor (lib/split.ts SPLIT_MIN) before the column goes. */
+const PANEL_PAGE_MIN = 542;
+const PANEL_MIN = 420;
 
-/** Whether the sessions column fits beside the rail, and how wide it is drawn, on a
- *  computer's window (the rail at the window's edge, the column beside it, the page):
- *  as wide as the person chose, narrowed to keep the page PAGE_ROOM wide, down to
+/** Whether the sessions column fits beside the rail, and how wide it and a panel beside
+ *  the page are drawn, on a computer's window (the rail at the window's edge, the column,
+ *  the page, the panel): the column as wide as the person chose, narrowed to keep the page
+ *  PAGE_ROOM wide (with a panel open: the page 542 and the panel at least 420), down to
  *  SIDEBAR_MIN; below that it is not drawn beside the page (the rail's button shows it
- *  over the page). Pure, for the tests. */
+ *  over the page). The panel keeps its own width while it fits beside the column and the
+ *  page, and narrows to make that room, never under 420. Pure, for the tests. */
 export function treeColumn(o: { window: number; rail: number; chosen: number; panel: number }): {
   fits: boolean;
   width: number;
   cap: number;
+  panel: number;
 } {
-  const need = o.panel > 0 ? o.panel + PANEL_PAGE_MIN : PAGE_ROOM;
+  const need = o.panel > 0 ? Math.min(o.panel, PANEL_MIN) + PANEL_PAGE_MIN : PAGE_ROOM;
   const cap = Math.min(SIDEBAR_MAX, o.window - o.rail - need);
-  return { fits: cap >= SIDEBAR_MIN, width: Math.max(SIDEBAR_MIN, Math.min(o.chosen, cap)), cap };
+  const fits = cap >= SIDEBAR_MIN;
+  const width = Math.max(SIDEBAR_MIN, Math.min(o.chosen, cap));
+  const panel =
+    o.panel > 0 && fits
+      ? Math.max(Math.min(o.panel, PANEL_MIN), Math.min(o.panel, o.window - o.rail - width - PANEL_PAGE_MIN))
+      : o.panel;
+  return { fits, width, cap, panel };
 }
 
 export const KEY = "sessionpipe-gui.settings";

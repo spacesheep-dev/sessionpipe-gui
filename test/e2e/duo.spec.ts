@@ -609,7 +609,7 @@ test("the keyboard up on the inner display turned: the strip stands on the keys,
 
     // From the Board, with no session page under it.
     await page.goto(b.server.url);
-    await page.locator("nav.rail .rail-compose").click();
+    await page.locator("nav.rail .stree-new").click();
     const ns = page.locator("[data-new-session]");
     await settled(page);
     await ns.locator("[data-ns-text]").click();
@@ -728,16 +728,19 @@ for (const [size, insets] of REGULAR) {
       await expect(page.locator("nav.rail .nav-link[data-tip]"), where).toHaveCount(0);
       await expect(page.locator("nav.rail .rail-foot .theme-btn:visible"), where).toHaveCount(0);
       // The head starts under the status bar, as tall as the page's bar; the page's bar has
-      // no New session of its own.
+      // no New session of its own: the sidebar's first row is.
       const [top, right, , left] = insets;
       const head = await page.locator("nav.rail .rail-head").evaluate((el) => ({
         top: el.getBoundingClientRect().top,
         pad: Number.parseFloat(getComputedStyle(el).paddingTop),
       }));
       expect(head, where).toEqual({ top: 0, pad: top });
-      const compose = page.locator("nav.rail .rail-compose");
+      const compose = page.locator("nav.rail .stree-new");
       expect((await compose.boundingBox())!.y, where).toBeGreaterThanOrEqual(top);
-      expect(await hitSize(compose), where).toEqual({ width: 44, height: 44 });
+      // New session is the sidebar's first row: a finger's height, the sidebar's width.
+      const hit = await hitSize(compose);
+      expect(hit.height, where).toBeGreaterThanOrEqual(44);
+      expect(hit.width, where).toBeGreaterThanOrEqual(44);
       // The mark is a link to the Board, and a finger's too.
       const brand = await hitSize(page.locator("nav.rail .rail-brand"));
       expect(brand.width, where).toBeGreaterThanOrEqual(44);
@@ -965,7 +968,7 @@ for (const [size, insets] of ROOM) {
       await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
       // Not approved yet: New session is its sentence and its one button at the top of the
       // card, and the card ends under the button.
-      await page.locator("nav.rail .rail-compose").click();
+      await page.locator("nav.rail .stree-new").click();
       const unapproved = page.locator("[data-new-session]");
       await expect(unapproved.locator(".ns-empty [data-ns-approve]")).toBeVisible();
       await settled(page);
@@ -986,7 +989,7 @@ for (const [size, insets] of ROOM) {
       await expect(page.locator("html"), where).toHaveAttribute("data-size-class", "regular");
 
       // New session: its machine's list is a pop-up under its button, over the sheet.
-      await page.locator("nav.rail .rail-compose").click();
+      await page.locator("nav.rail .stree-new").click();
       const ns = page.locator("[data-new-session]");
       await expect(ns.locator("[data-ns-text]")).toBeVisible();
       await formSheet(ns, `New session, ${where}`);
@@ -1165,7 +1168,7 @@ for (const [size, insets] of [
       await page.reload();
       await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular");
 
-      await page.locator("nav.rail .rail-compose").click();
+      await page.locator("nav.rail .stree-new").click();
       const ns = page.locator("[data-new-session]");
       await opened(ns, ns.locator("[data-ns-row=machine] button"), `New session, ${size}`);
 
@@ -1196,7 +1199,7 @@ test("with room, New session dragged down by its bar goes, its dim fading with i
         ).length,
     );
   const open = async () => {
-    await page.locator("nav.rail .rail-compose").click();
+    await page.locator("nav.rail .stree-new").click();
     await expect(ns.locator("[data-ns-text]")).toBeVisible();
     await settled(page);
   };

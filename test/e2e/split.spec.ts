@@ -255,6 +255,9 @@ test.describe("split panel", () => {
 
     test("the divider resizes the panel and the width is remembered", async ({ page }) => {
       await openBeside(page);
+      // The sessions column hidden: beside it the panel only narrows (lib/settings.ts treeColumn).
+      await page.locator("[data-tree-toggle]").click();
+      await expect(page.locator(".tree-col")).toHaveCount(0);
       // Let the slide-in finish: the grip's position is only right once the panel is still.
       const box = (await panel(page).boundingBox())!;
       await expect
