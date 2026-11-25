@@ -157,7 +157,7 @@
     padding-right: 0;
   }
   .panel {
-    left: var(--rail);
+    left: var(--side-w, var(--rail));
     width: auto;
     border-left: 0;
   }

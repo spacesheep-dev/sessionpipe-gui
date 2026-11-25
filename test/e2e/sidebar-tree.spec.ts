@@ -147,6 +147,9 @@ async function drag(
   await from.evaluate((el) => el.scrollIntoView({ block: "center" }));
   await from.hover({ position: { x: 40, y: 10 } });
   await expect(page.locator(".stree")).toHaveAttribute("data-held", "");
+  // The list may have taken a new order just before it held: let that slide finish.
+  await settled();
+  await from.hover({ position: { x: 40, y: 10 } });
   const a = (await from.boundingBox())!;
   await page.mouse.move(a.x + 40, a.y + a.height / 2);
   await page.mouse.down();
@@ -386,9 +389,47 @@ test("display only: the page still says whom it works for, and the parent's list
   await expect(realRow.locator(".kids-how")).toHaveCount(0);
 });
 
+test("the sessions column: beside the rail where it fits, hidden and shown again, over the page where it does not", async ({
+  page,
+}) => {
+  await openPage(page, "/");
+  const col = page.locator(".tree-col");
+  const toggle = page.locator("[data-tree-toggle]");
+  await expect(col).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-label", "Hide sessions");
+  await expect(toggle).toHaveAttribute("data-tip-keys", /.+/);
+  // Hidden by its button, kept on this device, shown again by its key.
+  await toggle.click();
+  await expect(col).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+  await expect(col).toHaveCount(0);
+  await page.keyboard.press(process.platform === "darwin" ? "Control+Meta+s" : "Control+b");
+  await expect(col).toBeVisible();
+  // 1024: the column at 288 beside a 664 px page.
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await expect.poll(async () => Math.round((await col.boundingBox())!.width)).toBe(288);
+  // 860: no room; the rail's button shows it over the page, and Esc, a click outside and
+  // opening a session close it.
+  await page.setViewportSize({ width: 860, height: 800 });
+  await expect(col).toHaveCount(0);
+  await toggle.click();
+  await expect(page.locator(".rail[data-tree-overlay] .tree-col")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(col).toHaveCount(0);
+  await toggle.click();
+  await page.mouse.click(700, 500);
+  await expect(col).toHaveCount(0);
+  await toggle.click();
+  await page.locator(".tree-col [data-tree-row]").first().click();
+  await expect(page).toHaveURL(/\/s\//);
+  await expect(col).toHaveCount(0);
+  await page.setViewportSize({ width: 1400, height: 1400 });
+});
+
 test("the sidebar's edge: dragged, by the keys, a double-click back to its width, kept", async ({ page }) => {
   await openPage(page, "/");
-  const rail = page.locator("nav.rail");
+  const rail = page.locator(".tree-col");
   const edge = page.getByRole("separator", { name: "Sidebar width" });
   await expect(edge).toHaveAttribute("aria-orientation", "vertical");
   const width = async () => Math.round((await rail.boundingBox())!.width);
@@ -415,11 +456,12 @@ test("the sidebar's edge: dragged, by the keys, a double-click back to its width
   await page.mouse.up();
   await expect(edge).toHaveAttribute("aria-valuenow", "320");
   const main = (await page.locator("main#main").boundingBox())!;
-  expect(Math.round(main.x)).toBe(320);
+  // The page starts after the icon rail (72) and the column.
+  expect(Math.round(main.x)).toBe(72 + 320);
   // Kept on this device, before the first paint of the next load.
   await page.reload();
   expect(
-    await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--rail-wide").trim()),
+    await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--tree-w").trim()),
   ).toBe("320px");
   await expect(edge).toHaveAttribute("aria-valuenow", "320");
   await edge.dblclick();
@@ -484,11 +526,11 @@ test.describe("the keys stay with the tree's row", () => {
     await request.patch("/api/ui/labels", { data: { sessions: { [n!.key]: null } } });
     // Space: beside the page, the focus staying on the row and the list not scrolled.
     await t.focus();
-    const before = await page.locator(".rail-scroll").evaluate((el) => el.scrollTop);
+    const before = await page.locator(".stree-scroll").evaluate((el) => el.scrollTop);
     await page.keyboard.press("Space");
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(n!.key).replace(/%3A/g, "(:|%3A)")));
     await expect(t).toBeFocused();
-    expect(await page.locator(".rail-scroll").evaluate((el) => el.scrollTop)).toBe(before);
+    expect(await page.locator(".stree-scroll").evaluate((el) => el.scrollTop)).toBe(before);
     // e: hides this row, not the Board's cursor row.
     await t.focus();
     await page.keyboard.press("e");

@@ -358,6 +358,16 @@ export const ACTIONS: readonly Action[] = [
     inInputs: true,
     hint: "leaves a text field or the notifications first; then closes a popover, the panel or a confirm; on a list clears its filter, then its cursor; then goes back",
   },
+  {
+    id: "sidebar.toggle",
+    label: "Show or hide the sessions",
+    group: "Everywhere",
+    scope: "global",
+    // The app menu's Toggle Sidebar chord (native/menu.ts SIDEBAR): ⌃⌘S on a Mac, Ctrl+B elsewhere.
+    keys: [IS_MAC ? "ctrl+mod+s" : "mod+b"],
+    inInputs: true,
+    hint: "the column of sessions beside the rail; where the window has no room for it, over the page",
+  },
   { id: "appearance.toggle", label: "Dark / light", group: "Everywhere", scope: "global", keys: ["t"] },
   { id: "colorTheme.next", label: "Next skin", group: "Everywhere", scope: "global", keys: ["shift+t"] },
   { id: "lens.cycle", label: "Cycle the tier lens", group: "Everywhere", scope: "global", keys: ["l"] },

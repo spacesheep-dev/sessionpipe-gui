@@ -399,7 +399,7 @@ test("the inner display turned is the touch app still: its own sidebar, one sent
       // The touch app's sidebar (its rows a finger's, named), not a Mac's icon rail.
       await expect(page.locator("nav.rail"), size).toBeVisible();
       await expect(page.locator("nav.tabbar"), size).toBeHidden();
-      await expect(page.locator(".shell--side"), size).toHaveCount(0);
+      await expect(page.locator(".shell--tree"), size).toHaveCount(0);
       await expect(page.locator("nav.rail").getByRole("link", { name: "Board" }), size).toBeVisible();
       // Not approved yet. The prompt's card says so in one sentence with the one way on: no
       // message field that would only refuse, and no second "Approve this iPhone" under it.

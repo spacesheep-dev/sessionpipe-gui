@@ -52,7 +52,7 @@ import { isUnread } from "../lib/marks";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { hrefFor, sessionPath } from "../lib/router";
-import { useShortcut } from "../lib/shortcuts";
+import { hintFor, useShortcut } from "../lib/shortcuts";
 import { howOf, openSession, openSplit } from "../lib/split";
 import {
   arrangeTree,
@@ -244,7 +244,19 @@ function Chevron() {
   );
 }
 
-export function SessionTree({ open, touch }: { open: SessionKey | null; touch: boolean }) {
+export function SessionTree({
+  open,
+  touch,
+  between,
+  foot,
+}: {
+  open: SessionKey | null;
+  touch: boolean;
+  /** Drawn between New session and the list, outside its scroll (the touch sidebar's pages). */
+  between?: ReactNode;
+  /** Drawn under the list, outside its scroll (the Usage line). */
+  foot?: ReactNode;
+}) {
   const store = useStore();
   // Only what the tree draws: a control frame, a viewer or the stats redraw nothing here.
   const sessions = useSyncExternalStore(store.subscribe, () => store.get().sessions);
@@ -644,9 +656,10 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
   useFlip(listRef, 80, { move: 150 });
   useFlip(pinRef, 80, { move: 150 });
   const empty = drawn.length === 0 && heldRoots.length === 0;
-  // Nothing pinned yet: while a row is held up, New session's place is where it is pinned
-  // (the same height, so no row moves for it).
-  const pinZone = !!drag && pinned.length === 0;
+  // While a row is held up, New session's row (fixed, always in view) is where it is pinned:
+  // the same height, so nothing in the list moves when a drag starts.
+  const pinZone = !!drag;
+  const fades = useScrollFades(scroller);
   return (
     <div
       className={`stree${touch ? " stree--touch" : ""}`}
@@ -655,35 +668,50 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
       data-held={hold ? "" : undefined}
       data-keys-own=""
     >
-      {pinZone ? (
-        <div
-          className="stree-new stree-pin-zone"
-          data-zone="pinned"
-          data-target={drag?.target?.kind === "pinned" ? "" : undefined}
-        >
-          <PinGlyph />
-          <span>Drop here to pin</span>
-        </div>
-      ) : (
-        <button type="button" className="stree-new" onClick={() => openNewSession()}>
-          <svg
-            className="stree-new-glyph"
-            viewBox="0 0 20 20"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            aria-hidden="true"
+      <div className="stree-head">
+        {pinZone ? (
+          <div
+            className="stree-new stree-pin-zone"
+            data-zone="pin"
+            data-target={drag?.target?.kind === "pinned" ? "" : undefined}
           >
-            <circle cx="10" cy="10" r="7" />
-            <path d="M10 7v6M7 10h6" />
-          </svg>
-          <span>New session</span>
-        </button>
-      )}
-      <div className="stree-scroll" ref={scroller}>
+            <PinGlyph />
+            <span>Drop to pin</span>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="stree-new"
+            onClick={() => openNewSession()}
+            data-tip={touch ? undefined : "New session"}
+            data-tip-keys={touch ? undefined : hintFor("newSession.open") || undefined}
+            data-tip-side="right"
+          >
+            <svg
+              className="stree-new-glyph"
+              viewBox="0 0 20 20"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="10" cy="10" r="7" />
+              <path d="M10 7v6M7 10h6" />
+            </svg>
+            <span>New session</span>
+          </button>
+        )}
+      </div>
+      {between}
+      <div
+        className="stree-scroll"
+        ref={scroller}
+        data-more-above={fades.above ? "" : undefined}
+        data-more-below={fades.below ? "" : undefined}
+      >
         {pinned.length > 0 && (
           <section className="stree-section" aria-labelledby={`${groupId}-pinned`}>
             <h2
@@ -737,6 +765,7 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
         </section>
         <div className="stree-line" ref={line} aria-hidden="true" hidden />
       </div>
+      {foot}
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-tree-said="">
         {said}
       </div>
@@ -758,6 +787,33 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
 }
 
 const nodeKey = (n: TreeNode) => n.s.key;
+
+/** Whether the list goes on above and below what is in view: its ends fade only where it does. */
+function useScrollFades(ref: RefObject<HTMLElement | null>): { above: boolean; below: boolean } {
+  const [fades, setFades] = useState({ above: false, below: false });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = () => {
+      const above = el.scrollTop > 1;
+      const below = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+      setFades((f) => (f.above === above && f.below === below ? f : { above, below }));
+    };
+    read();
+    el.addEventListener("scroll", read, { passive: true });
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(read) : null;
+    ro?.observe(el);
+    for (const c of el.children) ro?.observe(c);
+    const mo = new MutationObserver(read);
+    mo.observe(el, { childList: true, subtree: true });
+    return () => {
+      el.removeEventListener("scroll", read);
+      ro?.disconnect();
+      mo.disconnect();
+    };
+  }, [ref]);
+  return fades;
+}
 
 /** A row that left while the list was held: where it was, quiet and inert, until the hand leaves. */
 function GoneRow({ h }: { h: Held<TreeNode> }) {
@@ -1022,7 +1078,14 @@ function useDragStart(o: {
         const z = root.querySelector<HTMLElement>(sel)?.getBoundingClientRect();
         return z ? { top: z.top, bottom: z.bottom } : undefined;
       };
-      return { rows, zones: { pinned: zone('[data-zone="pinned"]'), sessions: zone('[data-zone="sessions"]') } };
+      // New session's row, during a drag the place to pin (Pinned's own heading as well).
+      return {
+        rows,
+        zones: {
+          pinned: zone('[data-zone="pin"]') ?? zone('[data-zone="pinned"]'),
+          sessions: zone('[data-zone="sessions"]'),
+        },
+      };
     };
 
     const title = (k: SessionKey) => {
@@ -1066,8 +1129,7 @@ function useDragStart(o: {
     };
 
     const scrollLoop = () => {
-      // The sidebar's own scroll (Shell.tsx .rail-scroll), which the pages share.
-      const sc = ref.current.box.current?.closest<HTMLElement>(".rail-scroll") ?? ref.current.scroller.current;
+      const sc = ref.current.scroller.current;
       if (!sc || !lifted) return;
       const r = sc.getBoundingClientRect();
       const dy = edgeScroll(at.y, r.top, r.bottom);

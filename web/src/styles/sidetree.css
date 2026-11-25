@@ -1,50 +1,36 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* ---------- the sidebar's sessions (components/SessionTree.tsx) ---------- */
-/* Under the pages, set off by the sidebar's own hairline: New session, then Pinned and
-   Sessions under the section labels' tier, each a tree of one-line rows. A row is the
-   page rows' size and type: the agent's mark where a page has its glyph, the title cut at
-   its end, a small computer mark, the state's lamp in a fixed slot at the end (so a
+/* The sessions column beside the icon rail (a finger's sidebar: under its four pages):
+   New session fixed at its top, in the page bars' band; then Pinned and Sessions under the
+   section labels' tier, each a tree of one-line rows, the one part that scrolls, its ends
+   fading where it goes on; the Usage line at its foot. A row: the agent's mark, the title
+   cut at its end, a small computer mark, the state's lamp in a fixed slot at the end (so a
    spinner never moves the title). Children sit 16 px in, on one hairline rail from the
-   parent's mark down. The open session's row has the page rows' fill. Only the rows
-   scroll; the pages above and the usage and foot below stay put. A touch screen with a
-   sidebar (styles/regular.css) has its 44 pt rows. */
+   parent's mark down. A touch screen with a sidebar (styles/regular.css) has 44 pt rows. */
 
-/* The pages and the sessions scroll as one, as a Mac's sidebar does; the head, the usage
-   lines and the foot stay put. */
-.rail-scroll {
+.stree {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
 }
-.rail-scroll::-webkit-scrollbar {
-  display: none;
-}
-.rail .rail-scroll > .rail-nav {
-  flex: none;
-  min-height: auto;
-  overflow: visible;
-}
-/* The sidebar's dividers share one inset; this one sits in the scroll with the pages. */
-.rail-scroll > .rail-group--tree {
-  flex: none;
-  margin: 6px 16px;
-}
-.stree {
+/* New session, fixed: on a computer in the band every page bar has (--bar, a hairline). */
+.stree-head {
   flex: none;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  padding: 0 8px;
+}
+.tree-col .stree-head {
+  height: var(--bar);
+  border-bottom: var(--hairline) solid var(--line);
 }
 .stree-new {
-  flex: none;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 8px;
   height: var(--side-row);
-  margin: 6px 8px 0;
   padding: 0 8px;
   border-radius: var(--radius);
   color: var(--fg-2);
@@ -70,9 +56,94 @@
   outline-offset: -2px;
 }
 
+/* The list: the one part that scrolls. Its ends fade only where it goes on, and a thin
+   bar shows while it scrolls (a mouse's: always). Nothing fades during a drag, or under
+   forced colours. */
 .stree-scroll {
   position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 0 8px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--fg) 22%, transparent) transparent;
+}
+.stree-scroll[data-more-above] {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 100%);
+}
+.stree-scroll[data-more-below] {
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 20px), transparent 100%);
+}
+.stree-scroll[data-more-above][data-more-below] {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 20px), transparent 100%);
+}
+.stree[data-dragging] .stree-scroll {
+  mask-image: none;
+}
+@media (forced-colors: active) {
+  .stree-scroll {
+    mask-image: none;
+  }
+}
+/* The Usage line: the column's foot, one row over a hairline (UsageGlance.tsx UsageLine). */
+.usage-line {
+  flex: none;
+  margin: 0;
+  padding: 4px 8px;
+  list-style: none;
+  border-top: var(--hairline) solid var(--line);
+}
+.usage-line .glance-line {
+  display: flex;
+  align-items: center;
+  height: var(--side-row);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg);
+}
+@media (hover: hover) {
+  .usage-line .glance-line:hover {
+    background-color: var(--hover);
+  }
+}
+.usage-line[data-here] .glance-line {
+  background-color: var(--press);
+}
+.usage-line .glance-top {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+}
+.usage-line .glance-top .glyph-wrap {
+  color: var(--fg-3);
+}
+.usage-line .glance-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-2);
+}
+.usage-line .glance-val {
+  white-space: nowrap;
+  color: var(--fg-2);
+}
+.usage-line .glance-win {
+  color: var(--fg-3);
+}
+.usage-line .glance-out {
+  color: var(--needs-fg);
+}
+.stree--touch ~ .usage-line .glance-line,
+.stree--touch .usage-line .glance-line {
+  height: 44px;
+  font-size: max(1rem, 16px);
 }
 .stree-section {
   margin-top: 8px;
@@ -430,10 +501,13 @@
 
 /* ----- a touch screen's sidebar: 44 pt rows (styles/regular.css) ----- */
 
+.stree--touch .stree-head {
+  padding: 0;
+}
 .stree--touch .stree-new {
   gap: 12px;
   height: 44px;
-  margin: 8px 0 0;
+  margin: 4px 0;
   padding: 0 12px;
   color: var(--fg);
   font-size: max(1rem, 16px);

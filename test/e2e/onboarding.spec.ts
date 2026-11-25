@@ -392,14 +392,17 @@ test.describe("the phone shell at tablet width", () => {
     const side = page.locator("nav.rail");
     await expect(side).toBeVisible();
     await expect(page.locator("nav.tabbar")).toBeHidden();
-    await expect(page.locator(".shell--side")).toHaveCount(0);
+    await expect(page.locator(".shell--tree")).toHaveCount(0);
     // Down the leading edge, from top to bottom, with the page beside it.
     const box = (await side.boundingBox())!;
     expect(Math.round(box.x)).toBe(0);
-    expect(Math.round(box.width)).toBe(220);
+    // clamp(264, 34vw, 320) (regular.css): 320 at 1032.
+    expect(Math.round(box.width)).toBe(320);
     expect(Math.round(box.y + box.height)).toBe(1376);
-    for (const name of ["Board", "Inbox", "Search", "Machines", "Settings"])
+    // Four pages and More above the sessions, Settings at the foot.
+    for (const name of ["Board", "Inbox", "Search", "Settings"])
       await expect(side.getByRole("link", { name })).toBeVisible();
+    await expect(side.getByRole("button", { name: "More", exact: true })).toBeVisible();
     await expect(side.getByRole("button", { name: "Display" })).toBeVisible();
     // Its head is under the status bar, the mark in it.
     const head = side.locator(".rail-head");
@@ -464,16 +467,17 @@ test.describe("the phone shell held wide with a fine pointer", () => {
     await wide(page);
     const rail = page.locator(".rail");
     await expect(rail).toBeVisible();
-    const railBox = await rail.boundingBox();
     const mark = await page.locator(".rail-brand .mark").boundingBox();
     expect(mark!.x).toBeGreaterThanOrEqual(0);
-    expect(mark!.x + mark!.width).toBeLessThanOrEqual(railBox!.x + railBox!.width);
-    // The compose glyph sits beside the mark, inside the rail, and still gets a finger's target.
-    const compose = page.locator(".rail-compose");
-    const cb = await compose.boundingBox();
-    expect(cb!.x + cb!.width).toBeLessThanOrEqual(railBox!.x + railBox!.width);
-    expect(cb!.x).toBeGreaterThanOrEqual(mark!.x + mark!.width);
-    const target = await compose.evaluate((el) => {
+    // New session is the sessions column's first row, beside the rail, and still gets a
+    // finger's target.
+    const start = page.locator(".tree-col .stree-new");
+    const sb = await start.boundingBox();
+    const icons = await page.locator(".rail-icons").boundingBox();
+    expect(mark!.x + mark!.width).toBeLessThanOrEqual(icons!.x + icons!.width);
+    expect(sb!.x).toBeGreaterThanOrEqual(icons!.x + icons!.width);
+    expect(sb!.y).toBeGreaterThanOrEqual(24);
+    const target = await start.evaluate((el) => {
       const after = getComputedStyle(el, "::after");
       const r = el.getBoundingClientRect();
       return r.height - Number.parseFloat(after.top) - Number.parseFloat(after.bottom);

@@ -176,6 +176,60 @@ export function useGlanceShown(): boolean {
   return shown;
 }
 
+/** The order of tightness across lines: none left first, then the most over, then the
+ *  least left; a line with no numbers has none (lib/limits.ts readWindow). */
+export function tightness(r: { kind: string; room: number } | null): number {
+  if (!r || r.kind === "reset") return Number.POSITIVE_INFINITY;
+  if (r.kind === "none") return -1e9;
+  if (r.kind === "over") return -1e6 + r.room;
+  return r.room;
+}
+
+/** Of the glance's lines, the one with the least left (its tightest window), or null when
+ *  none has numbers. A pooled machine with no account left is none left. Ties keep the
+ *  glance's order. */
+export function tightestLine<L extends Account | PoolLine>(lines: readonly L[], now: number): L | null {
+  let best: L | null = null;
+  let score = Number.POSITIVE_INFINITY;
+  for (const l of lines) {
+    let s: number;
+    if ("kind" in l) {
+      if (!l.current) s = tightness({ kind: "none", room: 0 });
+      else {
+        const t = l.entry ? tightest(l.entry, now) : null;
+        s = tightness(t ? readWindow(t, now) : null);
+      }
+    } else {
+      const t = l.entry ? tightest(l.entry, now) : null;
+      s = tightness(t ? readWindow(t, now) : null);
+    }
+    if (s < score) {
+      score = s;
+      best = l;
+    }
+  }
+  return best;
+}
+
+/** The sessions column's foot: one line, the account with the least left (its name, its
+ *  tightest window and the figure, the reset in its tooltip), a link to /usage. The same
+ *  line the glance draws, without its bar. Not drawn when no account has numbers. */
+export function UsageLine({ here }: { here: boolean }) {
+  const { shown, all, short, machines } = useGlance();
+  const now = useNow("coarse");
+  const line = tightestLine(all, now);
+  if (!shown || !line) return null;
+  return (
+    <ul className="glance-list usage-line" aria-label="Usage" data-here={here ? "" : undefined}>
+      {"kind" in line ? (
+        <PoolGlanceLine line={line} now={now} machines={machines} one />
+      ) : (
+        <GlanceLine a={line} name={short.get(line.key) ?? line.title} now={now} machines={machines} one />
+      )}
+    </ul>
+  );
+}
+
 export function UsageGlance({ here }: { here: boolean }) {
   const { shown, all, short, machines, lines } = useGlance();
   // Resets count down and passed ones turn to "Reset" without a new report.
@@ -212,11 +266,14 @@ function GlanceLine({
   name,
   now,
   machines,
+  one = false,
 }: {
   a: Account;
   name: string;
   now: number;
   machines: readonly MachineSummary[];
+  /** One line, no bar and no reset line under it (the sessions column's foot). */
+  one?: boolean;
 }) {
   const menu = useContextMenu(() => usageItems(a, { machines, from: "sidebar" }), { title: () => a.title });
   const e = a.entry!;
@@ -255,7 +312,7 @@ function GlanceLine({
             </span>
           )}
         </span>
-        {out && r?.when ? (
+        {one ? null : out && r?.when ? (
           <span className="glance-sub num">{r.when}</span>
         ) : stale ? (
           <span className="glance-sub">{stale}</span>
@@ -273,7 +330,17 @@ function GlanceLine({
  *  as an account's line has them, muted "in use" with no numbers yet, None left with the
  *  first reset under it when no account has room. The tooltip names the other accounts;
  *  a click opens the machine's section on /usage. */
-function PoolGlanceLine({ line, now, machines }: { line: PoolLine; now: number; machines: readonly MachineSummary[] }) {
+function PoolGlanceLine({
+  line,
+  now,
+  machines,
+  one = false,
+}: {
+  line: PoolLine;
+  now: number;
+  machines: readonly MachineSummary[];
+  one?: boolean;
+}) {
   const { pool, machine, current, entry } = line;
   const name = current ? sentenceName(current, pool.accounts) : machine;
   const title = `${name}, Claude Code on ${machine}`;
@@ -335,7 +402,7 @@ function PoolGlanceLine({ line, now, machines }: { line: PoolLine; now: number; 
             </span>
           )}
         </span>
-        {back ? (
+        {one ? null : back ? (
           <span className="glance-sub num">{back}</span>
         ) : out && r?.when ? (
           <span className="glance-sub num">{r.when}</span>

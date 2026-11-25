@@ -2,7 +2,7 @@
 // How sessions open by default, on a computer and on the phone, and the stored form: only
 // what the device set, with the one-time drop of the "page" every save used to write.
 import "../native/test-env";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PHONE_QUERY } from "./device";
 
 const g = globalThis as Record<string, unknown>;
@@ -84,5 +84,30 @@ describe("the sidebar's width", () => {
     expect((await load({ sidebarWidth: 12.6 })).getSettings().sidebarWidth).toBe(220);
     expect((await load({ sidebarWidth: "wide" })).getSettings().sidebarWidth).toBe(288);
     expect(m.sidebarClamp(301.4)).toBe(301);
+  });
+});
+
+describe("the sessions column beside the rail", () => {
+  let treeColumn: Awaited<ReturnType<typeof load>>["treeColumn"];
+  beforeAll(async () => {
+    layout(false);
+    ({ treeColumn } = await load());
+  });
+  const at = (window: number, chosen = 288, panel = 0) => treeColumn({ window, rail: 72, chosen, panel });
+  it("keeps the chosen width while the page keeps 600", () => {
+    expect(at(1440)).toEqual({ fits: true, width: 288, cap: 400 });
+    expect(at(1280).width).toBe(288);
+    expect(at(1200).width).toBe(288);
+    expect(at(1024).width).toBe(288);
+  });
+  it("narrows for the page, down to 220, then leaves the page to the rail's button", () => {
+    expect(at(1024, 400).width).toBe(352);
+    expect(at(900).width).toBe(228);
+    expect(at(892)).toMatchObject({ fits: true, width: 220 });
+    expect(at(891).fits).toBe(false);
+  });
+  it("with a session open beside the page, the panel and a 360 page come first", () => {
+    expect(at(1440, 288, 560)).toMatchObject({ fits: true, width: 288 });
+    expect(at(1200, 288, 560).fits).toBe(false);
   });
 });

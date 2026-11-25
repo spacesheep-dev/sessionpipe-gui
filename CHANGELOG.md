@@ -30,10 +30,17 @@ names in the Inbox.
   nests the same way, and every device shows the same arrangement. It is how you see the
   tree, nothing more: nothing is sent to a computer, and a session's page still says whom
   it works for; a session you placed under another is listed there as "placed by you".
-- **The sidebar can be made wider.** Drag its edge, from 220 to 400 points; it starts at
-  288 and this device keeps what you chose. A double-click on the edge puts it back, and
-  with the keyboard the edge moves 16 points an arrow. On a tablet on its side the
-  sidebar is 320 points.
+- **On a computer, the pages are an icon rail at the window's edge, and your sessions a
+  column beside it.** The column starts with New session, always in view (and the place
+  to drop a row to pin it), then Pinned and Sessions, with one line of usage at its
+  foot: the account with the least left. Its edge drags from 220 to 400 points; it
+  starts at 288 and this device keeps what you chose, and a double-click puts it back.
+  The rail's top button, or ⌃⌘S (Ctrl+B off a Mac), hides and shows it, remembered on
+  this device. Where the window is too narrow for it beside a 600 point page it narrows
+  to 220 and then steps aside: the same button shows it over the page, and Esc, a click
+  outside or opening a session puts it away. The list fades at an end where it goes on.
+  On a tablet the sidebar keeps its own form: Board, Inbox, Search and More over your
+  sessions, from 264 to 320 points wide.
 - **A session's page lists the sessions it asked.** Under the bar, "Asked sessions": each
   agent it asked or launched, with its state, its agent, its title, the computer it runs
   on and when it last moved; one that needs you first, five and "Show all". A row opens

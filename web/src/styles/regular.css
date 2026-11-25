@@ -11,17 +11,10 @@
 
 html[data-size-class="regular"] {
   --tabbar: 0px;
-  --rail: 220px;
+  /* 279 pt at an 820 pt tablet upright, 320 on its side. */
+  --rail: clamp(264px, 34vw, 320px);
   --side-w: calc(var(--rail) + var(--safe-left, env(safe-area-inset-left)));
   --edge-l: var(--gutter);
-}
-
-/* Where the page keeps 600 pt beside it (a tablet on its side), the sidebar is 320 pt, so
-   the sessions' titles have room; upright, a 820 pt tablet keeps 220 and its 600 pt page. */
-@media (min-width: 920px) {
-  html[data-size-class="regular"] {
-    --rail: 320px;
-  }
 }
 
 html[data-size-class="regular"] .shell {
@@ -368,4 +361,21 @@ html[data-size-class="regular"] :is(.settings-nav, .settings-pane) {
 html[data-size-class="regular"] .settings-bar {
   --column-in: max(0px, (100% - 32px - var(--measure-read)) / 2);
   padding-inline: calc(4px + var(--column-in));
+}
+
+/* The sidebar's parts in a column: its head, New session, the four pages, the sessions'
+   list (the one part that scrolls), the Usage line, the foot. */
+html[data-size-class="regular"] .rail-icons {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+html[data-size-class="regular"] .rail-nav.rail-nav--pad {
+  flex: none;
+  overflow: visible;
+  padding: 0 0 4px;
+}
+html[data-size-class="regular"] .rail-nav--pad .more {
+  display: contents;
 }
