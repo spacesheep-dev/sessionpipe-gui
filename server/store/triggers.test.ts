@@ -6,12 +6,13 @@
 // function of the events in their own order and of nothing else: every order of arrival,
 // a rebuild and a restart read the same.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type ProtocolEvent, sessionKey } from "../../shared/api.js";
+import { type ProtocolEvent, type ProtocolSession, sessionKey } from "../../shared/api.js";
 import { Session, tempDir } from "../../test/events.js";
 import { Rng } from "../demo/rng.js";
 import { eventProblem } from "../receiver/validate.js";
-import { slimEvent } from "./slim.js";
+import { SESSION_SHARED, slimEvent } from "./slim.js";
 import { Store } from "./store.js";
+import { newTriggerTrack, noteTrigger, triggerReading } from "./triggers.js";
 
 let tmp: { dir: string; cleanup: () => void };
 let store: Store;
@@ -58,8 +59,8 @@ const events = (id: string, specs: Spec[], tier: (seq: number) => 1 | 3 = () => 
   const s = new Session(id);
   return specs.map((x) =>
     s.ev(
-      x.start ? "session.started" : (x.machine ?? "turn.started"),
-      x.start ? { source: x.start } : x.machine ? { ...MACHINE[x.machine] } : {},
+      x.start !== undefined ? "session.started" : (x.machine ?? "turn.started"),
+      x.start !== undefined ? { source: x.start } : x.machine ? { ...MACHINE[x.machine] } : {},
       {
         seq: x.seq,
         tier: tier(x.seq),
@@ -80,7 +81,8 @@ function oracle(specs: Spec[]): { by: string; from: string } | null {
   const name = list[top]!.name!;
   let lo = top;
   while (lo > 0 && list[lo - 1]!.name === name) lo--;
-  const first = list.slice(lo, top + 1).find((x) => x.start);
+  // A session.started with an empty source is the run's first start all the same.
+  const first = list.slice(lo, top + 1).find((x) => x.start !== undefined);
   const from = first?.start === "startup" ? "start" : first?.start === "resume" ? "continue" : "unknown";
   return { by: name, from };
 }
@@ -99,8 +101,11 @@ async function readThrough(id: string, specs: Spec[], order: number[]) {
   const evs = events(id, specs, (seq) => (seq === low ? 1 : 3));
   for (const i of order) store.ingest([evs[i]!], "http");
   const live = reading(id);
+  const before = read(id);
   const up = evs[specs.findIndex((x) => x.seq === low)]!;
   store.ingest([{ ...up, tier: 3 }], "outbox");
+  // The upgrade rebuilt the session from its records: a summary of its own.
+  expect(read(id), "rebuilt").not.toBe(before);
   const rebuilt = reading(id);
   return { live, rebuilt };
 }
@@ -276,7 +281,7 @@ describe("the run: the newest unbroken stretch, in seq order", () => {
   it("reads the same live, after a rebuild and after a restart, for any events in any order", async () => {
     const rng = new Rng(20261125);
     const names = ["aaa", "bbb", undefined] as const;
-    const sources = ["startup", "resume", "compact", undefined, undefined, undefined] as const;
+    const sources = ["startup", "resume", "compact", "", undefined, undefined, undefined, undefined] as const;
     const machine = [...Object.keys(MACHINE), undefined, undefined, undefined, undefined] as (
       | MachineType
       | undefined
@@ -289,7 +294,7 @@ describe("the run: the newest unbroken stretch, in seq order", () => {
       while (seqs.size < n) seqs.add(rng.int(0, 14));
       const specs = [...seqs].map((seq): Spec => {
         const start = rng.pick(sources);
-        return { seq, name: rng.pick(names), start, machine: start ? undefined : rng.pick(machine) };
+        return { seq, name: rng.pick(names), start, machine: start === undefined ? rng.pick(machine) : undefined };
       });
       const order = specs.map((_, i) => i);
       for (let i = order.length - 1; i > 0; i--) {
@@ -312,6 +317,33 @@ describe("the run: the newest unbroken stretch, in seq order", () => {
     const a = new Session("slim");
     const ev = a.ev("turn.ended", {}, by("card-todo"));
     expect(slimEvent({ ...ev, arrivedAt: ev.time, source: "http" }).session.triggered_by).toBe("card-todo");
+  });
+
+  it("shares the name in the slim copy as every short string of the session block is", () => {
+    // Every field of the block, so one added to ProtocolSession is added here too: each
+    // string but the session's own id and link is one every event repeats.
+    const block: Required<ProtocolSession> = {
+      id: "s",
+      seq: 0,
+      machine: "m",
+      cwd: "~/c",
+      repo: "r",
+      branch: "b",
+      model: "o",
+      title: "t",
+      title_source: "custom",
+      url: "https://example.test/s",
+      account_id: "a",
+      attended: false,
+      parent_id: "p",
+      launched_by: "claude-code:l",
+      delegated_by: "codex:d",
+      triggered_by: "card-todo",
+    };
+    const strings = Object.keys(block).filter(
+      (k) => k !== "id" && k !== "url" && typeof block[k as keyof ProtocolSession] === "string",
+    );
+    expect([...SESSION_SHARED].sort()).toEqual(strings.sort());
   });
 });
 
@@ -361,5 +393,97 @@ describe("what the machine writes into a rule's run on its own", () => {
       "http",
     );
     expect(reading("then-person")).toEqual({ by: "card-todo", from: "continue" });
+  });
+});
+
+describe("the reading itself: every order, every prefix", () => {
+  /** The reading of `specs` read one at a time in `order`, through the store's own filter
+   *  (triggers.ts noteTrigger), checked against the oracle after every event read. */
+  function direct(specs: Spec[], order: number[]): string | null {
+    const t = newTriggerTrack();
+    const read: Spec[] = [];
+    for (const i of order) {
+      const x = specs[i]!;
+      noteTrigger(t, {
+        type: x.start !== undefined ? "session.started" : (x.machine ?? "turn.started"),
+        session: { seq: x.seq, ...(x.name ? { triggered_by: x.name } : {}) },
+        data: x.start !== undefined ? { source: x.start } : {},
+      });
+      read.push(x);
+      const r = triggerReading(t);
+      const got = r ? { by: r.name, from: r.from } : null;
+      const want = oracle(read);
+      if (JSON.stringify(got) !== JSON.stringify(want))
+        return `${JSON.stringify(read)}: ${JSON.stringify(got)}, not ${JSON.stringify(want)}`;
+    }
+    return null;
+  }
+
+  it("two starts in one stretch, the earlier read last: the earlier is how the run began", async () => {
+    // A@0, then A@4 resume, then A@2 startup: the stretch 0..4 began at its startup.
+    const specs: Spec[] = [
+      { seq: 0, name: "aaa" },
+      { seq: 4, name: "aaa", start: "resume" },
+      { seq: 2, name: "aaa", start: "startup" },
+    ];
+    expect(oracle(specs)).toEqual({ by: "aaa", from: "start" });
+    expect(await readThrough("two-starts", specs, [0, 1, 2])).toEqual({ live: oracle(specs), rebuilt: oracle(specs) });
+    for (const order of orders([0, 1, 2])) expect(direct(specs, order), order.join(",")).toBeNull();
+  });
+
+  it("a stretch split where seqs were never read keeps to the seqs read", async () => {
+    // null@8 resume, null@20 startup, bbb@14 resume, bbb@10 compact: bbb's stretch is
+    // 10..14 and began on a compaction, so how it began is not known.
+    const specs: Spec[] = [
+      { seq: 8, start: "resume" },
+      { seq: 20, start: "startup" },
+      { seq: 14, name: "bbb", start: "resume" },
+      { seq: 10, name: "bbb", start: "compact" },
+    ];
+    expect(oracle(specs)).toEqual({ by: "bbb", from: "unknown" });
+    expect(await readThrough("split-gaps", specs, [0, 1, 2, 3])).toEqual({
+      live: oracle(specs),
+      rebuilt: oracle(specs),
+    });
+    for (const order of orders([0, 1, 2, 3])) expect(direct(specs, order), order.join(",")).toBeNull();
+  });
+
+  it("an event that is no start copies no stretch's starts", () => {
+    const t = newTriggerTrack();
+    noteTrigger(t, { type: "session.started", session: { seq: 0, triggered_by: "aaa" }, data: { source: "startup" } });
+    const starts = t.stretches[0]!.starts;
+    for (let seq = 1; seq < 50; seq++)
+      noteTrigger(t, { type: "tool.started", session: { seq, triggered_by: "aaa" }, data: {} });
+    expect(t.stretches).toHaveLength(1);
+    expect(t.stretches[0]!.starts).toBe(starts);
+    expect(starts).toEqual([{ seq: 0, source: "startup" }]);
+  });
+
+  it("matches the oracle after every event of 20 000 generated sessions read in shuffled orders", () => {
+    const rng = new Rng(20261126);
+    const names = ["aaa", "bbb", undefined] as const;
+    const sources = ["startup", "resume", "compact", "", undefined, undefined, undefined, undefined] as const;
+    const machine = [...Object.keys(MACHINE), undefined, undefined, undefined, undefined] as (
+      | MachineType
+      | undefined
+    )[];
+    const wrong: string[] = [];
+    for (let c = 0; c < 20_000 && wrong.length < 5; c++) {
+      const n = rng.int(1, 14);
+      const seqs = new Set<number>();
+      while (seqs.size < n) seqs.add(rng.int(0, 24));
+      const specs = [...seqs].map((seq): Spec => {
+        const start = rng.pick(sources);
+        return { seq, name: rng.pick(names), start, machine: start === undefined ? rng.pick(machine) : undefined };
+      });
+      const order = specs.map((_, i) => i);
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = rng.int(0, i);
+        [order[i], order[j]] = [order[j]!, order[i]!];
+      }
+      const bad = direct(specs, order);
+      if (bad) wrong.push(bad);
+    }
+    expect(wrong).toEqual([]);
   });
 });

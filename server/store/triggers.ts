@@ -31,9 +31,11 @@ interface Stretch {
   starts: { seq: number; source: string }[];
 }
 
-/** What the reading keeps of a session: the seqs read (as intervals of consecutive seqs,
- *  which a session's are almost always: a few numbers whatever its length) and its events
- *  cut into stretches by `triggered_by`. Two stretches side by side never share a name.
+/** What the reading keeps of a session: the seqs read, as intervals of consecutive seqs,
+ *  and its events cut into stretches by `triggered_by`. A session read whole is a few
+ *  intervals whatever its length; one read thinned (a relay that sends the main tools
+ *  only, a sink below tier 3: every other seq) is about one per event read, as many as
+ *  the store's own set of seqs holds. Two stretches side by side never share a name.
  *  Both are the same for the same events, whatever order they were read in. */
 export interface TriggerTrack {
   seen: [number, number][];
@@ -130,14 +132,20 @@ const byStart = (a: { seq: number }, b: { seq: number }) => a.seq - b.seq;
  *  its source. */
 export function noteTriggerEvent(t: TriggerTrack, seq: number, name: string | null, source?: string): void {
   if (!see(t, seq)) return;
-  const start = source === undefined ? [] : [{ seq, source }];
+  // A stretch's starts are touched only for a start: an event that is none (nearly every
+  // one) copies nothing, so a session with many starts costs no more per event.
+  const start = source === undefined ? undefined : { seq, source };
   const list = t.stretches;
   const i = firstEndingAtOrAfter(list, (x) => x.hi, seq);
   const here = list[i];
   if (here && here.lo < seq) {
     // Inside a stretch (its first and last are read, so it reaches past `seq` both ways).
     if (here.name === name) {
-      if (start.length) here.starts = [...here.starts, ...start].sort(byStart);
+      if (start) {
+        const last = here.starts[here.starts.length - 1];
+        here.starts.push(start);
+        if (last && last.seq > seq) here.starts.sort(byStart);
+      }
       return;
     }
     const left: Stretch = {
@@ -152,7 +160,7 @@ export function noteTriggerEvent(t: TriggerTrack, seq: number, name: string | nu
       name: here.name,
       starts: here.starts.filter((x) => x.seq > seq),
     };
-    list.splice(i, 1, left, { lo: seq, hi: seq, name, starts: start }, right);
+    list.splice(i, 1, left, { lo: seq, hi: seq, name, starts: start ? [start] : [] }, right);
     return;
   }
   // Between two stretches (or before the first, or after the last): nothing read lies
@@ -162,11 +170,11 @@ export function noteTriggerEvent(t: TriggerTrack, seq: number, name: string | nu
   const next = here;
   if (prev && prev.name === name) {
     prev.hi = seq;
-    prev.starts = [...prev.starts, ...start];
+    if (start) prev.starts.push(start);
   } else if (next && next.name === name) {
     next.lo = seq;
-    next.starts = [...start, ...next.starts];
-  } else list.splice(i, 0, { lo: seq, hi: seq, name, starts: start });
+    if (start) next.starts.unshift(start);
+  } else list.splice(i, 0, { lo: seq, hi: seq, name, starts: start ? [start] : [] });
 }
 
 /** The reading: the rule of the newest stretch that carries one (an event without the
