@@ -351,6 +351,10 @@
 .card-meta > .card-repo {
   flex: 0 100 auto;
   min-width: 0;
+}
+/* Its dot drawn with it ("· acme/infra") after a computer's name, as close to it as the
+   name's; with no name it is the line's first word, as far from the glyph as a name. */
+.card-meta > .card-machine + .card-repo {
   margin-left: -2px;
 }
 .card-sep {

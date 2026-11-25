@@ -834,29 +834,44 @@ test.describe("phone", () => {
       machine: "",
       repo: "github.com/acme/data-pipeline-backfills-eu",
     });
+    // And a short repo that stays on the line, with no computer's name before it.
+    const kept = await postRuled(request, { rule: "ab-8f3c2e", machine: "", repo: "github.com/acme/infra" });
     try {
-      // The row: the repo has given way, so nothing comes before the name but the glyph,
-      // as far from it as the glyph is from a computer's name.
+      // The first word after the glyph, as far from it as the glyph is from a computer's
+      // name: the line's own gap.
+      const lead = (meta: Locator, first: string) =>
+        meta.evaluate((el, first) => {
+          const glyph = el.querySelector(".glyph-wrap")!.getBoundingClientRect();
+          return {
+            gap: el.querySelector(first)!.getBoundingClientRect().left - glyph.right,
+            line: Number.parseFloat(getComputedStyle(el).columnGap),
+          };
+        }, first);
+      // The row: the repo has given way, so nothing comes before the name but the glyph.
       await openBoard(page);
       const meta = page.locator(`article.card[data-flip="claude-code:${run.id}"] .card-meta`);
       await expect(meta).toBeVisible({ timeout: 15_000 });
       await meta.scrollIntoViewIfNeeded();
       await expect(meta.locator(".card-repo")).toHaveAttribute("data-gone", "");
       expect(await dotGaps(meta)).toEqual([]);
-      const gap = await meta.evaluate((el) => {
-        const glyph = el.querySelector(".glyph-wrap")!.getBoundingClientRect();
-        const chip = el.querySelector(".card-trigger")!.getBoundingClientRect();
-        return chip.left - glyph.right;
-      });
-      expect(gap).toBeLessThanOrEqual(6.5);
+      const toName = await lead(meta, ".card-trigger");
+      expect(Math.abs(toName.gap - toName.line), `glyph to name ${toName.gap} px`).toBeLessThanOrEqual(0.5);
+      // The row whose repo stays: the repo is the first word, at the same distance.
+      const keptMeta = page.locator(`article.card[data-flip="claude-code:${kept.id}"] .card-meta`);
+      await expect(keptMeta).toBeVisible({ timeout: 15_000 });
+      await keptMeta.scrollIntoViewIfNeeded();
+      await expect(keptMeta.locator(".card-repo")).not.toHaveAttribute("data-gone", "");
+      const toRepo = await lead(keptMeta, ".card-repo");
+      expect(Math.abs(toRepo.gap - toRepo.line), `glyph to repo ${toRepo.gap} px`).toBeLessThanOrEqual(0.5);
       // The page: the sentence first, no dot before it.
       await openPage(page, `/s/claude-code/${run.id}`);
       const where = page.locator(".sess-where").first();
       await expect(where.locator(".sess-repo")).toHaveAttribute("data-gone", "");
-      const lead = await where.locator(".sess-trigger").evaluate((el) => getComputedStyle(el, "::before").content);
-      expect(lead).toBe("none");
+      const dot = await where.locator(".sess-trigger").evaluate((el) => getComputedStyle(el, "::before").content);
+      expect(dot).toBe("none");
     } finally {
       await run.end();
+      await kept.end();
     }
   });
 
