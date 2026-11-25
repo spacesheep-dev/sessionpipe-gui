@@ -36,6 +36,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   on, for up to a day. Each now reads as it happened.
 - **A session another one asked takes its parent into Needs you, and is quiet when its
   parent is.** Needs you's count now matches the Inbox badge.
+- **A computer's name too long for an Inbox row is cut in its middle instead of running
+  off the row.** Its start and end stay, and the whole name is its tooltip.
 
 ## [0.8.8] - 2026-11-24
 
