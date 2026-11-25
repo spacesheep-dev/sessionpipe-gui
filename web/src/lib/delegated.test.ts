@@ -101,6 +101,19 @@ describe("nestDelegated", () => {
       nested: { "claude-code:a": ["codex:b", "codex:c"] },
     });
   });
+
+  it("a child that needs you stays under its done parent with Done folded: the parent is in Needs you", () => {
+    const parent = { ...s("claude-code:a"), state: "done" } as SessionSummary;
+    const asks = { ...s("codex:b", parent.key), state: "needs_you" } as SessionSummary;
+    const needs = (c: SessionSummary) => c.state === "needs_you";
+    expect(foldsAway(asks, parent, false, needs)).toBe(false);
+    const hangs = (c: SessionSummary, p: SessionSummary) => sameMachine(c, p) && !foldsAway(c, p, false, needs);
+    const folded = nestDelegated([parent, asks], [parent, asks], hangs);
+    expect(keys(folded.roots)).toEqual(["claude-code:a"]);
+    expect(sectionOf(parent, folded.nested.get(parent.key), needs)).toBe("needs_you");
+    // One hidden on this device in that state lifts nothing, so it folds as before.
+    expect(foldsAway(asks, parent, false, () => false)).toBe(true);
+  });
 });
 
 describe("askedSessions (a session's page)", () => {

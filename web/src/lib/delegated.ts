@@ -23,12 +23,15 @@ export const askedBy = (
 
 /** Whether a parent drawn in a folded Done would take the child out of sight: the parent
  *  is done and Done is folded while the child still runs or needs you. A done child under
- *  a done parent folds with it, as a subagent's row does. */
-export const foldsAway = (
-  child: Pick<SessionSummary, "state">,
+ *  a done parent folds with it, as a subagent's row does. A child that `needs` you (the
+ *  test sectionOf is given) never does: it lifts its parent into Needs you, so it stays
+ *  under it whether Done is folded or not. */
+export const foldsAway = <C extends Pick<SessionSummary, "state">>(
+  child: C,
   parent: Pick<SessionSummary, "state">,
   showDone: boolean,
-): boolean => parent.state === "done" && !showDone && child.state !== "done";
+  needs: (child: C) => boolean = () => false,
+): boolean => parent.state === "done" && !showDone && child.state !== "done" && !needs(child);
 
 export interface Nested {
   /** The sessions drawn as roots, in the order given. */
