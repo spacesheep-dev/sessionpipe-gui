@@ -112,6 +112,15 @@
   background-color: var(--chrome);
 }
 
+/* Every row of the list keeps the pages' 28 px pitch with its fill inset 1 px top and
+   bottom (shell.css), so two fills never touch. */
+.stree-row,
+.stree-new,
+.stree-more,
+.stree-more-all {
+  border-block: 1px solid transparent;
+  background-clip: padding-box;
+}
 .stree-row {
   position: relative;
   display: flex;
@@ -489,4 +498,13 @@
 .stree--touch .stree-line {
   left: 24px;
   right: 16px;
+}
+
+/* The stream is down: nothing arrives, so the rings stop where they are, one quiet tier,
+   as the Board's do (board.css .board--down); the foot's connection dot says why. */
+[data-stream="down"] .stree .dot {
+  animation-play-state: paused;
+}
+[data-stream="down"] .stree-lamp {
+  opacity: 0.55;
 }

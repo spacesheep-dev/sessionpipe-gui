@@ -131,6 +131,19 @@ async function drag(
   o: { hold?: boolean } = {},
 ): Promise<void> {
   // The pointer on the list first, so it holds still (no row moves under a hand), then the row.
+  // Rows that are still sliding (a move just made) are not where they will be.
+  const settled = () =>
+    page.waitForFunction(() =>
+      document
+        .getAnimations()
+        .every(
+          (x) =>
+            x instanceof CSSAnimation ||
+            x.playState !== "running" ||
+            !(x.effect as KeyframeEffect)?.target?.closest?.(".stree"),
+        ),
+    );
+  await settled();
   await from.evaluate((el) => el.scrollIntoView({ block: "center" }));
   await from.hover({ position: { x: 40, y: 10 } });
   await expect(page.locator(".stree")).toHaveAttribute("data-held", "");
@@ -142,6 +155,7 @@ async function drag(
   await expect(page.locator(".stree-chip")).toBeVisible();
   // The place well inside the list's scroll, away from the edges that scroll it.
   await to.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await settled();
   const b = (await to.boundingBox())!;
   const y = where === "on" ? b.y + b.height / 2 : where === "above" ? b.y + 2 : b.y + b.height - 2;
   await page.mouse.move(b.x + 60, y, { steps: 8 });
@@ -174,12 +188,15 @@ test("the tree is a tree: role, levels, the Board's order, New session at its to
   // A working session's lamp is the board's turning ring, never a new colour.
   await expect(row(page, parent!.key).locator(".stree-lamp .dot--working")).toHaveCount(1);
   // The Board's order: the sidebar's top level is the Board's rows, done ones at the end.
-  const sidebar = await page
-    .locator('.stree [role="tree"] > .stree-item > [data-tree-row]')
-    .evaluateAll((els) => els.map((e) => e.getAttribute("data-tree-row")));
-  const board = await page
-    .locator(".board-list .group:not(.group--done):not(.group--hidden) article.card")
-    .evaluateAll((els) => els.map((e) => e.getAttribute("data-flip")));
+  // Read at one moment: the live demo moves rows between two reads.
+  const [sidebar, board] = await page.evaluate(() => [
+    Array.from(document.querySelectorAll('.stree [role="tree"] > .stree-item > [data-tree-row]')).map((e) =>
+      e.getAttribute("data-tree-row"),
+    ),
+    Array.from(document.querySelectorAll(".board-list .group:not(.group--done):not(.group--hidden) article.card")).map(
+      (e) => e.getAttribute("data-flip"),
+    ),
+  ]);
   expect(sidebar.slice(0, board.length)).toEqual(board);
   await expect(page.locator(".stree-new")).toHaveText("New session");
   await page.locator(".stree-new").click();

@@ -618,6 +618,7 @@
     translate: 0 calc(var(--brand-box) * -0.707 / 64);
   }
   .shell--side .rail-nav {
+    gap: 0;
     padding: 8px;
     overflow-y: auto;
     scrollbar-width: none;
@@ -625,12 +626,17 @@
   .shell--side .rail-nav::-webkit-scrollbar {
     display: none;
   }
+  /* One 28 px pitch for every row of the labelled sidebar, pages and sessions alike, each
+     fill inset 1 px top and bottom: 2 px of ground between any two fills
+     (sidetree.css does the same for the session rows). */
   .shell--side .rail .nav-link {
     flex-direction: row;
     justify-content: flex-start;
     gap: 8px;
     min-height: var(--side-row);
     padding: 0 8px;
+    border-block: 1px solid transparent;
+    background-clip: padding-box;
     font-size: var(--text-sm);
     font-weight: 400;
   }
