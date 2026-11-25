@@ -51,9 +51,9 @@ import { useStartTitles } from "../control/Starting";
 import { cliCommand, isFinal } from "../control/words";
 import {
   bySectionThenRecent,
-  byStateThenRecent,
   needsYouNow,
   useAppState,
+  useArrangement,
   useFirstLoad,
   useLabels,
   useMachines,
@@ -63,7 +63,7 @@ import {
   useUnreadKeys,
 } from "../data/hooks";
 import { agentFound } from "../lib/agents";
-import { foldsAway, nestDelegated, sectionOf, waitingIn } from "../lib/delegated";
+import { foldsAway, sectionOf, waitingIn } from "../lib/delegated";
 import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import {
@@ -88,6 +88,7 @@ import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib
 import { hintFor, useBindingVersion, useShortcut } from "../lib/shortcuts";
 import { openSession, openSplit, useSplitKey } from "../lib/split";
 import { useNow } from "../lib/time";
+import { arrangeTree } from "../lib/tree";
 import { NEW_WORDS as N } from "../native/accountWords";
 import { useSetupStatus } from "../setup/api";
 
@@ -292,20 +293,23 @@ export function Board() {
     [recentStart, starts, paired, now],
   );
 
-  // A session another one asked (`delegatedBy`: sessionpipe ask, a handoff) nests under
-  // the asking session the way a subagent does, as long as that session is drawn on the
-  // board and on the same machine: the daemon only ever asks there, so a child naming a
-  // parent elsewhere is a hook's say-so, not lineage. Drawn means every filter the roots
-  // go through (machine, harness, label, the query's label part, hidden on this device,
-  // an alias of a start) and not folded away in Done while the child still runs; a parent
-  // any of those takes off the board leaves the asked one a root of its own. A chain of
-  // asks hangs under its top, a loop nests nobody (lib/delegated.ts): nothing leaves the board.
+  // The one session tree (lib/tree.ts), the sidebar's too: a subagent's session under its
+  // parent, a session another one asked (`delegatedBy`: sessionpipe ask, a handoff) under
+  // the asking session as long as that session is drawn on the board and on the same
+  // machine (the daemon only ever asks there, so a child naming a parent elsewhere is a
+  // hook's say-so, not lineage), and over both what the person arranged (placed under
+  // another, brought to the top level, pinned). Drawn means every filter the roots go
+  // through (machine, harness, label, the query's label part, hidden on this device, an
+  // alias of a start) and not folded away in Done while the child still runs; a parent any
+  // of those takes off the board leaves the child a root of its own. A row draws every
+  // session under it at any depth; nothing leaves the board.
   // A session under another that needs you, in a way that lifts that row into Needs you
   // (sectionFor): such a child also stays under a done parent while Done is folded.
   const needsHere = useCallback(
     (c: SessionSummary) => c.state === "needs_you" && !isHidden(hidden, c.key, c.stateSince, true),
     [hidden],
   );
+  const arrangement = useArrangement();
   const { roots, childrenOf } = useMemo(() => {
     const drawn = (p: SessionSummary) =>
       (!machine || p.machine === machine) &&
@@ -314,15 +318,15 @@ export function Board() {
       lq.test(p.key) &&
       !aliased(p) &&
       !isHidden(hidden, p.key, p.stateSince, p.state === "needs_you");
-    const hangs = (s: SessionSummary, p: SessionSummary) =>
-      p.machine === s.machine && drawn(p) && !foldsAway(s, p, showDone, needsHere);
-    const { roots, nested } = nestDelegated(tree.roots, all, hangs);
-    if (nested.size === 0) return { roots, childrenOf: tree.childrenOf };
-    const childrenOf = new Map(tree.childrenOf);
-    for (const [key, list] of nested)
-      childrenOf.set(key, [...(childrenOf.get(key) ?? []), ...list].sort(byStateThenRecent));
-    return { roots, childrenOf };
-  }, [tree, all, machine, harness, labels, label, lq, aliased, hidden, showDone, needsHere]);
+    const t = arrangeTree({
+      all,
+      arrangement,
+      drawn,
+      hangs: (s, p) => !foldsAway(s, p, showDone, needsHere),
+      needs: needsHere,
+    });
+    return { roots: t.roots.map((n) => n.s), childrenOf: t.childrenOf };
+  }, [all, arrangement, machine, harness, labels, label, lq, aliased, hidden, showDone, needsHere]);
   // A row is in Needs you while a session under it needs you (one hidden on this device in
   // that state, which the Inbox badge leaves out, takes it nowhere), so the section holds
   // every session the badge counts; it goes back when the child stops needing you.

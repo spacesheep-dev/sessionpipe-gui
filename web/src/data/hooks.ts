@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // React bindings for the store. One Store per page load, chosen in main.tsx (real or mock).
 import type {
+  Arrangement,
   Attention,
   LabelColor,
   Labels,
@@ -138,6 +139,13 @@ export function useSession(key: SessionKey): SessionSummary | undefined {
 export function useLabels(): Labels {
   const store = useStore();
   const read = useCallback(() => store.get().labels, [store]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** How the person arranged the session tree (lib/tree.ts reads it). */
+export function useArrangement(): Arrangement {
+  const store = useStore();
+  const read = useCallback(() => store.get().arrangement, [store]);
   return useSyncExternalStore(store.subscribe, read, read);
 }
 
