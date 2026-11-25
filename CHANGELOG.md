@@ -23,7 +23,9 @@ names in the Inbox.
   its state at the end (the turning ring
   while it works, the orange disc while it needs you). A session another one asked or ran
   sits under it on one rail; a parent folds, and stays folded on this device. The list is
-  the Board's, in the Board's order, less what you hid: thirty, then Show more. Drag a row
+  the Board's, in the Board's order, less what you hid: thirty, then Show more. A session
+  you start is in it at once, as on the Board, and the list never says "None yet" while
+  it is still loading or reconnecting. Drag a row
   onto another to put it under it, between rows to bring it to the top level, onto Pinned
   to pin it; Esc puts it back, and every move has Undo. The keys walk the tree, and every
   session's menu, on the phone too, has Pin, Move under… and Move to top level. The Board

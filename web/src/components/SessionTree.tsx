@@ -22,9 +22,10 @@
 // scrolls near its edges; Esc, or a drop anywhere else, puts it all back. The keys and
 // the menu do the same (lib/arrange.ts), and a live region says what a move did. None of
 // it reaches a machine: it is how this person sees the tree.
-import { isEmptySession, type SessionKey, type SessionSummary } from "@shared/api";
+import { type ControlActivity, isEmptySession, type SessionKey, type SessionSummary, splitKey } from "@shared/api";
 import {
   type CSSProperties,
+  Fragment,
   type KeyboardEvent,
   memo,
   type ReactElement,
@@ -42,6 +43,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
+import { useBehind } from "../account/current";
+import { usePendingStarts } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { useHideKeys, useStore, useUnreadKeys } from "../data/hooks";
 import { arrange, onArranged, planMove } from "../lib/arrange";
@@ -262,12 +265,19 @@ export function SessionTree({
   const sessions = useSyncExternalStore(store.subscribe, () => store.get().sessions);
   const arrangement = useSyncExternalStore(store.subscribe, () => store.get().arrangement);
   const marks = useSyncExternalStore(store.subscribe, () => store.get().marks);
+  const snapshotAt = useSyncExternalStore(store.subscribe, () => store.get().snapshotAt);
+  const behind = useBehind();
   const hidden = useHidden();
   const hid = useCallback(
     (s: SessionSummary) => isHidden(hidden, s.key, s.stateSince, s.state === "needs_you"),
     [hidden],
   );
   const all = useMemo(() => [...sessions.values()].filter((s) => !isEmptySession(s)), [sessions]);
+  // Loaded as the Board is: the first snapshot is in, and an account's history is not
+  // still coming into an empty list. Before that the headings stand with no rows and no
+  // "None yet"; a reconnect keeps the rows it has (the store keeps them until the next
+  // snapshot replaces them).
+  const loaded = !!snapshotAt && !(behind && all.length === 0);
   const tree = useMemo(
     () =>
       arrangeTree({
@@ -656,6 +666,9 @@ export function SessionTree({
   useFlip(listRef, 80, { move: 150 });
   useFlip(pinRef, 80, { move: 150 });
   const empty = drawn.length === 0 && heldRoots.length === 0;
+  // A start not listed yet is drawn where the Board draws it: first of the working rows,
+  // after those that need you.
+  const startAt = shownRoots.findIndex((h) => h.item.s.state !== "needs_you");
   // While a row is held up, New session's row (fixed, always in view) is where it is pinned:
   // the same height, so nothing in the list moves when a drag starts.
   const pinZone = !!drag;
@@ -738,7 +751,11 @@ export function SessionTree({
             Sessions
           </h2>
           {empty ? (
-            <p className="stree-none">{all.length > 0 ? "All hidden on this device" : "None yet"}</p>
+            <StartingRows
+              touch={touch}
+              none={loaded ? (all.length > 0 ? "All hidden on this device" : "None yet") : null}
+              label={`${groupId}-sessions`}
+            />
           ) : (
             <div
               className="stree-list"
@@ -747,9 +764,13 @@ export function SessionTree({
               onKeyDown={onKey}
               ref={listRef}
             >
-              {shownRoots.map((h, i) =>
-                h.gone ? <GoneRow key={h.key} h={h} /> : row(h.item, "sessions", i + 1, shownRoots.length),
-              )}
+              {shownRoots.map((h, i) => (
+                <Fragment key={h.key}>
+                  {i === startAt && <StartingRows touch={touch} />}
+                  {h.gone ? <GoneRow h={h} /> : row(h.item, "sessions", i + 1, shownRoots.length)}
+                </Fragment>
+              ))}
+              {startAt === -1 && <StartingRows touch={touch} />}
             </div>
           )}
           {more > 0 && (
@@ -787,6 +808,68 @@ export function SessionTree({
 }
 
 const nodeKey = (n: TreeNode) => n.s.key;
+
+/** The starts from here whose session is not listed yet (the Board's starting cards): a
+ *  row each, its agent's mark, the start's words or "New session" and the turning ring,
+ *  opening its session, never dragged. Keyed by the session's key, as its real row will
+ *  be (data-flip), so that row takes the same place with nothing sliding. With no rows to
+ *  stand among (`none` set or null), it is the list itself, or the words for an empty one.
+ *  Its own component: the control activity it reads redraws only these rows. */
+function StartingRows({ touch, none, label }: { touch: boolean; none?: string | null; label?: string }) {
+  const { pending } = usePendingStarts();
+  const rows = pending.map((a) => <StartingRow key={a.session} a={a} touch={touch} />);
+  if (none === undefined) return rows;
+  if (pending.length === 0) return none ? <p className="stree-none">{none}</p> : null;
+  return (
+    <div className="stree-list" role="tree" aria-labelledby={label}>
+      {rows}
+    </div>
+  );
+}
+
+function StartingRow({ a, touch }: { a: ControlActivity; touch: boolean }) {
+  const key = a.session!;
+  const { harness, id } = splitKey(key);
+  const title = (a.text ?? "").split("\n")[0]!.trim().slice(0, 120) || "New session";
+  const menu = useContextMenu(() => [{ label: "Open", run: () => openSession(key, "primary") }], {
+    title: () => title,
+  });
+  return (
+    <div role="none" className="stree-item" data-flip={key}>
+      <a
+        href={hrefFor(sessionPath(harness, id))}
+        role="treeitem"
+        aria-level={1}
+        aria-busy="true"
+        tabIndex={-1}
+        className="stree-row"
+        data-starting={key}
+        data-state="working"
+        style={{ "--lvl": 0 } as CSSProperties}
+        title={`${title}\nStarting`}
+        onClick={(e) => {
+          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          openSession(key, "primary");
+        }}
+        onDragStart={(e) => e.preventDefault()}
+        draggable={false}
+        {...menu}
+      >
+        <span className="stree-lead">
+          <HarnessGlyph name={harness} size={touch ? "md" : "sm"} />
+        </span>
+        <span className="stree-title" dir="auto">
+          {title}
+        </span>
+        <span className="stree-lamp">
+          <StateDot state="working" decorative size={touch ? 12 : 10} />
+        </span>
+        <span className="sr-only">, starting</span>
+      </a>
+    </div>
+  );
+}
 
 /** Whether the list goes on above and below what is in view: its ends fade only where it does. */
 function useScrollFades(ref: RefObject<HTMLElement | null>): { above: boolean; below: boolean } {

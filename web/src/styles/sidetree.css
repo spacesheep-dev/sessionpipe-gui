@@ -582,3 +582,9 @@
 [data-stream="down"] .stree-lamp {
   opacity: 0.55;
 }
+
+/* A start not listed yet (SessionTree StartingRows): its words a step quieter until its
+   session's own row takes its place. */
+.stree-row[data-starting] .stree-title {
+  color: var(--fg-2);
+}

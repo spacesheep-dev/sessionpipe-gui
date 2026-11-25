@@ -11,7 +11,7 @@
 // (That a change without the UI key is refused is server/ui/arrangement.test.ts's.)
 import { randomUUID } from "node:crypto";
 import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
-import { EVENTS, INFO, openPage, sessionUrl, ulid } from "./helpers.js";
+import { dropStream, EVENTS, INFO, openPage, sessionUrl, tapStream, ulid } from "./helpers.js";
 
 test.describe.configure({ mode: "serial" });
 
@@ -50,13 +50,15 @@ async function sessions(
     asks?: string;
     /** Working unless said: idle (its turn ended), needs (a prompt open), done (ended). */
     state?: "idle" | "needs" | "done";
+    /** Its id, when a test needs to know it before it is posted (a start's). */
+    id?: string;
   }[],
 ): Promise<Made[]> {
   const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
   const out: Made[] = [];
   for (const d of defs) {
     const harness = d.harness ?? "claude-code";
-    const id = randomUUID();
+    const id = d.id ?? randomUUID();
     let seq = 0;
     let clock = Date.now() - 5_000;
     const ev = (type: string, data: Record<string, unknown>, hook: string) => {
@@ -731,4 +733,85 @@ test.describe("the phone", () => {
     await sheet.getByRole("menuitem", { name: "Pin", exact: true }).click();
     await expect.poll(async () => (await arrangement(request)).pinned).toEqual([a!.key]);
   });
+});
+
+test("before the first snapshot the list says nothing; a reconnect keeps its rows", async ({ page }) => {
+  // The stream held back: the headings, no rows, and no "None yet".
+  await page.route("**/api/ui/stream", (route) => route.abort("connectionrefused"));
+  await tapStream(page);
+  await page.goto("/");
+  await expect(page.locator(".stree .stree-label", { hasText: "Sessions" })).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page.locator(".stree-none")).toHaveCount(0);
+  await expect(page.locator(".stree [data-tree-row]")).toHaveCount(0);
+  await page.unroute("**/api/ui/stream");
+  await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+  const rows = page.locator(".stree [data-tree-row]");
+  await expect(rows.first()).toBeVisible();
+  // The stream drops and comes back: the rows stay drawn all the while.
+  const counts: number[] = [];
+  const sample = setInterval(() => {
+    rows.count().then(
+      (n) => counts.push(n),
+      () => {},
+    );
+  }, 50);
+  const restore = await dropStream(page);
+  await expect(page.locator(".conn").first()).not.toHaveText("live");
+  await page.waitForTimeout(400);
+  await restore();
+  await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
+  clearInterval(sample);
+  expect(counts.length).toBeGreaterThan(3);
+  expect(Math.min(...counts)).toBeGreaterThan(0);
+});
+
+test("a start shows at once, as the Board's starting card does, and its session takes its place", async ({
+  page,
+  request,
+}) => {
+  const id = randomUUID();
+  const key = `claude-code:${id}`;
+  const at = new Date().toISOString();
+  const start = {
+    id: `start-${id}`,
+    machineId: "m-studio",
+    kind: "start",
+    session: key,
+    text: "Tree start: check the refunds",
+    at,
+    expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    outcome: "taken",
+  };
+  await page.route("**/api/ui/control/activity*", (route) => route.fulfill({ json: { activity: [start] } }));
+  await openPage(page, "/");
+  const starting = page.locator(`.stree [data-starting="${key}"]`);
+  await expect(starting).toBeVisible();
+  await expect(page.locator(`.board-list [data-starting="${key}"]`)).toBeVisible();
+  await expect(starting).toHaveAttribute("aria-busy", "true");
+  await expect(starting).toContainText("Tree start: check the refunds");
+  // Its session arrives: its real row takes over in the same frame, never both and never
+  // neither, and stands where the Board puts it. (That it keeps the starting row's place
+  // is the steady order's, Round 2.)
+  await page.evaluate((k) => {
+    const w = window as unknown as { __seen: string[] };
+    w.__seen = [];
+    const look = () => {
+      const s = !!document.querySelector(`.stree [data-starting="${k}"]`);
+      const r = !!document.querySelector(`.stree [data-tree-row="${k}"]`);
+      w.__seen.push(`${s ? "s" : ""}${r ? "r" : ""}`);
+      return r;
+    };
+    look();
+    new MutationObserver((_, mo) => look() && mo.disconnect()).observe(document.querySelector(".stree")!, {
+      childList: true,
+      subtree: true,
+    });
+  }, key);
+  await sessions(request, [{ title: "Tree start: check the refunds", id }]);
+  await expect(row(page, key)).toBeVisible();
+  await expect(starting).toHaveCount(0);
+  const seen = await page.evaluate(() => (window as unknown as { __seen: string[] }).__seen);
+  expect(new Set(seen)).toEqual(new Set(["s", "r"]));
+  await expect(row(page, key)).toHaveAttribute("aria-level", "1");
 });

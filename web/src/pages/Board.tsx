@@ -13,7 +13,7 @@
 // state that names this machine and its hooked agents, and dissolves into the first row.
 // While the stream is down the rows stay, quiet, their clocks stopped.
 import type { ControlActivity, Info, SessionState, SessionSummary } from "@shared/api";
-import { isEmptySession, ROUTES, SESSION_STATES, splitKey } from "@shared/api";
+import { ROUTES, SESSION_STATES, splitKey } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBehind, useCatchingUp } from "../account/current";
 import {
@@ -44,11 +44,11 @@ import {
   useStickyTop,
 } from "../components/SessionCard";
 import { machineHome, tildify } from "../control/folders";
-import { useAnswersOut, useControlActivity } from "../control/hooks";
+import { useAnswersOut, usePendingStarts } from "../control/hooks";
 import { ComposeButton } from "../control/NewSession";
-import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
+import { aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
 import { useStartTitles } from "../control/Starting";
-import { cliCommand, isFinal } from "../control/words";
+import { cliCommand } from "../control/words";
 import {
   bySectionThenRecent,
   needsYouNow,
@@ -57,7 +57,6 @@ import {
   useFirstLoad,
   useHideKeys,
   useLabels,
-  useMachines,
   useSessionTree,
   useStore,
   useStreamDown,
@@ -78,14 +77,11 @@ import { Link, navigate, searchAll, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
 import { hintFor, useBindingVersion, useShortcut } from "../lib/shortcuts";
 import { openSession, openSplit, useSplitKey } from "../lib/split";
-import { useNow } from "../lib/time";
 import { arrangeTree } from "../lib/tree";
 import { NEW_WORDS as N } from "../native/accountWords";
 import { useSetupStatus } from "../setup/api";
 
-const isStart = (a: ControlActivity) => a.kind === "start";
 /** A start still on its way shows as a row for at most this long without an event. */
-const PENDING_MAX_MS = 3600_000;
 
 /** Whether a search finds one of a session's agents (their type or what they were asked). */
 const agentsMatch = (s: SessionSummary, q: string): boolean => (s.agents ?? []).some((a) => agentFound(a, q));
@@ -243,34 +239,7 @@ export function Board() {
   }, [machine, harness]);
 
   // Starts from here that have no session yet, and the alias window (newSessionState.ts).
-  const paired = useMachines().filter((m) => m.control);
-  const starts = useControlActivity(isStart);
-  const { sessions } = useAppState();
-  const recentStart = starts.some((a) => Date.now() - Date.parse(a.at) < ALIAS_WINDOW_MS);
-  const now = useNow(recentStart ? "fine" : "coarse");
-  // A start's session takes over from its row once the list shows it: at its first turn,
-  // not at its bare start (useSessionTree leaves an empty session out).
-  const listed = useCallback(
-    (key: string | undefined) => {
-      const s = key ? sessions.get(key) : undefined;
-      return !!s && !isEmptySession(s);
-    },
-    [sessions],
-  );
-  const pending = useMemo(
-    () =>
-      starts.filter(
-        (a) =>
-          !!a.session &&
-          !listed(a.session) &&
-          !listed(a.ackSession) &&
-          !isFinal(a) &&
-          now - Date.parse(a.at) < PENDING_MAX_MS &&
-          (!machine || paired.find((m) => m.control?.machineId === a.machineId)?.name === machine) &&
-          (!harness || splitKey(a.session).harness === harness),
-      ),
-    [starts, listed, now, machine, harness, paired],
-  );
+  const { pending, starts, recentStart, now, paired } = usePendingStarts({ machine, harness });
   const aliased = useCallback(
     (s: SessionSummary) =>
       recentStart &&
