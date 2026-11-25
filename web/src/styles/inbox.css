@@ -475,8 +475,11 @@
       ".    what  what  what  what"
       ".    where for   for   for";
   }
+  /* Its box is laid out from the whole text, so the gap after "·" comes out of its room:
+     never past the row's end. */
   .inbox-for {
     margin-left: 6px;
+    max-width: calc(100% - 6px);
   }
   .inbox-sep {
     display: inline;

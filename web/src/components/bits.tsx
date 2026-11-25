@@ -167,6 +167,8 @@ export function MidCut({ text, className }: { text: string; className?: string }
   // `measure` changes with the box's width and the fonts.
   useLayoutEffect(() => {
     const el = box.current;
+    // React's own text node, written in place while measuring and set back to what React
+    // renders next: it must stay the line's only child.
     const node = line.current?.firstChild;
     if (!el || !node || node.nodeType !== Node.TEXT_NODE) return;
     // Both read as drawn (a row's slide moves them alike); a chip has no padding.

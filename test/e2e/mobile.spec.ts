@@ -528,6 +528,16 @@ test.describe("phone", () => {
           return el.getBoundingClientRect().width - r.getBoundingClientRect().width;
         });
         expect(left).toBeLessThan(16);
+        // Its box, not only its line, stays inside the row: at or left of the row's end and
+        // of the time's.
+        for (const row of [child, page.locator(`li.inbox-row[data-session="${long.child.key}"]`)]) {
+          const ends = await row.evaluate((li) => {
+            const end = (sel: string) => li.querySelector(sel)!.getBoundingClientRect().right;
+            return { for: end(".inbox-for"), main: end(".inbox-main"), age: end(".inbox-age") };
+          });
+          expect(ends.for).toBeLessThanOrEqual(ends.main + 0.5);
+          expect(ends.for).toBeLessThanOrEqual(ends.age + 0.5);
+        }
       } finally {
         await long.end();
       }
