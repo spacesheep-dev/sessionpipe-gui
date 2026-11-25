@@ -18,8 +18,8 @@ All notable changes to `sessionpipe-gui`. The format follows
   Inbox says whom it works for.** On the Board, a child session's row has its computer
   before its state ("studio-mac · needs you"), under its title on a phone. In the Inbox,
   a prompt from a session another one asked, launched or ran as a subagent says "for" and
-  that session's title after its own. A long name is cut in its middle, its start and end
-  kept.
+  that session's title after its own. A long computer name is cut in its middle, its start
+  and end kept; a long title after "for" ends after a whole word.
 
 ### Fixed
 

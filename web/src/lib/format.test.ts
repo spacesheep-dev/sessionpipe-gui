@@ -7,6 +7,7 @@ import {
   askFitsRow,
   attentionMessage,
   CC_COMMAND_MAX,
+  endCuts,
   isPlanReview,
   isQuestion,
   midCut,
@@ -296,6 +297,32 @@ describe("sessionTitle", () => {
     };
     expect(sessionTitle(s)).toBe("Rename formatMoney to formatAmount everywhere");
     expect(sessionTitle({ ...s, lastUser: "something else" })).toBe("Rename formatMo…");
+  });
+});
+
+describe("endCuts", () => {
+  it("cuts after each whole word, shortest first, dropping what ends a clause", () => {
+    expect(endCuts("Find why the export, again")).toEqual([
+      "F…",
+      "Fi…",
+      "Fin…",
+      "Find…",
+      "Find why…",
+      "Find why the…",
+      "Find why the export…",
+    ]);
+  });
+  it("cuts a text of one word after each of its characters, CJK and paths too", () => {
+    const cjk = "夜間の請求書エクスポートが遅い";
+    const cuts = endCuts(cjk);
+    expect(cuts).toHaveLength([...cjk].length - 1);
+    expect(cuts[0]).toBe("夜…");
+    expect(cuts.at(-1)).toBe(`${[...cjk].slice(0, -1).join("")}…`);
+    expect(endCuts("~/code/billing/export.ts")[0]).toBe("~…");
+    expect(endCuts("😀😀😀")).toEqual(["😀…", "😀😀…"]);
+  });
+  it("has nothing to offer for one character", () => {
+    expect(endCuts("a")).toEqual([]);
   });
 });
 

@@ -6,12 +6,22 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MidCut, WithName } from "./bits";
+import { EndCut, MidCut, WithName } from "./bits";
 
 describe("MidCut", () => {
   it("draws the whole text, lays its box out from it, and names it in its tooltip", () => {
     expect(renderToStaticMarkup(createElement(MidCut, { text: "studio-mac", className: "kid-where" }))).toBe(
       '<span class="chip midcut kid-where" title="studio-mac" data-text="studio-mac"><span class="midcut-text">studio-mac</span></span>',
+    );
+  });
+});
+
+describe("EndCut", () => {
+  it("lays its box out from the lead and the whole text, its tooltip too", () => {
+    expect(
+      renderToStaticMarkup(createElement(EndCut, { lead: "for ", text: "Plan the migration", className: "inbox-for" })),
+    ).toBe(
+      '<span class="chip midcut inbox-for" title="for Plan the migration" data-text="for Plan the migration"><span class="midcut-text">for Plan the migration</span></span>',
     );
   });
 });

@@ -201,8 +201,8 @@
 /* A child session's row says whom it works for: "for <that session's title>", quiet,
    after the title on line 1, in all the room up to the time (over the computer's column
    too: the time has a track of its own). The title comes first: it gives way only so that
-   "for …" keeps 6em, and only past what the computer's column already leaves free. "for …"
-   is cut in its middle where it is short of room (bits.tsx MidCut). Rows of their own keep
+   "for …" keeps 6em, and only past what the computer's column already leaves free. Short of
+   room, the title after "for " is cut after its last whole word that fits (bits.tsx EndCut). Rows of their own keep
    their two columns. */
 .inbox-main:has(> .inbox-for) {
   grid-template-columns:

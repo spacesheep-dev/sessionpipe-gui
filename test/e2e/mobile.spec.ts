@@ -505,7 +505,7 @@ test.describe("phone", () => {
         expect((await line.textContent())!.endsWith("…")).toBe(false);
         expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       }
-      // A 90-character parent is cut once, in its middle, and fills its line.
+      // A 90-character parent is cut once, at its end after a whole word, "for " kept.
       const long = await askedPair(request, {
         machine: "lab-mac",
         title: "Find every page the move to the new docs site broke and fix the links that point to them again",
@@ -517,8 +517,9 @@ test.describe("phone", () => {
         const line = longFor.locator(".midcut-text");
         const cut = (await line.textContent())!;
         expect(cut.split("…")).toHaveLength(2);
-        expect(cut.endsWith("…")).toBe(false);
-        expect(`for ${long.parent.title}`.startsWith(cut.split("…")[0]!)).toBe(true);
+        expect(cut.endsWith("…")).toBe(true);
+        expect(cut.startsWith("for ")).toBe(true);
+        expect(`for ${long.parent.title}`.startsWith(`${cut.slice(0, -1)} `)).toBe(true);
         expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
         // Its line is full: under two characters' room is left at its end.
         const left = await line.evaluate((el) => {

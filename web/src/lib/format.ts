@@ -477,6 +477,24 @@ export function midCut(s: string, max: number): string {
     .trimStart()}`;
 }
 
+/** The ways to cut `s` at its end with "…", shortest first, for a measure to take the
+ *  longest that fits: after each whole word (punctuation before the cut dropped), and,
+ *  shorter than the first word, after each character of it (a title with no spaces: CJK,
+ *  a path, a URL). A character outside the BMP counts as one. Empty for one character. */
+export function endCuts(s: string): string[] {
+  const t = s.trim();
+  const words = t.split(/\s+/);
+  const first = Array.from(words[0] ?? "");
+  const out: string[] = [];
+  const add = (head: string) => {
+    const h = head.replace(/[\s,.;:–—-]+$/u, "");
+    if (h && out[out.length - 1] !== `${h}…`) out.push(`${h}…`);
+  };
+  for (let n = 1; n < first.length; n++) add(first.slice(0, n).join(""));
+  for (let n = 1; n < words.length; n++) add(words.slice(0, n).join(" "));
+  return out;
+}
+
 export const eventKind = (type: string) => type.split(".")[0] ?? type;
 
 export const isSubagent = (s: SessionSummary) => !!s.parentId;

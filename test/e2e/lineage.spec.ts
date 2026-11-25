@@ -287,7 +287,8 @@ test("a nested child's row names its computer at the row's end; its prompt's Inb
     expect(await forLine.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     e = await ends();
     expect(e.for).toBeLessThanOrEqual(Math.min(e.main, e.age) + 0.5);
-    // A long parent's, cut in its middle, keeps the time's 12px gap before the time's box.
+    // A long parent's, cut at its end after a whole word, keeps the time's 12px gap before
+    // the time's box.
     const long = await askedPair(request, {
       machine: "lab-mac",
       title: "Find every page the move to the new docs site broke and fix the links that point to them again",

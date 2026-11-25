@@ -32,6 +32,7 @@ import {
   ActionButton,
   Ago,
   EmptyState,
+  EndCut,
   HarnessGlyph,
   MidCut,
   Notice,
@@ -511,7 +512,7 @@ function InboxRow({
         </span>
         {/* Whose child it is, in the words its own page's bar uses: another session's title,
             so in the meta's tone, never the row's own. */}
-        {parent !== null && <MidCut className="inbox-for" text={`for ${parent}`} />}
+        {parent !== null && <EndCut className="inbox-for" lead="for " text={parent} />}
         <span className="inbox-age">
           <Ago iso={a.at} />
         </span>
