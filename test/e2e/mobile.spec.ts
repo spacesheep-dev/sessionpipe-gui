@@ -22,6 +22,7 @@ import {
   askedPair,
   composer,
   dotGaps,
+  drawnFrames,
   EVENTS,
   fits,
   INFO,
@@ -915,6 +916,59 @@ test.describe("phone", () => {
       expect(await read()).toEqual({ flips: true, overrun: [] });
     } finally {
       await run.end();
+    }
+  });
+
+  test("with Reduce Motion on as with it off, a rule's line on a phone draws the same in every frame while the session renders again: nothing past its end, no stub, the name cut only once the repo has gone", async ({
+    page,
+    request,
+  }) => {
+    // Two motions, three runs, two lines, two widths: about a second and a half each.
+    test.setTimeout(150_000);
+    const runs = [
+      // The repo gone and the name cut (the 40-character name).
+      await postRuled(request, {
+        rule: "nightly-cert-rotation-staging-eu-west-01",
+        repo: "github.com/acme/infra",
+        branch: "main",
+      }),
+      // A long repo beside a mid name: the repo cut or gone.
+      await postRuled(request, { rule: "weekly-backfill-7d2e", repo: "github.com/acme/data-pipeline-backfills-eu" }),
+      // A long repo beside a short name: the repo cut, keeping a few characters.
+      await postRuled(request, { rule: "cd-5a9b1f", repo: "github.com/acme/infra-terraform-mod" }),
+    ];
+    try {
+      for (const motion of ["no-preference", "reduce"] as const) {
+        await page.emulateMedia({ reducedMotion: motion });
+        for (const run of runs) {
+          // The page's line counts the session's events (data-events); the card's link has
+          // its counts in its tooltip: each render the posted events bring writes them anew.
+          for (const [path, line, mark] of [
+            [`/s/claude-code/${run.id}`, ".sess-where", [".sess-where", "data-events"]],
+            ["/", `article.card[data-flip="claude-code:${run.id}"] .card-meta`, [".card-link", "title"]],
+          ] as const) {
+            await openPage(page, path);
+            const el = page.locator(line).first();
+            await expect(el.locator(".chip.midcut")).toBeVisible({ timeout: 15_000 });
+            await el.scrollIntoViewIfNeeded();
+            for (const width of [390, 340]) {
+              await resizeWindow(page, { width, height: 844 });
+              const at = `${motion}, ${path === "/" ? "the card" : "the page"} of ${run.rule} at ${width}`;
+              const drawn = await drawnFrames(el, 1500, mark, async () => {
+                for (let i = 0; i < 4; i++) {
+                  await run.more(1);
+                  await page.waitForTimeout(250);
+                }
+              });
+              expect(drawn.renders, `${at}: renders seen`).toBeGreaterThanOrEqual(2);
+              expect(drawn.bad, at).toEqual([]);
+              expect([...new Set(drawn.frames)], `${at}: one drawing`).toHaveLength(1);
+            }
+          }
+        }
+      }
+    } finally {
+      for (const run of runs) await run.end();
     }
   });
 });

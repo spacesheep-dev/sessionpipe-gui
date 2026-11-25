@@ -273,6 +273,62 @@ export function dotGaps(line: Locator): Promise<number[]> {
   });
 }
 
+/** What a one-line row of facts whose repo gives way draws in each frame for `ms`, while
+ *  `during` runs (more events posted, so the page renders again): a frame's drawing (the
+ *  repo whole, cut to its words' room or gone, what the cut chip shows, how far the line
+ *  runs past its end), what a frame drew against the line's rules (past its end, a repo
+ *  kept as a stub, the name cut with the repo still on the line), and how many renders
+ *  were seen: the values `mark` (an attribute of the line or of what it is in, `[closest,
+ *  attr]`) took, which each render that counts the session's events writes anew. */
+export async function drawnFrames(
+  line: Locator,
+  ms: number,
+  mark: readonly [string, string],
+  during: () => Promise<void>,
+): Promise<{ frames: string[]; bad: string[]; renders: number }> {
+  const sampled = line.evaluate(
+    (el: HTMLElement, [ms, closest, attr]: [number, string, string]) =>
+      new Promise<{ frames: string[]; bad: string[]; renders: number }>((done) => {
+        const frames: string[] = [];
+        const bad = new Set<string>();
+        const marks = new Set<string | null>();
+        const t0 = performance.now();
+        const frame = () => {
+          const part = el.querySelector<HTMLElement>("[data-give-way]");
+          const chip = el.querySelector<HTMLElement>(".chip.midcut");
+          const shown = chip?.querySelector(".midcut-text")?.textContent ?? "";
+          const over = el.scrollWidth - el.clientWidth;
+          let repo = "no repo";
+          if (part?.hasAttribute("data-gone")) repo = "gone";
+          else if (part && part.scrollWidth > part.clientWidth + 0.5) {
+            // Its words' room: from where they start to where the part is cut off.
+            let text: Text | null = null;
+            for (let n = part.lastChild; n && !text; n = n.previousSibling)
+              if (n.nodeType === Node.TEXT_NODE && n.nodeValue?.trim()) text = n as Text;
+            const range = document.createRange();
+            if (text) range.selectNodeContents(text);
+            const start = text ? range.getBoundingClientRect().left : part.getBoundingClientRect().right;
+            const em =
+              (part.getBoundingClientRect().right - start) / Number.parseFloat(getComputedStyle(part).fontSize);
+            repo = `cut to ${em.toFixed(1)} em`;
+            if (em < 3) bad.add(`a repo kept as a stub, ${repo}`);
+          } else if (part) repo = "whole";
+          if (over > 1) bad.add(`${over} px past the line's end`);
+          if (chip && shown !== chip.dataset.text && part && !part.hasAttribute("data-gone"))
+            bad.add(`the name cut with the repo on the line (${repo})`);
+          frames.push(`${repo} | ${shown} | ${over} px over`);
+          marks.add(el.closest(closest)?.getAttribute(attr) ?? null);
+          if (performance.now() - t0 < ms) requestAnimationFrame(frame);
+          else done({ frames, bad: [...bad], renders: marks.size - 1 });
+        };
+        requestAnimationFrame(frame);
+      }),
+    [ms, mark[0], mark[1]] as [number, string, string],
+  );
+  const [drawn] = await Promise.all([sampled, during()]);
+  return drawn;
+}
+
 /** How far a focus ring drawn round `el` (its outline, off its edge by its offset) is cut
  *  off by the boxes it sits in that clip what overflows them: one line per side cut.
  *  `cutEnd`: a box that cuts `el` itself off at its end ("…") may cut the ring's end too. */
