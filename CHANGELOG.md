@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-11-25
+
+A session's page now lists the sessions it asked or launched, each child row names the
+computer it runs on, and a waiting child in the Inbox says whom it works for. Sessions
+started or continued by a sessionpipe trigger rule say so on their page and on their
+Board card. And fixes for Needs you counts and mute following child sessions,
+out-of-order attention events, contradictory search `in:` filters, and long computer
+names in the Inbox.
+
 ### Added
 
 - **A session's page lists the sessions it asked.** Under the bar, "Asked sessions": each
@@ -2363,7 +2372,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.8...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.9...HEAD
+[0.8.9]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.5...v0.8.6
