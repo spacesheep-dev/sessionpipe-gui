@@ -13,7 +13,7 @@ import { type RefObject, useCallback, useId, useLayoutEffect, useRef, useState, 
 import { useStore } from "../data/hooks";
 import { askedComputer, askedSessions, askedShown } from "../lib/delegated";
 import { wideLayout } from "../lib/device";
-import { harnessMark, STATE_LABEL, sessionTitle } from "../lib/format";
+import { endCuts, harnessMark, STATE_LABEL, sessionTitle } from "../lib/format";
 import { canMessage, messageItem, openMessage } from "../lib/menus";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { openSplit } from "../lib/split";
@@ -145,7 +145,9 @@ function AskedRow({ parent, c }: { parent: SessionSummary; c: SessionSummary }) 
 }
 
 /** The title in at most its two lines (the element's own max-height), cut after the last
- *  whole word that fits, with "…": never mid-word. Measured again when its width changes. */
+ *  whole word that fits, with "…": never mid-word, unless even its first word does not fit
+ *  (a title with no spaces: CJK, a path), which is cut after its last character that does
+ *  (lib/format.ts endCuts). Measured again when its width changes. */
 function useWordFit(ref: RefObject<HTMLElement | null>, text: string): string {
   const [fit, setFit] = useState(text);
   const [width, setWidth] = useState(0);
@@ -169,22 +171,19 @@ function useWordFit(ref: RefObject<HTMLElement | null>, text: string): string {
       setFit(text);
       return;
     }
-    const words = text.split(/\s+/);
-    let lo = 1;
-    let hi = words.length - 1;
-    let best = 1;
+    const cuts = endCuts(text);
+    let lo = 0;
+    let hi = cuts.length - 1;
+    let best = 0;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      node.nodeValue = `${words.slice(0, mid).join(" ")}…`;
+      node.nodeValue = cuts[mid]!;
       if (fits()) {
         best = mid;
         lo = mid + 1;
       } else hi = mid - 1;
     }
-    const out = `${words
-      .slice(0, best)
-      .join(" ")
-      .replace(/[\s,.;:–—-]+$/, "")}…`;
+    const out = cuts[best] ?? text;
     node.nodeValue = out;
     setFit(out);
   }, [ref, text, width]);
