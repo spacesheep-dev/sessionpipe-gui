@@ -545,7 +545,9 @@
   line-height: inherit;
 }
 /* "·" between the computer and the state, a mark a screen reader skips. */
+/* As tight as the card's meta line: 4px each side, not the row's 8px gap. */
 .kid-sep {
+  margin-inline: -4px;
   color: var(--fg-4);
 }
 .kid-tool {
