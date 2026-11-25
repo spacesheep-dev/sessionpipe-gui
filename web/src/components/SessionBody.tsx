@@ -3483,9 +3483,13 @@ function askRefusal(error: string, machine: string): string | null {
 /** A machine's detail ends the sentence it is quoted in; most arrive without a full stop. */
 const stopped = (s: string): string => (/[.!?…]$/.test(s) ? s : `${s}.`);
 const lower = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
+/** An asked session still at it: working, or waiting on you. */
+const busy = (s: SessionSummary): boolean => s.state === "working" || s.state === "needs_you";
 
 /** The row's state (UX-SPEC §3.1): one phrase in the meta tier, a live timer while it
- *  runs, red only when it went wrong. `child` is the asked session when the store has it. */
+ *  runs, red only when it went wrong. `child` is the asked session when the store has it:
+ *  while the ask is under way its state is in the board's word ("working", "needs you"),
+ *  as the page's list of asked sessions says it. */
 function askState(
   a: Ask,
   o: { machine: string; online: boolean; child?: SessionSummary },
@@ -3496,8 +3500,8 @@ function askState(
     if (isFinal(act) && act.outcome !== "delivered")
       return { text: handoffEndWords(act, o.machine), err: true, glyph: "err" };
     if (act.outcome === "delivered" && o.child)
-      return o.child.state === "working" || o.child.state === "needs_you"
-        ? { text: "running", since: o.child.stateSince, glyph: "run" }
+      return busy(o.child)
+        ? { text: STATE_LABEL[o.child.state], since: o.child.stateSince, glyph: "run" }
         : { text: STATE_LABEL[o.child.state], glyph: o.child.state === "done" ? "ok" : "none" };
     if (!act.outcome && !o.online)
       return { text: `waiting for ${o.machine}. It asks when the machine is back.`, glyph: "run" };
@@ -3508,7 +3512,10 @@ function askState(
     });
     return { text: line ? lower(line.text).replace(/[.…]?$/, "…") : "sent…", glyph: "run" };
   }
-  if (!a.endedAt) return { text: "running", since: a.startedAt, glyph: "run" };
+  if (!a.endedAt)
+    return o.child && busy(o.child)
+      ? { text: STATE_LABEL[o.child.state], since: o.child.stateSince, glyph: "run" }
+      : { text: "running", since: a.startedAt, glyph: "run" };
   const took = a.ms !== undefined ? dur(a.ms) : dur(ms(a.endedAt) - ms(a.startedAt));
   if (a.ok === false) {
     const refusal = a.error ? askRefusal(a.error, o.machine) : null;

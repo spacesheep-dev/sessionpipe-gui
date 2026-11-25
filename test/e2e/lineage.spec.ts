@@ -51,7 +51,8 @@ test("the asking session shows the row; the asked session says who asked", async
   const row = page.locator(".ask").first();
   await expect(row).toBeVisible();
   await expect(row).toContainText(/asked Codex/i);
-  await expect(row.locator(".ask-state")).toHaveText(/running|answered|failed/);
+  // An asked session the store holds says its state in the board's word, as the list does.
+  await expect(row.locator(".ask-state")).toHaveText(/running|working|needs you|answered|failed/);
   // The row links to the asked session, whose bar says whom it works for.
   if (child) {
     await expect(page.locator(`.ask a[href*="${child.id}"]`).first()).toBeVisible();

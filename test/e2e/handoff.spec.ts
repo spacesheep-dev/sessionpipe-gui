@@ -467,8 +467,14 @@ async function postAsked(
   return { harness: o.harness, id, key: `${o.harness}:${id}` };
 }
 
-/** The parent's own word that it asked `to` and has its answer: a delegation that names it. */
-async function postDelegation(token: string, p: { harness: string; id: string; machine: string }, to: string) {
+/** The parent's own word that it asked `to` and has its answer (or, `open`, waits for it):
+ *  a delegation that names it. */
+async function postDelegation(
+  token: string,
+  p: { harness: string; id: string; machine: string },
+  to: string,
+  o: { open?: boolean } = {},
+) {
   let seq = 1;
   let clock = Date.now() - 10_000;
   const ev = (type: string, data: Record<string, unknown>) => {
@@ -489,7 +495,9 @@ async function postDelegation(token: string, p: { harness: string; id: string; m
   await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
-    body: JSON.stringify({ events: [ev("delegation.started", ask), ev("delegation.ended", { ...ask, ok: true })] }),
+    body: JSON.stringify({
+      events: [ev("delegation.started", ask), ...(o.open ? [] : [ev("delegation.ended", { ...ask, ok: true })])],
+    }),
   });
 }
 const harnessOfKey = (k: string) => k.slice(0, k.indexOf(":"));
@@ -654,4 +662,26 @@ test("Message on an asked session leaves the parent's own kept Ask draft as it w
   await expect(sheet(page)).toBeVisible();
   await expect(text).toHaveValue("Keep this draft.");
   await expect(rowValue(page, "agent")).toContainText("Codex · new session");
+});
+
+test("the parent's row of an ask under way says the asked session's state as its list does", async ({ page }) => {
+  const name = `ho-word-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const p = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Parent ${name}` });
+  const parent = `${p.harness}:${p.id}`;
+  const kid = await postAsked(sink, {
+    machine: name,
+    harness: "codex",
+    title: "Run the suite",
+    parent,
+    state: "needs_you",
+  });
+  await postDelegation(sink, { ...p, machine: name }, kid.key, { open: true });
+  await page.goto(`${CONTROL_BASE}/s/${p.harness}/${p.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+  await expect(page.locator(`section.kids li.kids-row[data-kid="${kid.key}"] .kids-word`)).toHaveText("needs you");
+  const ask = page.locator(".ask").first();
+  await expect(ask.locator(".ask-title")).toHaveText("Run the suite");
+  await expect(ask.locator(".ask-state")).toHaveText(/^needs you\b/);
 });
