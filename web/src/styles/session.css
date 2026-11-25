@@ -126,7 +126,7 @@ html:has(.main > .session) {
 /* A copy of another session (a fork): the original, named and linked, in the same muted tier. */
 .sess-copy {
   flex: none;
-  max-width: 40%;
+  max-width: calc(40% + 4px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -178,7 +178,15 @@ html:has(.main > .session) {
 /* The launcher link: readable beside a short machine and repo too. The
    40% is of a line sized by its own content, which beside "dev-mac · acme/api" is an ellipsis. */
 .sess-where > .sess-launch {
-  max-width: max(40%, 14em);
+  max-width: calc(max(40%, 14em) + 4px);
+}
+/* The line's links ("for", "Copy of", "Launched by") are cut off by their own part too:
+   each part keeps a ring's room above, below and after its words inside its clip and
+   gives it back in margin, its cap 4 px wider to match, so it sits and cuts where it did. */
+.sess-where > .sess-for,
+.sess-where > .sess-copy {
+  margin: -4px -4px -4px 0;
+  padding: 4px 4px 4px 0;
 }
 /* "Started by trigger card-todo": words, not a link, whole while the line holds it. Where it
    does not, the repo gives way first (gone whole below a few characters, lib/giveWay.ts),

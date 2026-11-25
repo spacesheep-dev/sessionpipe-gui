@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { SETTINGS_KEY } from "../../playwright.config.js";
-import { EVENTS, INFO, openBoard, openPage, sessionUrl, tier1Batch, ulid } from "./helpers.js";
+import { EVENTS, INFO, openBoard, openPage, ringCut, sessionUrl, tier1Batch, ulid } from "./helpers.js";
 
 /** Opens the first working card from the board and returns its href. */
 async function openWorking(page: Page): Promise<string> {
@@ -212,6 +212,12 @@ test.describe("session page", () => {
     await link.click();
     await expect(page.locator("h1.sess-title")).toHaveText(first.title);
     await expect(page.locator(".sess-where .sess-copy a", { hasText: launcher.title })).toBeVisible();
+    // Its focus ring is drawn inside the parts of the line that clip: whole, but for its
+    // end where a long title is cut off with "…" (the link runs on past it).
+    await page.keyboard.press("Shift");
+    await page.locator(".sess-where .sess-copy a").focus();
+    expect(await ringCut(page.locator(".sess-where .sess-copy a"), { cutEnd: true })).toEqual([]);
+    await page.locator(".sess-where .sess-copy a").blur();
     // Two more runs: the launcher lists all three.
     const second = run(2);
     const third = run(3);

@@ -244,6 +244,12 @@ test("the asking session shows the row; the asked session says who asked", async
     await openPage(page, `/s/${child.harness}/${child.id}`);
     await expect(page.locator(".sess-for")).toContainText("for ");
     await expect(page.locator(`.sess-for a[href*="${asker.id}"]`)).toBeVisible();
+    // Its focus ring is drawn inside the parts of the line that clip: whole, but for its
+    // end where a long title is cut off with "…" (the link runs on past it).
+    await page.keyboard.press("Shift");
+    await page.locator(".sess-for a").focus();
+    expect(await ringCut(page.locator(".sess-for a"), { cutEnd: true })).toEqual([]);
+    await page.locator(".sess-for a").blur();
     await page.getByRole("button", { name: "More actions" }).click();
     await expect(page.getByRole("menuitem", { name: "Open the asking session" })).toBeVisible();
     await page.keyboard.press("Escape");

@@ -274,9 +274,10 @@ export function dotGaps(line: Locator): Promise<number[]> {
 }
 
 /** How far a focus ring drawn round `el` (its outline, off its edge by its offset) is cut
- *  off by the boxes it sits in that clip what overflows them: one line per side cut. */
-export function ringCut(el: Locator): Promise<string[]> {
-  return el.evaluate((node: HTMLElement) => {
+ *  off by the boxes it sits in that clip what overflows them: one line per side cut.
+ *  `cutEnd`: a box that cuts `el` itself off at its end ("…") may cut the ring's end too. */
+export function ringCut(el: Locator, o: { cutEnd?: boolean } = {}): Promise<string[]> {
+  return el.evaluate((node: HTMLElement, cutEnd: boolean) => {
     const cs = getComputedStyle(node);
     const out = Number.parseFloat(cs.outlineWidth) + Number.parseFloat(cs.outlineOffset);
     const r = node.getBoundingClientRect();
@@ -292,7 +293,7 @@ export function ringCut(el: Locator): Promise<string[]> {
         d > 0.5 && cut.push(`${a.className} ${side} by ${d.toFixed(1)}`);
       if (s.overflowX !== "visible") {
         by("left", box.left - ring.left);
-        by("right", ring.right - box.right);
+        if (!(cutEnd && r.right > box.right + 0.5)) by("right", ring.right - box.right);
       }
       if (s.overflowY !== "visible") {
         by("top", box.top - ring.top);
@@ -300,7 +301,7 @@ export function ringCut(el: Locator): Promise<string[]> {
       }
     }
     return cut;
-  });
+  }, !!o.cutEnd);
 }
 
 /** A Board kid row's box, its title's and its computer's, read in one frame: a card that
