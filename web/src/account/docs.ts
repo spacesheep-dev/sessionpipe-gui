@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: web. The account's documents (docs/rfcs/08, "The documents"): what nothing
 // upstream holds in this mode, the person's labels and read marks, the usage limits, the
-// sends not yet settled. The native hub keeps each as a whole JSON value under the
+// sends not yet settled, how they arranged the session tree. The native hub keeps each as a whole JSON value under the
 // account's id (`acct_doc_get` / `acct_doc_set`); here each is a DocKeep (server/ui/
 // docKeep.ts), which reads and writes at once: every document is read before anything
 // opens one, and a save is handed to the hub behind it, the last value winning.
@@ -15,7 +15,7 @@ import type { ShellCalls } from "./shell";
 
 /** The documents a page keeps for its account. A name is a lowercase letter, then letters,
  *  digits or dashes; an account has at most eight. */
-export const DOC_NAMES = ["labels", "marks", "limits", "sends"] as const;
+export const DOC_NAMES = ["labels", "marks", "limits", "sends", "arrangement"] as const;
 export type DocName = (typeof DOC_NAMES)[number];
 
 export interface AccountDocs {

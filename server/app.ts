@@ -62,6 +62,7 @@ import { registerThemes, ThemeRegistry } from "./themes/index.js";
 import { ensureCerts, localHostname, type TlsMaterial } from "./tls/certs.js";
 import { createDualListener, type DualListener, listen } from "./tls/listen.js";
 import { registerTrust } from "./tls/trust.js";
+import { ArrangementStore } from "./ui/arrangement.js";
 import { AttachmentStore } from "./ui/attachments.js";
 import { uiAuthFor } from "./ui/auth.js";
 import { registerUi, uiGuard } from "./ui/index.js";
@@ -622,6 +623,9 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   labels.follow(store);
   const marks = new MarkStore(stateDir, (key) => store.sessionExists(key));
   marks.follow(store);
+  // How the person arranged the session tree: a forgotten session loses its place and pin.
+  const arrangement = new ArrangementStore(stateDir, (key) => store.sessionExists(key));
+  arrangement.follow(store);
   // Stream messages that come from neither the store nor control: a view's state written.
   const broadcast = new Broadcast();
   /** A new UI key, written and applied at once: the guard reads it on every request, and
@@ -642,6 +646,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   registerUi(router, {
     labels,
     marks,
+    arrangement,
     limits,
     refreshLimits: () => antigravityUsage?.refresh() ?? Promise.resolve(false),
     broadcast,

@@ -3,6 +3,8 @@
 // the whole app runs with `npx vite --config web/vite.config.ts` and no server. Add
 // `&empty=1` for the first-run board.
 import {
+  type Arrangement,
+  EMPTY_ARRANGEMENT,
   LABEL_COLORS,
   LABEL_NAME_MAX,
   type Labels,
@@ -12,6 +14,7 @@ import {
   type MarksPatch,
   type StreamMessage,
 } from "@shared/api";
+import { applyArrangement, forgetInArrangement } from "@shared/arrangement";
 import type { Transport } from "../data/transport";
 import { installPhoneMock } from "./phone";
 import { review } from "./review";
@@ -74,6 +77,8 @@ export function createMockTransport(): Transport {
   let marks: Marks = { rev: 0, since: new Date().toISOString(), read: {}, unread: {}, notify: {} };
   // So do the usage limits; the first-run board has none.
   let limits: LimitsEntry[] = empty ? [] : mockLimits(Date.now());
+  // And the arrangement, by the receiver's own rules.
+  let arrangement: Arrangement = EMPTY_ARRANGEMENT;
   const handlers = new Set<(m: StreamMessage) => void>();
   let search: ReturnType<Transport["sessionSearch"]> | null = null;
   return {
@@ -84,7 +89,9 @@ export function createMockTransport(): Transport {
         h.onOpen();
         const first = world.snapshot();
         h.onMessage(
-          first.kind === "snapshot" ? { ...first, snapshot: { ...first.snapshot, labels, marks, limits } } : first,
+          first.kind === "snapshot"
+            ? { ...first, snapshot: { ...first.snapshot, labels, marks, limits, arrangement } }
+            : first,
         );
         // The messages the receiver carried, as the stream would have brought them.
         for (const message of [...world.controlActivity()].reverse()) h.onMessage({ kind: "control", message });
@@ -103,6 +110,13 @@ export function createMockTransport(): Transport {
             delete unread[m.key];
             marks = { ...marks, rev: marks.rev + 1, read, unread };
             for (const l of handlers) l({ kind: "marks", marks });
+          }
+          if (m.kind === "forgotten") {
+            const next = forgetInArrangement(arrangement, m.key);
+            if (next !== arrangement) {
+              arrangement = next;
+              for (const l of handlers) l({ kind: "arrangement", arrangement });
+            }
           }
           h.onMessage(m);
         });
@@ -133,6 +147,18 @@ export function createMockTransport(): Transport {
       marks = mergeMarks(marks, p, known);
       for (const l of handlers) l({ kind: "marks", marks });
       return marks;
+    },
+    arrangement: () => latency(arrangement, 40),
+    patchArrangement: async (p) => {
+      await latency(undefined, 60);
+      const snap = world.snapshot();
+      const known = (k: string) => snap.kind === "snapshot" && snap.snapshot.sessions.some((s) => s.key === k);
+      const next = applyArrangement(arrangement, p, known);
+      if (next !== arrangement) {
+        arrangement = next;
+        for (const l of handlers) l({ kind: "arrangement", arrangement });
+      }
+      return arrangement;
     },
     forgetLimits: async (key) => {
       await latency(undefined, 60);

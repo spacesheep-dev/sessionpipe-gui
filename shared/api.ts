@@ -672,6 +672,8 @@ export interface Snapshot {
   marks?: Marks;
   /** Each account's newest usage limits; present on the stream's first frame. */
   limits?: LimitsEntry[];
+  /** How the person arranged the session tree; present on the stream's first frame. */
+  arrangement?: Arrangement;
 }
 
 /** A server plugin's suggested answer to an open permission (shared/plugin-api.ts). Advice
@@ -710,6 +712,8 @@ export type StreamMessage =
   | { kind: "marks"; marks: Marks }
   /** Every account's usage limits after a change: the whole list (small, idempotent). */
   | { kind: "limits"; limits: LimitsEntry[] }
+  /** The whole arrangement after a change, numbered like `labels`. */
+  | { kind: "arrangement"; arrangement: Arrangement }
   /** A view's server-side state (THEME_ROUTES.state) was written; `etag` names the new
    *  version, so the page that wrote it can tell its own write from another device's. */
   | { kind: "viewState"; id: string; etag: string }
@@ -798,6 +802,37 @@ export interface MarksPatch {
 }
 
 export const EMPTY_MARKS: Marks = Object.freeze({ rev: 0, read: {}, unread: {} }) as Marks;
+
+// ---------- arrangement (the person's session tree; GET / PATCH ROUTES.ui.arrangement) ----------
+
+/** Placements the server keeps at most. */
+export const ARRANGEMENT_PLACED_MAX = 500;
+/** Pinned sessions the server keeps at most. */
+export const ARRANGEMENT_PINNED_MAX = 100;
+
+/** `<stateDir>/arrangement.json`, as the server serves it: where the person put sessions
+ *  in the tree, for their own eyes. Display only: it is never sent to a machine, never
+ *  changes what a session's events say (`delegatedBy`, `parentId`), and grants nothing.
+ *  shared/arrangement.ts has its rules. */
+export interface Arrangement {
+  /** Bumped on every change: a page drops a frame older than what it has. */
+  rev: number;
+  /** A session shown under another (`parent`), or at the top level (`null`) though its
+   *  events name a parent. A session not here follows what its events say. */
+  placed: Record<SessionKey, SessionKey | null>;
+  /** Pinned sessions, in the person's order. */
+  pinned: SessionKey[];
+}
+
+/** A change (PATCH). `placed` sets placements, `follow` takes them away (the session
+ *  follows its events again), `pinned` is the whole new list. */
+export interface ArrangementPatch {
+  placed?: Record<SessionKey, SessionKey | null>;
+  follow?: SessionKey[];
+  pinned?: SessionKey[];
+}
+
+export const EMPTY_ARRANGEMENT: Arrangement = Object.freeze({ rev: 0, placed: {}, pinned: [] }) as Arrangement;
 
 // ---------- usage limits (limits.observed; GET ROUTES.ui.limits) ----------
 
@@ -1926,6 +1961,12 @@ export const ROUTES = {
     /** POST {} (application/json) → 200 { limits, refreshed }: ask local usage sources (e.g.
      *  Antigravity `agy`) for fresh numbers now. 415 `json_only`. */
     limitsRefresh: "/api/ui/limits/refresh",
+    /** GET → Arrangement; PATCH ArrangementPatch (application/json) → Arrangement. 400
+     *  `malformed` (an unknown field, a key not in the store's shape) / `bad_place` (a
+     *  session under itself or its own descendant), 404 `not_found` (a session the store
+     *  does not know), 413 `too_many` (ARRANGEMENT_PLACED_MAX, ARRANGEMENT_PINNED_MAX) /
+     *  `too_large`, 415 `json_only`. Every change is an `arrangement` stream frame. */
+    arrangement: "/api/ui/arrangement",
     /** Workflows (server/orchestrate; ARCHITECTURE.md "UI API"), UI key like the rest.
      *  Every write takes JSON only, an empty POST too (415 `json_only`), and 403
      *  `cross_site` when the browser marks it from another site: a write here sets a
