@@ -711,13 +711,13 @@ for (const [size, insets] of REGULAR) {
       await expect(page.locator("html"), where).toHaveAttribute("data-size-class", "regular");
       await expect(page.locator("nav.rail"), where).toBeVisible();
       await expect(page.locator("nav.tabbar"), where).toBeHidden();
-      // What the tab bar and then More list, in their order, Display and Settings last
-      // (an account has no Workflows).
+      // What the tab bar lists, More for the rest, then Display and Settings at the foot;
+      // the sessions under them.
       const rows = await sidebarRows(page);
       expect(
         rows.map((r) => r.name),
         where,
-      ).toEqual(["Board", "Inbox", "Search", "Machines", "Usage", "Display", "Settings"]);
+      ).toEqual(["Board", "Inbox", "Search", "More", "Display", "Settings"]);
       for (const r of rows) expect(r.height, `${r.name}, ${where}`).toBeGreaterThanOrEqual(44);
       expect(rows.map((r) => r.top)).toEqual([...rows.map((r) => r.top)].sort((x, y) => x - y));
       // The Inbox's count: the sample's one prompt, as the tab bar says it.
@@ -759,7 +759,9 @@ for (const [size, insets] of REGULAR) {
       });
       expect(sides.glyph, where).toBeGreaterThanOrEqual(left + 8);
       expect(sides.mark, where).toBe(sides.glyph);
-      expect(sides.rail, where).toBe(220 + left);
+      // regular.css: 34vw, from 264 to 320.
+      const wide = Math.min(320, Math.max(264, (Number(size.split("x")[0]) * 34) / 100));
+      expect(sides.rail, where).toBe(wide + left);
       // The page's column (styles/regular.css): 672 pt at most, in the middle of what is
       // beside the sidebar.
       const room = Number(size.split("x")[0]) - sides.rail - 16 - (16 + right);
@@ -807,7 +809,8 @@ test("the outer display and a Split View half keep the tab bar; More or Display 
       await expect(tabbar, `${w}x${h}`).toBeVisible();
       await expect(page.locator("nav.rail"), `${w}x${h}`).toBeHidden();
     }
-    // What the tab bar and More list folded is what the sidebar lists unfolded.
+    // Unfolded, the sidebar lists the tab bar's first three pages and More (the polish
+    // plan's four), and More's own Display and Settings at its foot.
     const tabs = await tabbar.locator("a.nav-link .nav-label").allInnerTexts();
     await more.click();
     await expect(sheet).toBeVisible();
@@ -815,7 +818,8 @@ test("the outer display and a Split View half keep the tab bar; More or Display 
     await pose(page, 669, 951);
     await expect(page.locator("nav.rail")).toBeVisible();
     await expect(sheet).toHaveCount(0);
-    expect((await sidebarRows(page)).map((r) => r.name)).toEqual([...tabs, ...inMore]);
+    expect(inMore.slice(-2)).toEqual(["Display", "Settings"]);
+    expect((await sidebarRows(page)).map((r) => r.name)).toEqual([...tabs.slice(0, 3), "More", "Display", "Settings"]);
     await pose(page, 466, 678);
     await expect(tabbar).toBeVisible();
     await expect(more).toHaveAttribute("aria-expanded", "false");
@@ -1259,9 +1263,9 @@ test("on a tablet on its side each page reads down one column: its title starts 
 }) => {
   const b = await duoBed(browser, "1180x820", { insets: [24, 0, 20, 0] });
   const { page } = b;
-  /** The column beside the sidebar: 1180 less the sidebar's 220 and a 16 pt gutter a side,
-   *  then 672 in the middle of that. */
-  const column = 220 + 16 + (1180 - 220 - 32 - 672) / 2;
+  /** The column beside the sidebar: 1180 less the sidebar's 320 (regular.css: 34vw, from
+   *  264 to 320) and a 16 pt gutter a side, then 672 in the middle of that. */
+  const column = 320 + 16 + (1180 - 320 - 32 - 672) / 2;
   /** Where a box's content starts: inside its padding. */
   const startOf = (l: Locator) =>
     l.first().evaluate((el) => el.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(el).paddingLeft));
@@ -1281,7 +1285,7 @@ test("on a tablet on its side each page reads down one column: its title starts 
       expect(Math.abs(title - column), path).toBeLessThanOrEqual(1);
       // The bar's ground runs on from the sidebar to the window's edge.
       const bar = await boxOf(page.locator(".main > .page > .bar"));
-      expect([bar.left, bar.right], path).toEqual([220, 1180]);
+      expect([bar.left, bar.right], path).toEqual([320, 1180]);
     }
     // A session: its bar, the line under it (machine and folder) and its messages start at
     // one edge, the column's.

@@ -641,6 +641,9 @@ test.describe("a row is never lost", () => {
     const [p] = await sessions(request, [{ title: `Lost ${tag} quiet parent`, state: "done" }]);
     const [c] = await sessions(request, [{ title: `Lost ${tag} news`, asks: p!.key, state: "idle" }]);
     await openPage(page, "/");
+    // A done parent sorts last: past "Show more" once the server holds many sessions.
+    const more = page.locator(".stree-more-all");
+    while ((await row(page, p!.key).count()) === 0 && (await more.count()) > 0) await more.click();
     await expect(row(page, c!.key)).toHaveAttribute("data-unread", "");
     // Read the parent itself first: the glyph is then the child's.
     await row(page, p!.key).focus();

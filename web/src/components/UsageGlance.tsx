@@ -114,6 +114,11 @@ export function usageItems(
   ];
 }
 
+/** The sidebar's usage: one line, the account with the least left (the director's answer
+ *  to the polish plan's question 3), drawn at any height; false for every account with its
+ *  bar, as many as the window's height has room for. */
+export const USAGE_ONE_LINE = true;
+
 /** Lines past four go to "2 more"; past two in a window under 760 px tall, and in one
  *  under 640 there is no block, so it gives way before the navigation would scroll
  *  (Advanced mode's links take 375 px, four lines 244, the rail's head and foot 93). */
@@ -162,7 +167,7 @@ function useGlance() {
   const all = useMemo(() => glanceLines(accounts, machines, limits), [accounts, machines, limits]);
   const lines = useLines();
   const numbers = loaded ? all.length > 0 : readGlanceHint();
-  return { shown: on && numbers && lines > 0, all, short, machines, lines, loaded };
+  return { shown: on && numbers && (USAGE_ONE_LINE || lines > 0), all, short, machines, lines, loaded };
 }
 
 /** Whether the block would draw (in the wide sidebar): where it does not, the sidebar

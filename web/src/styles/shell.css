@@ -549,6 +549,7 @@
     display: none;
   }
   /* The rail's tooltips stand out past its edge, so only the sidebar form scrolls. */
+  /* In a short window the icons scroll under the head, and the foot stays in view. */
   .rail-nav {
     flex: 1 1 auto;
     min-height: 0;
@@ -556,6 +557,11 @@
     flex-direction: column;
     gap: 2px;
     padding: 8px 6px;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .rail-nav::-webkit-scrollbar {
+    display: none;
   }
   /* Finish setup sits at the foot of the list, so the rows above never move for it. */
   .rail-nav > .nav-link--pinned {
