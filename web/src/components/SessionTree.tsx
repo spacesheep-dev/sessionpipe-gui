@@ -41,7 +41,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { openNewSession } from "../control/newSessionState";
-import { useStore } from "../data/hooks";
+import { useHideKeys, useStore, useUnreadKeys } from "../data/hooks";
 import { arrange, onArranged, planMove } from "../lib/arrange";
 import { sessionTitle } from "../lib/format";
 import { haptic } from "../lib/haptics";
@@ -49,7 +49,8 @@ import { isHidden, useHidden } from "../lib/hidden";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
 import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { hrefFor, sessionPath } from "../lib/router";
-import { howOf, openSession } from "../lib/split";
+import { useShortcut } from "../lib/shortcuts";
+import { howOf, openSession, openSplit } from "../lib/split";
 import { arrangeTree, descendants, runsElsewhere, type Tree, type TreeNode } from "../lib/tree";
 import {
   dragStarts,
@@ -65,6 +66,7 @@ import {
 } from "../lib/treeDrag";
 import { HarnessGlyph, StateDot } from "./bits";
 import { closeMenu, useContextMenu } from "./ContextMenu";
+import { useLabelKeys } from "./LabelDot";
 import "../styles/sidetree.css";
 
 /** Top-level rows shown before Show more, and how many more each press shows. */
@@ -264,8 +266,12 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
   const rowEl = (key: string) => box.current?.querySelector<HTMLElement>(`[data-tree-row="${CSS.escape(key)}"]`);
   // A move by the keys or the menu draws the row in another list: the focus goes with it.
   const hadFocus = useRef(false);
+  /** The row element that last had the focus: only its leaving the page (a move drew the
+   *  row anew) sends the focus after the row; a Tab or a click away leaves it connected. */
+  const focusedEl = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     if (!focusKey || !hadFocus.current) return;
+    if (focusedEl.current?.isConnected) return;
     const a = document.activeElement;
     if (a && a !== document.body) {
       if (!box.current?.contains(a)) hadFocus.current = false;
@@ -275,7 +281,7 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
   });
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     const here = e.target as HTMLElement;
-    if (!here.matches?.("[data-tree-nav]") || e.altKey || e.metaKey || e.ctrlKey) return;
+    if (!here.matches?.("[data-tree-nav]")) return;
     // The rows as drawn, in both lists, and the Show more rows among them.
     const items = [...(box.current?.querySelectorAll<HTMLElement>("[data-tree-nav]") ?? [])];
     const i = items.indexOf(here);
@@ -307,9 +313,14 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
         else return;
         break;
       case "Enter":
-      case " ":
+        // A row's ↵, ⇧↵ and ⌘↵ are the Lists keys (below); Show N more presses itself.
         if (key) return;
         here.click();
+        break;
+      case " ":
+        // The Board's peek: the row beside the page, the focus staying here.
+        if (key) openSplit(key, { preview: true });
+        else here.click();
         break;
       default:
         return;
@@ -321,6 +332,62 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
       to.focus();
     }
   };
+
+  // ----- the Lists keys, on the row the focus is on (the tree owns them: data-keys-own) -----
+  /** The session of the row with the focus, when the focus is on one of the tree's rows. */
+  const focusedRow = (): SessionSummary | undefined => {
+    const a = document.activeElement as HTMLElement | null;
+    const k = a && box.current?.contains(a) ? a.getAttribute("data-tree-row") : null;
+    return k ? store.get().sessions.get(k) : undefined;
+  };
+  const step = (d: 1 | -1) => {
+    const a = document.activeElement as HTMLElement | null;
+    if (!a || !box.current?.contains(a)) return false;
+    const items = [...box.current.querySelectorAll<HTMLElement>("[data-tree-nav]")];
+    const to = items[items.indexOf(a) + d];
+    if (!to) return;
+    if (to.dataset.treeRow) setFocusKey(to.dataset.treeRow);
+    to.focus();
+  };
+  const own = { within: box };
+  useShortcut("list.down", () => step(1), own);
+  useShortcut("list.up", () => step(-1), own);
+  const openFocused = (how: "primary" | "other" | "background") => {
+    const s = focusedRow();
+    if (!s) return false;
+    openSession(s.key, how);
+  };
+  useShortcut("list.open", () => openFocused("primary"), own);
+  useShortcut("list.beside", () => openFocused("other"), own);
+  useShortcut("list.background", () => openFocused("background"), own);
+  useShortcut(
+    "list.menu",
+    () => {
+      const s = focusedRow();
+      const el = s ? rowEl(s.key) : null;
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const ce = new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: r.left + 24,
+        clientY: r.bottom,
+      });
+      el.dispatchEvent(Object.assign(ce, { __kbd: true }));
+    },
+    own,
+  );
+  useUnreadKeys(() => {
+    const s = focusedRow();
+    return s ? [s] : [];
+  }, own);
+  useHideKeys(focusedRow, () => leaveRow.current(), own);
+  useLabelKeys(() => {
+    const s = focusedRow();
+    return s ? [s.key] : [];
+  }, own);
+  /** Before a row leaves the list by a key (e, ⇧E): where the focus goes after it. */
+  const leaveRow = useRef(() => {});
 
   // ----- what a move did, said -----
   const [said, setSaid] = useState("");
@@ -362,6 +429,7 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
       down: (e, s) => latest.current.onRowDown(e, s),
       focus: (key) => {
         hadFocus.current = true;
+        focusedEl.current = document.activeElement as HTMLElement | null;
         latest.current.setFocusKey(key);
       },
       fold: (key, fold) => latest.current.setFolded(key, fold),
@@ -447,6 +515,7 @@ export function SessionTree({ open, touch }: { open: SessionKey | null; touch: b
       ref={box}
       data-dragging={drag ? "" : undefined}
       data-held={hold ? "" : undefined}
+      data-keys-own=""
     >
       {pinZone ? (
         <div

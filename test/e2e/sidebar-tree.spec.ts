@@ -43,7 +43,14 @@ interface Made {
  *  the same computer, so it is its real child). */
 async function sessions(
   request: APIRequestContext,
-  defs: { title: string; machine?: string; harness?: string; asks?: string }[],
+  defs: {
+    title: string;
+    machine?: string;
+    harness?: string;
+    asks?: string;
+    /** Working unless said: idle (its turn ended), needs (a prompt open), done (ended). */
+    state?: "idle" | "needs" | "done";
+  }[],
 ): Promise<Made[]> {
   const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
   const out: Made[] = [];
@@ -84,6 +91,19 @@ async function sessions(
         events: [
           ev("session.started", { source: "startup" }, "SessionStart"),
           ev("turn.started", { turn_id: "t1", prompt_chars: 30 }, "UserPromptSubmit"),
+          ...(d.state === "needs"
+            ? [
+                ev(
+                  "attention.needed",
+                  { attention_id: `a-${id}`, kind: "permission", tool: "Bash", message: "npm test" },
+                  "PermissionRequest",
+                ),
+              ]
+            : []),
+          ...(d.state === "idle" || d.state === "done"
+            ? [ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 2000 }, "Stop")]
+            : []),
+          ...(d.state === "done" ? [ev("session.ended", { reason: "exit" }, "SessionEnd")] : []),
         ],
       },
     });
@@ -387,6 +407,84 @@ test("the sidebar's edge: dragged, by the keys, a double-click back to its width
   await expect(edge).toHaveAttribute("aria-valuenow", "320");
   await edge.dblclick();
   await expect(edge).toHaveAttribute("aria-valuenow", "288");
+});
+
+test.describe("the keys stay with the tree's row", () => {
+  test("Tab leaves the tree, and a click in the Filter field types there", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [a] = await sessions(request, [{ title: `Keys ${tag} one` }, { title: `Keys ${tag} two` }]);
+    await openPage(page, "/");
+    await row(page, a!.key).focus();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => !!document.activeElement?.closest("[role=tree]"))).toBe(false);
+    await row(page, a!.key).focus();
+    await page.locator("[data-search]").click();
+    await page.keyboard.type("abc");
+    await expect(page.locator("[data-search]")).toHaveValue("abc");
+  });
+
+  test("every Lists key on a tree row acts on that row, never on the Board's cursor row", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [n] = await sessions(request, [{ title: `Keys ${tag} target`, state: "idle" }]);
+    await openPage(page, "/");
+    await expect(row(page, n!.key)).toBeVisible();
+    // The Board's cursor on its first row.
+    await page.locator("main#main").focus();
+    await page.keyboard.press("j");
+    const cursor = page.locator("article.card[aria-current='true']");
+    await expect(cursor).toHaveCount(1);
+    const boardKey = await cursor.getAttribute("data-flip");
+    expect(boardKey).not.toBe(n!.key);
+    const t = row(page, n!.key);
+    // `.`: the tree row's own menu.
+    await t.focus();
+    await page.keyboard.press(".");
+    await expect(page.getByRole("menu")).toContainText("Pin");
+    await expect(page.locator("[role=menu]").first()).toBeVisible();
+    await page.keyboard.press("Escape");
+    // u: this row's read mark (an idle row with news is unread: u marks it read).
+    type M = { read: Record<string, string>; unread: Record<string, true> };
+    const marks = async () => (await (await request.get("/api/ui/marks")).json()) as M;
+    const boardMarks = JSON.stringify([(await marks()).read[boardKey ?? ""], (await marks()).unread[boardKey ?? ""]]);
+    await t.focus();
+    await page.keyboard.press("u");
+    await expect.poll(async () => n!.key in (await marks()).read || n!.key in (await marks()).unread).toBe(true);
+    expect(JSON.stringify([(await marks()).read[boardKey ?? ""], (await marks()).unread[boardKey ?? ""]])).toBe(
+      boardMarks,
+    );
+    // ⌥⌘1: this row's label.
+    await t.focus();
+    await page.keyboard.press("ControlOrMeta+Alt+1");
+    await expect
+      .poll(
+        async () =>
+          ((await (await request.get("/api/ui/labels")).json()) as { sessions: Record<string, string> }).sessions[
+            n!.key
+          ],
+      )
+      .toBe("red");
+    await request.patch("/api/ui/labels", { data: { sessions: { [n!.key]: null } } });
+    // Space: beside the page, the focus staying on the row and the list not scrolled.
+    await t.focus();
+    const before = await page.locator(".rail-scroll").evaluate((el) => el.scrollTop);
+    await page.keyboard.press("Space");
+    await expect(page).toHaveURL(new RegExp(encodeURIComponent(n!.key).replace(/%3A/g, "(:|%3A)")));
+    await expect(t).toBeFocused();
+    expect(await page.locator(".rail-scroll").evaluate((el) => el.scrollTop)).toBe(before);
+    // e: hides this row, not the Board's cursor row.
+    await t.focus();
+    await page.keyboard.press("e");
+    await expect(row(page, n!.key)).toHaveCount(0);
+    expect(
+      await page.evaluate((k) => JSON.parse(localStorage.getItem("sessionpipe-gui.hidden") ?? "{}")[k], boardKey ?? ""),
+    ).toBeUndefined();
+    // Enter: opens this row's session.
+    const [m] = await sessions(request, [{ title: `Keys ${tag} open` }]);
+    await row(page, m!.key).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`/s/claude-code/${m!.id}`));
+  });
 });
 
 test.describe("the phone", () => {

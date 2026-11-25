@@ -1029,8 +1029,11 @@ const hasLiveHandler = (id: string): boolean => {
   return false;
 };
 
-/** Runs the best handler for an action; true when one took the key. */
-function runAction(id: string, e: KeyboardEvent): boolean {
+/** Runs the best handler for an action; true when one took the key. `owned`: the focus is
+ *  inside an element that owns the non-global keys (`data-keys-own`, the sidebar's tree),
+ *  so only a handler that belongs to where the focus is may take it, and with none the key
+ *  is not taken: a list key never acts on another list's cursor row. */
+function runAction(id: string, e: KeyboardEvent, owned = false): boolean {
   const v = viewActions.get(id);
   if (v) {
     v.run();
@@ -1039,7 +1042,9 @@ function runAction(id: string, e: KeyboardEvent): boolean {
   const set = handlers.get(id);
   if (!set) return false;
   const active = document.activeElement;
-  const live = [...set].filter((h) => h.enabled?.() !== false);
+  const live = [...set].filter(
+    (h) => h.enabled?.() !== false && (!owned || (!!active && !!h.within?.()?.contains(active))),
+  );
   live.sort((a, b) => {
     const fa = active && a.within?.()?.contains(active) ? 1 : 0;
     const fb = active && b.within?.()?.contains(active) ? 1 : 0;
@@ -1178,6 +1183,9 @@ function onKeyDown(e: KeyboardEvent): void {
   const all = candidates().filter(
     (c) => !inView || c.action.view !== undefined || c.seq.length === 2 || c.action.id === "back",
   );
+  // Inside an element that owns the non-global keys, those reach only its own handlers.
+  const owner = !!(e.target as Element | null)?.closest?.("[data-keys-own]");
+  const owned = (a: Action) => owner && a.scope !== "global";
 
   if (pending) {
     const first = pending.chord;
@@ -1186,7 +1194,7 @@ function onKeyDown(e: KeyboardEvent): void {
       (c) => c.seq.length === 2 && sameChord(c.seq[0]!, first) && sameChord(c.seq[1]!, chord) && allowed(c.action),
     );
     for (const c of exact) {
-      if (runAction(c.action.id, e)) {
+      if (runAction(c.action.id, e, owned(c.action))) {
         e.preventDefault();
         return;
       }
@@ -1196,7 +1204,7 @@ function onKeyDown(e: KeyboardEvent): void {
 
   const singles = all.filter((c) => c.seq.length === 1 && sameChord(c.seq[0]!, chord) && allowed(c.action));
   for (const c of singles) {
-    if (runAction(c.action.id, e)) {
+    if (runAction(c.action.id, e, owned(c.action))) {
       e.preventDefault();
       return;
     }
