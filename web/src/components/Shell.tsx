@@ -13,6 +13,11 @@
 // (PullRefresh), and shows a dropped stream as a pill under the bar, which that same
 // pull retries. The wide sidebar ends with what each account has left (UsageGlance.tsx);
 // where those lines are not drawn Usage is a row, and the phone reaches it as More › Usage.
+// Between the pages and the usage lines, the labelled sidebar and the touch app's sidebar
+// list the sessions as a tree the person can arrange (SessionTree.tsx); the icon rail and
+// the phone list none: the phone has the Board.
+
+import { sessionKey } from "@shared/api";
 import type { InstalledTheme } from "@shared/theme-api";
 import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
@@ -51,11 +56,12 @@ import { reloadThemes, setThemeDisabled, useThemes } from "../themes/host/regist
 import { Mark } from "./Brand";
 import { MenuHost, type MenuList, useContextMenu } from "./ContextMenu";
 import type { MoreSheetProps } from "./MoreSheet";
+import { MoveUnderHost } from "./MoveUnder";
 import { openPalette } from "./Palette";
 import { PULL_PAGES, PullRefresh } from "./PullRefresh";
 import { GearIcon, QuickSettings } from "./QuickSettings";
-import { MoveUnderHost } from "./MoveUnder";
 import { SessionPanel } from "./SessionPanel";
+import { SessionTree } from "./SessionTree";
 import { Settings } from "./Settings";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { TipHost } from "./Tip";
@@ -744,6 +750,48 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const firstView = railNav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
   // The app's update, downloaded and waiting ("0.8.5 is ready"): the foot's Settings button marks it.
   const update = useReadyUpdate();
+  // The sessions' tree: in a sidebar with labels, a mouse's or a finger's; not in the rail.
+  const treeShown = regular || (side && !phone);
+  const splitKey = useSplitKey();
+  const openKey = route.name === "session" ? sessionKey(route.harness, route.id) : splitKey;
+  const pagesNav = (
+    <div className="rail-nav">
+      {railNav.map((n, i) => {
+        // A hairline where the group changes; Finish setup sits apart, at the foot.
+        const prev = railNav[i - 1];
+        const split = !!prev && n.group !== undefined && n.group !== prev.group;
+        const experimental = n.group === 4 && prev?.group !== 4;
+        return (
+          <Fragment key={n.key}>
+            {split ? (
+              experimental ? (
+                /* Named for the rail, where the label below is not shown; data-nav keeps the divider's name for the tests. */
+                <hr
+                  className="rail-group"
+                  data-nav="experimental"
+                  title="Experimental views"
+                  aria-label="Experimental views"
+                />
+              ) : (
+                <hr className="rail-group" />
+              )
+            ) : null}
+            {i === firstView ? (
+              <div className="rail-section" aria-hidden="true">
+                Views
+              </div>
+            ) : null}
+            {experimental ? (
+              <div className="rail-section" aria-hidden="true">
+                Experimental
+              </div>
+            ) : null}
+            {entry(n, !side && !regular)}
+          </Fragment>
+        );
+      })}
+    </div>
+  );
   return (
     <div
       className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${side && !phone ? "shell--side" : ""}`}
@@ -764,7 +812,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {announce}
       </div>
       <ConnAnnouncer owned={route.name === "board" || route.name === "inbox"} />
-      <nav className="rail" aria-label="Pages" {...(regular ? {} : railMenuProps)}>
+      <nav className={`rail${treeShown ? " rail--tree" : ""}`} aria-label="Pages" {...(regular ? {} : railMenuProps)}>
         <div className="rail-head">
           <Link to="/" className="rail-brand" title="sessionpipe gui">
             <Mark size={28} />
@@ -773,42 +821,17 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           </Link>
           <ComposeButton className="rail-compose" />
         </div>
-        <div className="rail-nav">
-          {railNav.map((n, i) => {
-            // A hairline where the group changes; Finish setup sits apart, at the foot.
-            const prev = railNav[i - 1];
-            const split = !!prev && n.group !== undefined && n.group !== prev.group;
-            const experimental = n.group === 4 && prev?.group !== 4;
-            return (
-              <Fragment key={n.key}>
-                {split ? (
-                  experimental ? (
-                    /* Named for the rail, where the label below is not shown; data-nav keeps the divider's name for the tests. */
-                    <hr
-                      className="rail-group"
-                      data-nav="experimental"
-                      title="Experimental views"
-                      aria-label="Experimental views"
-                    />
-                  ) : (
-                    <hr className="rail-group" />
-                  )
-                ) : null}
-                {i === firstView ? (
-                  <div className="rail-section" aria-hidden="true">
-                    Views
-                  </div>
-                ) : null}
-                {experimental ? (
-                  <div className="rail-section" aria-hidden="true">
-                    Experimental
-                  </div>
-                ) : null}
-                {entry(n, !side && !regular)}
-              </Fragment>
-            );
-          })}
-        </div>
+        {treeShown ? (
+          // One scroll for the pages and the sessions, as a Mac's sidebar has: the head,
+          // the usage lines and the foot stay put.
+          <div className="rail-scroll">
+            {pagesNav}
+            <hr className="rail-group rail-group--tree" />
+            <SessionTree open={openKey} touch={regular} />
+          </div>
+        ) : (
+          pagesNav
+        )}
         {glance && <UsageGlance here={route.name === "usage"} />}
         <div className="rail-foot">
           {regular && (

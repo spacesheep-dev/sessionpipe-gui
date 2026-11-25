@@ -1,0 +1,385 @@
+// SPDX-License-Identifier: Apache-2.0
+// The sidebar's session tree (components/SessionTree.tsx) and the arrangement the person
+// makes in it (lib/arrange.ts, server/ui/arrangement.ts), on the demo server with sessions
+// of its own posted the way a sink sends them. A pointer drag attaches, moves, detaches,
+// pins; a drop on its own child is refused; Esc puts it back; Undo undoes; the keys and
+// the menu do the same. The arrangement is kept on the receiver: it is there after a
+// reload and in a second window without one, and the Board nests the same way. It is
+// display only: the session's page still says whom it really works for, and a parent's
+// list says "placed by you". The phone has no list and still has the menu's items.
+// One arrangement for the whole server: these tests run one after another, each from none.
+// (That a change without the UI key is refused is server/ui/arrangement.test.ts's.)
+import { randomUUID } from "node:crypto";
+import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
+import { EVENTS, INFO, openPage, sessionUrl, ulid } from "./helpers.js";
+
+test.describe.configure({ mode: "serial" });
+
+const ARRANGEMENT = "/api/ui/arrangement";
+
+interface Arr {
+  rev: number;
+  placed: Record<string, string | null>;
+  pinned: string[];
+}
+const arrangement = async (request: APIRequestContext): Promise<Arr> =>
+  (await (await request.get(ARRANGEMENT)).json()) as Arr;
+
+/** Back to no arrangement at all. */
+async function reset(request: APIRequestContext): Promise<void> {
+  const a = await arrangement(request);
+  const res = await request.patch(ARRANGEMENT, { data: { follow: Object.keys(a.placed), pinned: [] } });
+  expect(res.status()).toBe(200);
+}
+
+interface Made {
+  key: string;
+  id: string;
+  harness: string;
+  title: string;
+}
+
+/** Working sessions posted as a sink sends them: `asks` names the one that asked it (on
+ *  the same computer, so it is its real child). */
+async function sessions(
+  request: APIRequestContext,
+  defs: { title: string; machine?: string; harness?: string; asks?: string }[],
+): Promise<Made[]> {
+  const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  const out: Made[] = [];
+  for (const d of defs) {
+    const harness = d.harness ?? "claude-code";
+    const id = randomUUID();
+    let seq = 0;
+    let clock = Date.now() - 5_000;
+    const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+      clock += 200;
+      return {
+        protocol: 1,
+        id: ulid(clock),
+        type,
+        time: new Date(clock).toISOString(),
+        tier: 1,
+        harness: { name: harness, version: harness === "codex" ? "0.98.0" : "2.1.296", event: hook },
+        session: {
+          id,
+          seq: seq++,
+          machine: d.machine ?? "studio-mac",
+          cwd: "~/code/tree",
+          title: d.title,
+          title_source: "custom",
+          ...(d.asks ? { delegated_by: d.asks } : {}),
+        },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data,
+      };
+    };
+    const res = await request.post(EVENTS, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${sinkToken}`,
+        "sessionpipe-protocol": "1",
+      },
+      data: {
+        events: [
+          ev("session.started", { source: "startup" }, "SessionStart"),
+          ev("turn.started", { turn_id: "t1", prompt_chars: 30 }, "UserPromptSubmit"),
+        ],
+      },
+    });
+    expect(res.status()).toBe(202);
+    out.push({ key: `${harness}:${id}`, id, harness, title: d.title });
+  }
+  return out;
+}
+
+const row = (page: Page, key: string): Locator => page.locator(`.stree [data-tree-row="${key}"]`);
+/** The row a row is drawn under, read off the tree as a screen reader reads it. */
+const drawnUnder = (page: Page, key: string) =>
+  row(page, key).evaluate((el) => {
+    const group = el.closest('[role="group"]');
+    return group ? (document.querySelector(`[aria-owns="${group.id}"]`)?.getAttribute("data-tree-row") ?? "?") : null;
+  });
+
+/** A pointer drag of `from`'s row onto a place of `to`: its middle (`on`), just inside its
+ *  top edge (`above`) or its bottom edge (`below`). Released unless `hold`. */
+async function drag(
+  page: Page,
+  from: Locator,
+  to: Locator,
+  where: "on" | "above" | "below" = "on",
+  o: { hold?: boolean } = {},
+): Promise<void> {
+  // The pointer on the list first, so it holds still (no row moves under a hand), then the row.
+  await from.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await from.hover({ position: { x: 40, y: 10 } });
+  await expect(page.locator(".stree")).toHaveAttribute("data-held", "");
+  const a = (await from.boundingBox())!;
+  await page.mouse.move(a.x + 40, a.y + a.height / 2);
+  await page.mouse.down();
+  // Past the 4 px that make it a drag.
+  await page.mouse.move(a.x + 44, a.y + a.height / 2 + 6, { steps: 3 });
+  await expect(page.locator(".stree-chip")).toBeVisible();
+  // The place well inside the list's scroll, away from the edges that scroll it.
+  await to.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  const b = (await to.boundingBox())!;
+  const y = where === "on" ? b.y + b.height / 2 : where === "above" ? b.y + 2 : b.y + b.height - 2;
+  await page.mouse.move(b.x + 60, y, { steps: 8 });
+  if (!o.hold) await page.mouse.up();
+}
+
+/** The undo toast says what happened. */
+const toast = (page: Page) => page.locator('.toast[data-toast="undo"]');
+
+test.use({ viewport: { width: 1440, height: 1400 } });
+
+test.beforeEach(async ({ request }) => {
+  await reset(request);
+});
+test.afterAll(async ({ request }) => {
+  await reset(request);
+});
+
+test("the tree is a tree: role, levels, the Board's order, New session at its top", async ({ page, request }) => {
+  const tag = randomUUID().slice(0, 6);
+  const [parent] = await sessions(request, [{ title: `Tree ${tag} parent` }]);
+  const [kid] = await sessions(request, [{ title: `Tree ${tag} asked`, harness: "codex", asks: parent!.key }]);
+  await openPage(page, "/");
+  const tree = page.locator('.stree [role="tree"]').last();
+  await expect(tree).toHaveAttribute("aria-labelledby", /.+/);
+  await expect(row(page, parent!.key)).toHaveAttribute("aria-level", "1");
+  await expect(row(page, parent!.key)).toHaveAttribute("aria-expanded", "true");
+  await expect(row(page, kid!.key)).toHaveAttribute("aria-level", "2");
+  expect(await drawnUnder(page, kid!.key)).toBe(parent!.key);
+  // A working session's lamp is the board's turning ring, never a new colour.
+  await expect(row(page, parent!.key).locator(".stree-lamp .dot--working")).toHaveCount(1);
+  // The Board's order: the sidebar's top level is the Board's rows, done ones at the end.
+  const sidebar = await page
+    .locator('.stree [role="tree"] > .stree-item > [data-tree-row]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute("data-tree-row")));
+  const board = await page
+    .locator(".board-list .group:not(.group--done):not(.group--hidden) article.card")
+    .evaluateAll((els) => els.map((e) => e.getAttribute("data-flip")));
+  expect(sidebar.slice(0, board.length)).toEqual(board);
+  await expect(page.locator(".stree-new")).toHaveText("New session");
+  await page.locator(".stree-new").click();
+  await expect(page.getByRole("dialog", { name: /new session/i })).toBeVisible();
+});
+
+test("a pointer drag attaches, moves, detaches and pins; the Board agrees; Undo puts it back", async ({
+  page,
+  request,
+}) => {
+  const tag = randomUUID().slice(0, 6);
+  const [a, b, c] = await sessions(request, [
+    { title: `Tree ${tag} A` },
+    { title: `Tree ${tag} B`, machine: "build-box" },
+    { title: `Tree ${tag} C` },
+  ]);
+  await openPage(page, "/");
+  await expect(row(page, a!.key)).toBeVisible();
+
+  // Attach: B on A.
+  await drag(page, row(page, b!.key), row(page, a!.key), "on");
+  await expect(toast(page)).toContainText(`Moved under Tree ${tag} A`);
+  await expect.poll(async () => (await arrangement(request)).placed[b!.key]).toBe(a!.key);
+  expect(await drawnUnder(page, b!.key)).toBe(a!.key);
+  // Placed, and on another computer than its parent: its tooltip says both.
+  await expect(row(page, b!.key)).toHaveAttribute("title", /Placed here by you/);
+  await expect(row(page, b!.key).locator(".stree-away")).toHaveCount(1);
+  await expect(page.locator("[data-tree-said]")).toHaveText(`Tree ${tag} B moved under Tree ${tag} A.`);
+  // The Board nests by the same tree.
+  await expect(page.locator(`article.card[data-flip="${a!.key}"] .card-kids`)).toContainText(`Tree ${tag} B`);
+
+  // Move: B from A onto C.
+  await page.mouse.move(700, 600);
+  await drag(page, row(page, b!.key), row(page, c!.key), "on");
+  await expect.poll(async () => (await arrangement(request)).placed[b!.key]).toBe(c!.key);
+  expect(await drawnUnder(page, b!.key)).toBe(c!.key);
+
+  // Detach: B onto the line above a top-level row.
+  await drag(page, row(page, b!.key), row(page, a!.key), "above");
+  await expect(toast(page)).toContainText("Moved to the top level");
+  // B's events name no parent: it follows them again.
+  await expect.poll(async () => b!.key in (await arrangement(request)).placed).toBe(false);
+  expect(await drawnUnder(page, b!.key)).toBeNull();
+
+  // Pin: A onto the place to pin (New session's, while nothing is pinned).
+  await page.mouse.move(700, 600);
+  await drag(page, row(page, a!.key), page.locator(".stree-new"), "on", { hold: true });
+  await expect(page.locator(".stree-pin-zone")).toHaveAttribute("data-target", "");
+  await page.mouse.up();
+  await expect(toast(page)).toContainText("Pinned");
+  await expect.poll(async () => (await arrangement(request)).pinned).toEqual([a!.key]);
+  await expect(page.locator(".stree-section").first().locator(".stree-label")).toHaveText("Pinned");
+  await expect(page.locator(".stree-section").first().locator(`[data-tree-row="${a!.key}"]`)).toBeVisible();
+
+  // Undo: the pin goes.
+  await toast(page).getByRole("button", { name: "Undo" }).click();
+  await expect.poll(async () => (await arrangement(request)).pinned).toEqual([]);
+  await expect(page.locator(".stree-label", { hasText: "Pinned" })).toHaveCount(0);
+});
+
+test("a drop on a row's own child is refused, a drop elsewhere and Esc put it back", async ({ page, request }) => {
+  const tag = randomUUID().slice(0, 6);
+  const [p] = await sessions(request, [{ title: `Tree ${tag} parent` }]);
+  const [k] = await sessions(request, [{ title: `Tree ${tag} kid`, asks: p!.key }]);
+  await openPage(page, "/");
+  await expect(row(page, k!.key)).toBeVisible();
+  const before = (await arrangement(request)).rev;
+
+  // On its own child: no place shows, and the drop changes nothing.
+  await drag(page, row(page, p!.key), row(page, k!.key), "on", { hold: true });
+  await expect(row(page, k!.key)).not.toHaveAttribute("data-target", "");
+  await expect(page.locator(".stree [data-target]")).toHaveCount(0);
+  await page.mouse.up();
+  await expect(page.locator(".stree-chip")).toHaveCount(0);
+  expect((await arrangement(request)).rev).toBe(before);
+
+  // Esc mid-drag: everything goes back.
+  await drag(page, row(page, k!.key), page.locator(".stree [data-tree-row]").first(), "on", { hold: true });
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".stree-chip")).toHaveCount(0);
+  await expect(page.locator(".stree-item[data-lifted]")).toHaveCount(0);
+  await page.mouse.up();
+  expect((await arrangement(request)).rev).toBe(before);
+  expect(await drawnUnder(page, k!.key)).toBe(p!.key);
+
+  // Dropped outside the sidebar: the same.
+  await drag(page, row(page, k!.key), page.locator(".board-list"), "on");
+  await expect(page.locator(".stree-chip")).toHaveCount(0);
+  expect((await arrangement(request)).rev).toBe(before);
+  // A click still opens it: a drag never started.
+  await row(page, k!.key).click();
+  await expect(page).toHaveURL(new RegExp(`/s/claude-code/${k!.id}`));
+});
+
+test("the keys and the menu do what a drag does; the arrows walk the tree", async ({ page, request }) => {
+  const tag = randomUUID().slice(0, 6);
+  const [a, b] = await sessions(request, [{ title: `Tree ${tag} alpha` }, { title: `Tree ${tag} beta` }]);
+  await openPage(page, "/");
+  await expect(row(page, b!.key)).toBeVisible();
+  // Pin from the menu, by the keyboard.
+  await row(page, b!.key).focus();
+  await page.keyboard.press("Shift+F10");
+  await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
+  await expect.poll(async () => (await arrangement(request)).pinned).toEqual([b!.key]);
+  await expect(page.locator("[data-tree-said]")).toHaveText(`Tree ${tag} beta pinned.`);
+  // Move under…: the picker, filtered as typed, Enter takes it.
+  await row(page, a!.key).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Move under…" }).click();
+  const picker = page.getByRole("dialog", { name: "Move under…" });
+  await expect(picker).toBeVisible();
+  await picker.getByRole("combobox", { name: "Find a session" }).fill(`${tag} beta`);
+  await expect(picker.getByRole("option").first()).toContainText(`Tree ${tag} beta`);
+  // It never offers the session itself.
+  await expect(picker.getByRole("option", { name: new RegExp(`${tag} alpha`) })).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(picker).toHaveCount(0);
+  await expect.poll(async () => (await arrangement(request)).placed[a!.key]).toBe(b!.key);
+  expect(await drawnUnder(page, a!.key)).toBe(b!.key);
+  // The arrows: ← from the child goes to its parent, ← there folds it, → opens it again.
+  await row(page, a!.key).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(row(page, b!.key)).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(row(page, b!.key)).toHaveAttribute("aria-expanded", "false");
+  await expect(row(page, a!.key)).toHaveCount(0);
+  await page.keyboard.press("ArrowRight");
+  await expect(row(page, b!.key)).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("ArrowDown");
+  await expect(row(page, a!.key)).toBeFocused();
+  // Move to top level, from the menu, only where it applies.
+  await page.keyboard.press("Shift+F10");
+  await page.getByRole("menuitem", { name: "Move to top level" }).click();
+  await expect.poll(async () => a!.key in (await arrangement(request)).placed).toBe(false);
+  await row(page, a!.key).click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Move to top level" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // Enter opens.
+  await row(page, a!.key).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/s/claude-code/${a!.id}`));
+});
+
+test("it is kept on the receiver: after a reload, and in a second window at once", async ({
+  page,
+  browser,
+  request,
+}) => {
+  const tag = randomUUID().slice(0, 6);
+  const [a, b] = await sessions(request, [{ title: `Tree ${tag} one` }, { title: `Tree ${tag} two` }]);
+  await openPage(page, "/");
+  const other = await browser.newPage({ viewport: { width: 1440, height: 1400 } });
+  await openPage(other, "/");
+  await expect(row(other, b!.key)).toBeVisible();
+  await drag(page, row(page, b!.key), row(page, a!.key), "on");
+  await expect.poll(async () => (await arrangement(request)).placed[b!.key]).toBe(a!.key);
+  // The other window, never reloaded.
+  await expect.poll(() => drawnUnder(other, b!.key)).toBe(a!.key);
+  await other.close();
+  await page.reload();
+  await expect(row(page, b!.key)).toBeVisible();
+  expect(await drawnUnder(page, b!.key)).toBe(a!.key);
+});
+
+test("display only: the page still says whom it works for, and the parent's list says placed by you", async ({
+  page,
+  request,
+}) => {
+  const tag = randomUUID().slice(0, 6);
+  const [p, q] = await sessions(request, [{ title: `Tree ${tag} asker` }, { title: `Tree ${tag} other` }]);
+  const [k] = await sessions(request, [{ title: `Tree ${tag} asked`, harness: "codex", asks: p!.key }]);
+  // The asked one, put under another session by hand.
+  expect((await request.patch(ARRANGEMENT, { data: { placed: { [k!.key]: q!.key } } })).status()).toBe(200);
+  await openPage(page, sessionUrl("codex", k!.id));
+  // Its page says whom it really works for.
+  await expect(page.locator(".sess-for")).toContainText(`Tree ${tag} asker`);
+  // The session it was placed under lists it, saying how it got there.
+  await openPage(page, sessionUrl("claude-code", q!.id));
+  const placedRow = page.locator(`section.kids li.kids-row[data-kid="${k!.key}"]`);
+  await expect(placedRow.locator(".kids-how")).toHaveText("placed by you");
+  // The real parent's list still has it as asked, with no such words.
+  await openPage(page, sessionUrl("claude-code", p!.id));
+  const realRow = page.locator(`section.kids li.kids-row[data-kid="${k!.key}"]`);
+  await expect(realRow).toBeVisible();
+  await expect(realRow.locator(".kids-how")).toHaveCount(0);
+});
+
+test.describe("the phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test("has no list, and its menu still pins and moves", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [a] = await sessions(request, [{ title: `Tree ${tag} phone` }]);
+    await openPage(page, "/");
+    await expect(page.locator(".stree")).toHaveCount(0);
+    const card = page.locator(`article.card[data-flip="${a!.key}"]`);
+    await expect(card).toBeVisible();
+    // A finger held on the row: its menu, as a sheet.
+    const sheet = page.locator(".menu-sheet");
+    await expect(async () => {
+      await card.locator(".card-title").evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        el.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            bubbles: true,
+            pointerType: "touch",
+            clientX: r.left + 4,
+            clientY: r.top + 4,
+          }),
+        );
+      });
+      await expect(sheet.getByRole("menuitem", { name: "Pin", exact: true })).toBeVisible({ timeout: 2_000 });
+    }).toPass();
+    // The finger lifts: its click is the hold's, not a tap on the menu (ContextMenu.tsx).
+    await page.evaluate(() => {
+      document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "touch" }));
+      document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    await sheet.evaluate((el) => Promise.all(el.getAnimations().map((x) => x.finished)));
+    await expect(sheet.getByRole("menuitem", { name: "Move under…" })).toBeVisible();
+    await sheet.getByRole("menuitem", { name: "Pin", exact: true }).click();
+    await expect.poll(async () => (await arrangement(request)).pinned).toEqual([a!.key]);
+  });
+});

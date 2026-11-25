@@ -1,0 +1,463 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the sidebar's sessions (components/SessionTree.tsx) ---------- */
+/* Under the pages, set off by the sidebar's own hairline: New session, then Pinned and
+   Sessions under the section labels' tier, each a tree of one-line rows. A row is the
+   page rows' size and type: the agent's mark where a page has its glyph, the title cut at
+   its end, a small computer mark, the state's lamp in a fixed slot at the end (so a
+   spinner never moves the title). Children sit 16 px in, on one hairline rail from the
+   parent's mark down. The open session's row has the page rows' fill. Only the rows
+   scroll; the pages above and the usage and foot below stay put. A touch screen with a
+   sidebar (styles/regular.css) has its 44 pt rows. */
+
+/* The pages and the sessions scroll as one, as a Mac's sidebar does; the head, the usage
+   lines and the foot stay put. */
+.rail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+.rail .rail-scroll > .rail-nav {
+  flex: none;
+  min-height: auto;
+  overflow: visible;
+}
+.rail > .rail-group--tree {
+  flex: none;
+  margin: 0 16px;
+}
+.stree {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
+.stree-new {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--side-row);
+  margin: 6px 8px 0;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  text-align: left;
+  transition: background-color var(--dur-release) linear;
+}
+.stree-new-glyph {
+  flex: none;
+  color: var(--fg-3);
+}
+@media (hover: hover) {
+  .stree-new:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.stree-new:active {
+  background: var(--press);
+  transition: none;
+}
+.stree-new:focus-visible {
+  outline-offset: -2px;
+}
+
+.stree-scroll {
+  position: relative;
+  padding: 0 8px 8px;
+}
+.stree-section {
+  margin-top: 8px;
+}
+/* The section labels' tier (styles/shell.css .rail-section), as tall as a pointer needs. */
+.stree-label {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  margin: 0;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.stree-none {
+  margin: 0;
+  padding: 2px 8px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+
+.stree-list,
+.stree-kids {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stree-item {
+  position: relative;
+}
+/* Above the rows they pass while they make room (lib/motion.ts useFlip). */
+.stree-item[data-flip-moving] {
+  z-index: 1;
+}
+
+.stree-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--side-row);
+  padding: 0 6px 0 calc(8px + var(--lvl, 0) * 16px);
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  text-decoration: none;
+  -webkit-touch-callout: none;
+  transition: background-color var(--dur-release) linear;
+}
+.stree-row:focus-visible {
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .stree-row:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.stree-row:active {
+  background: var(--press);
+  transition: none;
+}
+.stree-row[data-open],
+.stree-row[data-open]:hover,
+.stree-row[data-menu-open] {
+  background: var(--sel);
+  color: var(--fg);
+}
+.stree-row[data-state="done"]:not([data-open], :hover) {
+  color: var(--fg-3);
+}
+
+/* The agent's mark, in a 16 px cell where a page row has its glyph. */
+.stree-lead {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-3);
+}
+.stree-lead .glyph-wrap {
+  display: grid;
+  place-items: center;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.stree-row[data-open] .stree-lead {
+  color: var(--fg);
+}
+/* A parent's disclosure takes the mark's cell under the pointer and the keyboard, and
+   stays while it is folded: the mark gives way, nothing beside it moves. */
+.stree-disc {
+  position: absolute;
+  inset: -4px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-inner);
+  color: var(--fg-2);
+  opacity: 0;
+  cursor: default;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.stree-disc svg {
+  rotate: 90deg;
+  transition: rotate var(--dur-fast) var(--ease-out);
+}
+.stree-disc[data-folded] svg {
+  rotate: 0deg;
+}
+@media (hover: hover) {
+  .stree-disc:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+  .stree-row:hover .stree-disc {
+    opacity: 1;
+  }
+  .stree-row[data-has-kids]:hover .stree-lead .glyph-wrap {
+    opacity: 0;
+  }
+}
+.stree-row:focus-visible .stree-disc,
+.stree-disc[data-folded] {
+  opacity: 1;
+}
+.stree-row[data-has-kids]:focus-visible .stree-lead .glyph-wrap,
+.stree-row:has(.stree-disc[data-folded]) .stree-lead .glyph-wrap {
+  opacity: 0;
+}
+
+.stree-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stree-away {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 16px;
+  margin-left: -2px;
+  color: var(--fg-4);
+}
+/* The lamp: always its 16 px, empty or not, so the title ends at one x. */
+.stree-lamp {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+/* The rail: one hairline from under the parent's mark down past its last child. */
+.stree-kids {
+  position: relative;
+}
+.stree-kids::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 6px;
+  left: calc(15px + var(--lvl, 0) * 16px);
+  width: var(--hairline);
+  background: var(--line-2);
+  pointer-events: none;
+}
+
+/* Show N more under a parent, and Show more under the list: quiet, a pointer's 24 px. */
+.stree-more,
+.stree-more-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  border-radius: var(--radius);
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.stree-more {
+  padding-left: calc(8px + var(--lvl, 0) * 16px + 24px);
+}
+.stree-more-all {
+  width: 100%;
+  padding: 0 8px 0 32px;
+  text-align: left;
+}
+@media (hover: hover) {
+  .stree-more:hover,
+  .stree-more-all:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.stree-more:focus-visible,
+.stree-more-all:focus-visible {
+  outline-offset: -2px;
+}
+.stree-more-count {
+  color: var(--fg-4);
+}
+
+/* A row that left while the list was held still: where it was, quiet, until the hand leaves. */
+.stree-item[data-gone] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* ----- the drag ----- */
+
+.stree[data-dragging],
+.stree[data-dragging] * {
+  cursor: grabbing;
+}
+/* Its place stays as a quiet gap; what hangs under it waits, faded. */
+.stree-item[data-lifted] > .stree-row {
+  background: var(--hover);
+}
+.stree-item[data-lifted] > .stree-row > * {
+  visibility: hidden;
+}
+.stree-item[data-lifted] > .stree-kids {
+  opacity: 0.4;
+}
+/* On a row: under it. */
+.stree-row[data-target],
+.stree-label[data-target],
+.stree-pin-zone[data-target] {
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1.5px var(--fg-2);
+  color: var(--fg);
+}
+/* Between top-level rows: the line, from the top-level mark to the list's end. */
+.stree-line {
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 10px;
+  z-index: 2;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--fg);
+  pointer-events: none;
+}
+.stree-line::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -6px;
+  width: 4px;
+  height: 4px;
+  border: 2px solid var(--fg);
+  border-radius: 50%;
+  background: var(--chrome);
+}
+.stree-line[hidden] {
+  display: none;
+}
+/* Nothing pinned yet: while a row is held up, New session's place is where it is pinned. */
+.stree-pin-zone {
+  box-shadow: inset 0 0 0 var(--hairline) var(--line-2);
+  color: var(--fg-3);
+}
+/* The lifted row, small, under the pointer: its mark and title. */
+.stree-chip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tip);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  color: var(--fg);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  pointer-events: none;
+  animation: stree-chip-in var(--dur-fast) var(--ease-out) both;
+}
+.stree-chip .glyph-wrap {
+  color: var(--fg-3);
+}
+.stree-chip-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes stree-chip-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stree-chip {
+    animation: none;
+  }
+  .stree-disc,
+  .stree-disc svg,
+  .stree-lead .glyph-wrap {
+    transition: none;
+  }
+}
+
+/* ----- a touch screen's sidebar: 44 pt rows (styles/regular.css) ----- */
+
+.stree--touch .stree-new {
+  gap: 12px;
+  height: 44px;
+  margin: 8px 0 0;
+  padding: 0 12px;
+  color: var(--fg);
+  font-size: max(1rem, 16px);
+}
+.stree--touch .stree-new-glyph {
+  width: 20px;
+  height: 20px;
+}
+.stree--touch .stree-scroll {
+  padding: 0 0 8px;
+}
+.stree--touch .stree-label {
+  height: 32px;
+  padding: 0 12px;
+  font-size: var(--text-sm);
+}
+.stree--touch .stree-row {
+  gap: 12px;
+  height: 44px;
+  padding: 0 0 0 calc(12px + var(--lvl, 0) * 20px);
+  color: var(--fg);
+  font-size: max(1rem, 16px);
+}
+.stree--touch .stree-row[data-state="done"]:not([data-open]) {
+  color: var(--fg-2);
+}
+.stree--touch .stree-lead {
+  width: 20px;
+  height: 20px;
+}
+.stree--touch .stree-lamp {
+  width: 20px;
+}
+/* The disclosure at the row's end, a finger's 44 pt, always there. */
+.stree--touch .stree-disc {
+  position: static;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-left: -8px;
+  opacity: 1;
+}
+.stree--touch .stree-row:has(.stree-disc[data-folded]) .stree-lead .glyph-wrap {
+  opacity: 1;
+}
+.stree--touch .stree-row:not([data-has-kids]) {
+  padding-right: 8px;
+}
+.stree--touch .stree-kids::before {
+  left: calc(21px + var(--lvl, 0) * 20px);
+}
+.stree--touch .stree-more {
+  height: 36px;
+  padding-left: calc(12px + var(--lvl, 0) * 20px + 32px);
+  font-size: var(--text-sm);
+}
+.stree--touch .stree-more-all {
+  height: 36px;
+  padding-left: 44px;
+  font-size: var(--text-sm);
+}
+.stree--touch .stree-line {
+  left: 18px;
+  right: 4px;
+}

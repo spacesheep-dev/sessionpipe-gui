@@ -204,8 +204,9 @@ const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
  *  its last commit (a window resized, a phone unfolded or turned): its rows are laid out
  *  anew, and none of them went anywhere. (A list that was hidden then had no width: shown,
  *  its rows come in as new ones do.) Off under reduced motion, and past `max` rows (a
- *  long list just snaps). */
-export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
+ *  long list just snaps). `move` sets a list's own travel time (the sidebar's tree makes
+ *  room faster than the board slides). */
+export function useFlip(ref: RefObject<HTMLElement | null>, max = 80, o: { move?: number } = {}): void {
   /** Each row's layout top (no transform), relative to the container, at the last commit. */
   const prev = useRef<Map<string, number> | null>(null);
   /** The container's width at the last commit; 0 while it had no box. */
@@ -241,7 +242,7 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
     const before = prev.current;
     prev.current = now;
     if (!before || !motion || rewrapped) return;
-    const slow = tokenMs("--dur-slow", 280);
+    const slow = o.move ?? tokenMs("--dur-slow", 280);
     const dur = tokenMs("--dur", 200);
     const live = new Map<string, Animation>();
     for (const el of els) {

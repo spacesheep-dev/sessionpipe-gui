@@ -17,6 +17,18 @@ names in the Inbox.
 
 ### Added
 
+- **The sidebar lists your sessions as a tree you can arrange.** Under the pages, New
+  session, then Pinned and Sessions: one line a session, its agent's mark, its title, a
+  small computer mark where it runs elsewhere, and its state at the end (the turning ring
+  while it works, the orange disc while it needs you). A session another one asked or ran
+  sits under it on one rail; a parent folds, and stays folded on this device. The list is
+  the Board's, in the Board's order, less what you hid: thirty, then Show more. Drag a row
+  onto another to put it under it, between rows to bring it to the top level, onto Pinned
+  to pin it; Esc puts it back, and every move has Undo. The keys walk the tree, and every
+  session's menu, on the phone too, has Pin, Move under… and Move to top level. The Board
+  nests the same way, and every device shows the same arrangement. It is how you see the
+  tree, nothing more: nothing is sent to a computer, and a session's page still says whom
+  it works for; a session you placed under another is listed there as "placed by you".
 - **A session's page lists the sessions it asked.** Under the bar, "Asked sessions": each
   agent it asked or launched, with its state, its agent, its title, the computer it runs
   on and when it last moved; one that needs you first, five and "Show all". A row opens
