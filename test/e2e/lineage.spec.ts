@@ -8,10 +8,12 @@
 // badge's (a subagent's own session too, its agent row marked even in a folded tree); a
 // parent set to Never quiets the session it asked. A child's row on the board names the
 // computer it runs on, and the Inbox row of its prompt names the session it works for.
+// A run a person's rule made (sessionpipe triggers) says so on its page, started or
+// continued, in words that are no link, and its card carries the rule's name.
 // Desktop only (a finger's: mobile.spec).
 import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
-import { askedPair, kidBoxes, openBoard, openPage } from "./helpers.js";
+import { askedPair, fits, kidBoxes, metaParts, openBoard, openPage, postRuled } from "./helpers.js";
 
 test.skip(({ isMobile }) => isMobile, "desktop project");
 
@@ -24,9 +26,94 @@ interface Snap {
     delegatedBy?: string;
     machine?: string;
     delegations?: { via: string; harness: string; to?: string; endedAt?: string; relayed?: string }[];
+    triggeredBy?: string;
+    triggeredFrom?: string;
   }[];
 }
 const snap = async (page: Page): Promise<Snap> => (await (await page.request.get("/api/ui/snapshot")).json()) as Snap;
+
+test("a run a rule made says so: started or continued by its trigger, words and no link; its card names the rule", async ({
+  page,
+}) => {
+  await openPage(page, "/");
+  // The demo's two (another spec may post runs of its own rules meanwhile).
+  const ruled = async () =>
+    (await snap(page)).sessions.filter((s) => s.triggeredBy === "card-todo" || s.triggeredBy === "monday-report");
+  await expect.poll(async () => (await ruled()).length, { timeout: 60_000 }).toBe(2);
+  const all = await ruled();
+  const card = all.find((s) => s.triggeredBy === "card-todo")!;
+  const weekly = all.find((s) => s.triggeredBy === "monday-report")!;
+  expect(card.triggeredFrom).toBe("start");
+  expect(weekly.triggeredFrom).toBe("continue");
+  for (const [s, sentence, did] of [
+    [card, "Started by trigger card-todo", "started"],
+    [weekly, "Continued by trigger monday-report", "continued"],
+  ] as const) {
+    await openPage(page, `/s/${s.harness}/${s.id}`);
+    const line = page.locator(".sess-where .sess-trigger .chip");
+    await expect(line).toBeVisible();
+    await expect(line).toHaveAttribute("data-text", sentence);
+    // Where the rule lives and how to see it there (the computer's name isolated); the
+    // receiver never sees the rule, so no link anywhere.
+    const tip = `A rule named ${s.triggeredBy} on \u2068${s.machine}\u2069 ${did} this session. Rules are made, paused and removed only at that computer. To see them there: sessionpipe trigger list`;
+    await expect(line).toHaveAttribute("data-tip", tip);
+    await expect(line.locator("a")).toHaveCount(0);
+    expect(await line.evaluate((el) => el.closest("a"))).toBeNull();
+    // Whole while the line holds it: at 1440 it does.
+    expect(await fits(page.locator(".sess-where").first())).toBe(true);
+    await expect(line.locator(".midcut-text")).toHaveText(sentence);
+    // Without a mouse: a stop for the keyboard, where the app's tooltip says it at once.
+    await page.keyboard.press("Shift");
+    await line.focus();
+    await expect(page.locator(".tip .tip-name")).toHaveText(tip);
+  }
+  // A session no rule ran says nothing of the kind.
+  const plain = (await snap(page)).sessions.find((s) => !s.triggeredBy && !s.delegatedBy)!;
+  await openPage(page, `/s/${plain.harness}/${plain.id}`);
+  await expect(page.locator(".sess-where").first()).toBeVisible();
+  await expect(page.locator(".sess-trigger")).toHaveCount(0);
+
+  await openBoard(page);
+  for (const s of [card, weekly]) {
+    const meta = page.locator(`article.card[data-flip="${s.key}"] .card-meta`);
+    const mark = meta.locator(".card-trigger");
+    await expect(mark).toHaveAttribute("title", `trigger ${s.triggeredBy}`);
+    // Whole when the line holds it all, which a desktop row with a short name does.
+    expect(await fits(meta)).toBe(true);
+    await expect(mark.locator(".midcut-text")).toHaveText(`trigger ${s.triggeredBy}`);
+  }
+  // A card no rule ran has no mark.
+  await expect(page.locator(`article.card[data-flip="${plain.key}"] .card-trigger`)).toHaveCount(0);
+});
+
+test("a rule's 40-character name on a desktop row: cut in its middle past 18em, ending on the row's right edge as the others do", async ({
+  page,
+  request,
+}) => {
+  const long = `rot-${randomUUID().slice(0, 6)}-nightly-certs-staging-eu-west`;
+  const run = await postRuled(request, { rule: long, repo: "github.com/acme/infra" });
+  try {
+    await openBoard(page);
+    const card = page.locator(`article.card[data-flip="claude-code:${run.id}"]`);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    const meta = card.locator(".card-meta");
+    const name = (await metaParts(meta)).find((p) => p.cls.includes("card-trigger"))!;
+    expect(name.cut).toBe(true);
+    const [head, tail] = name.shown.slice("trigger ".length).split("…");
+    expect(long.startsWith(head!) && long.endsWith(tail!)).toBe(true);
+    // Its text ends where its box does, on the row's right edge, as a row's whole meta does.
+    const edges = await card.evaluate((el) => ({
+      meta: el.querySelector(".card-meta")!.getBoundingClientRect().right,
+      time: el.querySelector(".card-time")!.getBoundingClientRect().right,
+    }));
+    expect(name.textRight).toBeLessThanOrEqual(name.right + 0.5);
+    expect(name.textRight).toBeGreaterThanOrEqual(name.right - 0.5);
+    expect(Math.abs(name.right - edges.meta)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(edges.meta - edges.time)).toBeLessThanOrEqual(0.5);
+  } finally {
+    await run.end();
+  }
+});
 
 /** The demo's asking session (its delegation has reached the receiver) and the asked one. */
 async function lineage(page: Page) {

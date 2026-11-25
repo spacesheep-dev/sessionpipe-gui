@@ -18,7 +18,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { copyText } from "../lib/clipboard";
-import { endCuts, harnessMark, midCut, STATE_HINT, STATE_LABEL } from "../lib/format";
+import { endCuts, harnessMark, leadMidCut, STATE_HINT, STATE_LABEL } from "../lib/format";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
 import { ago, durCoarse, ms, since, tickFor, useNow } from "../lib/time";
 import { Select } from "./Select";
@@ -139,9 +139,31 @@ export function Chip({
  *  track) and is always laid out from the whole text (styles/shared.css `.midcut::before`),
  *  so what is cut never changes the room it is cut to. The line drawn over it is measured
  *  in fractional pixels, again when the box changes width and once the fonts are in. The
- *  whole text is its tooltip and what a screen reader reads. */
-export function MidCut({ text, className }: { text: string; className?: string }) {
-  return <CutChip text={text} className={className} count={[...text].length - 1} at={(n) => midCut(text, n)} />;
+ *  whole text is its tooltip and what a screen reader reads. `lead` ("trigger ") is always
+ *  drawn whole, and only the text after it is cut (lib/format.ts leadMidCut). With `tip`
+ *  the chip is a stop of its own for the keyboard, and the app's tooltip (Tip.tsx, at once
+ *  on keyboard focus) says `tip` in place of the browser's: never inside a link or a row
+ *  that is one tab stop. */
+export function MidCut({
+  lead = "",
+  text,
+  className,
+  tip,
+}: {
+  lead?: string;
+  text: string;
+  className?: string;
+  tip?: string;
+}) {
+  return (
+    <CutChip
+      text={lead + text}
+      className={className}
+      count={[...text].length - 1}
+      at={(n) => leadMidCut(lead, text, n)}
+      tip={tip}
+    />
+  );
 }
 
 /** The same chip cut at its end, after the last whole word that fits (or, for a text of
@@ -159,11 +181,13 @@ function CutChip({
   className,
   count,
   at,
+  tip,
 }: {
   text: string;
   className?: string;
   count: number;
   at: (n: number) => string;
+  tip?: string;
 }) {
   const cutAt = useRef(at);
   cutAt.current = at;
@@ -227,7 +251,16 @@ function CutChip({
   const shown = fit.text === text ? fit.shown : text;
   const cut = shown !== text;
   return (
-    <span ref={box} className={`chip midcut ${className ?? ""}`} title={text} data-text={text}>
+    <span
+      ref={box}
+      className={`chip midcut ${className ?? ""}`}
+      // With a tip, an empty title: no line's own tooltip shows through from around it.
+      title={tip ? "" : text}
+      data-text={text}
+      data-tip={tip}
+      data-tip-wrap={tip ? "" : undefined}
+      tabIndex={tip ? 0 : undefined}
+    >
       <span className="midcut-text" ref={line} aria-hidden={cut || undefined}>
         {shown}
       </span>

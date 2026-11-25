@@ -349,6 +349,11 @@
   overflow: hidden;
   white-space: nowrap;
 }
+/* The part of a line of facts that gives way first, gone whole once it would be a stub
+   (lib/giveWay.ts). */
+[data-give-way][data-gone] {
+  display: none;
+}
 .chip--link {
   color: var(--fg-2);
 }

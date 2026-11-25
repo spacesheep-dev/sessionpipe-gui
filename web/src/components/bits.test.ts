@@ -6,6 +6,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { leadMidCut } from "../lib/format";
 import { EndCut, MidCut, WithName } from "./bits";
 
 describe("MidCut", () => {
@@ -13,6 +14,31 @@ describe("MidCut", () => {
     expect(renderToStaticMarkup(createElement(MidCut, { text: "studio-mac", className: "kid-where" }))).toBe(
       '<span class="chip midcut kid-where" title="studio-mac" data-text="studio-mac"><span class="midcut-text">studio-mac</span></span>',
     );
+  });
+  // What it draws once measured is the page's to see (e2e: mobile.spec's 40-character
+  // rule); here, that a cut keeps the lead whole and cuts only the text after it.
+  it("cuts only the text after its lead, in the middle, keeping both of its ends", () => {
+    const name = "rot-0a1b2c-nightly-certs-staging-eu-west";
+    for (let n = 3; n < name.length; n++) {
+      const cut = leadMidCut("trigger ", name, n);
+      expect(cut.startsWith("trigger "), cut).toBe(true);
+      const [head, tail] = cut.slice("trigger ".length).split("…");
+      expect(tail, cut).toBeDefined();
+      expect(name.startsWith(head!), cut).toBe(true);
+      expect(name.endsWith(tail!), cut).toBe(true);
+      expect([...cut].length, cut).toBeLessThanOrEqual("trigger ".length + n);
+    }
+    expect(leadMidCut("trigger ", "card-todo", 9)).toBe("trigger card-todo");
+  });
+  it("with a tip, is a stop for the keyboard whose tooltip is the app's, not the browser's", () => {
+    const html = renderToStaticMarkup(
+      createElement(MidCut, { lead: "Started by trigger ", text: "card-todo", tip: "A rule named card-todo ran it." }),
+    );
+    expect(html).toContain('tabindex="0"');
+    expect(html).toContain('data-tip="A rule named card-todo ran it."');
+    expect(html).toContain("data-tip-wrap");
+    expect(html).toContain('title=""');
+    expect(html).toContain('data-text="Started by trigger card-todo"');
   });
 });
 

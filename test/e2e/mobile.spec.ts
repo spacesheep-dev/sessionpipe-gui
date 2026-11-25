@@ -18,7 +18,20 @@ import {
   seenSetupHere,
   sinkToken,
 } from "./control-helpers.js";
-import { askedPair, composer, EVENTS, INFO, kidBoxes, openBoard, openPage, sessionUrl, ulid } from "./helpers.js";
+import {
+  askedPair,
+  composer,
+  EVENTS,
+  fits,
+  INFO,
+  kidBoxes,
+  metaParts,
+  openBoard,
+  openPage,
+  postRuled,
+  sessionUrl,
+  ulid,
+} from "./helpers.js";
 
 /** A finger down the page from its top, as touch events (page.touchscreen only taps):
  *  lands at y 200, moves `by` px in steps, and stays down until `lift` is called. */
@@ -559,6 +572,153 @@ test.describe("phone", () => {
       await expect(page).toHaveURL(new RegExp(sessionUrl("codex", pair.child.id)));
     } finally {
       await pair.end();
+    }
+  });
+
+  test("a rule's mark on a phone: nothing cut while the line holds it; past that the repo goes first, then the name, cut in its middle, title and state in view; the page the same", async ({
+    page,
+    request,
+  }) => {
+    // 40 characters, the longest name a rule can have, and a nine-character one.
+    const long = `rot-${randomUUID().slice(0, 6)}-nightly-certs-staging-eu-west`;
+    const short = `ab-${randomUUID().slice(0, 6)}`;
+    expect(long).toHaveLength(40);
+    expect(short).toHaveLength(9);
+    // And a line that cannot hold it all though the name could keep its width: a long repo.
+    const mid = `weekly-backfill-${randomUUID().slice(0, 4)}`;
+    const a = await postRuled(request, { rule: short, repo: "github.com/acme/infra" });
+    const b = await postRuled(request, { rule: long, repo: "github.com/acme/infra" });
+    const c = await postRuled(request, { rule: mid, repo: "github.com/acme/data-pipeline-backfills-eu" });
+    // A repo too long for the line beside a short name: it is cut, keeping a few characters.
+    const d = await postRuled(request, {
+      rule: `cd-${randomUUID().slice(0, 6)}`,
+      repo: "github.com/acme/infra-terraform-mod",
+    });
+    try {
+      await openBoard(page);
+      await page.addStyleTag({ content: ".toasts { display: none !important; }" });
+      for (const r of [a, b, c, d]) {
+        const card = page.locator(`article.card[data-flip="claude-code:${r.id}"]`);
+        await expect(card).toBeVisible({ timeout: 15_000 });
+        await card.scrollIntoViewIfNeeded();
+        const meta = card.locator(".card-meta");
+        await expect(meta.locator(".card-trigger")).toHaveAttribute("title", `trigger ${r.rule}`);
+        const whole = await fits(meta);
+        const parts = await metaParts(meta);
+        const part = (c: string) => parts.find((p) => p.cls.includes(c))!;
+        const [machine, repo, name] = [part("card-machine"), part("card-repo"), part("card-trigger")];
+        expect(name.whole).toBe(`trigger ${r.rule}`);
+        if (whole) for (const p of parts) expect(p.cut || p.gone, `${p.cls} on a line that holds it`).toBe(false);
+        else {
+          // The repo gives way first, the name next, the computer last.
+          if (name.cut) expect(repo.gone, "the name is cut only once the repo has gone").toBe(true);
+          if (machine.cut) expect(name.cut).toBe(true);
+        }
+        // A repo that stays is never a stub: whole, or a few characters' room (GIVE_WAY_EM).
+        if (!repo.gone && repo.cut) {
+          const stub = await meta.locator(".card-repo").evaluate((el) => ({
+            width: el.getBoundingClientRect().width,
+            font: Number.parseFloat(getComputedStyle(el).fontSize),
+          }));
+          expect(stub.width).toBeGreaterThanOrEqual(3 * stub.font);
+        }
+        // The long repo cannot stay whole: it is the part that gives way, cut or gone (and the
+        // name is cut only once it has gone, above).
+        if (r === c) {
+          expect(whole).toBe(false);
+          expect(repo.cut || repo.gone).toBe(true);
+        }
+        // The 40-character name never fits its 18em: cut, "trigger " whole, both ends kept.
+        if (r === b) {
+          expect(name.cut).toBe(true);
+          expect(name.shown.startsWith("trigger ")).toBe(true);
+          const [head, tail] = name.shown.slice("trigger ".length).split("…");
+          expect(tail).toBeDefined();
+          expect(head!.length).toBeGreaterThan(0);
+          expect(long.startsWith(head!)).toBe(true);
+          expect(long.endsWith(tail!)).toBe(true);
+        }
+        // What it draws stays in its box, and a cut name still ends on the row's right edge.
+        expect(name.textRight).toBeLessThanOrEqual(name.right + 0.5);
+        if (name.cut) expect(name.textRight).toBeGreaterThanOrEqual(name.right - 1);
+        // The row: the mark inside the card and the screen, the title before the time, the
+        // state and the time on screen. Read in one frame.
+        const box = await card.evaluate((el: HTMLElement) => {
+          const r = (sel: string) => {
+            const b = el.querySelector(sel)!.getBoundingClientRect();
+            return { left: b.left, right: b.right, width: b.width };
+          };
+          return {
+            card: r(".card-link"),
+            mark: r(".card-trigger"),
+            title: r(".card-title"),
+            state: r(".card-state"),
+            time: r(".card-time"),
+            vw: window.innerWidth,
+          };
+        });
+        expect(box.mark.right).toBeLessThanOrEqual(Math.min(box.card.right, box.vw) + 0.5);
+        expect(box.mark.left).toBeGreaterThanOrEqual(box.card.left);
+        expect(box.title.width).toBeGreaterThan(0);
+        expect(box.title.right).toBeLessThanOrEqual(box.time.left + 0.5);
+        expect(box.state.right).toBeLessThanOrEqual(box.title.left + 0.5);
+        expect(box.time.right).toBeLessThanOrEqual(box.vw);
+        await expect(card.locator(".card-title")).toHaveText(r.title);
+        await expect(card.locator(".card-state")).toBeInViewport();
+        await expect(card.locator(".card-time")).toBeInViewport();
+      }
+      await noSidewaysScroll(page);
+
+      // The page under the long name: the sentence in words, the name cut in its middle
+      // with its end kept, the repo gone whole rather than a stub, all inside the screen.
+      await openPage(page, `/s/claude-code/${b.id}`);
+      const where = page.locator(".sess-where").first();
+      const chip = where.locator(".sess-trigger .chip");
+      await expect(chip).toBeVisible();
+      await expect(chip).toHaveAttribute("data-text", `Started by trigger ${long}`);
+      await expect(chip).toHaveAttribute(
+        "data-tip",
+        new RegExp(`^A rule named ${long} on \u2068build-box\u2069 started this session\\. `),
+      );
+      const pageParts = await metaParts(where);
+      const sentence = pageParts.find((p) => p.cls.includes("sess-trigger"))!;
+      const pageRepo = pageParts.find((p) => p.cls.includes("sess-repo"));
+      expect(await fits(where)).toBe(false);
+      expect(sentence.cut).toBe(true);
+      expect(sentence.shown.startsWith("Started by trigger ")).toBe(true);
+      const [head, tail] = sentence.shown.slice("Started by trigger ".length).split("…");
+      expect(tail).toBeDefined();
+      expect(long.startsWith(head!)).toBe(true);
+      expect(long.endsWith(tail!)).toBe(true);
+      expect(tail!.length).toBeGreaterThan(0);
+      // The name is cut, so the repo went first, whole: no "· …" left of it.
+      expect(pageRepo?.gone ?? true).toBe(true);
+      expect(await where.locator(".sess-repo:visible").count()).toBe(0);
+      expect(sentence.textRight).toBeLessThanOrEqual(sentence.right + 0.5);
+      const end = await where.evaluate((el) => ({ right: el.getBoundingClientRect().right, vw: window.innerWidth }));
+      expect(end.right).toBeLessThanOrEqual(end.vw);
+      await noSidewaysScroll(page);
+      // The same order on the page: with the long repo, the sentence is whole or the repo
+      // has gone, never both cut.
+      await openPage(page, `/s/claude-code/${c.id}`);
+      const cWhere = page.locator(".sess-where").first();
+      await expect(cWhere.locator(".sess-trigger .chip")).toHaveAttribute("data-text", `Started by trigger ${mid}`);
+      const cParts = await metaParts(cWhere);
+      const cSentence = cParts.find((p) => p.cls.includes("sess-trigger"))!;
+      const cRepo = cParts.find((p) => p.cls.includes("sess-repo"))!;
+      if (cSentence.cut) expect(cRepo.gone, "the sentence is cut only once the repo has gone").toBe(true);
+      if (!cRepo.gone && cRepo.cut) {
+        const stub = await cWhere.locator(".sess-repo").evaluate((el) => ({
+          width: el.getBoundingClientRect().width,
+          font: Number.parseFloat(getComputedStyle(el).fontSize),
+        }));
+        expect(stub.width).toBeGreaterThanOrEqual(3 * stub.font);
+      }
+    } finally {
+      await a.end();
+      await b.end();
+      await c.end();
+      await d.end();
     }
   });
 });

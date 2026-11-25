@@ -333,6 +333,45 @@
   position: relative;
   min-width: 0;
 }
+/* A rule ran it ("trigger card-todo"): the computer, the repo, then the rule's name, in the
+   same tier and with the same dots between. Nothing is cut while the line holds it all: no
+   share of a width (the line is as wide as what it holds, so a share would cut what fits),
+   only lengths and the order in which the parts give way when it does not: the repo first
+   (it leaves whole below a few characters, lib/giveWay.ts), then the name, cut in its
+   middle with "trigger " kept (MidCut), the computer whole up to 16em. Past 18em the name is cut
+   whatever the room; the whole of it is its tooltip and what a screen reader reads. */
+.card-meta:has(> .card-trigger) {
+  max-width: 500px;
+}
+.card-meta > .card-machine {
+  flex: none;
+  max-width: 16em;
+}
+.card-meta > .card-repo {
+  flex: 0 100 auto;
+  min-width: 0;
+  margin-left: -2px;
+}
+.card-sep {
+  flex: none;
+  margin-inline: -2px;
+}
+.card-meta > .chip.card-trigger {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 18em;
+  line-height: inherit;
+}
+/* While the repo is on the line the name keeps its width: a share of the shortfall, however
+   small, would cut it before the repo had gone. */
+.card-meta:has(> .card-repo:not([data-gone])) > .chip.card-trigger {
+  flex-shrink: 0;
+}
+/* A cut name ends where a whole one would, on the row's right edge: what a cut leaves of
+   its box goes before it. */
+.card-meta > .card-trigger > .midcut-text {
+  text-align: right;
+}
 /* Advanced: turns and tools as two right-aligned columns before the time; errors only
    when there are some, and only those in red. */
 .card-foot {
@@ -879,7 +918,8 @@
     place-items: start center;
     padding-top: 11px;
   }
-  .card-meta {
+  .card-meta,
+  .card-meta:has(> .card-trigger) {
     justify-self: start;
     /* Its area, not its text: a long repo or branch is cut, never widens the row. */
     max-width: 100%;

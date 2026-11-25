@@ -169,6 +169,28 @@ html:has(.main > .session) {
 .sess-where > .sess-launch {
   max-width: max(40%, 14em);
 }
+/* "Started by trigger card-todo": words, not a link, whole while the line holds it. Where it
+   does not, the repo gives way first (gone whole below a few characters, lib/giveWay.ts),
+   then the rule's name, cut in its middle (MidCut), "Started
+   by trigger " kept. Lengths, not shares: the line is as wide as what it holds. */
+.sess-where > .sess-trigger {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 24em;
+}
+/* While the repo is on the line the sentence keeps its width: a share of the shortfall,
+   however small, would cut it before the repo had gone. */
+.sess-where:has(> .sess-repo:not([data-gone])) > .sess-trigger {
+  flex-shrink: 0;
+}
+.sess-trigger > .chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
 /* The phone: the meta is the line under the navigation bar. */
 .session > .bar + .bar-below {
   margin-top: -4px;

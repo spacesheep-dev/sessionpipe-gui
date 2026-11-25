@@ -477,6 +477,10 @@ export function midCut(s: string, max: number): string {
     .trimStart()}`;
 }
 
+/** `lead` whole, then `s` in at most `max` characters, cut in its middle (midCut): "trigger "
+ *  and a rule's name, whose end is what tells two rules apart. */
+export const leadMidCut = (lead: string, s: string, max: number): string => lead + midCut(s, max);
+
 /** The ways to cut `s` at its end with "…", shortest first, for a measure to take the
  *  longest that fits: after each whole word (punctuation before the cut dropped), and,
  *  shorter than the first word, after each character of it (a title with no spaces: CJK,

@@ -146,6 +146,65 @@ export function strandedMarks(el: Locator): Promise<number[]> {
 
 type Box = { x: number; y: number; width: number; height: number };
 
+/** Whether a one-line row of facts holds all its parts whole: its width with every part at
+ *  its whole width (each part's own box, as the layout sizes it from the whole text) is no
+ *  more than the width the layout gave it. Read in one frame, set back as it was. */
+export function fits(line: Locator): Promise<boolean> {
+  return line.evaluate((el: HTMLElement) => {
+    const given = el.getBoundingClientRect().width;
+    const was = el.getAttribute("style");
+    const gone = Array.from(el.querySelectorAll<HTMLElement>("[data-gone]"));
+    for (const g of gone) g.removeAttribute("data-gone");
+    el.style.setProperty("width", "max-content", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("flex", "none", "important");
+    const whole = el.getBoundingClientRect().width;
+    for (const g of gone) g.setAttribute("data-gone", "");
+    if (was === null) el.removeAttribute("style");
+    else el.setAttribute("style", was);
+    return whole <= given + 0.5;
+  });
+}
+
+/** What a row of facts with a rule's mark draws of each part: the text each would show
+ *  whole and what it shows, and whether a part left (`data-gone`). Read in one frame. */
+export function metaParts(line: Locator): Promise<
+  {
+    cls: string;
+    whole: string;
+    shown: string;
+    cut: boolean;
+    gone: boolean;
+    right: number;
+    textRight: number;
+  }[]
+> {
+  return line.evaluate((el: HTMLElement) =>
+    Array.from(el.children)
+      .filter((c): c is HTMLElement => c instanceof HTMLElement && !c.classList.contains("glyph-wrap"))
+      .filter((c) => !c.matches(".card-sep, [aria-hidden='true']"))
+      .map((c) => {
+        const chip = c.matches(".chip") ? c : c.querySelector<HTMLElement>(".chip");
+        const text = chip?.querySelector<HTMLElement>(".midcut-text");
+        const range = document.createRange();
+        if (text) range.selectNodeContents(text);
+        const whole = chip ? (chip.dataset.text ?? "") : (c.textContent ?? "");
+        const shown = text ? (text.textContent ?? "") : (c.textContent ?? "");
+        return {
+          cls: c.className,
+          whole,
+          shown,
+          // A chip is cut when it draws less than its text; an ellipsis span, when its text
+          // runs past its box.
+          cut: text ? shown !== whole : c.scrollWidth > c.clientWidth + 0.5,
+          gone: c.hasAttribute("data-gone"),
+          right: (chip ?? c).getBoundingClientRect().right,
+          textRight: text ? range.getBoundingClientRect().right : c.getBoundingClientRect().right,
+        };
+      }),
+  );
+}
+
 /** A Board kid row's box, its title's and its computer's, read in one frame: a card that
  *  slides to a new place (useFlip's translate) moves all three together, so two reads
  *  apart could see it half way. */
@@ -441,4 +500,53 @@ export function wellKnownProblems(doc: unknown): string[] {
     }
   }
   return out;
+}
+
+/** A Claude Code session on build-box that a rule named `rule` started, mid-turn, posted
+ *  the way its hooks send it (tier 1); `end()` ends it, so no other spec finds it. */
+export async function postRuled(
+  request: APIRequestContext,
+  o: { rule: string; repo: string },
+): Promise<{ id: string; rule: string; title: string; end: () => Promise<void> }> {
+  const { sinkToken: token } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  const id = randomUUID();
+  const title = "Rotate the staging certificates";
+  let seq = 0;
+  let clock = Date.now() - 20_000;
+  const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+    clock += 1000;
+    return {
+      protocol: 1,
+      id: ulid(clock),
+      type,
+      time: new Date(clock).toISOString(),
+      tier: 1,
+      harness: { name: "claude-code", version: "2.1.296", event: hook },
+      session: {
+        id,
+        seq: seq++,
+        machine: "build-box",
+        cwd: "~/work/infra",
+        repo: o.repo,
+        title,
+        title_source: "custom",
+        triggered_by: o.rule,
+      },
+      privacy: { rulesets: ["secrets@1"], pii: false },
+      data,
+    };
+  };
+  const post = async (events: unknown[]) => {
+    const res = await request.post(EVENTS, {
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "sessionpipe-protocol": "1" },
+      data: { events },
+    });
+    expect(res.status()).toBe(202);
+  };
+  await post([
+    ev("session.started", { source: "startup" }, "SessionStart"),
+    ev("turn.started", { turn_id: "t1", prompt_chars: 60 }, "UserPromptSubmit"),
+    ev("tool.started", { tool: "Bash", call_id: `toolu_${id.slice(0, 8)}`, turn_id: "t1" }, "PreToolUse"),
+  ]);
+  return { id, rule: o.rule, title, end: () => post([ev("session.ended", { reason: "exit" }, "SessionEnd")]) };
 }

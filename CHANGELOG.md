@@ -20,6 +20,14 @@ All notable changes to `sessionpipe-gui`. The format follows
   a prompt from a session another one asked, launched or ran as a subagent says "for" and
   that session's title after its own. A long computer name is cut in its middle, its start
   and end kept; a long title after "for" ends after a whole word.
+- **A session one of your rules ran says so.** When a sessionpipe trigger starts or
+  continues a session on your computer, the line under its title says "Started by trigger
+  card-todo" or "Continued by trigger card-todo" ("Run by trigger card-todo" when the
+  app did not see how that run began), and its card on the Board carries "trigger
+  card-todo" after where it runs. A long name is cut in its middle, after the repo has
+  made room. Its tooltip, also from the keyboard, says the rule lives on that computer
+  and is made, paused and removed only there (`sessionpipe trigger list`). Only the
+  rule's name reaches the app; nothing is allowed, hidden or sorted because of it.
 
 ### Fixed
 

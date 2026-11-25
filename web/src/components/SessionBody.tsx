@@ -93,6 +93,7 @@ import {
   sessionTitle,
   toolLabel,
 } from "../lib/format";
+import { useGiveWay } from "../lib/giveWay";
 import { labelMenu } from "../lib/labels";
 import { absoluteUrl, agentItems, askItem, copyItem, sessionItems } from "../lib/menus";
 import { reducedMotion, useFlip } from "../lib/motion";
@@ -110,6 +111,7 @@ import { JUMP_EVENT, openSplit, takeJump } from "../lib/split";
 import { agentTabKey } from "../lib/splitState";
 import { atTier, TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { ClockHold, clock, dur, ms, useNow } from "../lib/time";
+import { triggerWords } from "../lib/triggered";
 import {
   type AgentItem,
   type DelegationItem,
@@ -130,7 +132,7 @@ import { NEW_WORDS } from "../native/accountWords.new";
 import { HistoryOrMissing } from "../search/HistoryEntry";
 import { AgentGlyph, AgentNow, AgentText } from "./AgentRow";
 import { AskedSessions } from "./AskedSessions";
-import { CopyIconButton, HarnessGlyph, Redacted, Segmented, Since, Spinner, StateDot } from "./bits";
+import { CopyIconButton, HarnessGlyph, MidCut, Redacted, Segmented, Since, Spinner, StateDot } from "./bits";
 import { confirmAction, type MenuItem, type MenuList, MoreButton, openMenu, tidy, useContextMenu } from "./ContextMenu";
 import { answerable } from "./ControlStrip";
 import { LabelDot, useLabelKeys } from "./LabelDot";
@@ -1642,6 +1644,9 @@ function SessionMeta({
   // first; a `delegatedBy` session is not a subagent, so "for" never meets "parent".
   const parent = useSession(s.delegatedBy ?? "");
   const askedBy = s.delegatedBy ? splitKey(s.delegatedBy) : null;
+  const trigger = triggerWords(s);
+  const whereRef = useRef<HTMLSpanElement>(null);
+  useGiveWay(whereRef, !!trigger);
   const more = [
     STATE_LABEL[s.state],
     fact,
@@ -1661,7 +1666,7 @@ function SessionMeta({
     .filter(Boolean)
     .join(" · ");
   return (
-    <span className="sess-where" title={more} data-events={total}>
+    <span className="sess-where" title={more} data-events={total} ref={whereRef}>
       {askedBy && (
         <span className="sess-for">
           for{" "}
@@ -1676,7 +1681,11 @@ function SessionMeta({
           Copy of <Link to={copyOf.path}>{copyOf.title}</Link>
         </span>
       ) : (
-        place && <span className="sess-repo">{place}</span>
+        place && (
+          <span className="sess-repo" data-give-way={trigger ? "" : undefined}>
+            {place}
+          </span>
+        )
       )}
       {launcher && (
         <span className="sess-copy sess-launch">
@@ -1688,6 +1697,16 @@ function SessionMeta({
           ) : (
             <span title={launcher.title}>{launcher.title}</span>
           )}
+        </span>
+      )}
+      {/* A rule's run (session.triggered_by): words, not a link, since the receiver never
+          sees the rule. Whole while the line holds it; where it does not, the repo gives
+          way first (gone whole below a few characters), then the rule's name, cut in its
+          middle. A stop for the keyboard, whose tooltip (the app's, at once on focus) says
+          where the rule lives. Lineage, never authority. */}
+      {trigger && (
+        <span className="sess-trigger">
+          <MidCut lead={trigger.lead} text={trigger.name} tip={trigger.tip} />
         </span>
       )}
     </span>
