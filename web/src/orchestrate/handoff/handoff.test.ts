@@ -3,7 +3,7 @@
 // the picker opens, the prefilled text, the signed command (`reply_to` only with the
 // switch on, `from` never inside it), and the entry points' words.
 import type { MachineControl } from "@shared/api";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ControlError } from "../../control/api";
 import { commandString } from "../../control/command";
 import { sendErrorWords } from "../../control/words";
@@ -18,6 +18,7 @@ import {
   parseTarget,
   prefillText,
   REPLY_CUT,
+  sheetStart,
   targetValue,
 } from "./handoff";
 
@@ -89,6 +90,44 @@ describe("defaultTarget", () => {
       expect(parseTarget(targetValue(t))).toEqual(t);
     expect(parseTarget("")).toBeNull();
     expect(parseTarget("h:")).toBeNull();
+  });
+});
+
+describe("sheetStart", () => {
+  const others = [{ key: "codex:kid" }, { key: "codex:other" }];
+  const harnesses = ["claude-code", "codex"];
+  const draft = { text: "Keep this", target: "s:codex:other" };
+  const fallback = () => ({ kind: "new", harness: "codex" }) as const;
+
+  it("a Message opens on its session, and never reads the asking session's draft", () => {
+    const readDraft = vi.fn(() => draft);
+    expect(sheetStart({ to: "codex:kid", others, harnesses, readDraft, fallback })).toEqual({
+      draft: null,
+      target: { kind: "session", key: "codex:kid" },
+    });
+    expect(readDraft).not.toHaveBeenCalled();
+  });
+
+  it("a Message whose session may no longer be asked opens on nobody: not the draft's, not the default", () => {
+    const readDraft = vi.fn(() => draft);
+    expect(sheetStart({ to: "codex:gone", others, harnesses, readDraft, fallback })).toEqual({
+      draft: null,
+      target: null,
+    });
+    expect(readDraft).not.toHaveBeenCalled();
+  });
+
+  it("else the draft and its agent while it is there, else the default", () => {
+    expect(sheetStart({ others, harnesses, readDraft: () => draft, fallback })).toEqual({
+      draft,
+      target: { kind: "session", key: "codex:other" },
+    });
+    const gone = { text: "Keep this", target: "s:codex:gone" };
+    expect(sheetStart({ others, harnesses, readDraft: () => gone, fallback })).toEqual({
+      draft: gone,
+      target: { kind: "new", harness: "codex" },
+    });
+    expect(sheetStart({ others, harnesses, readDraft: () => null, fallback }).target).toEqual(fallback());
   });
 });
 

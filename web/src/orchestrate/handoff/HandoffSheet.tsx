@@ -56,6 +56,7 @@ import {
   lastReplyOf,
   parseTarget,
   prefillText,
+  sheetStart,
   type Target,
   targetValue,
 } from "./handoff";
@@ -110,32 +111,34 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   );
 
   // ----- the first values: the draft the sheet was closed on, else the defaults -----
-  // Aimed at a session (Message on a parent's list): that one, if it may be asked.
-  const aimed = open.to && others.some((s) => s.key === open.to) ? open.to : undefined;
-  const initial = useMemo(() => {
-    if (aimed) return { draft: null, target: { kind: "session", key: aimed } as Target };
-    const draft = open.reply === undefined ? readHandoffDraft(open.session) : null;
-    const fromDraft = draft ? parseTarget(draft.target) : null;
-    const valid =
-      fromDraft &&
-      (fromDraft.kind === "new" ? harnesses.includes(fromDraft.harness) : others.some((s) => s.key === fromDraft.key));
-    const target =
-      (valid ? fromDraft : null) ??
-      (session
-        ? defaultTarget({
-            harnesses,
-            selfHarness: session.harness,
-            sessions: others,
-            remembered: c ? readHandoffAgent(c.machineId) : null,
-          })
-        : null);
-    return { draft, target };
+  // Message on a parent's list (`open.to`) is its own path, decided once at open: aimed at
+  // that session or at nobody, and the asking session's draft is neither read, kept nor
+  // cleared (sheetStart; the draft's effect, `asked` and `discard` below).
+  const messaging = open.to !== undefined;
+  const initial = useMemo(
+    () =>
+      sheetStart({
+        to: open.to,
+        others,
+        harnesses,
+        readDraft: () => (open.reply === undefined ? readHandoffDraft(open.session) : null),
+        fallback: () =>
+          session
+            ? defaultTarget({
+                harnesses,
+                selfHarness: session.harness,
+                sessions: others,
+                remembered: c ? readHandoffAgent(c.machineId) : null,
+              })
+            : null,
+      }),
     // Once, at open: later stream frames must not move what was picked.
-  }, []);
+    [],
+  );
   const [target, setTarget] = useState<Target | null>(initial.target);
   const [bringBack, setBringBack] = useState(initial.draft?.bringBack ?? true);
   const [text, setText] = useState(
-    initial.draft?.text ?? (open.reply !== undefined && !aimed ? prefillText(open.reply) : ""),
+    initial.draft?.text ?? (open.reply !== undefined && !messaging ? prefillText(open.reply) : ""),
   );
   const [busy, setBusy] = useState(false);
   const [tap, setTap] = useState(false);
@@ -194,9 +197,9 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
 
   // ----- the prefill: once, from the session's last reply, unless it came with the open -----
   const lastReply = useRef<string | null>(open.reply ?? null);
-  const [replyKnown, setReplyKnown] = useState(open.reply !== undefined || !!aimed);
+  const [replyKnown, setReplyKnown] = useState(open.reply !== undefined || messaging);
   useEffect(() => {
-    if (!session || open.reply !== undefined || aimed) return;
+    if (!session || open.reply !== undefined || messaging) return;
     let on = true;
     const apply = (reply: string) => {
       if (!on) return;
@@ -214,9 +217,9 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
     // Once, at open.
   }, []);
 
-  // ----- the draft, kept while something was edited -----
+  // ----- the draft, kept while something was edited (not a Message's: see `messaging`) -----
   useEffect(() => {
-    if (!touched.current) return;
+    if (!touched.current || messaging) return;
     saveHandoffDraft(open.session, {
       text,
       ...(target ? { target: targetValue(target) } : {}),
@@ -225,7 +228,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
       ...(permission ? { permission } : {}),
       ...(model ? { model } : {}),
     });
-  }, [open.session, text, target, folder, bringBack, permission, model]);
+  }, [messaging, open.session, text, target, folder, bringBack, permission, model]);
 
   const close = () => closeHandoff();
   useFocusTrap(ref, !closing, { onClose: close, initial: "textarea, [data-ns-approve]" });
@@ -294,7 +297,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   // remembers is what was asked when it was pressed, never the sheet as it is now.
   const asked = (s: AskSent) => {
     if (s.target.kind === "new") rememberHandoffAgent(s.machineId, s.target.harness);
-    saveHandoffDraft(session.key, null);
+    if (!messaging) saveHandoffDraft(session.key, null);
     closeHandoff();
   };
   // Everything an ask is made of, as one string: a held ask goes the moment any of it
@@ -363,7 +366,7 @@ export function Sheet({ open, closing }: { open: HandoffTarget; closing: boolean
   };
 
   const discard = () => {
-    saveHandoffDraft(session.key, null);
+    if (!messaging) saveHandoffDraft(session.key, null);
     touched.current = true;
     setText("");
     setError(null);

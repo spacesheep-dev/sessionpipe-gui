@@ -65,6 +65,26 @@ export function defaultTarget(o: {
   return s ? { kind: "session", key: s.key } : null;
 }
 
+/** Where the sheet opens, once. A Message (`to`: a parent's list aimed at a session it
+ *  asked) opens on that session while it may be asked and on nobody once it may not:
+ *  never on the draft's agent or the default one, and the asking session's draft is not
+ *  read (the sheet neither keeps nor clears it either). Else the draft (`readDraft`), its
+ *  agent while that is still there, else `fallback` (defaultTarget). */
+export function sheetStart<D extends { target?: string }>(o: {
+  to?: SessionKey;
+  others: readonly Pick<Askable, "key">[];
+  harnesses: readonly string[];
+  readDraft: () => D | null;
+  fallback: () => Target | null;
+}): { draft: D | null; target: Target | null } {
+  if (o.to !== undefined)
+    return { draft: null, target: o.others.some((s) => s.key === o.to) ? { kind: "session", key: o.to } : null };
+  const draft = o.readDraft();
+  const t = draft ? parseTarget(draft.target) : null;
+  const valid = t && (t.kind === "new" ? o.harnesses.includes(t.harness) : o.others.some((s) => s.key === t.key));
+  return { draft, target: (valid ? t : null) ?? o.fallback() };
+}
+
 /** The one line of ours over the reply; the person edits it. */
 export const ASK_LINE = "Give a second opinion on the reply below. Point out what you'd do differently and why.";
 /** A reply longer than this is cut, with the cut marked on its own line. */

@@ -551,3 +551,59 @@ test("a parent's Asked sessions: each with its state, agent and computer, the on
   // One level: the child asked nobody, and a session that asked none has no list at all.
   await expect(page.locator("section.kids")).toHaveCount(0);
 });
+
+test("Message on an asked session leaves the parent's own kept Ask draft as it was", async ({ page }) => {
+  const name = `ho-msg-${tag()}`;
+  const m = await fakeDaemon(key, asking(name), { sinkToken: sink });
+  daemons.push(m);
+  const p = await postSession(sink, { machine: name, cwd: "/Users/e2e/code", title: `Parent ${name}` });
+  const kid = await postAsked(sink, {
+    machine: name,
+    harness: "codex",
+    title: "Draft the note",
+    parent: `${p.harness}:${p.id}`,
+    state: "working",
+  });
+  await page.goto(`${CONTROL_BASE}/s/${p.harness}/${p.id}`);
+  await expect(page.locator(".conn").first()).toHaveText("live");
+  const text = sheet(page).locator("[data-hs-text]");
+  const back = sheet(page).locator("[data-hs-row=back] [role=switch]");
+
+  // The parent's own ask, kept on Esc.
+  await page.locator("[data-ctl-ask]").click();
+  await expect(sheet(page)).toBeVisible();
+  await text.fill("Keep this draft.");
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+
+  const row = page.locator(`section.kids li.kids-row[data-kid="${kid.key}"]`);
+  const message = async () => {
+    await row.hover();
+    await row.getByRole("button", { name: /^Message/ }).click();
+    await expect(sheet(page)).toBeVisible();
+    await expect(rowValue(page, "agent")).toContainText("Draft the note");
+    await expect(text).toHaveValue("");
+  };
+  // Opened, edited, toggled and closed: nothing of it is kept, the draft is untouched.
+  await message();
+  await text.fill("Not a draft.");
+  await back.click();
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toHaveCount(0);
+  // Opened again, edited, toggled and sent.
+  await message();
+  await text.fill("Is the note done?");
+  await back.click();
+  await expect(back).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(sheet(page)).toHaveCount(0, { timeout: 15_000 });
+  await expect
+    .poll(() => m.seen.find((c) => c.kind === "prompt" && c.text === "Is the note done?"), { timeout: 15_000 })
+    .toBeTruthy();
+
+  // The parent's own Ask comes back with its draft and the agent it had.
+  await page.locator("[data-ctl-ask]").click();
+  await expect(sheet(page)).toBeVisible();
+  await expect(text).toHaveValue("Keep this draft.");
+  await expect(rowValue(page, "agent")).toContainText("Codex · new session");
+});

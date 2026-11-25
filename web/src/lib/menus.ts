@@ -271,7 +271,16 @@ export function askItem(
  *  disabled. */
 export function messageItem(parent: SessionSummary, child: SessionSummary, store: Store): MenuItem | null {
   if (!canMessage(parent, child, store)) return null;
-  return { label: "Message…", run: () => openHandoffFor(parent, { to: child.key }) };
+  return { label: "Message…", run: () => openMessage(parent, child, store) };
+}
+
+/** Opens the parent's sheet aimed at `child` when it may still be asked now: a row drawn
+ *  a moment ago may hold a child that has since ended or moved. */
+export function openMessage(parent: SessionSummary, child: SessionSummary, store: Store): void {
+  const { sessions } = store.get();
+  const p = sessions.get(parent.key) ?? parent;
+  const k = sessions.get(child.key) ?? child;
+  if (canMessage(p, k, store)) openHandoffFor(p, { to: k.key });
 }
 
 /** Whether the parent's sheet may ask that child (messageItem). */

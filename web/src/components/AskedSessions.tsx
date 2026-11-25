@@ -14,10 +14,9 @@ import { useStore } from "../data/hooks";
 import { askedComputer, askedSessions, askedShown } from "../lib/delegated";
 import { wideLayout } from "../lib/device";
 import { harnessMark, STATE_LABEL, sessionTitle } from "../lib/format";
-import { canMessage, messageItem } from "../lib/menus";
+import { canMessage, messageItem, openMessage } from "../lib/menus";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { openSplit } from "../lib/split";
-import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import { HarnessGlyph, Since, StateDot } from "./bits";
 import { tidy, useContextMenu } from "./ContextMenu";
 import { BesideButton } from "./SessionCard";
@@ -123,7 +122,7 @@ function AskedRow({ parent, c }: { parent: SessionSummary; c: SessionSummary }) 
             tabIndex={-1}
             onClick={(e) => {
               e.preventDefault();
-              openHandoffFor(parent, { to: c.key });
+              openMessage(parent, c, store);
             }}
           >
             <svg
