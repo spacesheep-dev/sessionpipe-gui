@@ -554,6 +554,21 @@ test("a parent's Asked sessions: each with its state, agent and computer, the on
     await expect(rows.nth(i).locator(".kids-title")).toHaveText(title);
   }
 
+  // A mouse's Open beside and Message stand over the row's end, in place of the age, so they
+  // hold no room of their own: the row's columns have it. Shown on hover, inside the row.
+  const box = (sel: string) =>
+    rows.nth(1).evaluate((li, s) => {
+      const r = (s ? li.querySelector(s)! : li).getBoundingClientRect();
+      return { x: r.x, w: r.width };
+    }, sel);
+  const [row, link] = [await box(""), await box(".kids-link")];
+  expect(Math.abs(link.w - row.w)).toBeLessThan(1);
+  await expect(rows.nth(1).locator(".kids-acts")).toHaveCSS("opacity", "0");
+  await rows.nth(1).hover();
+  await expect(rows.nth(1).locator(".kids-acts")).toHaveCSS("opacity", "1");
+  const acts = await box(".kids-acts");
+  expect(acts.x + acts.w).toBeLessThanOrEqual(row.x + row.w + 0.5);
+
   // Message: Ask another agent… aimed at that session, the answer brought back.
   await rows.nth(1).hover();
   await rows.nth(1).getByRole("button", { name: "Message Claude Code" }).click();

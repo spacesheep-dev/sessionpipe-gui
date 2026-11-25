@@ -201,8 +201,8 @@ a.ask-link:active {
    the heading over one inset panel (Settings' group grammar), a row each on hairlines.
    Where the list has room a row is one line in fixed columns (the state's glyph and word,
    the agent, the title in up to two lines, the computer, the age), with a mouse Open
-   beside and Message at its end on hover; narrower it is two lines; under a finger the
-   actions are in its long-press menu. */
+   beside and Message over its end on hover, in place of the age; narrower it is two
+   lines; under a finger the actions are in its long-press menu. */
 .kids {
   display: flex;
   flex-direction: column;
@@ -239,6 +239,7 @@ a.ask-link:active {
   border-top: var(--hairline) solid var(--line);
 }
 .kids-row {
+  position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
@@ -254,7 +255,7 @@ a.ask-link:active {
   column-gap: 12px;
   min-width: 0;
   min-height: var(--row-sm);
-  padding: 6px 4px 6px 12px;
+  padding: 6px 12px;
   color: var(--fg-3);
   font-size: var(--text-sm);
   line-height: var(--lh-tight);
@@ -299,31 +300,37 @@ a.ask-link:active {
   color: var(--fg);
   overflow-wrap: break-word;
 }
+/* The computer, cut in its middle (MidCut), takes up to 40% of the room the title and it
+   share: the row less its fixed columns, gaps and padding (19em + 86px). */
 .kids-where {
   grid-area: where;
-  max-width: 11em;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: calc((100cqi - 19em - 86px) * 0.4);
 }
 .kids-age {
   grid-area: age;
   justify-self: end;
   white-space: nowrap;
 }
+/* Over the row's end, in place of the age, so they hold no room of their own: the title
+   has it. The row's hovered colour under them. */
 .kids-acts {
-  flex: none;
+  position: absolute;
+  inset-block: 0;
+  right: 0;
   display: flex;
   align-items: center;
   gap: 2px;
-  padding-right: 6px;
+  padding: 0 6px 0 8px;
+  background: linear-gradient(var(--hover), var(--hover)), var(--bg-2);
   opacity: 0;
+  pointer-events: none;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 .kids-row:hover .kids-acts,
 .kids-row:focus-within .kids-acts {
   opacity: 1;
+  pointer-events: auto;
 }
 @media (hover: hover) {
   .kids-row:hover {
@@ -412,8 +419,20 @@ a.ask-link:active {
   }
   /* The computer gives way last but one: the age stays whole. */
   .kids-meta > .kids-where {
+    display: flex;
     flex: 0 1 auto;
     max-width: none;
+  }
+  .kids-where::before {
+    flex: none;
+  }
+  .kids-where > .midcut {
+    flex: 0 1 auto;
+  }
+  /* Two lines have no age column to stand over: the actions keep their own room. */
+  .kids-acts {
+    position: static;
+    background: none;
   }
   /* Show all starts where the titles do. */
   .kids-more-btn {

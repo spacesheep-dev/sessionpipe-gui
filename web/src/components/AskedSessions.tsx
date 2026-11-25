@@ -3,8 +3,8 @@
 // its page under the bar: one ruled panel, "Asked sessions", a row each (lib/delegated.ts
 // askedSessions: those that need you first, then the newest), five and "Show all n". A
 // row is the child's state (the board's glyph and word), its agent, its title, the
-// computer it runs on (always named) and how long ago it last moved; the whole row opens
-// its page, and beside it, on hover, Open beside and Message (the Handoff sheet aimed at
+// computer it runs on (always named, cut in its middle) and how long ago it last moved;
+// the whole row opens its page, and over its end, on hover, Open beside and Message (the Handoff sheet aimed at
 // it, the answer brought back). A phone stacks the row in two lines and keeps the actions
 // in its long-press menu. One level: a child's own asked sessions are on its page. What a
 // child says is never drawn here: only its title, as the board draws it.
@@ -17,7 +17,7 @@ import { harnessMark, STATE_LABEL, sessionTitle } from "../lib/format";
 import { canMessage, messageItem, openMessage } from "../lib/menus";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { openSplit } from "../lib/split";
-import { HarnessGlyph, Since, StateDot } from "./bits";
+import { HarnessGlyph, MidCut, Since, StateDot } from "./bits";
 import { tidy, useContextMenu } from "./ContextMenu";
 import { BesideButton } from "./SessionCard";
 
@@ -103,8 +103,8 @@ function AskedRow({ parent, c }: { parent: SessionSummary; c: SessionSummary }) 
             <HarnessGlyph name={c.harness} size="sm" />
             <span className="kids-agent-name">{agent}</span>
           </span>
-          <span className="kids-where" title={computer}>
-            {computer}
+          <span className="kids-where">
+            <MidCut text={computer} />
           </span>
           <span className="kids-age">
             <Since iso={c.lastAt} />
