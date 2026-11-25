@@ -64,7 +64,15 @@ export interface ProtocolSession {
   /** `<harness>:<id>` of the session this one was started or resumed for (sessionpipe
    *  `ask` / a handoff): lineage across harnesses, never authority. Absent otherwise. */
   delegated_by?: string;
+  /** The name of the person's rule the machine's daemon started or resumed this run for
+   *  (sessionpipe triggers, CONTROL.md §14.9; TRIGGER_NAME_RE), on every event of that run.
+   *  Lineage, never authority; a rule is no session, so never `launched_by`. */
+  triggered_by?: string;
 }
+
+/** A trigger's name, as a rule is named (sessionpipe CONTROL.md §14, PROTOCOL.md §3):
+ *  lowercase letters, digits, `_` and `-`, at most 40, starting with a letter or a digit. */
+export const TRIGGER_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 
 /** The GUI's reading of a session's state (spec §1: made from the facts, never sent).
  *  needs_you: an attention is open. working: a turn started and nothing ended it, with
@@ -154,6 +162,15 @@ export interface SessionSummary {
   /** `session.delegated_by`: the session this one was started for (`sessionpipe ask`, or
    *  a handoff). Lineage like `parentId`, across harnesses; never authority. */
   delegatedBy?: SessionKey;
+  /** `session.triggered_by`: the name of the rule whose run is the newest, in the session's
+   *  own order (seq): the last unbroken stretch of events carrying one name (server/store/
+   *  triggers.ts). Only the name: the rule itself stays on its computer. Lineage, never
+   *  authority. */
+  triggeredBy?: string;
+  /** Set with `triggeredBy`, from the first `session.started` of that run: `start` (source
+   *  `startup`: the rule started the session), `continue` (`resume`: it continued one), or
+   *  `unknown` (another source, or no start read). */
+  triggeredFrom?: "start" | "continue" | "unknown";
 
   state: SessionState;
   /** When the current state began (ISO). */

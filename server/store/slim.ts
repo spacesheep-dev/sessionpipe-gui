@@ -73,6 +73,7 @@ function internEvent(ev: SlimEvent): SlimEvent {
     "parent_id",
     "launched_by",
     "delegated_by",
+    "triggered_by",
   ] as const)
     internField(out.session, k);
   if (ev.privacy && Array.isArray(ev.privacy.rulesets))

@@ -24,6 +24,12 @@ import type {
   Tier,
 } from "@shared/api";
 import { DONE_AFTER_MS, SNIPPET_CHARS, STALE_AFTER_MS, sessionKey } from "@shared/api";
+import { newTriggerTrack, noteTriggerEvent, triggerName, triggerReading } from "../../../server/store/triggers";
+
+/** The summary's two trigger fields from the store's reading, or none. */
+const ruled = (r: ReturnType<typeof triggerReading>): Pick<SessionSummary, "triggeredBy" | "triggeredFrom"> =>
+  r ? { triggeredBy: r.name, triggeredFrom: r.from } : {};
+
 import { indexTouches } from "@shared/files";
 import { AgentReading } from "./agents";
 
@@ -469,12 +475,16 @@ export class World {
     let source: SessionSummary["source"] = "outbox";
     let harnessVersion: string | undefined;
     const agents = new AgentReading();
+    // The rule whose run is the newest and how that run began: the store's own reading.
+    const rules = newTriggerTrack();
 
     for (const e of r.events) {
       for (const [k, v] of Object.entries(e.session) as [keyof ProtocolSession, unknown][]) {
         if (v !== undefined && v !== null && v !== "" && k !== "seq")
           (block as unknown as Record<string, unknown>)[k] = v;
       }
+      const startedFrom = e.type === "session.started" ? String(e.data.source ?? "") : undefined;
+      noteTriggerEvent(rules, e.session.seq, triggerName(e.session.triggered_by), startedFrom);
       if (e.harness.version) harnessVersion = e.harness.version;
       if (e.tier > maxTier) maxTier = e.tier;
       source = e.source;
@@ -669,6 +679,7 @@ export class World {
       parentId: block.parent_id ?? null,
       launchedBy: block.launched_by,
       delegatedBy: block.delegated_by,
+      ...ruled(triggerReading(rules)),
       state,
       stateSince,
       startedAt,
@@ -2240,6 +2251,65 @@ export class World {
         resume: { kind: "idle", nextTurnAt: now + 10 * min },
       };
     }
+
+    // 14. idle: a run a person's rule started (sessionpipe triggers): a card moved to TODO,
+    // `triggered_by` on every event of the run from the session's first.
+    const s14 = this.add({
+      harness: "claude-code",
+      machine: "demo-laptop",
+      cwd: "~/code/billing",
+      repo: "github.com/acme/billing",
+      branch: "fix/acme-142-vat-rate",
+      model: "claude-opus-5-5",
+      title: "ACME-142: wrong VAT rate on invoice PDFs",
+      tier: 2,
+    });
+    s14.block.triggered_by = "card-todo";
+    t = now - 26 * min;
+    this.push(s14, "session.started", { source: "startup" }, t);
+    this.pastTurn(
+      s14,
+      t + 1500,
+      "Card ACME-142 moved to TODO and is assigned to you. Read it on the board, fix it on a branch, run the tests and say what you changed.",
+      "Fixed ACME-142 on fix/acme-142-vat-rate: the PDF took the VAT rate from the customer's country instead of the rate the line was charged at. The invoice tests pass.",
+      4,
+    );
+    delete s14.block.triggered_by;
+
+    // 15. idle: a weekly report Sam began by hand last week, which a clock rule continued this
+    // morning: the mark only on this run's events.
+    const s15 = this.add({
+      harness: "claude-code",
+      machine: "demo-desktop",
+      cwd: "~/code/billing",
+      repo: "github.com/acme/billing",
+      branch: "main",
+      model: "claude-opus-5-5",
+      title: "Weekly billing report",
+      titleSource: "custom",
+      tier: 2,
+    });
+    t = now - 7 * 86_400_000;
+    this.push(s15, "session.started", { source: "startup" }, t);
+    t = this.pastTurn(
+      s15,
+      t + 2000,
+      "Write this week's billing report: merged PRs, failed invoice runs and anything still open. A short list.",
+      "Written to reports/week-46.md: six merged PRs, two failed invoice runs and one retry fix still open.",
+      2,
+    );
+    this.push(s15, "session.ended", { reason: "exit" }, t + 60_000);
+    s15.block.triggered_by = "monday-report";
+    t = now - 48 * min;
+    this.push(s15, "session.started", { source: "resume" }, t);
+    this.pastTurn(
+      s15,
+      t + 1500,
+      "It's Monday. Write this week's billing report the way you wrote last week's, in a new file beside it.",
+      "Written to reports/week-47.md: three merged PRs, no failed invoice runs this week, and last week's retry fix is merged.",
+      2,
+    );
+    delete s15.block.triggered_by;
   }
 }
 

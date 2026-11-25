@@ -28,6 +28,7 @@ import {
 import { SESSION_REF } from "../control/refs.js";
 import { changedPaths } from "./paths.js";
 import { detach, PREVIEW_CHARS } from "./slim.js";
+import { newTriggerTrack, noteTriggerEvent, type TriggerTrack, triggerName, triggerReading } from "./triggers.js";
 
 const TITLE_RANK: Record<string, number> = { custom: 3, harness: 2, "first-ask": 1 };
 /** `<harness>:<id>` in the protocol's own shapes (schemas/v1/event.json): a harness name is
@@ -129,6 +130,8 @@ export interface Tracking {
   /** The orchestrator's last CALLS_ENDED calls that ended, by `call_id`: the start of one,
    *  recorded after its end, is not the tool that runs now. */
   callsEnded: string[];
+  /** The events' rule names in seq order, for `summary.triggeredBy` (`noteTrigger`). */
+  trigger: TriggerTrack;
 }
 
 /** How far before something an event may be timed and still be one that was recorded
@@ -291,6 +294,7 @@ export function newRecord(harness: string, id: string, at: string, source: Event
       attentionClears: new Map(),
       agentEnds: new Map(),
       callsEnded: [],
+      trigger: newTriggerTrack(),
     },
   };
 }
@@ -418,6 +422,26 @@ export function coalesceSession(s: SessionSummary, ev: ProtocolEvent): void {
   }
   const v = str(ev.harness.version);
   if (v) s.harnessVersion = v;
+}
+
+/** `session.triggered_by` (sessionpipe triggers, CONTROL.md §14.9): the name of the rule a
+ *  machine's daemon started or resumed this run for, stamped on every event of that run.
+ *  It is lineage, never authority: it is shown ("Started by trigger card-todo"), and
+ *  nothing here or on the page reads it to allow, hide, sort or skip anything. Only the
+ *  protocol's shape is kept (tier 0 is not redacted); anything else is no name, as for
+ *  `launched_by`. The run is the newest unbroken stretch, in seq order, of events that
+ *  carry one name; how it began is its own first `session.started` (startup: started,
+ *  resume: continued, anything else or none: not known). A function of the events in
+ *  their own order and nothing else (triggers.ts), so the order they arrive in, a rebuild
+ *  and a restart all read the same. */
+function noteTrigger(s: SessionSummary, t: Tracking, ev: ProtocolEvent): void {
+  const source = ev.type === "session.started" ? (str(ev.data.source) ?? "") : undefined;
+  noteTriggerEvent(t.trigger, ev.session.seq, triggerName(ev.session.triggered_by), source);
+  const r = triggerReading(t.trigger);
+  if (r) {
+    s.triggeredBy = r.name;
+    s.triggeredFrom = r.from;
+  }
 }
 
 /** Apply one accepted event to its session record. `now` is the arrival time. */
@@ -603,6 +627,7 @@ export function applyEvent(rec: SessionRecord, ev: ProtocolEvent, arrivedAt: str
   // what it relays is events never sent, not events on their way (PROTOCOL.md §4: a
   // receiver MUST NOT read a seq gap as a lost event).
   noteSeq(t, ev.session.seq, arrivedAt, source !== "spacesheep");
+  noteTrigger(s, t, ev);
   const m = place(t, ev, arrivedAt);
   const turnId = str(d.turn_id);
   /** Names the turn that is open: it is that turn's, whatever its clock says. */

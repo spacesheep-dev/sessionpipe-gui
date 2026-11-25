@@ -1548,3 +1548,95 @@ export const HANDOFF: HandoffScript = {
   followUp:
     "Codex is right on both counts. I've added jitter (`base * (0.5 + Math.random())`) and fixed the try count to compare `attempt + 1`, so a job gets exactly five tries. Still uncommitted; say the word and I'll commit.",
 };
+
+// ---------- runs a person's rules made (sessionpipe triggers, CONTROL.md §14) ----------
+
+/** The rule a card moving to TODO starts Claude Code for (a notice rule), and the clock
+ *  rule that continues the weekly report every Monday. Demo names, as a person names a folder. */
+export const TRIGGER_CARD = "card-todo";
+export const TRIGGER_WEEKLY = "monday-report";
+
+/** `card-todo`'s run: the rule's words with the card's id filled in ({subject}), then the
+ *  card read through the board's MCP tool the rule allows, a fix and the tests. */
+export const TRIGGER_CARD_TURN: TurnScript = {
+  prompt:
+    "Card ACME-142 moved to TODO and is assigned to you. Read it on the board, fix it on a branch, run the tests and say what you changed.",
+  title: { text: "ACME-142: wrong VAT rate on invoice PDFs", source: "harness" },
+  steps: [
+    {
+      tool: "mcp__board__records_get",
+      input: { id: "ACME-142" },
+      output: [
+        {
+          type: "text",
+          text: '{"id":"ACME-142","title":"Invoice PDF shows the wrong VAT rate","state":"todo","body":"An EU customer\'s PDF says 19 % where the invoice charged 21 %."}',
+        },
+      ],
+      ms: 1300,
+      say: "ACME-142: an EU customer's invoice PDF prints 19 % where the invoice charged 21 %.",
+    },
+    {
+      tool: "Grep",
+      input: { pattern: "vatRate\\(", path: "src/invoices", output_mode: "content", "-n": true },
+      output: grepLines("src/invoices/render.ts:88:  const rate = vatRate(customer.country);", 1),
+      ms: 31,
+    },
+    {
+      tool: "Edit",
+      input: {
+        file_path: "~/code/billing/src/invoices/render.ts",
+        old_string: "  const rate = vatRate(customer.country);",
+        new_string: "  const rate = line.taxRate;",
+      },
+      output: edit(
+        "/Users/dev/code/billing/src/invoices/render.ts",
+        "  const rate = vatRate(customer.country);",
+        "  const rate = line.taxRate;",
+      ),
+      ms: 5,
+      paths: ["src/invoices/render.ts"],
+      say: "ACME-142: the PDF read the rate from the customer's country, not from the line it charged. It now prints the line's own rate.",
+    },
+    {
+      tool: "Bash",
+      input: { command: "npx vitest run src/invoices", description: "Run the invoice tests" },
+      output: bash(
+        " ✓ src/invoices/render.test.ts (14 tests) 188ms\n\n Test Files  1 passed (1)\n      Tests  14 passed (14)\n",
+      ),
+      ms: 2600,
+    },
+  ],
+  final:
+    "Fixed ACME-142 on fix/acme-142-vat-rate. The PDF took the VAT rate from the customer's country instead of the rate the invoice line was charged at, so a line at 21 % printed 19 %. It now prints the line's own rate. The invoice tests pass (14).",
+};
+
+/** The weekly report before any rule: Sam wrote the first one by hand, last week. */
+export const WEEKLY_FIRST = {
+  prompt: "Write this week's billing report: merged PRs, failed invoice runs and anything still open. A short list.",
+  reply:
+    "Written to reports/week-46.md: six merged PRs, two failed invoice runs (both the expired EU card token) and one retry fix still open.",
+};
+
+/** `monday-report`'s run, a clock rule's words (no braces), continuing that session. */
+export const TRIGGER_WEEKLY_TURN: TurnScript = {
+  prompt: "It's Monday. Write this week's billing report the way you wrote last week's, in a new file beside it.",
+  steps: [
+    {
+      tool: "Bash",
+      input: { command: "gh pr list --state merged --limit 20", description: "This week's merged PRs" },
+      output: bash(
+        "431  Prorate mid-cycle downgrades\n428  Retry webhooks with backoff\n425  Invoice PDF: line tax rate\n",
+      ),
+      ms: 1700,
+    },
+    {
+      tool: "Write",
+      input: { file_path: "~/code/billing/reports/week-47.md", content: "# Billing, week 47\n" },
+      output: { type: "create", filePath: "/Users/dev/code/billing/reports/week-47.md" },
+      ms: 4,
+      paths: ["reports/week-47.md"],
+    },
+  ],
+  final:
+    "Written to reports/week-47.md: three merged PRs, no failed invoice runs this week, and the retry fix from last week is merged.",
+};

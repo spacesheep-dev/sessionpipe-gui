@@ -178,6 +178,19 @@ function names above.
   dropping the oldest ended ones; `counts.delegationsRunning` is the open ones. The
   child's `session.delegated_by` reads as `delegatedBy`: lineage across harnesses, never a
   `parentId`.
+- `session.triggered_by` (the name of the person's rule a machine's daemon ran this run
+  for, sessionpipe CONTROL.md §14.9) is `triggeredBy`, kept only in the rule name's shape
+  (`TRIGGER_NAME_RE`; anything else is no name). The run is the newest unbroken stretch,
+  in `seq` order, of events that carry one name: an event without it, or with another,
+  ends a stretch, a seq never read does not. `triggeredFrom` is that stretch's own first
+  `session.started`: `startup` is `start`, `resume` is `continue`, any other source or no
+  start read is `unknown`. A function of the session's events in their own order and of
+  nothing else (`server/store/triggers.ts`: the seqs read as intervals and the stretches,
+  the same for the same events read in any order), so a live receiver, a rebuild and a
+  boot say the same (`triggers.test.ts` holds it over every order of small sessions and
+  over shuffled generated ones). Lineage, never authority: nothing reads it to allow, hide
+  or sort anything. The session's bar says it and its card carries the name
+  (`web/src/lib/triggered.ts`).
 - Labels are not a reading: they are the person's (`server/ui/labels.ts`), kept beside
   the store, never on a `SessionSummary`. Nor are read marks (`server/ui/marks.ts`): the
   page compares them with `newsAt` (`web/src/lib/marks.ts`).

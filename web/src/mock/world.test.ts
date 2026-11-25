@@ -52,3 +52,22 @@ describe("World: agents that ask each other", () => {
     expect(machine?.control).toMatchObject({ ask: true, handoff: true });
   });
 });
+
+// And the runs a person's rules made (readings.ts noteTrigger): one started its session,
+// one continued a session already known.
+describe("World: runs a rule made", () => {
+  const world = new World();
+  const snap = world.snapshot();
+  const sessions = snap.kind === "snapshot" ? snap.snapshot.sessions : [];
+
+  it("reads a rule that started a session and one that continued one", () => {
+    const card = sessions.find((s) => s.triggeredBy === "card-todo")!;
+    expect(card).toMatchObject({ triggeredFrom: "start", title: "ACME-142: wrong VAT rate on invoice PDFs" });
+    const weekly = sessions.find((s) => s.triggeredBy === "monday-report")!;
+    expect(weekly).toMatchObject({ triggeredFrom: "continue", title: "Weekly billing report" });
+    const events = world.detail(weekly.harness, weekly.id)!.events as StoredEvent[];
+    expect(events[0]!.session.triggered_by).toBeUndefined();
+    expect(events[events.length - 1]!.session.triggered_by).toBe("monday-report");
+    expect(sessions.filter((s) => s.triggeredBy)).toHaveLength(2);
+  });
+});
