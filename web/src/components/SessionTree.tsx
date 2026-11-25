@@ -247,7 +247,7 @@ function Chevron() {
   );
 }
 
-export function SessionTree({
+export const SessionTree = memo(function SessionTree({
   open,
   touch,
   between,
@@ -805,7 +805,7 @@ export function SessionTree({
         )}
     </div>
   );
-}
+});
 
 const nodeKey = (n: TreeNode) => n.s.key;
 

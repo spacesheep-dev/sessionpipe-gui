@@ -795,7 +795,10 @@ test("a start shows at once, as the Board's starting card does, and its session 
   await expect(starting).toContainText("Tree start: check the refunds");
   // Its session arrives: its real row takes over in the same frame, never both and never
   // neither, and stands where the Board puts it. (That it keeps the starting row's place
-  // is the steady order's, Round 2.)
+  // is the steady order's, Round 2.) On this busy server that can be past "Show more"
+  // (every test's sessions that need you come first), so the whole list is shown.
+  const more = page.locator(".stree-more-all");
+  while ((await more.count()) > 0) await more.click();
   await page.evaluate((k) => {
     const w = window as unknown as { __seen: string[] };
     w.__seen = [];

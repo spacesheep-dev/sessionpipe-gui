@@ -27,6 +27,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -797,6 +798,10 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   // Usage is in the sidebar once: its lines where they are drawn, a row otherwise. The
   // touch app's sidebar lists what the tab bar and More do, in their order.
   const glance = useGlanceShown() && (columnShown || overlayShown || regular);
+  // One element while nothing it shows changes, so the tree (memo) does not redraw on
+  // every route change, a search's keystrokes among them.
+  const onUsage = route.name === "usage";
+  const usageFoot = useMemo(() => (glance ? <SideUsage here={onUsage} /> : null), [glance, onUsage]);
   // The touch sidebar's pages are the iPad's four: Board, Inbox, Search and More (the rest
   // in More's sheet); the rail lists every page, Usage among them where its line is not drawn.
   const padPages = nav.filter((n) => n.key === "board" || n.key === "inbox" || n.key === "search");
@@ -917,7 +922,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
                   <MoreTab items={padMore} active={active} views={views} regular={regular} inSidebar />
                 </div>
               }
-              foot={glance ? <SideUsage here={route.name === "usage"} /> : null}
+              foot={usageFoot}
             />
           )}
           <div className="rail-foot">
@@ -976,11 +981,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         </div>
         {(columnShown || overlayShown) && (
           <section className="tree-col" id="tree-col" ref={columnRef} aria-label="Sessions">
-            <SessionTree
-              open={openKey}
-              touch={false}
-              foot={glance ? <SideUsage here={route.name === "usage"} /> : null}
-            />
+            <SessionTree open={openKey} touch={false} foot={usageFoot} />
           </section>
         )}
         {columnShown && (
