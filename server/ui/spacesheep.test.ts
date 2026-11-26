@@ -5,7 +5,10 @@ import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { cleanOrigin, registerSpacesheepUi, type SpacesheepUiDeps } from "./spacesheep.js";
 
 /** A router that only remembers its handlers. */
-function fakeRouter(): { router: Router; call: (method: string, body?: unknown) => Promise<Reply> } {
+function fakeRouter(remote: Partial<Ctx["remote"]> = {}): {
+  router: Router;
+  call: (method: string, body?: unknown) => Promise<Reply>;
+} {
   const handlers = new Map<string, Handler>();
   const router = {
     get: (p: string, h: Handler) => handlers.set(`GET ${p}`, h),
@@ -18,7 +21,7 @@ function fakeRouter(): { router: Router; call: (method: string, body?: unknown) 
     const ctx = {
       json: async () => body ?? {},
       req: { headers: {} },
-      remote: { ip: "127.0.0.1", loopback: true, thisComputer: true, forwarded: false },
+      remote: { ip: "127.0.0.1", loopback: true, thisComputer: true, forwarded: false, ...remote },
     } as unknown as Ctx;
     return (await h(ctx)) as Reply;
   };
@@ -141,5 +144,47 @@ describe("the spacesheep connect flow on the GUI side (ui/spacesheep.ts)", () =>
     expect(r.status).toBe(502);
     expect(String((r.json as { error: string }).error)).toContain("ENOTFOUND");
     expect((await call("POST", { origin: "ftp://x" })).status).toBe(400);
+  });
+
+  it("takes another origin from this computer only: a visitor with the board's key connects spacesheep.dev", async () => {
+    const asked: string[] = [];
+    const fetchStub = (async (url: string) => {
+      asked.push(url);
+      return new Response(
+        JSON.stringify({ code: "c".repeat(24), digits: "4821", url: "https://x/connect", poll_token: "t" }),
+        { status: 201 },
+      );
+    }) as unknown as typeof fetch;
+    const deps = (): SpacesheepUiDeps => ({
+      link: () => undefined,
+      status: () => null,
+      connect: () => {},
+      disconnect: () => {},
+      deviceName: () => "m",
+      version: () => "0",
+      fetch: fetchStub,
+    });
+
+    // A phone, a browser on the LAN or one through the proxy: the board's key, not this computer.
+    for (const remote of [
+      { ip: "192.168.1.40", loopback: false, thisComputer: false, forwarded: false },
+      { ip: "100.64.0.9", loopback: false, thisComputer: false, forwarded: true },
+    ]) {
+      const visitor = fakeRouter(remote);
+      registerSpacesheepUi(visitor.router, deps(), (h) => h);
+      const r = await visitor.call("POST", { origin: "https://attacker.example" });
+      expect(r.status).toBe(403);
+      expect((r.json as { reason: string }).reason).toBe("local_only");
+      expect(asked).toEqual([]);
+      // The default (what the page itself sends) still connects from there.
+      expect((await visitor.call("POST", {})).status).toBe(201);
+      expect(asked.pop()).toBe("https://spacesheep.dev/api/gui/connect");
+    }
+
+    // This computer may name another spacesheep (staging, a local dev server).
+    const here = fakeRouter();
+    registerSpacesheepUi(here.router, deps(), (h) => h);
+    expect((await here.call("POST", { origin: "https://staging.spacesheep.dev" })).status).toBe(201);
+    expect(asked.pop()).toBe("https://staging.spacesheep.dev/api/gui/connect");
   });
 });

@@ -121,6 +121,19 @@ export function registerSpacesheepUi(
       const origin = cleanOrigin(body.origin);
       if (!origin)
         return { status: 400, json: { reason: "bad_origin", error: "The origin must be an https address." } };
+      // The page asks for spacesheep.dev; another origin (staging, a local dev server) is
+      // this computer's to choose. A visitor with the board's key that could name one would
+      // make this receiver keep a key from a server of its choosing and, from then on, take
+      // that server's machines and sessions onto the board and send it the files and
+      // commands meant for them.
+      if (origin !== DEFAULT_SPACESHEEP_ORIGIN && !ctx.remote.thisComputer)
+        return {
+          status: 403,
+          json: {
+            reason: "local_only",
+            error: `Only the computer this board runs on connects to another spacesheep than ${DEFAULT_SPACESHEEP_ORIGIN}.`,
+          },
+        };
       if (deps.link())
         return { status: 409, json: { reason: "connected", error: "Already connected. Disconnect first." } };
       if (pending && pending.state === "pending" && Date.now() - pending.startedAt < CONNECT_POLL_MAX_MS)
