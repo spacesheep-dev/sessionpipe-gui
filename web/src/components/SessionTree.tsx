@@ -223,16 +223,16 @@ function foldWords(r: Rolled): string {
 const NO_ROWS: readonly SessionSummary[] = [];
 
 /** The Machines page's own mark, small: this session runs on another computer. */
-function AwayMark({ machine }: { machine: string }) {
+function AwayMark() {
   return (
-    <span className="stree-away" title={`Runs on ${machine}`}>
+    <span className="stree-away" aria-hidden="true">
       <svg
         viewBox="0 0 20 20"
         width="12"
         height="12"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
@@ -1325,11 +1325,11 @@ const RowLine = memo(function RowLine({
       <span className="stree-title" dir="auto">
         {title}
       </span>
-      {away && s.machine && <AwayMark machine={s.machine} />}
+      {!touch && away && s.machine && <AwayMark />}
+      {touch && disclose}
       <span className="stree-lamp">
         <Lamp s={s} unread={unread} rolled={rolled} size={touch ? 12 : 10} />
       </span>
-      {touch && disclose}
       <span className="sr-only">
         {stateWords(s, unread)}
         {inside}

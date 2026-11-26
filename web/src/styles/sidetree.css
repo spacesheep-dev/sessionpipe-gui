@@ -8,11 +8,20 @@
    spinner never moves the title). Children sit 16 px in, on one hairline rail from the
    parent's mark down. A touch screen with a sidebar (styles/regular.css) has 44 pt rows. */
 
+.tree-col {
+  container: side / inline-size;
+}
 .stree {
+  --tree-indent: 24px;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+@container side (max-width: 259px) {
+  .stree:not(.stree--touch) {
+    --tree-indent: 16px;
+  }
 }
 /* New session, fixed: on a computer in the band every page bar has (--bar, a hairline). */
 .stree-head {
@@ -210,7 +219,7 @@
   align-items: center;
   gap: 8px;
   height: var(--side-row);
-  padding: 0 6px 0 calc(8px + var(--lvl, 0) * 16px);
+  padding: 0 6px 0 calc(8px + var(--lvl, 0) * var(--tree-indent));
   border-radius: var(--radius);
   color: var(--fg-2);
   font-size: var(--text-sm);
@@ -309,11 +318,13 @@
     background-color: var(--hover);
     color: var(--fg);
   }
-  .stree-row:hover .stree-disc {
+  .stree-lead:hover .stree-disc {
     opacity: 1;
+    transition: none;
   }
-  .stree-row[data-has-kids]:hover .stree-lead .glyph-wrap {
+  .stree-row[data-has-kids] .stree-lead:hover .glyph-wrap {
     opacity: 0;
+    transition: none;
   }
 }
 .stree-row:focus-visible .stree-disc,
@@ -350,19 +361,43 @@
   height: 16px;
 }
 
-/* The rail: one hairline from under the parent's mark down past its last child. */
+/* Stepped rails: each child draws its own segment on the parent's mark centre, meeting the
+   parent's mark at the top and stopping at the last direct child so depth reads as stairs. */
 .stree-kids {
   position: relative;
 }
 .stree-kids::before {
+  content: none;
+}
+.stree-kids > .stree-item,
+.stree-kids > .stree-more {
+  position: relative;
+}
+.stree-kids > .stree-item::before,
+.stree-kids > .stree-more::before {
   content: "";
   position: absolute;
   top: 0;
-  bottom: 6px;
-  left: calc(15px + var(--lvl, 0) * 16px);
+  bottom: 0;
+  left: calc(16px + var(--lvl, 0) * var(--tree-indent) - var(--hairline) / 2);
   width: var(--hairline);
   background: var(--line-2);
   pointer-events: none;
+}
+.stree-kids > .stree-more::before {
+  left: calc(16px + (var(--lvl, 1) - 1) * var(--tree-indent) - var(--hairline) / 2);
+  bottom: auto;
+  height: 50%;
+}
+.stree-kids > .stree-item:first-child::before {
+  top: -4px;
+}
+.stree-kids > .stree-item:not(:has(~ .stree-item, ~ .stree-more))::before {
+  bottom: auto;
+  height: calc(var(--side-row) - 7px);
+}
+.stree-kids > .stree-item:first-child:not(:has(~ .stree-item, ~ .stree-more))::before {
+  height: calc(var(--side-row) - 3px);
 }
 
 /* Show N more under a parent, and Show more under the list: quiet, a pointer's 24 px. */
@@ -378,7 +413,7 @@
   cursor: pointer;
 }
 .stree-more {
-  padding-left: calc(8px + var(--lvl, 0) * 16px + 24px);
+  padding-left: calc(8px + var(--lvl, 0) * var(--tree-indent) + 24px);
 }
 .stree-more-all {
   width: 100%;
@@ -520,6 +555,9 @@
 
 /* ----- a touch screen's sidebar: 44 pt rows (styles/regular.css) ----- */
 
+.stree--touch {
+  --tree-indent: 20px;
+}
 .stree--touch .stree-head {
   padding: 0;
 }
@@ -546,7 +584,7 @@
 .stree--touch .stree-row {
   gap: 10px;
   height: 44px;
-  padding: 0 0 0 calc(12px + var(--lvl, 0) * 20px);
+  padding: 0 12px 0 calc(12px + var(--lvl, 0) * var(--tree-indent));
   color: var(--fg);
   font-size: max(1rem, 16px);
 }
@@ -560,31 +598,41 @@
 .stree--touch .stree-lamp {
   width: 16px;
 }
-/* The disclosure at the row's end, a finger's 44 pt, always there. */
+/* The disclosure before the lamp: a finger's 44 pt, always there, so every state mark
+   ends at one x (12 px from the row's right edge). */
 .stree--touch .stree-disc {
   position: static;
   flex: none;
-  width: 32px;
+  width: 44px;
   height: 44px;
-  margin-left: -6px;
+  margin: 0 -10px;
   opacity: 1;
 }
 .stree--touch .stree-row:has(.stree-disc[data-folded]) .stree-lead .glyph-wrap {
   opacity: 1;
 }
-.stree--touch .stree-row:not([data-has-kids]) {
-  padding-right: 8px;
+.stree--touch .stree-kids > .stree-item::before {
+  left: calc(22px + var(--lvl, 0) * var(--tree-indent) - var(--hairline) / 2);
 }
-.stree--touch .stree-kids::before {
-  left: calc(21px + var(--lvl, 0) * 20px);
+.stree--touch .stree-kids > .stree-more::before {
+  left: calc(22px + (var(--lvl, 1) - 1) * var(--tree-indent) - var(--hairline) / 2);
+}
+.stree--touch .stree-kids > .stree-item:first-child::before {
+  top: -9px;
+}
+.stree--touch .stree-kids > .stree-item:not(:has(~ .stree-item, ~ .stree-more))::before {
+  height: 32px;
+}
+.stree--touch .stree-kids > .stree-item:first-child:not(:has(~ .stree-item, ~ .stree-more))::before {
+  height: 41px;
 }
 .stree--touch .stree-more {
-  height: 36px;
-  padding-left: calc(12px + var(--lvl, 0) * 20px + 32px);
+  height: 44px;
+  padding-left: calc(12px + var(--lvl, 0) * var(--tree-indent) + 32px);
   font-size: var(--text-sm);
 }
 .stree--touch .stree-more-all {
-  height: 36px;
+  height: 44px;
   padding-left: 44px;
   font-size: var(--text-sm);
 }
