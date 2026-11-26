@@ -1753,19 +1753,20 @@ test.describe("a touch screen 760 px wide", () => {
     await expect(settings).toHaveAttribute("href", "/?settings=about");
     const dot = settings.locator(".nav-dot");
     await expect(dot).toBeVisible();
-    // At the row's trailing edge, beside its label.
+    // On the compact foot button's top-right corner, inside its 44×44 hit area.
     const b = (await settings.boundingBox())!;
     const d = (await dot.boundingBox())!;
-    const label = (await settings.locator(".nav-label").boundingBox())!;
-    expect(d.x).toBeGreaterThan(label.x);
+    expect(d.x).toBeGreaterThanOrEqual(b.x);
     expect(d.x + d.width).toBeLessThanOrEqual(b.x + b.width);
+    expect(d.y).toBeGreaterThanOrEqual(b.y);
+    expect(d.y + d.height).toBeLessThanOrEqual(b.y + b.height);
     await settings.click();
     await expect(page).toHaveURL(/\/\?settings=about$/);
     await expect(page.getByRole("tabpanel", { name: "About" })).toBeVisible();
     // Installed, or checked again: the dot goes with it.
     await emit(page, "update", { state: "checking" });
     await expect(dot).toHaveCount(0);
-    await expect(settings).not.toHaveAttribute("aria-label");
+    await expect(settings).toHaveAttribute("aria-label", "Settings");
   });
 });
 

@@ -694,7 +694,11 @@ const sidebarRows = (page: Page) =>
       .filter((el) => el.getClientRects().length > 0)
       .map((el) => {
         const r = el.getBoundingClientRect();
-        return { name: el.querySelector(".nav-label")?.textContent ?? "", height: r.height, top: r.top };
+        return {
+          name: el.querySelector(".nav-label")?.textContent || el.getAttribute("aria-label") || "",
+          height: r.height,
+          top: r.top,
+        };
       }),
   );
 

@@ -80,7 +80,7 @@ test.describe("themes", () => {
     await expect(host.locator(".e2e-title")).toHaveText("E2E Counter");
     // The stylesheet from the manifest is linked.
     await expect(host.locator(".e2e-title")).toHaveCSS("color", "rgb(1, 2, 3)");
-    await expect(page).toHaveTitle("E2E Counter · sessionpipe gui");
+    await expect(page).toHaveTitle(/^(\(\d+\) )?E2E Counter · sessionpipe gui$/);
     // The snapshot: demo sessions are there, the host is named, tokens and React handed over.
     await expect(host.locator("[data-sessions]")).toHaveText(/^[1-9]\d*$/);
     await expect(host.locator("[data-host]")).toHaveText(/^sessionpipe-gui \d+\.\d+\.\d+/);

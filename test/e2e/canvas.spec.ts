@@ -40,6 +40,7 @@ test.describe("the Canvas view's preset bar", () => {
   test.afterEach(({ page }) => page.unrouteAll({ behavior: "ignoreErrors" }));
 
   test("each preset is as wide as its own name", async ({ page }) => {
+    await page.setViewportSize({ width: 1500, height: 900 });
     await openPage(page, "/t/canvas");
     await expect(page.locator(".cv-views .cv-view").first()).toBeVisible();
     const w = await presets(page);
@@ -51,6 +52,7 @@ test.describe("the Canvas view's preset bar", () => {
   test("at the largest text size, in the narrowest window that shows the bar whole, the layout tools end clear of the search field", async ({
     page,
   }) => {
+    await page.setViewportSize({ width: 1500, height: 900 });
     await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.textSize", "1.25"));
     await openPage(page, "/t/canvas");
     const root = page.locator(".spcv");
@@ -58,7 +60,7 @@ test.describe("the Canvas view's preset bar", () => {
     await expect(page.locator("html")).toHaveCSS("font-size", "20px");
     // Canvas folds its presets into a chip under 1100 px of its own width: the window that
     // leaves it exactly that, whatever the sidebar takes.
-    const beside = 1440 - (await root.boundingBox())!.width;
+    const beside = 1500 - (await root.boundingBox())!.width;
     await page.setViewportSize({ width: Math.ceil(1100 + beside), height: 860 });
     await page.locator(".cv-views .cv-view", { hasText: "My layout" }).click();
     const tools = page.locator(".cv-layout-tools > *");

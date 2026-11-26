@@ -39,6 +39,48 @@ interface Made {
   title: string;
 }
 
+const created: { id: string; harness: string; machine: string; seq: number; needs: boolean; done: boolean }[] = [];
+
+/** End any sessions this test posted (and clear any open prompts), so the shared demo
+ *  server stays clean for parallel specs watching the global Inbox / title count. */
+async function cleanup(request: APIRequestContext): Promise<void> {
+  if (created.length === 0) return;
+  const todo = created.splice(0, created.length);
+  const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+  let clock = Date.now();
+  const events: Record<string, unknown>[] = [];
+  for (const s of todo) {
+    if (s.done) continue;
+    let seq = s.seq;
+    const mk = (type: string, data: Record<string, unknown>, hook: string) => {
+      clock += 10;
+      return {
+        protocol: 1,
+        id: ulid(clock),
+        type,
+        time: new Date(clock).toISOString(),
+        tier: 1,
+        harness: { name: s.harness, version: s.harness === "codex" ? "0.98.0" : "2.1.296", event: hook },
+        session: { id: s.id, seq: seq++, machine: s.machine, cwd: "~/code/tree" },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data,
+      };
+    };
+    if (s.needs) events.push(mk("attention.cleared", { attention_id: `a-${s.id}`, reason: "resolved" }, "PostToolUse"));
+    events.push(mk("turn.ended", { turn_id: "t1", reason: "stop", ms: 2000 }, "Stop"));
+    events.push(mk("session.ended", { reason: "exit" }, "SessionEnd"));
+  }
+  if (events.length === 0) return;
+  await request.post(EVENTS, {
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${sinkToken}`,
+      "sessionpipe-protocol": "1",
+    },
+    data: { events },
+  });
+}
+
 /** Working sessions posted as a sink sends them: `asks` names the one that asked it (on
  *  the same computer, so it is its real child). */
 async function sessions(
@@ -110,6 +152,14 @@ async function sessions(
       },
     });
     expect(res.status()).toBe(202);
+    created.push({
+      id,
+      harness,
+      machine: d.machine ?? "studio-mac",
+      seq,
+      needs: d.state === "needs",
+      done: d.state === "done",
+    });
     out.push({ key: `${harness}:${id}`, id, harness, title: d.title });
   }
   return out;
@@ -182,7 +232,12 @@ test.use({ viewport: { width: 1440, height: 1400 } });
 test.beforeEach(async ({ request }) => {
   await reset(request);
 });
+test.afterEach(async ({ request }) => {
+  await cleanup(request);
+  await reset(request);
+});
 test.afterAll(async ({ request }) => {
+  await cleanup(request);
   await reset(request);
 });
 
@@ -945,7 +1000,11 @@ test.describe("Round 2 polish", () => {
     await expect.poll(async () => (await arrangement(request)).placed[b!.key]).toBe(a!.key);
     await expect(row(page, b!.key)).toBeFocused();
 
-    // ⌥← folds all and ⌥→ unfolds all without FLIP slide.
+    // ⌥← folds all and ⌥→ unfolds all without FLIP slide. Hold the list under the pointer so
+    // an unrelated demo update cannot start a FLIP slide between ⌥← and the check.
+    await row(page, a!.key).hover({ position: { x: 40, y: 10 } });
+    await expect(page.locator(".stree")).toHaveAttribute("data-held", "");
+    await settled(page);
     await row(page, a!.key).focus();
     await page.keyboard.press("Alt+ArrowLeft");
     await expect(row(page, a!.key)).toHaveAttribute("aria-expanded", "false");
@@ -983,10 +1042,7 @@ test.describe("Round 2 polish", () => {
     await expect(row(page, c!.key)).toBeVisible();
 
     // Title-first accessible name: starts with title and contains it once.
-    const name = await row(page, p!.key).evaluate((el) => {
-      const id = el.getAttribute("aria-labelledby");
-      return id ? (document.getElementById(id)?.textContent ?? "") : "";
-    });
+    const name = (await row(page, p!.key).getAttribute("aria-label")) ?? "";
     expect(name.startsWith(`Geom ${tag} parent`)).toBe(true);
     expect(name.split(`Geom ${tag} parent`).length - 1).toBe(1);
 

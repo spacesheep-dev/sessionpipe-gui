@@ -82,7 +82,7 @@ test.describe("connect", () => {
     await expect(cmd).toHaveText(info.sinkCommand);
     await expect(cmd).toContainText(info.sinkToken);
     await expect(page.locator(".token-text")).toHaveText(info.sinkToken);
-    await page.getByRole("button", { name: "Hide" }).click();
+    await page.getByRole("button", { name: "Hide", exact: true }).click();
     await expect(cmd).not.toContainText(info.sinkToken);
 
     await page.getByRole("button", { name: /^Sources/ }).click();

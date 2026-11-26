@@ -497,7 +497,13 @@ test.describe("split panel", () => {
     });
 
     test("a wider window has it beside the page again, at the width it had", async ({ page }) => {
-      await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.splitWidth", "520"));
+      await page.addInitScript(() => {
+        localStorage.setItem("sessionpipe-gui.splitWidth", "520");
+        // Exercise the 840 px rail-only cover threshold without the 288 px sessions column
+        // forcing cover at 1000 px under the one-open rule.
+        const cur = JSON.parse(localStorage.getItem("sessionpipe-gui.settings") ?? "{}");
+        localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ ...cur, treeHidden: true }));
+      });
       await page.setViewportSize({ width: 1000, height: 800 });
       await openBeside(page);
       const beside = async () => {

@@ -530,10 +530,13 @@ test.describe("a session page across a dropped stream", () => {
     const beside = new Feed(BASE, token, "lab-mac", "Short one");
     for (const f of [s, beside])
       await f.post(f.ev("session.started", { source: "startup" }, "SessionStart"), ...f.turn(0, "Check it", "Done."));
-    // A session beside the page, in a window half a laptop's screen wide.
+    // A session beside the page, in a window half a laptop's screen wide (rail only, since
+    // the sessions column + panel covers under the one-open rule at 1000 px).
     await page.setViewportSize({ width: 1000, height: 800 });
     await page.goto(`${s.url}?s=${encodeURIComponent(`claude-code:${beside.id}`)}`);
     await live(page);
+    await page.locator("[data-tree-toggle]").click();
+    await expect(page.locator("#tree-col")).toHaveCount(0);
     await expect(page.locator(".panel")).toBeVisible();
     const bar = page.locator(".main .sess-bar");
     const title = bar.locator(".bar-title");
@@ -593,6 +596,8 @@ test.describe("a session page across a dropped stream", () => {
     // The Files drawer open too, in a laptop's window: the column has no room for Retry,
     // nor for a syllable of the words. The dot stands alone, and nothing lands on the buttons.
     await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator("[data-tree-toggle]").click();
+    await expect(page.locator("#tree-col")).toBeVisible();
     await bar.getByRole("button", { name: "Files" }).click();
     await expect(page.locator(".page.session > .files")).toBeVisible();
     await expect.poll(async () => (await edges(bar)).wide).toBeLessThan(200);
