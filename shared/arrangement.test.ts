@@ -266,6 +266,56 @@ describe("custom folders and inFolder", () => {
     expect(reason(() => applyArrangement(full, { inFolder: { "codex:one-more": "f_0" } }, all))).toBe("413 too_many");
   });
 
+  it("rejects invisible/zero-width-only folder names while preserving ZWJ emoji", () => {
+    for (const invisible of [
+      "\u200b",
+      "\u200d",
+      "\u200e",
+      "\u200f",
+      "\u00ad",
+      "\ufeff",
+      "\u0085",
+      "\u2028",
+      "\u061c",
+    ]) {
+      expect(sanitizeFolderName(invisible)).toBe("");
+      expect(reason(() => applyArrangement(EMPTY_ARRANGEMENT, { folders: [{ id: "f1", name: invisible }] }, all))).toBe(
+        "400 malformed",
+      );
+    }
+    expect(sanitizeFolderName("  🧑‍💻 Dev\u200b\u00ad  ")).toBe("🧑‍💻 Dev");
+    const ok = applyArrangement(EMPTY_ARRANGEMENT, { folders: [{ id: "f1", name: "🧑‍💻 Dev" }] }, all);
+    expect(ok.folders).toEqual([{ id: "f1", name: "🧑‍💻 Dev" }]);
+  });
+
+  it("prunes conflicting inFolder when a session is pinned or nested in both cleanArrangement and applyArrangement", () => {
+    const cleaned = cleanArrangement({
+      rev: 4,
+      placed: { [B]: A, [C]: null },
+      pinned: [A],
+      folders: [{ id: "f1", name: "Work" }],
+      inFolder: { [A]: "f1", [B]: "f1", [C]: "f1" },
+    });
+    // A is pinned, B is nested under A -> both pruned; C is explicitly root (placed[C] = null) -> kept.
+    expect(cleaned.inFolder).toEqual({ [C]: "f1" });
+
+    // Direct PATCH: pinning or nesting a foldered session drops its inFolder membership.
+    let doc = applyArrangement(
+      EMPTY_ARRANGEMENT,
+      { folders: [{ id: "f1", name: "Work" }], inFolder: { [A]: "f1", [B]: "f1" } },
+      all,
+    );
+    doc = applyArrangement(doc, { pinned: [A] }, all);
+    expect(doc.inFolder).toEqual({ [B]: "f1" });
+    doc = applyArrangement(doc, { placed: { [B]: C } }, all);
+    expect(doc.inFolder).toBeUndefined();
+
+    // Direct PATCH trying to set inFolder on an already-pinned session produces no conflict and no rev bump.
+    const same = applyArrangement(doc, { inFolder: { [A]: "f1" } }, all);
+    expect(same).toBe(doc);
+    expect(same.inFolder).toBeUndefined();
+  });
+
   it("forgetInArrangement drops inFolder membership too while keeping folders", () => {
     const doc: Arrangement = {
       rev: 5,

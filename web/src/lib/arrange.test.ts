@@ -310,4 +310,24 @@ describe("folder CRUD and atomic Undo", () => {
     expect(afterUndo.folders?.map((f) => f.name)).toEqual(["Play", "Core"]);
     expect(afterUndo.inFolder).toEqual({ [C.key]: f1!.id });
   });
+
+  it("deleteFolder undo merges into the latest folder list without clobbering concurrent edits", () => {
+    const st = makeStore();
+    const f1 = createFolder(st, "Alpha")!;
+    const f2 = createFolder(st, "Beta")!;
+    expect(deleteFolder(st, f1.id)).toBe(true);
+    // Simulate a concurrent folder rename + new folder from another device before Undo runs.
+    const live = st as unknown as {
+      get(): { arrangement: Arrangement };
+      patchArrangement(p: Parameters<typeof applyArrangement>[1]): Promise<Arrangement>;
+    };
+    void live.patchArrangement({
+      folders: [
+        { id: f2.id, name: "Beta Renamed" },
+        { id: "f_remote", name: "Remote" },
+      ],
+    });
+    expect(undoLatest()).toBe(true);
+    expect(live.get().arrangement.folders?.map((f) => f.name)).toEqual(["Alpha", "Beta Renamed", "Remote"]);
+  });
 });

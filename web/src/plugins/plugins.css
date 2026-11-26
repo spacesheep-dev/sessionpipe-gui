@@ -71,6 +71,7 @@
 
 /* Full-width nested settings drawer beneath the plugin header row. */
 .plug-drawer {
+  container-type: inline-size;
   margin-left: calc(-12px + var(--hairline));
   padding: 0 16px;
   border-top: var(--hairline) solid var(--line);
@@ -244,6 +245,22 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
+}
+
+/* Stack the 2-column settings grid when the drawer itself is narrow (e.g. split panel open). */
+@container (max-width: 480px) {
+  .plug-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 6px;
+  }
+  .plug-field-grid > .plug-label {
+    padding-top: 0;
+  }
+  .plug-input,
+  .plug-control .sel,
+  .plug-secret {
+    max-width: none;
+  }
 }
 
 /* Phone & coarse-pointer adaptations. */

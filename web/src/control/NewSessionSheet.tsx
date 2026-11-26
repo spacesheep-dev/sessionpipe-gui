@@ -39,7 +39,7 @@ import {
 } from "react";
 import { useSendStates } from "../account/sendable";
 import { ActionButton, EmptyState, HarnessGlyph, withFormScrim } from "../components/bits";
-import { Select, type SelectOption } from "../components/Select";
+import { filterOptions, Select, type SelectOption } from "../components/Select";
 import { useAppState, useLimits, useListedSessions, useMachines } from "../data/hooks";
 import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
@@ -256,9 +256,13 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const first = useMemo(() => {
     const d = initial.draft;
     const fromDraft = d && !target.machine && d.machine === initial.ctx.machine;
+    const sameMachine = !target.machine || target.machine === initial.ctx.machine;
+    const targetClean = Object.fromEntries(
+      Object.entries(target).filter(([k, v]) => v !== undefined && (k !== "cwd" || sameMachine)),
+    );
     const prefer: NewSessionTarget = {
       ...(fromDraft ? { harness: d.harness, cwd: d.folder, permission: d.permission, model: d.model } : {}),
-      ...Object.fromEntries(Object.entries(target).filter(([, v]) => v !== undefined)),
+      ...targetClean,
       ...(initial.ctx.harness && !target.harness && !fromDraft ? { harness: initial.ctx.harness } : {}),
     };
     return valuesFor(initial.ctx.machine, prefer);
@@ -327,12 +331,14 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       ready: ready(names),
     });
     if (!ctx.machine) return;
+    const sameMachine = !target.machine || target.machine === ctx.machine;
     const prefer: NewSessionTarget = {
-      ...Object.fromEntries(Object.entries(target).filter(([, v]) => v !== undefined)),
+      ...Object.fromEntries(Object.entries(target).filter(([k, v]) => v !== undefined && (k !== "cwd" || sameMachine))),
       ...(ctx.harness && !target.harness ? { harness: ctx.harness } : {}),
     };
     const v = valuesFor(ctx.machine, prefer);
     setMachineRaw(ctx.machine);
+    setFavorites(readFavoriteFolders(ctx.machine));
     setHarness(v.harness);
     setFolder(v.folder);
     setPermission(v.permission);
@@ -342,6 +348,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const setMachine = (name: string) => {
     if (name === machine) return;
     setMachineRaw(name);
+    setFavorites(readFavoriteFolders(name));
     const v = valuesFor(name);
     setHarness(v.harness);
     setFolder(v.folder);
@@ -872,8 +879,13 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   ];
   const typed = (t: string): SelectOption<string> | null => {
     if (!machine) return null;
+    const pathLike = t.startsWith("/") || t.startsWith("~") || /^[A-Za-z]:[\\/]/.test(t);
+    if (!pathLike && filterOptions(folderOptions, t).length > 0) return null;
     const r = typedFolder(t, { folders: c?.folders, home: machineHome(c), machine });
-    if (!r.ok) return { value: t, label: t, hint: r.reason };
+    if (!r.ok) {
+      const disabled = !pathLike || r.reason.includes("without . or ..");
+      return { value: t, label: t, hint: r.reason, ...(disabled ? { disabled: true } : {}) };
+    }
     const display = tildify(r.path, machineHome(c));
     const fmt = formatFolder(display);
     return {
@@ -1024,8 +1036,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         ),
         machine && c && !listsFolders ? (
           <span className="ns-row-end">
-            <span className="ns-aside">{machine} didn't list its folders; it checks the path itself</span>
             {folderPin}
+            <span className="ns-aside">{machine} didn't list its folders; it checks the path itself</span>
           </span>
         ) : (
           folderPin

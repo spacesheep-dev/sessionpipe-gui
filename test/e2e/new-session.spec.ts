@@ -127,7 +127,8 @@ test("right-click a session: New session here, prefilled; a machine's menu: New 
   // one (`MachineControl.tilde`); elsewhere it starts from the machine's own folders.
   if (await tildeOn(name)) {
     await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "~/code/billing");
-    await expect(rowValue(page, "folder")).toContainText("~/code/billing");
+    await expect(rowValue(page, "folder")).toContainText("billing");
+    await expect(rowValue(page, "folder")).toContainText("~/code");
   } else {
     await expect(rowValue(page, "folder")).toHaveAttribute("data-value", "/Users/e2e/code");
     await expect(status(page)).not.toHaveText(/needs the full path/);

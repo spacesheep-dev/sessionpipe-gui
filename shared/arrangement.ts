@@ -36,19 +36,33 @@ export class ArrangementError extends Error {
 const FIELDS = new Set<string>(["placed", "follow", "pinned", "folders", "inFolder"]);
 const FOLDER_FIELDS = new Set<string>(["id", "name", "color"]);
 const COLORS = new Set<string>(LABEL_COLORS);
-// biome-ignore lint/suspicious/noControlCharactersInRegex: control and bidi override characters are stripped from folder names
-const BAD_FOLDER_CHARS = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g;
+const BAD_FOLDER_CHARS =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control, zero-width, and bidi override characters are stripped from folder names
+  /[\u0000-\u001f\u007f-\u009f\u00ad\u200b\u200e\u200f\u061c\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g;
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const has = (o: object, k: string) => Object.hasOwn(o, k);
 
-/** Strips control characters and bidi overrides, then trims whitespace. */
+/** Strips control, zero-width, and bidi override characters, trims whitespace, and
+ *  rejects names with no visible non-format character (e.g. lone ZWJ). */
 export function sanitizeFolderName(raw: string): string {
-  return raw.replace(BAD_FOLDER_CHARS, "").trim();
+  const s = raw.replace(BAD_FOLDER_CHARS, "").trim();
+  if (!s.replace(/\p{Cf}/gu, "").trim()) return "";
+  return s;
 }
 
 const sameFolders = (a: readonly ArrangementFolder[], b: readonly ArrangementFolder[]): boolean =>
   a.length === b.length && a.every((x, i) => x.id === b[i]!.id && x.name === b[i]!.name && x.color === b[i]!.color);
+
+const sameInFolder = (
+  a: Readonly<Record<SessionKey, string>> | undefined,
+  b: Readonly<Record<SessionKey, string>>,
+): boolean => {
+  const ak = a ? Object.keys(a) : [];
+  const bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  return bk.every((k) => !!a && has(a, k) && a[k] === b[k]);
+};
 
 function buildDoc(
   rev: number,
@@ -161,10 +175,7 @@ export function applyArrangement(
     }
     // Prune any inFolder entries referencing removed folder IDs (zero orphans).
     for (const [k, fid] of Object.entries(inFolder)) {
-      if (!seenIds.has(fid)) {
-        delete inFolder[k];
-        changed = true;
-      }
+      if (!seenIds.has(fid)) delete inFolder[k];
     }
   }
   const folderIds = new Set(folders.map((f) => f.id));
@@ -173,22 +184,22 @@ export function applyArrangement(
     for (const [key, fid] of Object.entries(p.inFolder)) {
       if (!isSessionKey(key)) throw new ArrangementError(400, "malformed");
       if (fid === null) {
-        if (has(inFolder, key)) {
-          delete inFolder[key];
-          changed = true;
-        }
+        if (has(inFolder, key)) delete inFolder[key];
         continue;
       }
       if (typeof fid !== "string") throw new ArrangementError(400, "malformed");
       if (!folderIds.has(fid)) throw new ArrangementError(400, "bad_folder");
       if (!known(key)) throw new ArrangementError(404, "not_found");
-      if (!has(inFolder, key) || inFolder[key] !== fid) {
-        inFolder[key] = fid;
-        changed = true;
-      }
+      inFolder[key] = fid;
     }
     if (Object.keys(inFolder).length > ARRANGEMENT_PLACED_MAX) throw new ArrangementError(413, "too_many");
   }
+  // A pinned or nested session never coexists with custom folder membership.
+  const pinSet = new Set(pinned);
+  for (const k of Object.keys(inFolder)) {
+    if (pinSet.has(k) || (has(placed, k) && placed[k] !== null)) delete inFolder[k];
+  }
+  if (!sameInFolder(doc.inFolder, inFolder)) changed = true;
   return changed ? buildDoc(doc.rev + 1, placed, pinned, folders, inFolder) : doc;
 }
 
@@ -244,11 +255,13 @@ export function cleanArrangement(raw: unknown): Arrangement {
       folders.push(color !== undefined ? { id: item.id, name, color } : { id: item.id, name });
     }
   }
+  const pinSet = new Set(pinned);
   const inFolder: Record<SessionKey, string> = {};
   if (isObject(r.inFolder)) {
     for (const [key, fid] of Object.entries(r.inFolder)) {
       if (Object.keys(inFolder).length >= ARRANGEMENT_PLACED_MAX) break;
       if (!isSessionKey(key) || typeof fid !== "string" || !folderIds.has(fid)) continue;
+      if (pinSet.has(key) || (has(placed, key) && placed[key] !== null)) continue;
       inFolder[key] = fid;
     }
   }

@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import type { InstalledTheme } from "@shared/theme-api";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { installSvgDomStub } from "../lib/safeSvg.test";
 import { ADD_LINE, formatExtensionMeta, safeViewSvg, ThemeRow, ViewIconTile, viewBadges } from "./ThemesPage";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -32,15 +33,22 @@ describe("ThemesPage helpers", () => {
   });
 
   it("sanitizes inline SVG icons and rejects unsafe markup", () => {
-    const clean = '<svg viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16"/></svg>';
-    expect(safeViewSvg(clean)).toBe(clean);
-    expect(safeViewSvg(undefined)).toBeNull();
-    expect(safeViewSvg("<div>not svg</div>")).toBeNull();
-    expect(safeViewSvg("<svg><script>alert(1)</script></svg>")).toBeNull();
-    expect(safeViewSvg('<svg onload="alert(1)"></svg>')).toBeNull();
-    expect(safeViewSvg('<svg><a href="javascript:alert(1)"></a></svg>')).toBeNull();
-    expect(safeViewSvg("<svg><foreignObject></foreignObject></svg>")).toBeNull();
-    expect(safeViewSvg("<svg><iframe src='x'></iframe></svg>")).toBeNull();
+    installSvgDomStub();
+    try {
+      const clean = '<svg viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16"/></svg>';
+      const out = safeViewSvg(clean);
+      expect(out).toContain('viewBox="0 0 20 20"');
+      expect(out).toContain('<rect x="2" y="2" width="16" height="16"/>');
+      expect(safeViewSvg(undefined)).toBeNull();
+      expect(safeViewSvg("<div>not svg</div>")).toBeNull();
+      expect(safeViewSvg("<svg><script>alert(1)</script></svg>")).toBeNull();
+      expect(safeViewSvg('<svg onload="alert(1)"></svg>')).toBeNull();
+      expect(safeViewSvg('<svg><a href="javascript:alert(1)"></a></svg>')).toBeNull();
+      expect(safeViewSvg("<svg><foreignObject></foreignObject></svg>")).toBeNull();
+      expect(safeViewSvg("<svg><iframe src='x'></iframe></svg>")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("shows only noteworthy badges and omits noisy bundled/disabled pills", () => {
@@ -116,7 +124,10 @@ describe("ThemeRow and ViewIconTile", () => {
     expect(html).not.toContain('href="/t/bad"');
   });
 
+  afterEach(() => vi.unstubAllGlobals());
+
   it("renders manifest SVG inside ViewIconTile when safe and falls back otherwise", () => {
+    installSvgDomStub();
     const withManifest = renderToStaticMarkup(
       createElement(ViewIconTile, {
         theme: makeTheme({ icon: '<svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></svg>' }),

@@ -10,6 +10,7 @@ import { Extras } from "../components/Extras";
 import { PageBar } from "../components/PageBar";
 import { copyText } from "../lib/menus";
 import { Link, navigate } from "../lib/router";
+import { safeSvg } from "../lib/safeSvg";
 import { isLoopbackPage, PLUGIN_ADD_LINE, PluginsSection } from "../plugins/PluginsSection";
 import { fetchPlugins, reloadPlugins, usePlugins } from "../plugins/registry";
 import { fetchThemes, reloadThemes, setThemeDisabled, useThemes } from "../themes/host/registry";
@@ -20,10 +21,7 @@ const ONLY_HERE = "Only on the machine running the receiver";
 
 /** Sanitize a manifest's inline SVG icon before rendering inside the 36x36 icon well. */
 export function safeViewSvg(svg: string | undefined): string | null {
-  if (!svg) return null;
-  const s = svg.trim();
-  if (!/^<svg[\s>]/i.test(s) || /<script|on[a-z]+\s*=|javascript:|<foreignObject|<iframe/i.test(s)) return null;
-  return s;
+  return safeSvg(svg) ?? null;
 }
 
 /** Concise PageBar meta: "2 views · 1 plugin", "2 views", or undefined while empty. */

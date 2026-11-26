@@ -68,7 +68,10 @@ function Picker({ moving, fromTree, onClose }: { moving: SessionKey; fromTree: b
   const choice = Math.min(at, Math.max(0, shown.length - 1));
   const s = state.sessions.get(moving);
   const id = useId();
-  useFocusTrap(ref, true, { onClose, initial: "input" });
+  useFocusTrap(ref, Boolean(s), { onClose, initial: "input" });
+  useEffect(() => {
+    if (!s) onClose();
+  }, [s, onClose]);
   useEffect(() => {
     ref.current?.querySelector(`[data-pick="${choice}"]`)?.scrollIntoView({ block: "nearest" });
   }, [choice]);

@@ -239,12 +239,20 @@ describe("favorite folders per machine", () => {
     expect(favs[0]).toBe(`/w/p${FAV_FOLDERS_MAX + 3}`);
   });
 
-  it("is resilient to missing or corrupt storage", () => {
+  it("is resilient to missing or corrupt storage and prototype-key machine names", () => {
     expect(readFavoriteFolders("studio")).toEqual([]);
     const store = stubStorage(new Map([["sp.newSession.favFolders", "{not valid json"]]));
     expect(readFavoriteFolders("studio")).toEqual([]);
     store.set("sp.newSession.favFolders", JSON.stringify(["wrong-shape"]));
     expect(readFavoriteFolders("studio")).toEqual([]);
+    // Machine names matching Object.prototype keys must never crash or read inherited functions.
+    store.set("sp.newSession.favFolders", JSON.stringify({ studio: ["/w/a"] }));
+    for (const protoKey of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+      expect(readFavoriteFolders(protoKey)).toEqual([]);
+      expect(toggleFavoriteFolder(protoKey, "/w/proto")).toEqual(["/w/proto"]);
+      expect(readFavoriteFolders(protoKey)).toEqual(["/w/proto"]);
+      expect(toggleFavoriteFolder(protoKey, "/w/proto")).toEqual([]);
+    }
   });
 
   it("orders pinned -> recent (deduped) -> allowed (deduped) in folderChoices", () => {

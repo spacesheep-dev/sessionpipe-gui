@@ -3,7 +3,14 @@ import type { InstalledPlugin } from "@shared/plugin-api";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { hasUnconfiguredSettings, PLUGIN_ADD_LINE, PluginRow, pluginStatusPill, SettingsForm } from "./PluginsSection";
+import {
+  hasUnconfiguredSettings,
+  PLUGIN_ADD_LINE,
+  PluginRow,
+  pluginSettingsPatch,
+  pluginStatusPill,
+  SettingsForm,
+} from "./PluginsSection";
 
 const makePlugin = (patch: Partial<InstalledPlugin> = {}): InstalledPlugin => ({
   id: "ping-a-human",
@@ -50,6 +57,18 @@ describe("PluginsSection helpers", () => {
 
   it("uses the concise CLI plugin install line", () => {
     expect(PLUGIN_ADD_LINE).toBe("sessionpipe-gui plugin add <source>");
+  });
+
+  it("computes normalized per-field patch so clearing an unset optional number is not dirty", () => {
+    const fields = makePlugin().settings!;
+    // Unset optional number (undefined) cleared to null -> empty patch (not dirty).
+    expect(pluginSettingsPatch(fields, { retries: null }, {})).toEqual({});
+    // Set optional number (2) cleared to null -> dirty with explicit null patch.
+    expect(pluginSettingsPatch(fields, { retries: null }, { retries: 2 })).toEqual({ retries: null });
+    // Secret cleared from masked value -> explicit null patch.
+    expect(pluginSettingsPatch(fields, { botToken: null }, { botToken: "••••1234" })).toEqual({ botToken: null });
+    // Unchanged masked secret -> omitted from patch.
+    expect(pluginSettingsPatch(fields, { botToken: "••••1234" }, { botToken: "••••1234" })).toEqual({});
   });
 });
 

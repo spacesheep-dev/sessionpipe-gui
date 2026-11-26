@@ -150,12 +150,12 @@ export const FAV_FOLDERS_KEY = "sp.newSession.favFolders";
 export const FAV_FOLDERS_MAX = 12;
 
 function readAllFavorites(): Record<string, string[]> {
+  const out: Record<string, string[]> = Object.create(null);
   try {
     const raw = localStorage.getItem(FAV_FOLDERS_KEY);
-    if (!raw) return {};
+    if (!raw) return out;
     const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out: Record<string, string[]> = {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
     for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
       if (!Array.isArray(v)) continue;
       const list = [...new Set(v.filter((x): x is string => typeof x === "string" && x.trim().length > 0))].slice(
@@ -166,7 +166,7 @@ function readAllFavorites(): Record<string, string[]> {
     }
     return out;
   } catch {
-    return {};
+    return out;
   }
 }
 
@@ -182,7 +182,8 @@ function writeAllFavorites(all: Record<string, string[]>): void {
 /** Pinned folder paths for `machine` (at most FAV_FOLDERS_MAX), resilient to storage errors. */
 export function readFavoriteFolders(machine: string): string[] {
   if (!machine) return [];
-  return readAllFavorites()[machine] ?? [];
+  const all = readAllFavorites();
+  return Object.hasOwn(all, machine) ? all[machine]! : [];
 }
 
 /** Pins `path` at the top of `machine`'s favorites, or unpins it when already present. */
@@ -190,7 +191,7 @@ export function toggleFavoriteFolder(machine: string, path: string): string[] {
   const norm = normalizePath(path.trim());
   if (!machine || !norm) return readFavoriteFolders(machine);
   const all = readAllFavorites();
-  const prev = all[machine] ?? [];
+  const prev = Object.hasOwn(all, machine) ? all[machine]! : [];
   const exists = prev.some((p) => normalizePath(p) === norm);
   const next = exists
     ? prev.filter((p) => normalizePath(p) !== norm)

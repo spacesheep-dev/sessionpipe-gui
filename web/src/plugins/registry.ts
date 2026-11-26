@@ -83,7 +83,10 @@ export async function setPluginEnabled(id: string, on: boolean): Promise<void> {
 }
 
 /** Save one plugin's settings (loopback only); the list is updated with the masked values. */
-export async function savePluginSettings(id: string, values: Record<string, unknown>): Promise<void> {
+export async function savePluginSettings(
+  id: string,
+  values: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
   const body = await request<{ settings: Record<string, unknown> }>(
     `${PLUGIN_ROUTES.settings}/${encodeURIComponent(id)}/settings`,
     "PUT",
@@ -92,6 +95,7 @@ export async function savePluginSettings(id: string, values: Record<string, unkn
   set({ plugins: state.plugins.map((p) => (p.id === id ? { ...p, values: body.settings } : p)) });
   // The plugin may have come alive (or fallen over) on the new values.
   void fetchPlugins();
+  return body.settings;
 }
 
 export function usePlugins(): PluginsState {

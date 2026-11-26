@@ -106,7 +106,10 @@ export function roomWords(accounts: readonly MachinePoolAccount[], now: number, 
   if (n === 1) return "1 account";
   const room = accounts.filter(hasRoom).length;
   if (room > 0) return `${n} accounts, ${room} with room`;
-  const back = firstBack(accounts, now);
+  const back = firstBack(
+    accounts.filter((a) => a.enabled),
+    now,
+  );
   return `${n} accounts, none with room${withBack && back ? ` · ${back}` : ""}`;
 }
 
@@ -358,7 +361,7 @@ export function poolPickerWords(
         return !!info && isOut(info.reading);
       });
     if (!usedUp) return { detail: room, tone: "neutral", ...(asideTip ? { asideTip } : {}) };
-    const back = firstBack(pool.accounts, now) ?? (currentInfo?.reading.when || null);
+    const back = firstBack(enabled, now) ?? (currentInfo?.reading.when || null);
     return {
       hint: "None left",
       detail: room,

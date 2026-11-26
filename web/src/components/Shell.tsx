@@ -61,6 +61,7 @@ import {
   usePath,
   useSearchParam,
 } from "../lib/router";
+import { safeSvg } from "../lib/safeSvg";
 import { useReadyUpdate } from "../lib/selfUpdate";
 import {
   getSettings as getAppSettings,
@@ -287,15 +288,6 @@ const BUILTIN: NavItem[] = [
   { to: "/machines", key: "machines", label: "Machines", glyph: ICON.machines, group: 2 },
 ];
 
-/** A manifest icon is inline SVG the theme author wrote; it is code of the same trust
- *  as the theme itself, but a script-bearing one is refused all the same. */
-const safeSvg = (svg: string | undefined): string | null => {
-  if (!svg) return null;
-  const s = svg.trim();
-  if (!/^<svg[\s>]/i.test(s) || /<script|on[a-z]+\s*=|javascript:|<foreignObject|<iframe/i.test(s)) return null;
-  return s;
-};
-
 export const themeNavItem = (t: InstalledTheme): NavItem => {
   const svg = safeSvg(t.icon);
   return {
@@ -303,7 +295,7 @@ export const themeNavItem = (t: InstalledTheme): NavItem => {
     key: `t:${t.id}`,
     label: t.name || t.id,
     glyph: PLUG_ICON,
-    svg: svg ?? undefined,
+    svg,
     experimental: t.experimental,
     group: t.experimental ? 4 : 3,
   };
@@ -836,13 +828,17 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     if (!overlayShown) return;
     const key = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (document.querySelector('[role="menu"], [role="dialog"], [aria-modal="true"], .sel-pop, .sel-sheet')) return;
       e.stopImmediatePropagation();
       e.preventDefault();
       setOverlay(false);
     };
     const down = (e: PointerEvent) => {
       const t = e.target as Element | null;
-      if (columnRef.current?.contains(t) || t?.closest?.("[data-tree-toggle], .menu, .menu-sheet, [role=dialog]"))
+      if (
+        columnRef.current?.contains(t) ||
+        t?.closest?.("[data-tree-toggle], .menu, .menu-sheet, [role=dialog], [aria-modal='true'], .sel-pop, .sel-sheet")
+      )
         return;
       setOverlay(false);
     };

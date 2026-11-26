@@ -243,8 +243,24 @@ function Picker<T>({
       if (trigger.current?.contains(t) || pop.current?.contains(t)) return;
       close(false);
     };
+    const onPopKey = (e: KeyboardEvent) => {
+      if (
+        trigger.current?.closest('[aria-modal="true"]') &&
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "f"
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    const el = pop.current;
     document.addEventListener("pointerdown", onDown, true);
-    return () => document.removeEventListener("pointerdown", onDown, true);
+    el?.addEventListener("keydown", onPopKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      el?.removeEventListener("keydown", onPopKey);
+    };
   }, [open, close]);
 
   // ----- placement (desktop): under the trigger, flipped above when there is no room -----
@@ -397,6 +413,18 @@ function Picker<T>({
     // Open: nothing here reaches the page's keys (Esc, j/k, /).
     if (e.key === "Tab") {
       close(false);
+      return;
+    }
+    // When portaled from inside a modal (e.g. New session sheet), prevent mod+shift+f from
+    // bubbling to the window dispatcher and navigating away to /search.
+    if (
+      trigger.current?.closest('[aria-modal="true"]') &&
+      (e.metaKey || e.ctrlKey) &&
+      e.shiftKey &&
+      e.key.toLowerCase() === "f"
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
     e.stopPropagation();

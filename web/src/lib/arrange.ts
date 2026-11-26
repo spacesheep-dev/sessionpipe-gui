@@ -480,7 +480,8 @@ export function reorderFolder(store: Store, folderId: string, dir: -1 | 1): bool
 export function deleteFolder(store: Store, folderId: string): boolean {
   const state = store.get();
   const prevFolders = state.arrangement.folders ?? [];
-  const cur = prevFolders.find((f) => f.id === folderId);
+  const origIndex = prevFolders.findIndex((f) => f.id === folderId);
+  const cur = origIndex >= 0 ? prevFolders[origIndex] : undefined;
   if (!cur) return false;
   const members = Object.entries(state.arrangement.inFolder ?? {})
     .filter(([, fid]) => fid === folderId)
@@ -500,11 +501,15 @@ export function deleteFolder(store: Store, folderId: string): boolean {
     quiet: true,
     undo: () => {
       calmNextCommit();
-      const liveSessions = store.get().sessions;
+      const live = store.get();
+      const currentFolders = live.arrangement.folders ?? [];
+      const without = currentFolders.filter((f) => f.id !== folderId);
+      const at = Math.min(origIndex, without.length);
+      const mergedFolders = [...without.slice(0, at), cur, ...without.slice(at)];
       const restored: Record<SessionKey, string> = {};
-      for (const k of members) if (liveSessions.has(k)) restored[k] = folderId;
+      for (const k of members) if (live.sessions.has(k)) restored[k] = folderId;
       const patch: ArrangementPatch = {
-        folders: prevFolders,
+        folders: mergedFolders,
         ...(Object.keys(restored).length > 0 ? { inFolder: restored } : {}),
       };
       void store.patchArrangement(patch).catch(() => {});

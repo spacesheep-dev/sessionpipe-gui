@@ -22,6 +22,7 @@ import {
   isEmptySession,
   LABEL_COLORS,
   LABEL_DEFAULT_NAMES,
+  type MachineSummary,
   type SessionKey,
   type SessionSummary,
   splitKey,
@@ -450,6 +451,7 @@ export const SessionTree = memo(function SessionTree({
   const store = useStore();
   // Only what the tree draws: a control frame, a viewer or the stats redraw nothing here.
   const sessions = useSyncExternalStore(store.subscribe, () => store.get().sessions);
+  const machines = useSyncExternalStore(store.subscribe, () => store.get().machines);
   const arrangement = useSyncExternalStore(store.subscribe, () => store.get().arrangement);
   const marks = useSyncExternalStore(store.subscribe, () => store.get().marks);
   const snapshotAt = useSyncExternalStore(store.subscribe, () => store.get().snapshotAt);
@@ -542,15 +544,39 @@ export const SessionTree = memo(function SessionTree({
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [folderDraft, setFolderDraft] = useState("");
   const inlineInputRef = useRef<HTMLInputElement>(null);
-  const cancelledEdit = useRef(false);
+  const settledEdit = useRef(false);
+  const returnFocusTo = useRef<HTMLElement | null>(null);
   const editingFolderRef = useRef(false);
   editingFolderRef.current = creatingFolder || renamingFolderId !== null;
 
+  const focusRowNextFrame = useCallback((key: string, force: boolean) => {
+    requestAnimationFrame(() => {
+      if (!force) {
+        const cur = document.activeElement;
+        if (cur && cur !== document.body && !box.current?.contains(cur)) return;
+      }
+      const el = box.current?.querySelector<HTMLElement>(
+        `[data-tree-row="${CSS.escape(key)}"], [data-group-row="${CSS.escape(key)}"]`,
+      );
+      if (!el) return;
+      hadFocus.current = true;
+      focusedEl.current = el;
+      setFocusKey(key);
+      el.focus({ preventScroll: true });
+    });
+  }, []);
+
   const cancelFolderEdit = useCallback(() => {
-    cancelledEdit.current = true;
+    if (settledEdit.current) return;
+    settledEdit.current = true;
+    const prev = returnFocusTo.current;
+    returnFocusTo.current = null;
     setCreatingFolder(false);
     setRenamingFolderId(null);
     setFolderDraft("");
+    requestAnimationFrame(() => {
+      if (prev?.isConnected) prev.focus({ preventScroll: true });
+    });
   }, []);
   const cancelFolderEditRef = useRef(cancelFolderEdit);
   cancelFolderEditRef.current = cancelFolderEdit;
@@ -581,7 +607,8 @@ export const SessionTree = memo(function SessionTree({
       requestFolderPrompt({ mode: "create" });
       return;
     }
-    cancelledEdit.current = false;
+    returnFocusTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    settledEdit.current = false;
     setRenamingFolderId(null);
     setFolderDraft("");
     setCreatingFolder(true);
@@ -593,7 +620,11 @@ export const SessionTree = memo(function SessionTree({
         requestFolderPrompt({ mode: "rename", folderId: f.id, initialName: f.name });
         return;
       }
-      cancelledEdit.current = false;
+      const fk = `f:${f.id}`;
+      returnFocusTo.current =
+        box.current?.querySelector<HTMLElement>(`[data-group-row="${CSS.escape(fk)}"]`) ??
+        (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+      settledEdit.current = false;
       setCreatingFolder(false);
       setFolderDraft(f.name);
       setRenamingFolderId(f.id);
@@ -601,26 +632,37 @@ export const SessionTree = memo(function SessionTree({
     [touch],
   );
 
-  const commitFolderCreate = useCallback(() => {
-    if (cancelledEdit.current) {
-      cancelledEdit.current = false;
-      return;
-    }
-    const text = folderDraft.trim();
-    setCreatingFolder(false);
-    setFolderDraft("");
-    if (text) {
-      calmNextCommit();
-      createFolder(store, text);
-    }
-  }, [folderDraft, store]);
+  const commitFolderCreate = useCallback(
+    (fromKey = false) => {
+      if (settledEdit.current) return;
+      settledEdit.current = true;
+      const prev = returnFocusTo.current;
+      returnFocusTo.current = null;
+      const text = folderDraft.trim();
+      setCreatingFolder(false);
+      setFolderDraft("");
+      if (text) {
+        calmNextCommit();
+        const created = createFolder(store, text);
+        if (created) {
+          focusRowNextFrame(`f:${created.id}`, fromKey);
+          return;
+        }
+      }
+      if (fromKey) {
+        requestAnimationFrame(() => {
+          if (prev?.isConnected) prev.focus({ preventScroll: true });
+        });
+      }
+    },
+    [folderDraft, store, focusRowNextFrame],
+  );
 
   const commitFolderRename = useCallback(
-    (folderId: string) => {
-      if (cancelledEdit.current) {
-        cancelledEdit.current = false;
-        return;
-      }
+    (folderId: string, fromKey = false) => {
+      if (settledEdit.current) return;
+      settledEdit.current = true;
+      returnFocusTo.current = null;
       const text = folderDraft.trim();
       setRenamingFolderId(null);
       setFolderDraft("");
@@ -628,8 +670,9 @@ export const SessionTree = memo(function SessionTree({
         calmNextCommit();
         renameFolder(store, folderId, text);
       }
+      focusRowNextFrame(`f:${folderId}`, fromKey);
     },
-    [folderDraft, store],
+    [folderDraft, store, focusRowNextFrame],
   );
 
   // Held still under the hand, as the board is: no row moves while the pointer is over
@@ -740,19 +783,50 @@ export const SessionTree = memo(function SessionTree({
 
   // ----- focus: one row in the tab order, the arrows walk the rest -----
   const [focusKey, setFocusKey] = useState<string | null>(null);
-  const groupKeys = useMemo(() => {
-    const set = new Set<string>();
-    for (const f of folders) set.add(`f:${f.id}`);
-    if (grouped) for (const pg of projectGroups) set.add(`p:${pg.key}`);
-    return set;
-  }, [folders, grouped, projectGroups]);
-  const hasNavKey = (k: string | null | undefined) =>
-    !!k && (drawn.some((d) => d.node.s.key === k) || groupKeys.has(k));
-  const firstNavKey =
-    pinned[0]?.s.key ??
-    (folders[0] ? `f:${folders[0].id}` : undefined) ??
-    (grouped && projectGroups[0] ? `p:${projectGroups[0].key}` : undefined) ??
-    drawn[0]?.node.s.key;
+  const navKeys = useMemo(() => {
+    const out: string[] = [];
+    const byFolder = new Map<string, string[]>();
+    const byProject = new Map<string, string[]>();
+    const flatSessions: string[] = [];
+    for (const d of drawn) {
+      const k = d.node.s.key;
+      if (d.group === "pinned") {
+        out.push(k);
+      } else if (d.group === "folder" && d.folderId) {
+        let list = byFolder.get(d.folderId);
+        if (!list) {
+          list = [];
+          byFolder.set(d.folderId, list);
+        }
+        list.push(k);
+      } else if (d.projectKey) {
+        let list = byProject.get(d.projectKey);
+        if (!list) {
+          list = [];
+          byProject.set(d.projectKey, list);
+        }
+        list.push(k);
+      } else {
+        flatSessions.push(k);
+      }
+    }
+    for (const f of folders) {
+      out.push(`f:${f.id}`);
+      for (const k of byFolder.get(f.id) ?? []) out.push(k);
+    }
+    if (grouped) {
+      for (const pg of projectGroups) {
+        out.push(`p:${pg.key}`);
+        for (const k of byProject.get(pg.key) ?? []) out.push(k);
+      }
+    } else {
+      for (const k of flatSessions) out.push(k);
+    }
+    return out;
+  }, [drawn, folders, grouped, projectGroups]);
+  const navKeySet = useMemo(() => new Set(navKeys), [navKeys]);
+  const hasNavKey = (k: string | null | undefined) => !!k && navKeySet.has(k);
+  const firstNavKey = navKeys[0];
   const tabKey = hasNavKey(focusKey) ? focusKey : hasNavKey(open) ? open : firstNavKey;
   const rowEl = (key: string) =>
     box.current?.querySelector<HTMLElement>(
@@ -763,10 +837,10 @@ export const SessionTree = memo(function SessionTree({
   /** The row element that last had the focus: only its leaving the page (a move drew the
    *  row anew) sends the focus after the row; a Tab or a click away leaves it connected. */
   const focusedEl = useRef<HTMLElement | null>(null);
-  /** Where the focused row was in the rows as drawn: a row that leaves the list (hidden,
-   *  forgotten) hands the focus to the row that took its place. */
+  /** Where the focused row (session, folder, or project header) was in nav order: a row
+   *  that leaves the list (hidden, forgotten, deleted folder) hands focus to its neighbor. */
   const lastIndex = useRef(0);
-  const focusAt = drawn.findIndex((d) => d.node.s.key === focusKey);
+  const focusAt = focusKey ? navKeys.indexOf(focusKey) : -1;
   if (focusAt >= 0) lastIndex.current = focusAt;
   useLayoutEffect(() => {
     if (!focusKey || !hadFocus.current) return;
@@ -781,7 +855,7 @@ export const SessionTree = memo(function SessionTree({
       here.focus({ preventScroll: true });
       return;
     }
-    const next = drawn[Math.min(lastIndex.current, drawn.length - 1)]?.node.s.key ?? firstNavKey;
+    const next = navKeys[Math.min(lastIndex.current, navKeys.length - 1)] ?? firstNavKey;
     if (!next) return;
     setFocusKey(next);
     rowEl(next)?.focus({ preventScroll: true });
@@ -818,7 +892,8 @@ export const SessionTree = memo(function SessionTree({
           if (isFolded) {
             calmNextCommit();
             setFolded(groupKey, false);
-          } else to = items[i + 1];
+          } else if (items[i + 1]?.dataset.up === groupKey) to = items[i + 1];
+          else return;
         } else if (key && kids && isFolded) {
           calmNextCommit();
           setFolded(key, false);
@@ -1547,7 +1622,7 @@ export const SessionTree = memo(function SessionTree({
                       draft={folderDraft}
                       inputRef={isRenaming ? inlineInputRef : undefined}
                       onDraftChange={setFolderDraft}
-                      onCommitRename={() => commitFolderRename(f.id)}
+                      onCommitRename={(fromKey) => commitFolderRename(f.id, fromKey)}
                       onCancelEdit={cancelFolderEdit}
                       onStartRename={() => startRenameFolder(f)}
                       onToggleFold={() => {
@@ -1565,7 +1640,16 @@ export const SessionTree = memo(function SessionTree({
                           {fRoots.length > 0 ? (
                             fRoots.map((n, i) => row(n, "folder", i + 1, fRoots.length, undefined, f.id, fk))
                           ) : (
-                            <p className="stree-group-empty">Drop sessions here</p>
+                            <p
+                              className="stree-group-empty"
+                              data-zone="folder"
+                              data-folder-id={f.id}
+                              data-target={
+                                drag?.target?.kind === "folder" && drag.target.folderId === f.id ? "" : undefined
+                              }
+                            >
+                              Drop sessions here
+                            </p>
                           )}
                         </div>
                       )}
@@ -1592,12 +1676,12 @@ export const SessionTree = memo(function SessionTree({
                         autoComplete="off"
                         spellCheck={false}
                         onChange={(e) => setFolderDraft(e.target.value)}
-                        onBlur={commitFolderCreate}
+                        onBlur={() => commitFolderCreate(false)}
                         onKeyDown={(e) => {
                           e.stopPropagation();
                           if (e.key === "Enter") {
                             e.preventDefault();
-                            commitFolderCreate();
+                            commitFolderCreate(true);
                           } else if (e.key === "Escape") {
                             e.preventDefault();
                             cancelFolderEdit();
@@ -1643,6 +1727,7 @@ export const SessionTree = memo(function SessionTree({
                     <ProjectGroupRow
                       key={pg.key}
                       group={pg}
+                      machines={machines}
                       index={pi}
                       total={projectGroups.length}
                       foldKey={pk}
@@ -1743,23 +1828,36 @@ const nodeKey = (n: TreeNode) => n.s.key;
 /** Touch long-press menu trigger for folder / project group rows inside `.stree`
  *  (ContextMenu.tsx skips `.stree` so session rows own their own press/drag gesture). */
 function useTouchMenu(touch: boolean) {
+  const activeCleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => activeCleanup.current?.(), []);
   return useCallback(
     (e: ReactPointerEvent<HTMLElement>) => {
       if (!touch || e.pointerType !== "touch") return;
+      activeCleanup.current?.();
       const el = e.currentTarget;
       const start = { x: e.clientX, y: e.clientY };
       let timer = 0;
+      let swallowTimer = 0;
+      const swallow = (c: Event) => {
+        c.preventDefault();
+        c.stopPropagation();
+      };
       const cleanup = () => {
         window.clearTimeout(timer);
+        window.clearTimeout(swallowTimer);
         window.removeEventListener("pointermove", onMove, true);
         window.removeEventListener("pointerup", cleanup, true);
         window.removeEventListener("pointercancel", cleanup, true);
+        window.removeEventListener("click", swallow, { capture: true });
+        if (activeCleanup.current === cleanup) activeCleanup.current = null;
       };
       const onMove = (ev: PointerEvent) => {
         if (touchScrolls(ev.clientX - start.x, ev.clientY - start.y)) cleanup();
       };
       timer = window.setTimeout(() => {
-        cleanup();
+        window.removeEventListener("pointermove", onMove, true);
+        window.removeEventListener("pointerup", cleanup, true);
+        window.removeEventListener("pointercancel", cleanup, true);
         haptic("selection");
         const ce = new MouseEvent("contextmenu", {
           bubbles: true,
@@ -1768,13 +1866,13 @@ function useTouchMenu(touch: boolean) {
           clientY: start.y,
         });
         el.dispatchEvent(Object.assign(ce, { __touch: true }));
-        const swallow = (c: Event) => {
-          c.preventDefault();
-          c.stopPropagation();
-        };
         window.addEventListener("click", swallow, { capture: true, once: true });
-        window.setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 800);
+        swallowTimer = window.setTimeout(() => {
+          window.removeEventListener("click", swallow, { capture: true });
+          if (activeCleanup.current === cleanup) activeCleanup.current = null;
+        }, 800);
       }, LONG_PRESS_MS);
+      activeCleanup.current = cleanup;
       window.addEventListener("pointermove", onMove, true);
       window.addEventListener("pointerup", cleanup, true);
       window.addEventListener("pointercancel", cleanup, true);
@@ -1825,7 +1923,7 @@ function FolderGroupRow({
   draft: string;
   inputRef?: RefObject<HTMLInputElement | null>;
   onDraftChange: (v: string) => void;
-  onCommitRename: () => void;
+  onCommitRename: (fromKey?: boolean) => void;
   onCancelEdit: () => void;
   onStartRename: () => void;
   onToggleFold: () => void;
@@ -1942,12 +2040,12 @@ function FolderGroupRow({
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             onChange={(e) => onDraftChange(e.target.value)}
-            onBlur={onCommitRename}
+            onBlur={() => onCommitRename(false)}
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter") {
                 e.preventDefault();
-                onCommitRename();
+                onCommitRename(true);
               } else if (e.key === "Escape") {
                 e.preventDefault();
                 onCancelEdit();
@@ -1976,6 +2074,7 @@ function FolderGroupRow({
 /** One auto-grouped project header + hover `+` new-session button + its expanded sessions. */
 function ProjectGroupRow({
   group,
+  machines,
   index,
   total,
   foldKey,
@@ -1991,6 +2090,7 @@ function ProjectGroupRow({
   children,
 }: {
   group: ProjectGroup;
+  machines: ReadonlyMap<string, MachineSummary>;
   index: number;
   total: number;
   foldKey: string;
@@ -2006,21 +2106,35 @@ function ProjectGroupRow({
   children?: ReactNode;
 }) {
   const onTouchDown = useTouchMenu(touch);
+  // Only offer "New session in …" when at least one session in the project runs on a paired machine.
+  let pairedLatest: SessionSummary | undefined;
+  let pairedTime = -1;
+  for (const n of group.roots) {
+    const s = n.s;
+    if (!s.machine || !machines.get(s.machine)?.control) continue;
+    const t = Date.parse(s.lastAt || s.startedAt) || 0;
+    if (!pairedLatest || t > pairedTime) {
+      pairedLatest = s;
+      pairedTime = t;
+    }
+  }
   const startInProject = () => {
+    if (!pairedLatest) return;
     openNewSession({
-      ...(group.latest.machine ? { machine: group.latest.machine } : {}),
-      ...(group.latest.harness ? { harness: group.latest.harness } : {}),
-      ...(group.latest.cwd ? { cwd: group.latest.cwd } : {}),
+      machine: pairedLatest.machine,
+      ...(pairedLatest.harness ? { harness: pairedLatest.harness } : {}),
+      ...(pairedLatest.cwd ? { cwd: pairedLatest.cwd } : {}),
     });
   };
   const menu = useContextMenu(
     () => {
       const kidKeys = kidsInProject();
+      if (!pairedLatest && kidKeys.length === 0) return null;
       const anyKidFolded = kidKeys.some((k) => latestFolds.current.has(k));
       const anyKidOpen = kidKeys.some((k) => !latestFolds.current.has(k));
       return [
-        { label: `New session in ${group.label}`, run: startInProject },
-        kidKeys.length > 0 && { sep: true },
+        pairedLatest && { label: `New session in ${group.label}`, run: startInProject },
+        pairedLatest && kidKeys.length > 0 && { sep: true },
         kidKeys.length > 0 && {
           label: "Unfold all",
           disabled: !anyKidFolded,
@@ -2039,61 +2153,65 @@ function ProjectGroupRow({
   const tip = group.subtitle ? `${group.label}\n${group.subtitle}` : group.label;
   return (
     <div role="none" className="stree-item stree-group-item">
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the tree's onKey handler owns Enter, Space, and arrows */}
-      <div
-        role="treeitem"
-        aria-level={1}
-        aria-posinset={index + 1}
-        aria-setsize={total}
-        aria-expanded={!folded}
-        aria-owns={!folded ? groupId : undefined}
-        tabIndex={tab ? 0 : -1}
-        className="stree-row stree-group-row stree-project-row"
-        data-tree-nav=""
-        data-group-row={foldKey}
-        data-zone="project"
-        data-project-key={group.key}
-        data-rolled={rolled}
-        data-tip={touch ? undefined : tip}
-        data-tip-wrap={touch ? undefined : ""}
-        data-tip-side={touch ? undefined : "right"}
-        onClick={onToggleFold}
-        onPointerDown={onTouchDown}
-        onFocus={onFocus}
-        {...menu}
-      >
-        <span className="stree-group-chev" data-folded={folded ? "" : undefined} aria-hidden="true">
-          <Chevron />
-        </span>
-        <span className="stree-lead">
-          <ProjectIcon />
-        </span>
-        <span className="stree-title" dir="auto">
-          {group.label}
-        </span>
-        <button
-          type="button"
-          className="stree-project-add"
-          aria-label={`New session in ${group.label}`}
-          data-tip={touch ? undefined : `New session in ${group.label}`}
-          data-tip-side="right"
-          tabIndex={-1}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            startInProject();
-          }}
+      <div role="none" className={`stree-project-head${pairedLatest ? " stree-project-head--add" : ""}`}>
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: the tree's onKey handler owns Enter, Space, and arrows */}
+        <div
+          role="treeitem"
+          aria-level={1}
+          aria-posinset={index + 1}
+          aria-setsize={total}
+          aria-expanded={!folded}
+          aria-owns={!folded ? groupId : undefined}
+          tabIndex={tab ? 0 : -1}
+          className="stree-row stree-group-row stree-project-row"
+          data-tree-nav=""
+          data-group-row={foldKey}
+          data-zone="project"
+          data-project-key={group.key}
+          data-rolled={rolled}
+          data-tip={touch ? undefined : tip}
+          data-tip-wrap={touch ? undefined : ""}
+          data-tip-side={touch ? undefined : "right"}
+          onClick={onToggleFold}
+          onPointerDown={onTouchDown}
+          onFocus={onFocus}
+          {...menu}
         >
-          <PlusSmallIcon />
-        </button>
-        <span className="stree-group-count num" aria-hidden="true">
-          {group.count}
-        </span>
-        <span className="stree-lamp">{rolled && <GroupLamp loud={rolled} size={touch ? 12 : 10} />}</span>
-        <span className="sr-only">
-          , project, {group.count} {group.count === 1 ? "session" : "sessions"}
-          {rolled ? loudWords(rolled) : ""}
-        </span>
+          <span className="stree-group-chev" data-folded={folded ? "" : undefined} aria-hidden="true">
+            <Chevron />
+          </span>
+          <span className="stree-lead">
+            <ProjectIcon />
+          </span>
+          <span className="stree-title" dir="auto">
+            {group.label}
+          </span>
+          <span className="stree-group-count num" aria-hidden="true">
+            {group.count}
+          </span>
+          <span className="stree-lamp">{rolled && <GroupLamp loud={rolled} size={touch ? 12 : 10} />}</span>
+          <span className="sr-only">
+            , project, {group.count} {group.count === 1 ? "session" : "sessions"}
+            {rolled ? loudWords(rolled) : ""}
+          </span>
+        </div>
+        {pairedLatest && (
+          <button
+            type="button"
+            className="stree-project-add"
+            aria-label={`New session in ${group.label}`}
+            data-tip={touch ? undefined : `New session in ${group.label}`}
+            data-tip-side="right"
+            tabIndex={-1}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              startInProject();
+            }}
+          >
+            <PlusSmallIcon />
+          </button>
+        )}
       </div>
       {children}
     </div>
@@ -2604,11 +2722,14 @@ function useDragStart(o: {
         const b = p.getBoundingClientRect();
         projects.push({ top: b.top, bottom: b.bottom });
       }
-      // New session's row, during a drag the place to pin (Pinned's own heading as well).
+      // New session's row (Drop to pin) AND Pinned's own heading both accept drops to pin.
+      const pinnedZones = [zone('[data-zone="pin"]'), zone('[data-zone="pinned"]')].filter(
+        (z): z is { top: number; bottom: number } => !!z,
+      );
       return {
         rows,
         zones: {
-          pinned: zone('[data-zone="pin"]') ?? zone('[data-zone="pinned"]'),
+          pinned: pinnedZones.length ? pinnedZones : undefined,
           sessions: zone('[data-zone="sessions"]'),
           folders,
           projects,

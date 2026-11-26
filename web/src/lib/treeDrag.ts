@@ -47,11 +47,16 @@ export interface FolderZone {
   bottom: number;
 }
 
+export interface RectY {
+  top: number;
+  bottom: number;
+}
+
 export interface DropZones {
-  pinned?: { top: number; bottom: number };
-  sessions?: { top: number; bottom: number };
+  pinned?: RectY | readonly RectY[];
+  sessions?: RectY;
   folders?: readonly FolderZone[];
-  projects?: readonly { top: number; bottom: number }[];
+  projects?: readonly RectY[];
   bottom?: number;
 }
 
@@ -79,7 +84,12 @@ export function targetAt(
   refused: ReadonlySet<SessionKey>,
   zones: DropZones = {},
 ): Target | null {
-  if (zones.pinned && y >= zones.pinned.top && y < zones.pinned.bottom) return { kind: "pinned" };
+  if (zones.pinned) {
+    const pinnedZones = Array.isArray(zones.pinned) ? zones.pinned : [zones.pinned];
+    for (const p of pinnedZones) {
+      if (y >= p.top && y < p.bottom) return { kind: "pinned" };
+    }
+  }
   if (zones.folders) {
     for (const f of zones.folders) {
       if (y >= f.top && y < f.bottom) return { kind: "folder", folderId: f.folderId };

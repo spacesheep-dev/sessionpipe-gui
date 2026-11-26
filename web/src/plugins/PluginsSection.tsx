@@ -272,6 +272,26 @@ export function PluginRow({
   );
 }
 
+/** Computes the minimal per-field patch between `draft` and `current`, treating `null` and
+ *  `undefined` as equal for non-secret fields (e.g. cleared optional numbers). */
+export function pluginSettingsPatch(
+  fields: readonly SettingField[],
+  draft: Record<string, unknown>,
+  current: Record<string, unknown>,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  for (const f of fields) {
+    const d = draft[f.key];
+    const c = current[f.key];
+    const same =
+      f.type === "secret"
+        ? JSON.stringify(d) === JSON.stringify(c)
+        : JSON.stringify(d ?? null) === JSON.stringify(c ?? null);
+    if (!same) patch[f.key] = d ?? null;
+  }
+  return patch;
+}
+
 export function SettingsForm({ plugin: p, loopback }: { plugin: InstalledPlugin; loopback: boolean }) {
   const fields = p.settings ?? [];
   const current = p.values ?? {};
@@ -283,18 +303,16 @@ export function SettingsForm({ plugin: p, loopback }: { plugin: InstalledPlugin;
   useEffect(() => {
     setDraft(current);
   }, [currentJson]);
-  const dirty = JSON.stringify(draft) !== currentJson;
+  const patch = pluginSettingsPatch(fields, draft, current);
+  const dirty = Object.keys(patch).length > 0;
 
   const save = async () => {
     setSaving(true);
     setNote(null);
     try {
       // Only what changed goes; a secret still showing its mask is left alone by the server.
-      const patch: Record<string, unknown> = {};
-      for (const f of fields) {
-        if (JSON.stringify(draft[f.key]) !== JSON.stringify(current[f.key])) patch[f.key] = draft[f.key] ?? null;
-      }
-      await savePluginSettings(p.id, patch);
+      const saved = await savePluginSettings(p.id, patch);
+      setDraft(saved);
       setNote({ text: "Saved." });
     } catch (e) {
       setNote({ text: e instanceof Error ? e.message : String(e), err: true });

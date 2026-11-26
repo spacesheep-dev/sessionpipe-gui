@@ -447,6 +447,11 @@
     width: var(--tap);
     height: var(--tap);
   }
+  .themes-inline-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--tap);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -454,7 +459,10 @@
     animation: none;
   }
   .themes-reload.is-busy svg {
-    animation-duration: 1.6s;
+    /* biome-ignore lint/complexity/noImportantStyles: matches base.css reduced-motion spinner override */
+    animation-duration: 1.6s !important;
+    /* biome-ignore lint/complexity/noImportantStyles: matches base.css reduced-motion spinner override */
+    animation-iteration-count: infinite !important;
   }
 }
 

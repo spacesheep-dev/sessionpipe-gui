@@ -28,14 +28,23 @@ import { useFocusTrap } from "../lib/focus";
 import { sessionTitle } from "../lib/format";
 import { fuzzy } from "../lib/fuzzy";
 import { calmNextCommit } from "../lib/motion";
+import { usePath } from "../lib/router";
 import "../styles/pick.css";
 import "../styles/sidetree.css";
 
 export function MoveFolderHost() {
   const [pickReq, setPickReq] = useState<MoveFolderRequest | null>(null);
   const [promptReq, setPromptReq] = useState<FolderPromptRequest | null>(null);
+  const path = usePath();
+  const prevPath = useRef(path);
   useEffect(() => onMoveFolder(setPickReq), []);
   useEffect(() => onFolderPrompt(setPromptReq), []);
+  useEffect(() => {
+    if (prevPath.current === path) return;
+    prevPath.current = path;
+    setPickReq(null);
+    setPromptReq(null);
+  }, [path]);
   useEffect(() => {
     const close = () => {
       setPickReq(null);
@@ -132,7 +141,10 @@ function FolderPicker({ moving, fromTree, onClose }: { moving: SessionKey; fromT
   const choice = Math.min(at, Math.max(0, choices.length - 1));
   const s = state.sessions.get(moving);
   const id = useId();
-  useFocusTrap(ref, true, { onClose, initial: "input" });
+  useFocusTrap(ref, Boolean(s), { onClose, initial: "input" });
+  useEffect(() => {
+    if (!s) onClose();
+  }, [s, onClose]);
   useEffect(() => {
     ref.current?.querySelector(`[data-pick="${choice}"]`)?.scrollIntoView({ block: "nearest" });
   }, [choice]);
@@ -183,6 +195,9 @@ function FolderPicker({ moving, fromTree, onClose }: { moving: SessionKey; fromT
         aria-describedby={`${id}-what`}
         ref={ref}
         tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key !== "Tab" && e.key !== "Escape") e.stopPropagation();
+        }}
       >
         {phone && <span className="menu-grab" aria-hidden="true" />}
         {phone ? <div className="menu-sheet-head">{title}</div> : title}
@@ -197,8 +212,8 @@ function FolderPicker({ moving, fromTree, onClose }: { moving: SessionKey; fromT
           placeholder="Find or create a folder"
           aria-label="Find or create a folder"
           role="combobox"
-          aria-expanded="true"
-          aria-controls={`${id}-list`}
+          aria-expanded={choices.length > 0}
+          aria-controls={choices.length > 0 ? `${id}-list` : undefined}
           aria-activedescendant={choices.length ? `${id}-opt-${choice}` : undefined}
           aria-autocomplete="list"
           autoComplete="off"
@@ -311,6 +326,9 @@ function FolderPrompt({ req, onClose }: { req: FolderPromptRequest; onClose: () 
         aria-labelledby={`${id}-title`}
         ref={ref}
         tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key !== "Tab" && e.key !== "Escape") e.stopPropagation();
+        }}
       >
         {phone && <span className="menu-grab" aria-hidden="true" />}
         {phone ? <div className="menu-sheet-head">{title}</div> : title}

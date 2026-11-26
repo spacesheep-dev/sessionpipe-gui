@@ -48,9 +48,19 @@ describe("targetAt", () => {
     expect(targetAt(rows, 154, "c:b", none, zones)).toEqual({ kind: "line", group: "pinned", at: 2, y: 156 });
   });
 
-  it("is the Pinned heading, or top level on the Sessions heading", () => {
+  it("is the Pinned heading, Drop to pin zone, or top level on the Sessions heading", () => {
     expect(targetAt(rows, 80, "c:b", none, zones)).toEqual({ kind: "pinned" });
     expect(targetAt(rows, 180, "c:p1", none, zones)).toEqual({ kind: "top" });
+    // Both the fixed "Drop to pin" bar and the scrolled "Pinned" section heading work simultaneously.
+    const multiPinned = {
+      ...zones,
+      pinned: [
+        { top: 10, bottom: 38 },
+        { top: 76, bottom: 100 },
+      ],
+    };
+    expect(targetAt(rows, 20, "c:b", none, multiPinned)).toEqual({ kind: "pinned" });
+    expect(targetAt(rows, 88, "c:b", none, multiPinned)).toEqual({ kind: "pinned" });
   });
 
   it("is no place on the row itself, on its own sessions, or outside the scroller", () => {

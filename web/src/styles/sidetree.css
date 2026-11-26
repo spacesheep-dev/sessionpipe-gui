@@ -674,7 +674,23 @@
   color: var(--fg-4);
   font-size: var(--text-xs);
 }
+.stree-group-empty[data-target] {
+  color: var(--fg-2);
+}
+.stree-project-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.stree-project-head > .stree-project-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .stree-project-add {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
   flex: none;
   display: inline-grid;
   place-items: center;
@@ -683,23 +699,37 @@
   border-radius: var(--radius-inner);
   color: var(--fg-3);
   opacity: 0;
+  pointer-events: none;
   transition:
     opacity var(--dur-fast) var(--ease-out),
     background-color var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
 @media (hover: hover) {
-  .stree-project-row:hover .stree-project-add,
-  .stree-project-row:focus-within .stree-project-add {
+  .stree-project-head:hover > .stree-project-row {
+    background-color: var(--hover);
+    color: var(--fg);
+  }
+  .stree-project-head:hover .stree-project-add,
+  .stree-project-head:focus-within .stree-project-add {
     opacity: 1;
+    pointer-events: auto;
+  }
+  .stree-project-head--add:hover .stree-group-count,
+  .stree-project-head--add:focus-within .stree-group-count {
+    opacity: 0;
   }
   .stree-project-add:hover {
     background-color: var(--sel);
     color: var(--fg);
   }
 }
-.stree-project-row:focus-within .stree-project-add {
+.stree-project-head:focus-within .stree-project-add {
   opacity: 1;
+  pointer-events: auto;
+}
+.stree-project-head--add:focus-within .stree-group-count {
+  opacity: 0;
 }
 .stree-project-add:active {
   background-color: var(--press);
@@ -730,6 +760,7 @@
 }
 .stree-color-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin: 0;
@@ -747,7 +778,12 @@
   border-radius: 50%;
   border: var(--hairline) solid transparent;
   background: transparent;
-  cursor: pointer;
+}
+@media (pointer: coarse) {
+  .stree-color-opt {
+    width: var(--tap);
+    height: var(--tap);
+  }
 }
 .stree-color-opt:hover {
   background: var(--hover);
@@ -776,8 +812,15 @@
   height: 44px;
 }
 .stree--touch .stree-project-add {
-  width: 36px;
-  height: 36px;
+  position: static;
+  transform: none;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  opacity: 1;
+  pointer-events: auto;
+}
+.stree--touch .stree-project-head--add:focus-within .stree-group-count {
   opacity: 1;
 }
 .stree--touch .stree-group-body {

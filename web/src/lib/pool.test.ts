@@ -659,6 +659,32 @@ describe("the section's words", () => {
     expect(moveIn(["a", "b", "c"], 1, 1)).toEqual(["a", "b", "c"]);
     expect(moveIn(["a", "b", "c"], 1, 7)).toEqual(["a", "b", "c"]);
   });
+  it("ignores disabled accounts' until timestamps in roomWords and poolPickerWords", () => {
+    const now = Date.parse("2026-10-23T12:00:00Z");
+    const accounts: MachinePoolAccount[] = [
+      {
+        id: "disabled-soon",
+        label: "Disabled",
+        enabled: false,
+        current: false,
+        status: "limited",
+        until: "2026-10-23T12:15:00Z",
+      },
+      {
+        id: "enabled-later",
+        label: "Active",
+        enabled: true,
+        current: true,
+        status: "limited",
+        until: "2026-10-23T14:30:00Z",
+      },
+    ];
+    expect(roomWords(accounts, now)).toBe("2 accounts, none with room · first back in 2 h 30 m");
+    const picked = poolPickerWords({ harness: "claude-code", on: true, accounts }, () => undefined, now, "lab-mac");
+    expect(picked.aside).toBe("Pool used up · first back in 2 h 30 m");
+    expect(picked.tone).toBe("out");
+  });
+
   it("says the rest once each", () => {
     expect(offlineNotice("lab-mac", true)).toMatch(/can't reach Claude while switching is on\.$/);
     expect(offlineNotice("lab-mac", false)).toBe("lab-mac's sessionpipe is offline.");

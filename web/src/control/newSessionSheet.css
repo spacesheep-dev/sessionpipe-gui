@@ -190,6 +190,7 @@
 }
 .ns-row-end {
   display: inline-flex;
+  flex-direction: row-reverse;
   align-items: center;
   gap: 6px;
 }
@@ -644,6 +645,10 @@
 .ns-sheet--phone [data-ns-row="folder"]:has(.ns-pin) {
   grid-template-columns: auto minmax(0, 1fr) auto;
   padding-right: 4px;
+}
+.ns-sheet--phone [data-ns-row="folder"] .ns-pin {
+  grid-row: 1;
+  grid-column: 3;
 }
 .ns-sheet--phone .ns-row-end {
   display: contents;
