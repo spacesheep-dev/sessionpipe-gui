@@ -52,6 +52,8 @@
   visibility: visible;
 }
 .lens-chip-caret {
+  flex: none;
+  display: block;
   color: var(--fg-3);
 }
 /* The one line a page shows while the lens hides something, its way out a quiet button. */

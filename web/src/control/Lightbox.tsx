@@ -96,13 +96,25 @@ export function Lightbox({
             onClick={() => move(-1)}
             aria-label="Previous picture"
           >
-            <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" fill="none">
-              <path d="M10 3.5 5.5 8l4.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none">
+              <path
+                d="M12.5 4.5 7 10l5.5 5.5"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </button>
           <button type="button" className="icon-btn lb-btn lb-next" onClick={() => move(1)} aria-label="Next picture">
-            <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" fill="none">
-              <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none">
+              <path
+                d="M7.5 4.5 13 10l-5.5 5.5"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </button>
         </>

@@ -425,15 +425,17 @@ export function CopyIconButton({ text, label = "Copy" }: { text: string; label?:
     >
       <svg
         viewBox="0 0 16 16"
-        width="15"
-        height="15"
+        width="16"
+        height="16"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         aria-hidden="true"
       >
         {done ? (
-          <path d="M3.5 8.5 6.5 11.5 12.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
         ) : (
           <>
             <rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5" />

@@ -10,12 +10,14 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { sessionKey } from "../../../shared/api.js";
+import { resolveAntigravityBrainParent } from "../../sources/antigravityParent.js";
 import type {
   AdapterState,
   DocSink,
   ReadCursor,
   ReadOptions,
   ReadResult,
+  SearchDoc,
   SessionFacts,
   SourceAdapter,
   SourceEnv,
@@ -153,8 +155,19 @@ export function antigravityAdapter(): SourceAdapter {
     async read(file: SourceFile, from: ReadCursor, sink: DocSink, opts: ReadOptions = {}): Promise<ReadResult> {
       const brain = brainOf(file.path);
       if (!brain) return { offset: from.offset, state: from.state, skipped: "unreadable" };
-      const key = sessionKey(HARNESS, brain.id);
+      const dataDir = path.dirname(path.dirname(brain.dir));
+      const parentInfo = resolveAntigravityBrainParent(brain.dir, brain.id, dataDir);
+      const parentId = parentInfo && parentInfo.parentId !== brain.id ? parentInfo.parentId : undefined;
+      // A subagent brain's words belong to its parent's row, as the other harnesses' subagents do.
+      const key = sessionKey(HARNESS, parentId ?? brain.id);
+      const agent = parentId ? brain.id : undefined;
+      const emitDoc = (d: Omit<SearchDoc, "key" | "agent">) => {
+        sink.doc(agent ? { key, ...d, agent } : { key, ...d });
+      };
       const f: SessionFacts = { key, harness: HARNESS, id: brain.id };
+      const emitFacts = () => {
+        if (!parentId) sink.facts(f);
+      };
       const time = (t: number) => {
         if (!t) return;
         if (!f.firstAt || t < f.firstAt) f.firstAt = t;
@@ -179,7 +192,7 @@ export function antigravityAdapter(): SourceAdapter {
             time(t);
             const text = finish(antigravityRequest(c));
             if (!text) return;
-            sink.doc({ key, field: "prompt", at: t, text, offset: at });
+            emitDoc({ field: "prompt", at: t, text, offset: at });
             if (!st.fa) {
               st.fa = true;
               f.title = {
@@ -190,13 +203,13 @@ export function antigravityAdapter(): SourceAdapter {
           } else if (j.type === "PLANNER_RESPONSE") {
             time(t);
             const text = finish(c);
-            if (text) sink.doc({ key, field: "reply", at: t, text, offset: at });
+            if (text) emitDoc({ field: "reply", at: t, text, offset: at });
             for (const call of Array.isArray(j.tool_calls) ? j.tool_calls : []) {
               const o = obj(call);
               const name = str(o?.name);
               if (!name) continue;
               const line = antigravityToolLine(name, o?.args);
-              sink.doc({ key, field: "tool", at: t, text: line, offset: at, tool: name });
+              emitDoc({ field: "tool", at: t, text: line, offset: at, tool: name });
               if (!f.cwd) {
                 const cwd = str(obj(o?.args)?.Cwd);
                 if (cwd && path.isAbsolute(cwd)) f.cwd = cwd;
@@ -207,7 +220,7 @@ export function antigravityAdapter(): SourceAdapter {
         const r = readAppend(file.path, from.offset, onLine, opts);
         bad += r.bad;
         f.path = file.path;
-        sink.facts(f);
+        emitFacts();
         return { offset: r.offset, state: st, ...(bad ? { bad } : {}) };
       }
 
@@ -231,10 +244,10 @@ export function antigravityAdapter(): SourceAdapter {
         const t = ms(j?.updatedAt) || st.mtimeMs;
         time(t);
         const summary = finish(str(j?.summary));
-        if (summary) sink.doc({ key, field: "reply", at: t, text: summary, offset: 0 });
+        if (summary) emitDoc({ field: "reply", at: t, text: summary, offset: 0 });
         if (summary && !hasTranscript)
           f.title = { text: finish(firstAskTitle(summary), 200), rank: TITLE_RANK.firstAsk - 3 };
-        sink.facts(f);
+        emitFacts();
         return { offset: 1 };
       }
       if (base.endsWith(".md")) {
@@ -244,7 +257,7 @@ export function antigravityAdapter(): SourceAdapter {
         } catch {}
         time(t);
         const body = finish(text);
-        if (body) sink.doc({ key, field: "reply", at: t, text: body, offset: 0 });
+        if (body) emitDoc({ field: "reply", at: t, text: body, offset: 0 });
         const h = /^#\s+(.+)$/m.exec(text)?.[1]?.trim();
         if (h && !hasTranscript) {
           // task.md names the conversation best, then the plan, then any other artifact.
@@ -256,7 +269,7 @@ export function antigravityAdapter(): SourceAdapter {
                 : TITLE_RANK.firstAsk - 2;
           f.title = { text: finish(firstAskTitle(h), 200), rank };
         }
-        sink.facts(f);
+        emitFacts();
         return { offset: 1 };
       }
       // .system_generated/messages/<id>.json
@@ -271,8 +284,8 @@ export function antigravityAdapter(): SourceAdapter {
       const body = finish(str(j.content));
       if (body) {
         time(t);
-        sink.doc({ key, field: str(j.sender) === "user" ? "prompt" : "reply", at: t, text: body, offset: 0 });
-        sink.facts(f);
+        emitDoc({ field: str(j.sender) === "user" ? "prompt" : "reply", at: t, text: body, offset: 0 });
+        emitFacts();
       }
       return { offset: 1 };
     },

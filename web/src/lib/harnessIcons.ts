@@ -35,7 +35,7 @@ export const HARNESS_ICONS: Record<string, HarnessIcon> = {
   antigravity: {
     name: "Antigravity",
     // Wider than tall: the arch sits in a square box so it lines up with the others.
-    viewBox: "0 0 112 112",
+    viewBox: "10 12 92 92",
     path: "M89.754 92.75c4.667 3.5 11.667 1.167 5.25-5.25-19.25-18.667-15.167-70-39.083-70-23.917 0-19.834 51.333-39.084 70-7 7 .584 8.75 5.25 5.25C40.171 80.5 39.004 58.917 55.921 58.917c16.916 0 15.75 21.583 33.833 33.833Z",
   },
   cursor: {

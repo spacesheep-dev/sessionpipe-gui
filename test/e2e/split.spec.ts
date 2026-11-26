@@ -896,7 +896,7 @@ test.describe("split panel", () => {
         await expect(page.locator("h1.sess-title")).toBeVisible();
       });
 
-      test("plain clicks reuse one italic preview tab; ⌘-click and a double-click keep theirs; ⌘2 and a close keep the rule", async ({
+      test("plain clicks reuse one upright preview tab; ⌘-click and a double-click keep theirs; ⌘2 and a close keep the rule", async ({
         page,
       }) => {
         await openBoard(page);
@@ -916,13 +916,13 @@ test.describe("split panel", () => {
         await expect.poll(() => where(page)).toEqual({ path: "/", s: b, t: null });
         await expect(tabs(page)).toHaveCount(1);
         await expect(preview).toHaveCount(1);
-        await expect(panel(page).locator(".panel-title")).toHaveCSS("font-style", "italic");
+        await expect(panel(page).locator(".panel-title")).toHaveCSS("font-style", "normal");
         // ⌘-click: a kept tab in the background; the preview stays the active one.
         const c = await open([meta]);
         await expect.poll(() => tabKeys(page)).toEqual([b, c]);
         await expect.poll(() => activeKey(page)).toBe(b);
         await expect(tabs(page).nth(0)).toHaveClass(/tab--preview/);
-        await expect(tabs(page).nth(0).locator(".tab-title")).toHaveCSS("font-style", "italic");
+        await expect(tabs(page).nth(0).locator(".tab-title")).toHaveCSS("font-style", "normal");
         await expect(tabs(page).nth(1).locator(".tab-title")).toHaveCSS("font-style", "normal");
         // ⌘2 goes to the kept tab; the next plain open still takes the preview's place.
         await page.keyboard.press(`${meta}+2`);

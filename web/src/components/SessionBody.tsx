@@ -319,7 +319,7 @@ function PromptKept({ chars }: { chars: number | undefined }) {
     <>
       <svg className="prompt-lock" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
         <rect x="2.5" y="5.25" width="7" height="5" rx="1.25" fill="currentColor" />
-        <path d="M4 5.25V4a2 2 0 0 1 4 0v1.25" fill="none" stroke="currentColor" strokeWidth="1.25" />
+        <path d="M4 5.25V4a2 2 0 0 1 4 0v1.25" fill="none" stroke="currentColor" strokeWidth="1.45" />
       </svg>
       {chars !== undefined ? (
         <>
@@ -3337,6 +3337,7 @@ function AgentBlock({
               fill="none"
               stroke="currentColor"
               strokeWidth="1.5"
+              strokeLinecap="round"
               strokeLinejoin="round"
               aria-hidden="true"
             >

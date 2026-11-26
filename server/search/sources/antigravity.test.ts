@@ -72,6 +72,66 @@ describe("antigravity", () => {
     expect(antigravityRequest("plain ask <META>m</META>")).toBe("plain ask");
     expect(antigravityToolLine("grep_search", { Query: "retry", SearchPath: "/a" })).toBe("grep_search /a");
   });
+
+  it("folds Antigravity subagent brains into their parent session key without emitting a standalone row", async () => {
+    const parentId = G2.slice(12);
+    const childTranscriptId = "d0000000-0000-4000-8000-000000000098";
+    const childMessagesId = "d0000000-0000-4000-8000-000000000099";
+    const childTranscriptKey = `antigravity:${childTranscriptId}`;
+    const childMessagesKey = `antigravity:${childMessagesId}`;
+
+    // Subagent brain detected via transcript SYSTEM_MESSAGE sender=<parentId>
+    const tDir = path.join(fx.home, ".gemini/antigravity-cli/brain", childTranscriptId, ".system_generated/logs");
+    mkdirSync(tDir, { recursive: true });
+    writeFileSync(
+      path.join(tDir, "transcript.jsonl"),
+      `${[
+        JSON.stringify({
+          type: "SYSTEM_MESSAGE",
+          created_at: "2026-10-06T10:00:00Z",
+          content: `[Message] timestamp=2026-10-06T10:00:00Z sender=${parentId} content=You are **Retry Auditor**. Check jitter math.`,
+        }),
+        JSON.stringify({
+          type: "PLANNER_RESPONSE",
+          created_at: "2026-10-06T10:00:05Z",
+          content: "Verified jitter backoff bounds in upload.ts.",
+          tool_calls: [{ name: "view_file", args: { AbsolutePath: "/Users/dev/acme/uploader/src/backoff.ts" } }],
+        }),
+      ].join("\n")}\n`,
+    );
+
+    // Subagent brain detected via .system_generated/messages/*.json sender=<parentId>
+    const mDir = path.join(fx.home, ".gemini/antigravity/brain", childMessagesId, ".system_generated/messages");
+    mkdirSync(mDir, { recursive: true });
+    writeFileSync(
+      path.join(mDir, "m1.json"),
+      JSON.stringify({
+        sender: parentId,
+        timestamp: "2026-10-06T10:01:00Z",
+        content: "Subagent message folded into parent search row.",
+      }),
+    );
+
+    const sink = new Collect();
+    await readAll(antigravityAdapter(), testEnv(fx.home, fx.state), sink);
+
+    // Neither subagent emits a standalone session row or facts
+    expect(sink.keys()).not.toContain(childTranscriptKey);
+    expect(sink.keys()).not.toContain(childMessagesKey);
+    expect(sink.got.map((f) => f.key)).not.toContain(childTranscriptKey);
+    expect(sink.got.map((f) => f.key)).not.toContain(childMessagesKey);
+
+    // Their docs are routed to the parent key with agent set to the child id
+    expect(
+      sink.docs.filter((d) => d.key === G2 && d.agent === childTranscriptId).map((d) => [d.field, d.text]),
+    ).toEqual([
+      ["reply", "Verified jitter backoff bounds in upload.ts."],
+      ["tool", "view_file /Users/dev/acme/uploader/src/backoff.ts"],
+    ]);
+    expect(sink.docs.filter((d) => d.key === G2 && d.agent === childMessagesId).map((d) => [d.field, d.text])).toEqual([
+      ["reply", "Subagent message folded into parent search row."],
+    ]);
+  });
 });
 
 describe("gemini cli", () => {

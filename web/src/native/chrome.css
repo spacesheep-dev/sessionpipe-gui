@@ -43,9 +43,12 @@ html[data-shell="macos"] body {
     position: absolute;
     top: calc(var(--bar) + 8px);
     left: calc(var(--rail) / 2);
+    z-index: 1;
     transform: translateX(-50%);
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
   }
-  html[data-shell="macos"] .shell .rail-icons:has(.rail-compose) > .rail-nav:first-of-type {
+  html[data-shell="macos"] .shell:not(.shell--tree) .rail-icons:has(.rail-compose) > .rail-head + .rail-nav {
     padding-top: calc(8px + var(--control, 28px) + 8px);
   }
 

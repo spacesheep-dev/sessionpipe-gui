@@ -80,6 +80,15 @@
   display: block;
   flex: none;
 }
+span.nav-glyph {
+  display: grid;
+  place-items: center;
+}
+span.nav-glyph > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
 .nav-link--on {
   color: var(--fg);
 }
@@ -504,6 +513,9 @@
   .boot:not(.shell--tree) .tree-col {
     display: none;
   }
+  .boot.shell--tree .rail-compose {
+    display: none;
+  }
   /* Where the window has no room for it, over the page, on asking. */
   .rail[data-tree-overlay] .tree-col {
     position: absolute;
@@ -787,12 +799,14 @@
    window's own buttons sit in the sidebar's top band, as in Finder, and the bands drag
    the window. In a browser tab none of this applies. */
 @media (display-mode: window-controls-overlay) {
+  .rail-head,
   .rail-brand,
   .bar {
     -webkit-app-region: drag;
     app-region: drag;
   }
   .rail-brand .mark,
+  .rail-compose,
   .bar button,
   .bar a,
   .bar input,
@@ -800,8 +814,23 @@
     -webkit-app-region: no-drag;
     app-region: no-drag;
   }
-  .shell .rail-brand .mark {
-    visibility: hidden;
+  @media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
+    .rail-brand {
+      display: none;
+    }
+    .shell {
+      --rail: 80px;
+    }
+    .shell .rail-compose {
+      position: absolute;
+      top: calc(var(--bar) + 8px);
+      left: calc(var(--rail) / 2);
+      z-index: 1;
+      transform: translateX(-50%);
+    }
+    .shell:not(.shell--tree) .rail-icons:has(.rail-compose) > .rail-head + .rail-nav {
+      padding-top: calc(8px + var(--control, 28px) + 8px);
+    }
   }
 }
 

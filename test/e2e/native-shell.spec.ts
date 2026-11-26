@@ -351,12 +351,26 @@ test.describe("inside the native shell", () => {
     const start = await page.locator(".tree-col .stree-new").boundingBox();
     expect(start!.x).toBeGreaterThanOrEqual(84);
     expect((await page.locator(".rail-icons").boundingBox())!.width).toBe(80);
+    // Collapsing the sidebar at 1440 px drops New session below the traffic-light band without
+    // overlapping the tree-toggle button beneath it.
+    const toggle = page.locator("[data-tree-toggle]");
+    const assertComposeAboveToggle = async () => {
+      const composeBox = (await page.locator(".rail-compose").boundingBox())!;
+      const toggleBox = (await toggle.boundingBox())!;
+      expect(composeBox.y).toBeGreaterThanOrEqual(48);
+      expect(composeBox.y + composeBox.height).toBeLessThanOrEqual(toggleBox.y);
+    };
+    await toggle.click();
+    await expect(page.locator(".shell--tree")).toHaveCount(0);
+    expect((await corner()).filter(Boolean)).toEqual([]);
+    await assertComposeAboveToggle();
+    await toggle.click();
+    await expect(page.locator(".shell--tree")).toHaveCount(1);
     // The rail alone (860 px, no room for the column): the compose button steps under the band.
     await page.setViewportSize({ width: 860, height: 800 });
     await expect(page.locator(".shell--tree")).toHaveCount(0);
     expect((await corner()).filter(Boolean)).toEqual([]);
-    const compact = await page.locator(".rail-compose").boundingBox();
-    expect(compact!.y).toBeGreaterThanOrEqual(48);
+    await assertComposeAboveToggle();
     // A narrow window (half a 13-inch screen) keeps the compact rail: the lights are the
     // rail's, so the page bar is padded by the gutter alone, as in the wider window.
     const bar = page.locator(".main .bar").first();
@@ -368,7 +382,7 @@ test.describe("inside the native shell", () => {
       await expect(page.locator(".tabbar")).toBeHidden();
       expect((await corner()).filter(Boolean)).toEqual([]);
       expect((await page.locator(".rail").boundingBox())!.width).toBe(80);
-      expect((await page.locator(".rail-compose").boundingBox())!.y).toBeGreaterThanOrEqual(48);
+      await assertComposeAboveToggle();
       expect(await padOf()).toBe(wide);
       expect(wide).toBeLessThan(84);
     }

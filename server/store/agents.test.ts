@@ -236,4 +236,84 @@ describe("agents", () => {
     store = new Store(tmp.dir, { tickMs: 60_000, statsMs: 60_000 });
     expect(read().agents).toEqual(before);
   });
+
+  it("nests Antigravity subagents via resolveParent on live ingest, restart boot, and tier upgrades", async () => {
+    const parentId = "8f78dc26-6620-41cd-bf87-91c7a3dde24e";
+    const childId = "e418f517-de91-4b55-80d8-20d82e8b440a";
+    const explicitTopId = "11111111-2222-4333-8444-555555555555";
+    const parentKey = sessionKey("antigravity", parentId);
+    const childKey = sessionKey("antigravity", childId);
+    const explicitTopKey = sessionKey("antigravity", explicitTopId);
+
+    const resolveParent = (harness: string, id: string) => {
+      if (harness === "antigravity" && (id === childId || id === explicitTopId)) {
+        return { parentId, title: "GUI Antigravity Subagents Engineer" };
+      }
+      return null;
+    };
+
+    await store.close();
+    store = new Store(tmp.dir, { tickMs: 60_000, statsMs: 60_000, resolveParent });
+
+    const parent = new Session(parentId, "antigravity");
+    const child = new Session(childId, "antigravity");
+    const explicitTop = new Session(explicitTopId, "antigravity");
+
+    // Ingest parent, child (without parent_id), and a session with explicit parent_id: null
+    store.ingest(
+      [parent.ev("session.started", { source: "startup" }), parent.ev("turn.started", { turn_id: "t1" })],
+      "http",
+    );
+    store.ingest(
+      [
+        child.ev("session.started", { source: "startup" }),
+        child.ev("tool.started", { tool: "read_file", call_id: "r1" }),
+      ],
+      "http",
+    );
+    store.ingest([explicitTop.ev("session.started", { source: "startup" }, { session: { parent_id: null } })], "http");
+
+    const pLive = store.session(parentKey)!;
+    const cLive = store.session(childKey)!;
+    expect(cLive.parentId).toBe(parentId);
+    expect(cLive.title).toBe("GUI Antigravity Subagents Engineer");
+    expect(cLive.titleSource).toBe("first-ask");
+    expect(pLive.children).toBe(1);
+    expect(pLive.agents).toHaveLength(1);
+    expect(pLive.agents[0]).toMatchObject({
+      id: childId,
+      session: childKey,
+      description: "GUI Antigravity Subagents Engineer",
+      state: "running",
+      currentTool: { tool: "read_file" },
+    });
+
+    // Explicit parent_id: null from a newer sessionpipe CLI is never overridden
+    expect(store.session(explicitTopKey)!.parentId).toBeNull();
+
+    // Tier upgrade (rebuild) keeps resolved parentId and title
+    const upgraded = child.ev("session.started", { source: "startup" }, { tier: 3, session: { seq: 1 } });
+    store.ingest([upgraded], "outbox");
+    expect(store.session(childKey)!.parentId).toBe(parentId);
+    expect(store.session(parentKey)!.agents[0]).toMatchObject({
+      id: childId,
+      description: "GUI Antigravity Subagents Engineer",
+    });
+
+    // Restart boot(): already-persisted Antigravity child nests under parent immediately
+    await store.close();
+    store = new Store(tmp.dir, { tickMs: 60_000, statsMs: 60_000, resolveParent });
+    const pBoot = store.session(parentKey)!;
+    const cBoot = store.session(childKey)!;
+    expect(cBoot.parentId).toBe(parentId);
+    expect(cBoot.title).toBe("GUI Antigravity Subagents Engineer");
+    expect(pBoot.children).toBe(1);
+    expect(pBoot.agents).toHaveLength(1);
+    expect(pBoot.agents[0]).toMatchObject({
+      id: childId,
+      session: childKey,
+      description: "GUI Antigravity Subagents Engineer",
+    });
+    expect(store.session(explicitTopKey)!.parentId).toBeNull();
+  });
 });

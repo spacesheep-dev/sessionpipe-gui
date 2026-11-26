@@ -773,6 +773,10 @@ html:has(.main > .session) {
   transform: translate(-50%, -100%);
   animation: fade-in var(--dur) var(--ease-out);
 }
+.sess-new svg {
+  flex: none;
+  display: block;
+}
 @media (hover: hover) {
   .sess-new:hover {
     background: color-mix(in oklch, var(--bg-2), var(--fg) 5%);

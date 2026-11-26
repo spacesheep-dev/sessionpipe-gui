@@ -106,8 +106,8 @@ export function Themes() {
             >
               <svg
                 viewBox="0 0 16 16"
-                width="15"
-                height="15"
+                width="16"
+                height="16"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.4"
@@ -129,8 +129,8 @@ export function Themes() {
             >
               <svg
                 viewBox="0 0 12 12"
-                width="11"
-                height="11"
+                width="12"
+                height="12"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.6"
@@ -165,8 +165,8 @@ export function Themes() {
             >
               <svg
                 viewBox="0 0 12 12"
-                width="11"
-                height="11"
+                width="12"
+                height="12"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.5"
@@ -291,9 +291,9 @@ function FallbackViewIcon({ id }: { id: string }) {
         strokeLinejoin="round"
         aria-hidden="true"
       >
-        <rect x="2.5" y="3.5" width="9" height="6.5" rx="1.5" />
-        <rect x="8.5" y="10" width="9" height="6.5" rx="1.5" />
-        <path d="M2.5 6.5h9M8.5 13h9" />
+        <rect x="2.5" y="2.5" width="8.5" height="6" rx="1.25" />
+        <rect x="9" y="11.5" width="8.5" height="6" rx="1.25" />
+        <path d="M2.5 5.25h8.5M9 14.25h8.5" />
       </svg>
     );
   }
@@ -310,9 +310,9 @@ function FallbackViewIcon({ id }: { id: string }) {
         strokeLinejoin="round"
         aria-hidden="true"
       >
-        <path d="M10 2.75 17 6.5v7L10 17.25 3 13.5v-7L10 2.75Z" />
-        <path d="M3 6.5 10 10.25 17 6.5" />
-        <path d="M10 10.25v7" />
+        <path d="M3 16.5V5a1.5 1.5 0 0 1 1.5-1.5h11A1.5 1.5 0 0 1 17 5v11.5" />
+        <path d="M2.5 16.5h15" />
+        <path d="M7.5 16.5v-5h5v5" />
       </svg>
     );
   }
