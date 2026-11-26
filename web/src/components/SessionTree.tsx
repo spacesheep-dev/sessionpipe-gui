@@ -2000,6 +2000,7 @@ function FolderGroupRow({
         aria-owns={!folded ? groupId : undefined}
         tabIndex={tab ? 0 : -1}
         className={`stree-row stree-group-row stree-folder-row${renaming ? " stree-folder-row--editing" : ""}`}
+        data-flip={`fhead:${folder.id}`}
         data-tree-nav=""
         data-group-row={foldKey}
         data-zone="folder"
@@ -2153,7 +2154,11 @@ function ProjectGroupRow({
   const tip = group.subtitle ? `${group.label}\n${group.subtitle}` : group.label;
   return (
     <div role="none" className="stree-item stree-group-item">
-      <div role="none" className={`stree-project-head${pairedLatest ? " stree-project-head--add" : ""}`}>
+      <div
+        role="none"
+        className={`stree-project-head${pairedLatest ? " stree-project-head--add" : ""}`}
+        data-flip={`phead:${group.key}`}
+      >
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: the tree's onKey handler owns Enter, Space, and arrows */}
         <div
           role="treeitem"

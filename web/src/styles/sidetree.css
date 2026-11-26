@@ -268,7 +268,10 @@
   position: relative;
 }
 /* Above the rows they pass while they make room (lib/motion.ts useFlip). */
-.stree-item[data-flip-moving] {
+.stree-item[data-flip-moving],
+.stree-folder-row[data-flip-moving],
+.stree-project-head[data-flip-moving] {
+  position: relative;
   z-index: 1;
   background-color: var(--chrome);
 }
