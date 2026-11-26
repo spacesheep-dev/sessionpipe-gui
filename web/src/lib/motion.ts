@@ -26,18 +26,19 @@ export function tokenMs(name: string, fallback: number): number {
 /** An overlay's life with an exit: `mounted` stays true for `ms` after `open` turns
  *  false, with `closing` set, so the element can play its exit (`[data-closing]`) before
  *  it unmounts. No wait under reduced motion. */
-export function usePresence(open: boolean, ms = tokenMs("--dur-exit", 140)): { mounted: boolean; closing: boolean } {
+export function usePresence(open: boolean, ms?: number): { mounted: boolean; closing: boolean } {
   const [mounted, setMounted] = useState(open);
   // Opened (again, even mid-exit): mounted from this very render.
   if (open && !mounted) setMounted(true);
   // `mounted` is read, not followed: only `open` starts or stops an exit.
   useEffect(() => {
     if (open || !mounted) return;
-    if (reducedMotion() || ms <= 0) {
+    const wait = ms ?? tokenMs("--dur-exit", 140);
+    if (reducedMotion() || wait <= 0) {
       setMounted(false);
       return;
     }
-    const t = window.setTimeout(() => setMounted(false), ms);
+    const t = window.setTimeout(() => setMounted(false), wait);
     return () => window.clearTimeout(t);
   }, [open, ms]);
   // Closing from the render in which `open` turns false, and focus leaves in that same

@@ -292,22 +292,51 @@ export function Feed() {
   const queueingRef = useRef(queueing);
   queueingRef.current = queueing;
 
-  // Live rows.
-  useEffect(
-    () =>
-      store.onEvent((e) => {
-        if (!applyFilter(e, filterRef.current)) return;
-        if (queueingRef.current) {
-          pending.current.unshift(e);
-          if (pending.current.length > CAP) pending.current.length = CAP;
-          setPendingCount(pending.current.length);
-          return;
+  // Live rows, coalesced to one commit per animation frame so bursts never thrash layout.
+  useEffect(() => {
+    let batch: StoredEvent[] = [];
+    let raf = 0;
+    const drain = () => {
+      raf = 0;
+      const incoming = batch;
+      batch = [];
+      if (incoming.length === 0) return;
+      const matched = incoming.filter((e) => applyFilter(e, filterRef.current));
+      if (matched.length === 0) return;
+      if (queueingRef.current) {
+        for (const e of matched) pending.current.unshift(e);
+        if (pending.current.length > CAP) pending.current.length = CAP;
+        setPendingCount(pending.current.length);
+        return;
+      }
+      for (const e of matched) arrived.add(e);
+      setRows((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        let next = prev;
+        for (const e of matched) {
+          if (seen.has(e.id)) continue;
+          seen.add(e.id);
+          next = insertByTime(next, e);
         }
-        arrived.add(e);
-        setRows((prev) => (prev.some((p) => p.id === e.id) ? prev : insertByTime(prev, e).slice(0, CAP)));
-      }),
-    [store],
-  );
+        return next === prev ? prev : next.slice(0, CAP);
+      });
+    };
+    const off = store.onEvent((e) => {
+      if (!applyFilter(e, filterRef.current)) return;
+      if (queueingRef.current) {
+        pending.current.unshift(e);
+        if (pending.current.length > CAP) pending.current.length = CAP;
+        setPendingCount(pending.current.length);
+        return;
+      }
+      batch.push(e);
+      if (!raf) raf = requestAnimationFrame(drain);
+    });
+    return () => {
+      off();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [store]);
 
   /** The waiting rows land, in one step. */
   const flush = useCallback(() => {
@@ -603,18 +632,15 @@ function useGlide(ref: RefObject<HTMLOListElement | null>, rows: readonly Stored
     const ol = ref.current;
     if (!ol || last.current === rows) return;
     last.current = rows;
-    let i = 0;
-    for (const li of ol.children) {
-      if (!(li instanceof HTMLElement) || !li.classList.contains("ev")) continue;
-      const n = String(i++);
-      if (li.dataset.cursor !== n) li.dataset.cursor = n;
-    }
+    // Read every visible row's geometry BEFORE mutating data-cursor or starting any
+    // animation, so the browser does one layout for the commit instead of thrashing.
     const base = ol.getBoundingClientRect().top;
     const vh = window.innerHeight;
     const motion = !reducedMotion() && typeof Element.prototype.animate === "function";
     const before = tops.current;
     const now = new Map<string, number>();
     const dur = tokenMs("--dur", 200);
+    const moves: { li: HTMLElement; a: Animation | undefined; from: number }[] = [];
     for (const li of ol.children) {
       if (!(li instanceof HTMLElement) || !li.dataset.ev) continue;
       const r = li.getBoundingClientRect();
@@ -626,10 +652,19 @@ function useGlide(ref: RefObject<HTMLOListElement | null>, rows: readonly Stored
       now.set(li.dataset.ev, y);
       const was = before.get(li.dataset.ev);
       if (!motion || was === undefined || Math.abs(was - y) < 0.5) continue;
+      moves.push({ li, a, from: was + drawn - y });
+    }
+    let i = 0;
+    for (const li of ol.children) {
+      if (!(li instanceof HTMLElement) || !li.classList.contains("ev")) continue;
+      const n = String(i++);
+      if (li.dataset.cursor !== n) li.dataset.cursor = n;
+    }
+    for (const { li, a, from } of moves) {
       a?.cancel();
       playing.current.set(
         li,
-        li.animate([{ transform: `translateY(${was + drawn - y}px)` }, { transform: "none" }], {
+        li.animate([{ transform: `translateY(${from}px)` }, { transform: "none" }], {
           duration: dur,
           easing: "cubic-bezier(0.22, 1, 0.36, 1)",
         }),
