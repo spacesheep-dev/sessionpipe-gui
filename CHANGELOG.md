@@ -6,6 +6,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-11-25
+
+The session-tree sidebar lands with its full desktop, iPad, and touch polish: an icon rail beside a resizable sessions column, receiver-backed arrangement synced across devices, stable three-block ordering, outliner keyboard chords, stepped child rails, floating needs-you jump pill, compact iPad foot row, and smoother live Feed rendering. Usage gains polished account pool cards with collapsible windows, calm status pills, and local Antigravity quota polling.
+
 ## [0.8.9] - 2026-11-25
 
 A session's page now lists the sessions it asked or launched, each child row names the
@@ -2398,7 +2402,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.9...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.10...HEAD
+[0.8.10]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.9...v0.8.10
 [0.8.9]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.8...v0.8.9
 [0.8.8]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.6...v0.8.7
