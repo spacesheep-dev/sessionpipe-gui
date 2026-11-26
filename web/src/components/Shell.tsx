@@ -27,6 +27,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -34,7 +35,15 @@ import {
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
 import { useAppState, useNeedsYouCount, useStore, useStreamMark } from "../data/hooks";
-import { onPhoneLayout, phoneLayout, reachName, usePanelCovers, usePhoneLayout, useRegular } from "../lib/device";
+import {
+  onPhoneLayout,
+  phoneLayout,
+  reachName,
+  setShellPanelCovers,
+  usePanelCovers,
+  usePhoneLayout,
+  useRegular,
+} from "../lib/device";
 import { useKeyboardInset } from "../lib/keyboardInset";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
@@ -55,6 +64,7 @@ import {
 import { useReadyUpdate } from "../lib/selfUpdate";
 import {
   getSettings as getAppSettings,
+  SIDE_PAGE_MIN,
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
@@ -67,7 +77,7 @@ import {
 } from "../lib/settings";
 import { hintFor, isTyping, KeysOff, useShortcut, useShortcutMap } from "../lib/shortcuts";
 import { getSkins, isPlain } from "../lib/skins";
-import { closeSplit, leaveSplit, restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
+import { closeSplit, leaveSplit, restoreSplit, SPLIT_MIN, useSplitKey, useSplitWidth } from "../lib/split";
 import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
 import { NEW_WORDS } from "../native/accountWords";
 import { WORKFLOWS_ICON_PATHS } from "../orchestrate/workflows/glyphs";
@@ -734,13 +744,20 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       navigate(v.to);
     });
   }
-  // A window with a mouse under 840 px has no room for a session beside its page: the
-  // panel covers the page (split.css), from the rail to the window's edge. The page under
-  // it leaves the tab order and the accessibility tree until the panel closes or the
-  // window widens, and its keys are off (KeysOff, below): the palette, the toasts and
-  // Settings are in <main> too, and stay live. The focus goes from the page to the panel,
-  // and back to the row it was on unless it has been put somewhere since.
-  const covers = usePanelCovers() && splitOpen;
+  // Where the panel has no room beside the page (under 840 px with a mouse, or when the
+  // sessions column leaves less than SPLIT_MIN beside the page), the panel covers the page
+  // from the sidebar's edge (split.css .shell[data-covers]). The page under it leaves the
+  // tab order and the accessibility tree until the panel closes or the window widens, and
+  // its keys are off (KeysOff, below): the palette, the toasts and Settings stay live.
+  // Focus from the page goes to the panel; focus in the rail or tree stays on its row.
+  const panelRoom = window.innerWidth - (railWidth() + treeWidth) - SIDE_PAGE_MIN;
+  const roomCovers = columnShown && panelRoom < SPLIT_MIN;
+  useLayoutEffect(() => {
+    setShellPanelCovers(roomCovers);
+    return () => setShellPanelCovers(false);
+  }, [roomCovers]);
+  const wouldCover = usePanelCovers() || roomCovers;
+  const covers = wouldCover && splitOpen;
   const stillOpen = useRef(splitOpen);
   stillOpen.current = splitOpen;
   useEffect(() => {
@@ -776,8 +793,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     under.current = { path, covered: covers };
     if (was?.covered && was.path !== path && lastMove() === "navigate") leaveSplit();
   }, [path, covers]);
-  // Beside the sessions column the panel narrows first (treeColumn), so the column stays.
-  const panelWidth = columnShown ? column.panel : splitWidth;
+  // Beside the sessions column the panel takes its room from the page (never the column).
+  const panelWidth = columnShown ? Math.min(splitWidth, panelRoom) : splitWidth;
   const shellStyle = { "--split-width": `${splitOpen && !phone && !covers ? panelWidth : 0}px` } as CSSProperties;
   const entry = (n: NavItem, tip: boolean) => (
     <NavEntry
@@ -877,6 +894,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   return (
     <div
       className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${columnShown ? "shell--tree" : ""}`}
+      data-covers={wouldCover ? "" : undefined}
       style={shellStyle}
     >
       {/* biome-ignore lint/a11y/useValidAnchor: a real in-page link to #main; the handler only keeps the hash out of the URL */}

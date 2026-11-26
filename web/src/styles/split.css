@@ -146,12 +146,28 @@
   bottom: 0;
 }
 
-/* A window with a mouse under 840 px (lib/device.ts PANEL_COVERS_QUERY) has no room for a
-   session beside its page: the panel's 420 px would leave a list about 260. There the
-   panel covers the page, from the rail to the window's edge, with nothing to resize; the
-   rail's own hairline is its edge. Its tabs, its close button and Esc are as ever, and a
-   wider window has it beside the page again at the width it had. Shell.tsx takes the
-   page under it out of the tab order. */
+/* Where the panel has no room beside the page (lib/device.ts PANEL_COVERS_QUERY, or the
+   sessions column leaving less than SPLIT_MIN beside the page: Shell.tsx data-covers), the
+   panel covers the page from the sidebar's edge, with nothing to resize; the sidebar's own
+   hairline is its edge. Its tabs, its close button and Esc are as ever, and a wider window
+   has it beside the page again at the width it had. Shell.tsx takes the page under it out
+   of the tab order. */
+.shell[data-covers] {
+  padding-right: 0;
+}
+.shell[data-covers] > .panel {
+  left: var(--side-w, var(--rail));
+  width: auto;
+  border-left: 0;
+}
+.shell[data-covers] > .panel .panel-grip {
+  display: none;
+}
+/* It takes the focus the covered page gave up, as <main> does a page's: not a control. */
+.shell[data-covers] > .panel:focus-visible {
+  outline: none;
+}
+/* Before JS marks data-covers on the first paint, the narrow desktop breakpoint still covers. */
 @media (min-width: 720px) and (max-width: 839px) and (pointer: fine) {
   .shell {
     padding-right: 0;
@@ -164,7 +180,6 @@
   .panel-grip {
     display: none;
   }
-  /* It takes the focus the covered page gave up, as <main> does a page's: not a control. */
   .panel:focus-visible {
     outline: none;
   }
