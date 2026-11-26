@@ -6,6 +6,16 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **Only the computer the board runs on connects it to another spacesheep.** Connecting
+  an account (`POST /api/ui/spacesheep`) took an `origin` from anyone with the board's
+  key, so a phone, a browser on the LAN or anyone the board's link reached could make the
+  receiver keep a key from a server of their choosing and, from then on, show that
+  server's machines and sessions on the board and send it the files and commands meant
+  for them. A visitor now connects spacesheep.dev, as the page always asked; another
+  origin (staging, a local dev server) is `403 local_only` from anywhere but this computer.
+
 ## [0.8.10] - 2026-11-25
 
 The session-tree sidebar lands with its full desktop, iPad, and touch polish: an icon rail beside a resizable sessions column, receiver-backed arrangement synced across devices, stable three-block ordering, outliner keyboard chords, stepped child rails, floating needs-you jump pill, compact iPad foot row, and smoother live Feed rendering. Usage gains polished account pool cards with collapsible windows, calm status pills, and local Antigravity quota polling.
