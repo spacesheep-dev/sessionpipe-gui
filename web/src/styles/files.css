@@ -64,7 +64,7 @@
   @media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
     @media (pointer: fine) {
       .page.session.session--files > .files--page {
-        left: var(--rail);
+        left: var(--side-w, var(--rail));
       }
     }
   }

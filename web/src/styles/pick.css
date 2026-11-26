@@ -1,0 +1,76 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- Move under… (components/MoveUnder.tsx) ---------- */
+/* The confirm's frame at 420 px (a sheet on a phone): a line saying what it does, a field,
+   and the list it narrows, a row each: the agent's mark, the title, the computer. */
+.pick-dialog {
+  width: min(420px, calc(100vw - 32px));
+  gap: 10px;
+}
+.pick-what {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: var(--lh);
+}
+.pick-field {
+  width: 100%;
+}
+.pick-list {
+  list-style: none;
+  max-height: min(320px, 46vh);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--side-row);
+  padding: 0 8px;
+  border-radius: var(--radius-inner);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  cursor: default;
+}
+.pick-row .glyph-wrap {
+  color: var(--fg-3);
+}
+.pick-row[aria-selected="true"] {
+  background: var(--sel);
+  color: var(--fg);
+}
+.pick-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick-where {
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.pick-none {
+  padding: 8px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.pick-sheet .pick-what,
+.pick-sheet .pick-field,
+.pick-sheet .pick-list {
+  margin: 0 16px 10px;
+  width: auto;
+}
+.pick-sheet .pick-row {
+  height: 44px;
+  font-size: max(1rem, 16px);
+}

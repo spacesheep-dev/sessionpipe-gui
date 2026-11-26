@@ -44,6 +44,7 @@ import {
 } from "../../../server/sources/relay";
 import { StoreCore } from "../../../server/store/core";
 import { utf8Bytes } from "../../../server/store/log";
+import { ArrangementCore } from "../../../server/ui/arrangementCore";
 import { LabelsCore } from "../../../server/ui/labelsCore";
 import { LimitsCore } from "../../../server/ui/limitsCore";
 import { MarksCore } from "../../../server/ui/marksCore";
@@ -264,6 +265,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   labels.follow(store);
   const marks = new MarksCore(docs.keep("marks"), known);
   marks.follow(store);
+  const arrangement = new ArrangementCore(docs.keep("arrangement"), known);
+  arrangement.follow(store);
   const limits = new LimitsCore(docs.keep("limits"));
   limits.follow(store);
   const sends = docs.keep("sends");
@@ -356,7 +359,13 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     const s = snapshotWithControl(store, control);
     // Gone, there is no board: an empty one, with nothing of the person's on it.
     if (gone) return { ...s, sessions: [], machines: [] };
-    return { ...s, labels: labels.get(), marks: marks.get(), limits: limits.list() };
+    return {
+      ...s,
+      labels: labels.get(),
+      marks: marks.get(),
+      arrangement: arrangement.get(),
+      limits: limits.list(),
+    };
   };
   const board = (tell = !catching): void => {
     boarded = true;
@@ -395,6 +404,7 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
   };
   labels.subscribe(emit);
   marks.subscribe(emit);
+  arrangement.subscribe(emit);
   limits.subscribe(emit);
 
   // ---------- needs-you, handed to the shell where it takes it ----------
@@ -945,6 +955,8 @@ export async function startAccountBackend(o: AccountBackendOptions): Promise<Acc
     patchLabels: async (p) => refusing(() => labels.patch(p)),
     marks: async () => marks.get(),
     patchMarks: async (p) => refusing(() => marks.patch(p)),
+    arrangement: async () => arrangement.get(),
+    patchArrangement: async (p) => refusing(() => arrangement.patch(p)),
     forgetLimits: async (key) => {
       if (!limits.forget(key)) throw new HttpError(404, "not_found");
     },

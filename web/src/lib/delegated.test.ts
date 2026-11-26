@@ -1,120 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-// Where an asked session goes on the board: under its asker; a chain under the chain's
-// top; a loop nests nobody; a parent the child may not hang under (another machine, a
-// filter, not a root) ends the climb; nothing is ever lost from the board. A child that
-// needs you takes its parent into Needs you, whose count is the Inbox badge's.
+// Lineage across sessions (where an asked session goes is lib/tree.test.ts's): a session's
+// page lists what it asked, and a child that needs you takes its parent into Needs you,
+// whose count is the Inbox badge's.
 // The badge's own test (data/hooks.ts needsYouNow) needs the page's window.
 import "../native/test-env";
 import type { Attention, SessionState, SessionSummary } from "@shared/api";
 import { describe, expect, it } from "vitest";
 import type { AnswerOut } from "../control/answers";
 import { needsYouNow } from "../data/hooks";
-import {
-  ASKED_SHOWN,
-  askedComputer,
-  askedSessions,
-  askedShown,
-  foldsAway,
-  nestDelegated,
-  parentOf,
-  sectionOf,
-  waitingIn,
-} from "./delegated";
+import { ASKED_SHOWN, askedComputer, askedSessions, askedShown, parentOf, sectionOf, waitingIn } from "./delegated";
+import { arrangeTree } from "./tree";
 
-const s = (key: string, delegatedBy?: string, machine = "lab-mac"): SessionSummary =>
-  ({ key, machine, ...(delegatedBy ? { delegatedBy } : {}) }) as unknown as SessionSummary;
-const sameMachine = (c: SessionSummary, p: SessionSummary) => c.machine === p.machine;
 const keys = (list: readonly SessionSummary[]) => list.map((x) => x.key);
-const shape = (roots: SessionSummary[], all = roots, hangs = sameMachine) => {
-  const { roots: r, nested } = nestDelegated(roots, all, hangs);
-  return { roots: keys(r), nested: Object.fromEntries([...nested].map(([k, v]) => [k, keys(v)])) };
-};
-
-describe("nestDelegated", () => {
-  it("an asked session nests under its asker; one with no asker on the board stays a root", () => {
-    const a = s("claude-code:a");
-    const b = s("codex:b", a.key);
-    const lone = s("codex:lone", "claude-code:gone");
-    expect(shape([a, b, lone])).toEqual({
-      roots: ["claude-code:a", "codex:lone"],
-      nested: { "claude-code:a": ["codex:b"] },
-    });
-  });
-
-  it("a chain hangs every link under its top, and the top stays a root", () => {
-    const a = s("claude-code:a");
-    const b = s("codex:b", a.key);
-    const c = s("gemini-cli:c", b.key);
-    expect(shape([c, b, a])).toEqual({
-      roots: ["claude-code:a"],
-      nested: { "claude-code:a": ["gemini-cli:c", "codex:b"] },
-    });
-  });
-
-  it("a loop nests nobody: both stay roots, a session asked by one of them hangs under it", () => {
-    const a = s("claude-code:a", "codex:b");
-    const b = s("codex:b", "claude-code:a");
-    const c = s("gemini-cli:c", "codex:b");
-    expect(shape([a, b, c])).toEqual({ roots: ["claude-code:a", "codex:b", "gemini-cli:c"], nested: {} });
-  });
-
-  it("the climb ends at a parent the child may not hang under: another machine, a filter, not a root", () => {
-    const far = s("claude-code:far", undefined, "build-box");
-    const b = s("codex:b", far.key);
-    const c = s("gemini-cli:c", b.key);
-    // far is on another machine: b is the top, c under it.
-    expect(shape([far, b, c])).toEqual({
-      roots: ["claude-code:far", "codex:b"],
-      nested: { "codex:b": ["gemini-cli:c"] },
-    });
-    // A parent filtered off the board (not in roots) is the same: the child stays a root.
-    const a = s("claude-code:a");
-    const kid = s("codex:kid", a.key);
-    expect(shape([kid], [a, kid])).toEqual({ roots: ["codex:kid"], nested: {} });
-    // A parent that is a subagent's child session is not a root either.
-    expect(shape([kid], [a, kid], () => true)).toEqual({ roots: ["codex:kid"], nested: {} });
-  });
-
-  it("a session naming itself stays a root", () => {
-    const me = s("claude-code:me", "claude-code:me");
-    expect(shape([me])).toEqual({ roots: ["claude-code:me"], nested: {} });
-  });
-
-  it("a parent in a folded Done keeps no live child: the asked session stays a root until Done opens", () => {
-    const done = s("claude-code:a");
-    const live = s("codex:b", done.key);
-    const ended = s("codex:c", done.key);
-    const states = { [done.key]: "done", [live.key]: "working", [ended.key]: "done" } as const;
-    const withState = (x: SessionSummary) => ({ ...x, state: states[x.key as keyof typeof states] }) as SessionSummary;
-    const [d, l, e] = [done, live, ended].map(withState) as [SessionSummary, SessionSummary, SessionSummary];
-    expect(foldsAway(l, d, false)).toBe(true);
-    expect(foldsAway(l, d, true)).toBe(false);
-    expect(foldsAway(e, d, false)).toBe(false);
-    const hangs = (showDone: boolean) => (c: SessionSummary, p: SessionSummary) =>
-      sameMachine(c, p) && !foldsAway(c, p, showDone);
-    expect(shape([d, l, e], [d, l, e], hangs(false))).toEqual({
-      roots: ["claude-code:a", "codex:b"],
-      nested: { "claude-code:a": ["codex:c"] },
-    });
-    expect(shape([d, l, e], [d, l, e], hangs(true))).toEqual({
-      roots: ["claude-code:a"],
-      nested: { "claude-code:a": ["codex:b", "codex:c"] },
-    });
-  });
-
-  it("a child that needs you stays under its done parent with Done folded: the parent is in Needs you", () => {
-    const parent = { ...s("claude-code:a"), state: "done" } as SessionSummary;
-    const asks = { ...s("codex:b", parent.key), state: "needs_you" } as SessionSummary;
-    const needs = (c: SessionSummary) => c.state === "needs_you";
-    expect(foldsAway(asks, parent, false, needs)).toBe(false);
-    const hangs = (c: SessionSummary, p: SessionSummary) => sameMachine(c, p) && !foldsAway(c, p, false, needs);
-    const folded = nestDelegated([parent, asks], [parent, asks], hangs);
-    expect(keys(folded.roots)).toEqual(["claude-code:a"]);
-    expect(sectionOf(parent, folded.nested.get(parent.key), needs)).toBe("needs_you");
-    // One hidden on this device in that state lifts nothing, so it folds as before.
-    expect(foldsAway(asks, parent, false, () => false)).toBe(true);
-  });
-});
 
 describe("askedSessions (a session's page)", () => {
   const at = (min: number) => new Date(Date.UTC(2026, 10, 24, 12, min)).toISOString();
@@ -211,8 +108,10 @@ describe("a child that needs you lifts its parent into Needs you", () => {
   /** The Board's Needs you, as pages/Board.tsx draws it with nothing held, and the badge's
    *  number (data/hooks.ts useNeedsYouCount) for the same sessions. */
   const board = (all: SessionSummary[], out: Record<string, AnswerOut> = {}) => {
-    const { roots, nested } = nestDelegated(all, all, sameMachine);
     const needs = (c: SessionSummary) => c.state === "needs_you";
+    const tree = arrangeTree({ all, arrangement: { placed: {}, pinned: [] }, needs });
+    const roots = tree.roots.map((n) => n.s);
+    const nested = tree.childrenOf;
     const section = new Map(roots.map((r) => [r.key, sectionOf(r, nested.get(r.key), needs)]));
     const rows = roots.filter((r) => section.get(r.key) === "needs_you");
     const wait = (x: SessionSummary) => needsYouNow(x, {}, out);

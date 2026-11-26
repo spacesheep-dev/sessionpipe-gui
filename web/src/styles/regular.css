@@ -11,7 +11,8 @@
 
 html[data-size-class="regular"] {
   --tabbar: 0px;
-  --rail: 220px;
+  /* 279 pt at an 820 pt tablet upright, 320 on its side. */
+  --rail: clamp(264px, 34vw, 320px);
   --side-w: calc(var(--rail) + var(--safe-left, env(safe-area-inset-left)));
   --edge-l: var(--gutter);
 }
@@ -109,6 +110,10 @@ html[data-size-class="regular"] .rail .nav-link--on,
 html[data-size-class="regular"] .rail .nav-link[data-menu-open] {
   background: var(--sel);
 }
+/* One filled row: with a session open, its row in the tree; its page is ink only. */
+html[data-size-class="regular"] .rail:has(.stree-row[data-open]) .rail-nav .nav-link--on {
+  background-color: transparent;
+}
 html[data-size-class="regular"] .rail .nav-glyph {
   width: 20px;
   height: 20px;
@@ -139,18 +144,40 @@ html[data-size-class="regular"] .rail-section {
   font-size: var(--text-sm);
 }
 
-/* Its foot: Display and Settings, rows like the others, under a hairline. The stream's
-   state is the page bar's to say in the touch app, and Views is in Settings. */
+/* Its foot: one compact row with the connection pill on the left and Display and
+   Settings as 44×44 icon buttons on the right, under a hairline. */
 html[data-size-class="regular"] .rail-foot {
   flex: none;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 8px;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
   border-top: var(--hairline) solid var(--line);
 }
-html[data-size-class="regular"] .rail-foot > :is(.conn, .theme-btn, .qs--rail) {
+html[data-size-class="regular"] .rail-foot > :is(.theme-btn, .qs--rail) {
   display: none;
+}
+html[data-size-class="regular"] .rail-foot > .conn {
+  margin-right: auto;
+  padding-left: 12px;
+}
+html[data-size-class="regular"] .rail-foot > .side-foot-btn {
+  flex: none;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  gap: 0;
+  color: var(--fg-2);
+}
+html[data-size-class="regular"] .rail-foot > .side-foot-btn > .nav-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  left: auto;
+  margin: 0;
 }
 
 /* New session is the sidebar's: the page bar's copy goes. */
@@ -356,4 +383,21 @@ html[data-size-class="regular"] :is(.settings-nav, .settings-pane) {
 html[data-size-class="regular"] .settings-bar {
   --column-in: max(0px, (100% - 32px - var(--measure-read)) / 2);
   padding-inline: calc(4px + var(--column-in));
+}
+
+/* The sidebar's parts in a column: its head, New session, the four pages, the sessions'
+   list (the one part that scrolls), the Usage line, the foot. */
+html[data-size-class="regular"] .rail-icons {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+html[data-size-class="regular"] .rail-nav.rail-nav--pad {
+  flex: none;
+  overflow: visible;
+  padding: 0 0 4px;
+}
+html[data-size-class="regular"] .rail-nav--pad .more {
+  display: contents;
 }

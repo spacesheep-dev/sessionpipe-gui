@@ -79,28 +79,25 @@ async function report(
   expect(((await res.json()) as { accepted: number }).accepted).toBe(1);
 }
 
-test("the sidebar says what each account has left, in the wide sidebar only", async ({ page }) => {
+test("the sessions column's foot says, in one line, the account with the least left", async ({ page }) => {
   await openPage(page, "/");
-  const block = page.locator(".glance");
+  const block = page.locator(".tree-col .usage-line");
   await expect(block).toBeVisible();
-  // lab-mac pools dev@example.com as "Misha": its numbers are the pooled machine's one line
-  // (pool-surfaces.spec.ts), never a line of their own.
-  const dev = block.locator('.glance-line[data-glance="pool:lab-mac"]');
-  await expect(dev.locator(".glance-name")).toHaveText("Misha");
-  await expect(dev.locator(".glance-val")).toHaveText(/^5h (\d+|<1)% left$/);
-  await expect(dev.locator(".glance-bar")).toBeVisible();
-  await expect(block.locator(".glance-line", { hasText: /^dev\b/ })).toHaveCount(0);
-  // studio-mac's account, which no hello names, by its machine: none left, and when it resets in the bar's place.
-  const studio = block.locator(".glance-line", { hasText: /^studio-mac/ }).filter({ hasText: "None left" });
-  await expect(studio.locator(".glance-out")).toHaveText("None left");
-  await expect(studio.locator(".glance-sub")).toHaveText(/^resets in /);
+  // One line of all the accounts: studio-mac's, none left, wins over any with some left.
+  const line = block.locator(".glance-line");
+  await expect(line).toHaveCount(1);
+  await expect(line.locator(".glance-name")).toHaveText(/^studio-mac/);
+  await expect(line.locator(".glance-out")).toHaveText("None left");
+  // One line: no bar and no reset line under it (its tooltip says when it resets).
+  await expect(line.locator(".glance-bar")).toHaveCount(0);
+  await expect(line.locator(".glance-sub")).toHaveCount(0);
   await expect(block).not.toContainText("used");
-  // The lines are the way in, so there is no Usage row beside them.
+  // The line is the way in, so there is no Usage row in the rail beside it.
   await expect(page.locator(".rail-nav [data-nav=usage]")).toHaveCount(0);
 
-  // The icon rail has no room for the lines: Usage is a row there, after Machines.
-  await page.setViewportSize({ width: 1000, height: 800 });
-  await expect(page.locator(".glance")).toHaveCount(0);
+  // With no column beside the rail there is no line: Usage is a row there, after Machines.
+  await page.setViewportSize({ width: 860, height: 800 });
+  await expect(page.locator(".usage-line")).toHaveCount(0);
   const row = page.locator(".rail-nav > a[data-nav=usage]");
   await expect(row).toBeVisible();
   await expect(page.locator(".rail-nav > a[data-nav=machines] + a")).toHaveAttribute("data-nav", "usage");
@@ -120,7 +117,7 @@ async function watchUsageRow(page: Page): Promise<void> {
     const look = () => {
       const row = !!document.querySelector(".rail-nav [data-nav=usage]");
       if (w.usageRow.first === null && document.querySelector(".rail-nav a[data-nav]")) w.usageRow.first = row;
-      lines ||= !!document.querySelector(".glance");
+      lines ||= !!document.querySelector(".glance, .usage-line");
       if (!lines && row) w.usageRow.early = true;
     };
     new MutationObserver(look).observe(document, { childList: true, subtree: true });
@@ -157,7 +154,8 @@ test("Usage is drawn once: no row the lines then replace, and with the lines hid
   await page.reload();
   await expect(page.locator(".rail-nav > a[data-nav=usage]")).toBeVisible({ timeout: 15_000 });
   expect((await usageRow(page)).first).toBe(true);
-  await page.unroute("**/api/ui/stream");
+  // A stream still waiting out its 300 ms when the test ends is no failure.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("with no numbers there is no sidebar block, and the page says how to get them", async ({ context, page }) => {
@@ -167,7 +165,7 @@ test("with no numbers there is no sidebar block, and the page says how to get th
   await expect(page.locator(".state-title")).toHaveText("No limits yet");
   await expect(page.locator(".cmdwell")).toContainText("sessionpipe install --status-line");
   await expect(page.locator(".bar")).not.toContainText("account");
-  await expect(page.locator(".glance")).toHaveCount(0);
+  await expect(page.locator(".glance, .usage-line")).toHaveCount(0);
 });
 
 test("g u and ⌘K open Usage: every window named honestly, and nothing for a harness with no source", async ({
@@ -219,7 +217,9 @@ test("g u and ⌘K open Usage: every window named honestly, and nothing for a ha
   expect(order.slice(0, 3)).toEqual(["api.z.ai", "Claude Code account", "Claude Code account (none)"]);
 });
 
-test("a report updates the page and the sidebar without a reload; Copy usage and Forget", async ({ page }) => {
+test("a report updates the page without a reload, the sidebar keeps its one line; Copy usage and Forget", async ({
+  page,
+}) => {
   const account = `e2e-${tag()}`;
   const machine = `e2e-limits-${tag()}`;
   const key = `claude-code a:${account}`;
@@ -232,13 +232,15 @@ test("a report updates the page and the sidebar without a reload; Copy usage and
   await expect(s.locator(".usage-where")).toHaveText(`Claude Code on ${machine}`);
   await expect(s.locator('[data-window="five_hour"] .usage-value')).toHaveText("57% left");
   await expect(s.locator('[data-window="seven_day"] .usage-value')).toHaveText("80% left");
-  await expect(glance(page, key)).toContainText("5h 57% left");
+  // The sidebar's one line is the account with the least left (studio-mac's, none): not this.
+  await expect(page.locator(".usage-line .glance-line")).toHaveCount(1);
+  await expect(glance(page, key)).toHaveCount(0);
 
   // The next report is the whole set: none left now, on both, in the attention colour.
   await report(page, { account, machine, fiveHour: 100, seq: 1, at: Date.now() - 1000 });
   await expect(s.locator('[data-window="five_hour"] .usage-out')).toHaveText("None left");
-  await expect(glance(page, key).locator(".glance-out")).toHaveText("None left");
-  await expect(glance(page, key).locator(".glance-sub")).toHaveText(/^resets in 2 h \d{2} m$/);
+  await expect(page.locator(".usage-line .glance-line")).toHaveCount(1);
+  await expect(page.locator(".usage-line .glance-out")).toHaveText("None left");
 
   await s.locator(".usage-head").click({ button: "right" });
   const menu = page.getByRole("menu");
@@ -307,29 +309,21 @@ test("Enter on an account opens New session there, with its harness", async ({ p
 
 test("the sidebar line's menu, its tooltip, and hiding it until Settings brings it back", async ({ page }) => {
   await openPage(page, "/");
-  // lab-mac pools dev@example.com as "Misha", so its line is the pooled machine's: the
-  // tooltip is the pool's (the account, where, its windows, the others, the age).
-  const dev = page.locator('.glance-line[data-glance="pool:lab-mac"]');
-  await expect(dev).toHaveAttribute(
-    "data-tip",
-    /^Misha, Claude Code on lab-mac, in use\.\n5 hours: .*\nFiction has room\.\nSpacesheep is used up, .*\nAs of .*\.$/s,
-  );
-  await dev.click({ button: "right" });
+  // The one line: the account with the least left, its tooltip saying when it resets.
+  const line = page.locator(".usage-line .glance-line");
+  await expect(line).toHaveCount(1);
+  await expect(line).toHaveAttribute("data-tip", /.+/);
+  await line.click({ button: "right" });
   const menu = page.getByRole("menu");
-  await expect(menu.getByRole("menuitem")).toHaveText([
-    /^Open lab-mac's accounts/,
-    "New session on lab-mac…",
-    "Copy usage",
-    "Hide usage in the sidebar",
-  ]);
+  await expect(menu.getByRole("menuitem").last()).toHaveText("Hide usage in the sidebar");
   await menu.getByRole("menuitem", { name: "Hide usage in the sidebar" }).click();
-  await expect(page.locator(".glance")).toHaveCount(0);
-  // The page is not lost with its lines: Usage is a row of the sidebar's instead.
+  await expect(page.locator(".usage-line")).toHaveCount(0);
+  // The page is not lost with its line: Usage is a row of the rail's instead.
   const row = page.locator(".rail-nav > a[data-nav=usage]");
   await expect(row).toHaveText("Usage");
   await page.reload();
   await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
-  await expect(page.locator(".glance")).toHaveCount(0);
+  await expect(page.locator(".usage-line")).toHaveCount(0);
   await expect(row).toBeVisible();
 
   await page.goto("/settings");
@@ -337,39 +331,38 @@ test("the sidebar line's menu, its tooltip, and hiding it until Settings brings 
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await toggle.click();
   await page.keyboard.press("Escape");
-  await expect(page.locator(".glance")).toBeVisible();
+  await expect(page.locator(".usage-line")).toBeVisible();
   await expect(row).toHaveCount(0);
-  await dev.click();
-  await expect(page).toHaveURL(/\/usage#pool%3Alab-mac$/);
+  await line.click();
+  await expect(page).toHaveURL(/\/usage(#.+)?$/);
 });
 
-test("a long name keeps its room in the sidebar; the window's name gives way", async ({ page }) => {
-  const account = `e2e-${tag()}`;
-  const key = `claude-code a:${account}`;
+test("the sidebar's one line keeps its figure whole; the name gives way", async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 800 });
   await openPage(page, "/");
-  // No hello names it, so the sidebar names it by its machine; its tightest is this week's Fable.
-  await report(page, { account, machine: "misha-personal", fiveHour: 10, fable: 62 });
-  const line = glance(page, key);
-  await expect(line.locator(".glance-name")).toHaveText("misha-personal");
-  await expect(line.locator(".glance-val")).toHaveText("week Fable 38% left");
-  const cut = (sel: string) => line.locator(sel).evaluate((el) => el.scrollWidth > el.clientWidth);
-  expect(await cut(".glance-name")).toBe(false);
-  expect(await cut(".glance-fig")).toBe(false);
-  await page.request.post("/api/ui/limits/forget", { data: { key } });
-  await expect(line).toHaveCount(0);
+  // The narrowest column (220): the figure is never cut.
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem("sessionpipe-gui.settings") ?? "{}");
+    localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ ...s, sidebarWidth: 220 }));
+  });
+  await page.reload();
+  const line = page.locator(".usage-line .glance-line");
+  await expect(line).toHaveCount(1);
+  expect(Math.round((await page.locator(".tree-col").boundingBox())!.width)).toBe(220);
+  expect(await line.locator(".glance-fig").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false);
 });
 
-test("in a short window the sidebar's block gives way, never the navigation", async ({ page }) => {
-  const navScrolls = () => page.locator(".rail-nav").evaluate((el) => el.scrollHeight > el.clientHeight);
-  await page.setViewportSize({ width: 1440, height: 700 });
-  await openPage(page, "/");
-  await expect(page.locator(".glance-line")).toHaveCount(2);
-  await expect(page.locator(".glance-more")).toHaveText(/^\d+ more$/);
-  expect(await navScrolls()).toBe(false);
+test("in a short window the sidebar's line stays, the sessions scroll, and the rail keeps its foot", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 1440, height: 600 });
-  await expect(page.locator(".glance")).toHaveCount(0);
-  expect(await navScrolls()).toBe(false);
-  await expect(page.locator(".rail-nav [data-nav]").last()).toBeInViewport();
+  await openPage(page, "/");
+  await expect(page.locator(".usage-line .glance-line")).toHaveCount(1);
+  await expect(page.locator(".usage-line")).toBeInViewport();
+  expect(await page.locator(".stree-scroll").evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  // The rail's icons scroll under its head; Settings, at its foot, stays whole.
+  const settings = page.locator(".rail-foot .theme-btn[data-tip^='Settings']");
+  await expect(settings).toBeInViewport({ ratio: 1 });
 });
 
 test("with storage that throws, the page and the sidebar still draw", async ({ page }) => {
@@ -383,5 +376,5 @@ test("with storage that throws, the page and the sidebar still draw", async ({ p
   });
   await page.goto("/usage");
   await expect(page.locator("section.usage-acct").first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator(".glance")).toBeVisible();
+  await expect(page.locator(".usage-line")).toBeVisible();
 });

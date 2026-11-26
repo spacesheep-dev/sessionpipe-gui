@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { MenuItem } from "../components/ContextMenu";
 import type { Store } from "../data/store";
 import { PHONE_QUERY } from "./device";
-import { askItem, messageItem, type SessionMenuContext, sessionItems } from "./menus";
+import { askItem, messageItem, type SessionMenuContext, sessionItems, sessionRowTip } from "./menus";
 import { setSettings } from "./settings";
 
 // A wide window with a mouse, as every part of the page asks for it.
@@ -57,6 +57,7 @@ const storeOf = (c: MachineControl | undefined, sessions: SessionSummary[] = [se
       sessions: new Map(sessions.map((s) => [s.key, s])),
       labels: { names: {}, sessions: {} },
       marks: { since: null, read: {}, unread: {}, notify: {} },
+      arrangement: { rev: 0, placed: {}, pinned: [] },
     }),
   }) as unknown as Store;
 
@@ -260,5 +261,32 @@ describe("a child session's menu", () => {
     const got = items({});
     expect(got).not.toContain("Open the asking session");
     expect(got).not.toContain("Open parent session");
+  });
+});
+
+describe("sessionRowTip", () => {
+  const now = Date.parse("2026-11-18T10:05:00Z");
+
+  it("omits title when uncut, includes state and elapsed time, subtitle, and Placed by you", () => {
+    const s = session({
+      title: "Fix login",
+      state: "working",
+      stateSince: "2026-11-18T10:02:00Z",
+      machine: "build-box",
+      repo: "github.com/acme/billing",
+      branch: "main",
+    });
+    expect(sessionRowTip(s, false, false, now)).toBe("Working · 3 m\nbuild-box · acme/billing @ main");
+    expect(sessionRowTip(s, true, true, now)).toBe(
+      "Fix login\nWorking · 3 m\nbuild-box · acme/billing @ main\nPlaced by you",
+    );
+  });
+
+  it("caps every line at 60 characters", () => {
+    const longTitle = "A".repeat(80);
+    const s = session({ title: longTitle, machine: "m".repeat(70) });
+    const lines = sessionRowTip(s, false, true, now).split("\n");
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(60);
+    expect(lines[0]).toMatch(/…$/);
   });
 });

@@ -32,6 +32,7 @@ interface Tip {
 }
 
 function read(el: HTMLElement): Omit<Tip, "rect"> | null {
+  el.dispatchEvent(new Event("tip:prepare"));
   const raw = el.getAttribute("data-tip") ?? el.getAttribute("aria-label") ?? "";
   if (!raw.trim()) return null;
   // A labelled button's own visible text already names it: no tip.

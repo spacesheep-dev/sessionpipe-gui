@@ -59,7 +59,9 @@ export const MENU: Record<string, MenuItem> = {
   "go-review": { keys: `${PAGE}+4`, run: () => navigate("/review") },
   "go-machines": { keys: `${PAGE}+5`, run: () => navigate("/machines") },
   palette: firing("mod+k", "palette.toggle"),
-  "toggle-sidebar": { keys: SIDEBAR, run: () => toggleSidebar() },
+  // The page's own key for the sessions column (sidebar.toggle) is this chord; in the app
+  // the menu has it, and hides the rail and the column together, as a Mac app's sidebar.
+  "toggle-sidebar": { keys: SIDEBAR, fires: "sidebar.toggle", run: () => toggleSidebar() },
   back: { keys: "mod+[", run: () => back("/") },
   forward: { keys: "mod+]", run: () => history.forward() },
   shortcuts: firing("mod+/", "help.toggle"),

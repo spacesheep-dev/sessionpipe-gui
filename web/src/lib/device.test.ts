@@ -331,11 +331,15 @@ describe("panelCovers", () => {
           `${width} ${pointer}: ${narrowDesktop}`,
         );
       }
-    const { panelCovers } = await fresh();
+    const { panelCovers, setShellPanelCovers } = await fresh();
     expect(panelCovers()).toBe(false);
     windowOf(760, "fine");
     expect(panelCovers()).toBe(true);
     windowOf(840, "fine");
+    expect(panelCovers()).toBe(false);
+    setShellPanelCovers(true);
+    expect(panelCovers()).toBe(true);
+    setShellPanelCovers(false);
     expect(panelCovers()).toBe(false);
     windowOf(760, "coarse");
     expect(panelCovers()).toBe(false);

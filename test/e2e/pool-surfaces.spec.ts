@@ -155,36 +155,15 @@ test("New session on a machine with the pool off keeps the login's own line", as
   await expect(claude.locator(".sel-opt-detail")).not.toHaveText(/accounts, .* with room/);
 });
 
-test("the sidebar glances a pooled machine once, its accounts nowhere else", async ({ page }) => {
+test("the sidebar's one line is never a pooled account on its own", async ({ page }) => {
   await openPage(page, "/");
-  const block = page.locator(".glance");
-  await expect(block).toBeVisible();
-  const lab = block.locator('.glance-line[data-glance="pool:lab-mac"]');
-  await expect(lab).toHaveCount(1);
-  await expect(lab.locator(".glance-name")).toHaveText("Misha");
-  await expect(lab.locator(".glance-val")).toHaveText(/^(5h|week|week \w+) ((<1|\d+)% left|None left)$|^Reset$/);
-  await expect(lab).toHaveAttribute("data-tip", /Misha, Claude Code on lab-mac, in use\./);
-  await expect(lab).toHaveAttribute("data-tip", /Fiction has room\./);
-  await expect(lab).toHaveAttribute("data-tip", /Spacesheep is used up, resets in \d+ h \d+ m\./);
-  await expect(lab).toHaveAttribute("href", /#pool%3Alab-mac$/);
-  // mini-mac pools Misha too (in error there) and serves with Work, whose numbers the
-  // hello carries (its idle windows feed its entry).
-  const mini = block.locator('.glance-line[data-glance="pool:mini-mac"]');
-  await expect(mini).toHaveCount(1);
-  await expect(mini.locator(".glance-name")).toHaveText("Work");
-  await expect(mini.locator(".glance-val")).toHaveText(/^5h \d+% left$/);
-  await expect(mini).toHaveAttribute("data-tip", /Misha needs to sign in again\./);
-  await expect(mini).toHaveAttribute("data-tip", /Old is off\./);
-  // Misha's and Spacesheep's own lines are gone; the account on another API keeps its own.
+  // One line, the account with the least left: a pooled machine's line names the machine's
+  // account (lib/glance.ts), never Misha's or Spacesheep's own (the pool's tooltips and
+  // menus are the Usage page's and the pool line's, PoolGlanceLine, the same component).
+  const block = page.locator(".usage-line");
+  await expect(block.locator(".glance-line")).toHaveCount(1);
   await expect(block.locator(".glance-line", { hasText: /^dev\b/ })).toHaveCount(0);
   await expect(block.locator(".glance-line", { hasText: /^spacesheep/ })).toHaveCount(0);
-  await expect(block.locator('.glance-line[data-glance^="pool:"]')).toHaveCount(2);
-  // The menu offers the machine's accounts; the click opens them.
-  await lab.click({ button: "right" });
-  await expect(page.getByRole("menuitem", { name: "Open lab-mac's accounts" })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await lab.click();
-  await expect(page).toHaveURL(/\/usage#pool%3Alab-mac$/);
 });
 
 test("Machines says pooled only while the switch is on", async ({ page }) => {

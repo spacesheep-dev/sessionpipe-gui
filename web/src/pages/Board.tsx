@@ -13,7 +13,7 @@
 // state that names this machine and its hooked agents, and dissolves into the first row.
 // While the stream is down the rows stay, quiet, their clocks stopped.
 import type { ControlActivity, Info, SessionState, SessionSummary } from "@shared/api";
-import { isEmptySession, ROUTES, SESSION_STATES, splitKey } from "@shared/api";
+import { ROUTES, SESSION_STATES, splitKey } from "@shared/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBehind, useCatchingUp } from "../account/current";
 import {
@@ -44,39 +44,29 @@ import {
   useStickyTop,
 } from "../components/SessionCard";
 import { machineHome, tildify } from "../control/folders";
-import { useAnswersOut, useControlActivity } from "../control/hooks";
+import { useAnswersOut, usePendingStarts } from "../control/hooks";
 import { ComposeButton } from "../control/NewSession";
-import { ALIAS_WINDOW_MS, aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
+import { aliasHidden, openNewSession, setBoardFilter } from "../control/newSessionState";
 import { useStartTitles } from "../control/Starting";
-import { cliCommand, isFinal } from "../control/words";
+import { cliCommand } from "../control/words";
 import {
   bySectionThenRecent,
-  byStateThenRecent,
   needsYouNow,
   useAppState,
+  useArrangement,
   useFirstLoad,
+  useHideKeys,
   useLabels,
-  useMachines,
   useSessionTree,
   useStore,
   useStreamDown,
   useUnreadKeys,
 } from "../data/hooks";
 import { agentFound } from "../lib/agents";
-import { foldsAway, nestDelegated, sectionOf, waitingIn } from "../lib/delegated";
+import { foldsAway, sectionOf, waitingIn } from "../lib/delegated";
 import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
-import {
-  canHideUntilNeeded,
-  hiddenNow,
-  hiddenRows,
-  hide,
-  hideUntilNeeded,
-  inItsPlace,
-  isHidden,
-  unhide,
-  useHidden,
-} from "../lib/hidden";
+import { hiddenRows, inItsPlace, isHidden, useHidden } from "../lib/hidden";
 import { focusSearch, inPanel, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { isUnread, setUnread } from "../lib/marks";
@@ -87,13 +77,11 @@ import { Link, navigate, searchAll, sessionPath } from "../lib/router";
 import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
 import { hintFor, useBindingVersion, useShortcut } from "../lib/shortcuts";
 import { openSession, openSplit, useSplitKey } from "../lib/split";
-import { useNow } from "../lib/time";
+import { arrangeTree } from "../lib/tree";
 import { NEW_WORDS as N } from "../native/accountWords";
 import { useSetupStatus } from "../setup/api";
 
-const isStart = (a: ControlActivity) => a.kind === "start";
 /** A start still on its way shows as a row for at most this long without an event. */
-const PENDING_MAX_MS = 3600_000;
 
 /** Whether a search finds one of a session's agents (their type or what they were asked). */
 const agentsMatch = (s: SessionSummary, q: string): boolean => (s.agents ?? []).some((a) => agentFound(a, q));
@@ -251,34 +239,7 @@ export function Board() {
   }, [machine, harness]);
 
   // Starts from here that have no session yet, and the alias window (newSessionState.ts).
-  const paired = useMachines().filter((m) => m.control);
-  const starts = useControlActivity(isStart);
-  const { sessions } = useAppState();
-  const recentStart = starts.some((a) => Date.now() - Date.parse(a.at) < ALIAS_WINDOW_MS);
-  const now = useNow(recentStart ? "fine" : "coarse");
-  // A start's session takes over from its row once the list shows it: at its first turn,
-  // not at its bare start (useSessionTree leaves an empty session out).
-  const listed = useCallback(
-    (key: string | undefined) => {
-      const s = key ? sessions.get(key) : undefined;
-      return !!s && !isEmptySession(s);
-    },
-    [sessions],
-  );
-  const pending = useMemo(
-    () =>
-      starts.filter(
-        (a) =>
-          !!a.session &&
-          !listed(a.session) &&
-          !listed(a.ackSession) &&
-          !isFinal(a) &&
-          now - Date.parse(a.at) < PENDING_MAX_MS &&
-          (!machine || paired.find((m) => m.control?.machineId === a.machineId)?.name === machine) &&
-          (!harness || splitKey(a.session).harness === harness),
-      ),
-    [starts, listed, now, machine, harness, paired],
-  );
+  const { pending, starts, recentStart, now, paired } = usePendingStarts({ machine, harness });
   const aliased = useCallback(
     (s: SessionSummary) =>
       recentStart &&
@@ -292,20 +253,23 @@ export function Board() {
     [recentStart, starts, paired, now],
   );
 
-  // A session another one asked (`delegatedBy`: sessionpipe ask, a handoff) nests under
-  // the asking session the way a subagent does, as long as that session is drawn on the
-  // board and on the same machine: the daemon only ever asks there, so a child naming a
-  // parent elsewhere is a hook's say-so, not lineage. Drawn means every filter the roots
-  // go through (machine, harness, label, the query's label part, hidden on this device,
-  // an alias of a start) and not folded away in Done while the child still runs; a parent
-  // any of those takes off the board leaves the asked one a root of its own. A chain of
-  // asks hangs under its top, a loop nests nobody (lib/delegated.ts): nothing leaves the board.
+  // The one session tree (lib/tree.ts), the sidebar's too: a subagent's session under its
+  // parent, a session another one asked (`delegatedBy`: sessionpipe ask, a handoff) under
+  // the asking session as long as that session is drawn on the board and on the same
+  // machine (the daemon only ever asks there, so a child naming a parent elsewhere is a
+  // hook's say-so, not lineage), and over both what the person arranged (placed under
+  // another, brought to the top level, pinned). Drawn means every filter the roots go
+  // through (machine, harness, label, the query's label part, hidden on this device, an
+  // alias of a start) and not folded away in Done while the child still runs; a parent any
+  // of those takes off the board leaves the child a root of its own. A row draws every
+  // session under it at any depth; nothing leaves the board.
   // A session under another that needs you, in a way that lifts that row into Needs you
   // (sectionFor): such a child also stays under a done parent while Done is folded.
   const needsHere = useCallback(
     (c: SessionSummary) => c.state === "needs_you" && !isHidden(hidden, c.key, c.stateSince, true),
     [hidden],
   );
+  const arrangement = useArrangement();
   const { roots, childrenOf } = useMemo(() => {
     const drawn = (p: SessionSummary) =>
       (!machine || p.machine === machine) &&
@@ -314,15 +278,15 @@ export function Board() {
       lq.test(p.key) &&
       !aliased(p) &&
       !isHidden(hidden, p.key, p.stateSince, p.state === "needs_you");
-    const hangs = (s: SessionSummary, p: SessionSummary) =>
-      p.machine === s.machine && drawn(p) && !foldsAway(s, p, showDone, needsHere);
-    const { roots, nested } = nestDelegated(tree.roots, all, hangs);
-    if (nested.size === 0) return { roots, childrenOf: tree.childrenOf };
-    const childrenOf = new Map(tree.childrenOf);
-    for (const [key, list] of nested)
-      childrenOf.set(key, [...(childrenOf.get(key) ?? []), ...list].sort(byStateThenRecent));
-    return { roots, childrenOf };
-  }, [tree, all, machine, harness, labels, label, lq, aliased, hidden, showDone, needsHere]);
+    const t = arrangeTree({
+      all,
+      arrangement,
+      drawn,
+      hangs: (s, p) => !foldsAway(s, p, showDone, needsHere),
+      needs: needsHere,
+    });
+    return { roots: t.roots.map((n) => n.s), childrenOf: t.childrenOf };
+  }, [all, arrangement, machine, harness, labels, label, lq, aliased, hidden, showDone, needsHere]);
   // A row is in Needs you while a session under it needs you (one hidden on this device in
   // that state, which the Inbox badge leaves out, takes it nowhere), so the section holds
   // every session the badge counts; it goes back when the child stops needing you.
@@ -787,27 +751,6 @@ export function Board() {
       </div>
     </div>
   );
-}
-
-/** e hides the session `row()` names (the row under a list's cursor) or unhides it, ⇧E
- *  hides it until it needs you; a key with nothing to hide passes. `leave()` runs first,
- *  so the cursor can stay where the row was. */
-function useHideKeys(row: () => SessionSummary | undefined, leave: () => void): void {
-  // Not from inside the panel beside the board (the list's own menu and ⌘1–9 keep the
-  // same rule): e there would hide whatever row the cursor last rested on.
-  useShortcut("list.hide", () => {
-    const s = row();
-    if (!s || inPanel()) return false;
-    leave();
-    if (hiddenNow(s)) unhide(s.key);
-    else hide(s.key, s.stateSince, { title: sessionTitle(s), session: s.key });
-  });
-  useShortcut("list.hideUntil", () => {
-    const s = row();
-    if (!s || inPanel() || hiddenNow(s) || !canHideUntilNeeded(s)) return false;
-    leave();
-    hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key });
-  });
 }
 
 const keyOf = (s: SessionSummary) => s.key;

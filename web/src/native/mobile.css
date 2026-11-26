@@ -111,12 +111,12 @@ html[data-scanning] .onb {
    phone with a pen or a mouse, 720 px wide or wider, gets the mouse window's rail and
    inline bar (lib/device.ts DESKTOP_QUERY; a touch-first screen keeps the touch app at
    any width). The shell is still the app, so the status bar still sits over the top, and
-   that layout (shell.css) pads nothing for it: here the rail's head and the page bar start
-   under the safe area. Inside the rail, whose head is 72 px wide, the compose glyph keeps
+   that layout (shell.css) pads nothing for it: here the rail's head, the sessions column's
+   head and the page bar start under the safe area. Inside the rail, whose head is 72 px wide, the compose glyph keeps
    the desktop's size, its finger target reaching out past the glyph instead, as the
    screen still takes a finger. */
 @media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
-  html:is([data-shell="ios"], [data-shell="android"]) .rail-head {
+  html:is([data-shell="ios"], [data-shell="android"]) :is(.rail-head, .tree-col .stree-head) {
     box-sizing: content-box;
     padding-top: var(--safe-top, env(safe-area-inset-top));
   }
@@ -124,14 +124,23 @@ html[data-scanning] .onb {
   html:is([data-shell="ios"], [data-shell="android"]) .boot .bar {
     padding-top: var(--safe-top, env(safe-area-inset-top));
   }
-  html:is([data-shell="ios"], [data-shell="android"]) .shell:not(.shell--side) .rail-compose {
+  html:is([data-shell="ios"], [data-shell="android"]) .shell .rail-compose {
     position: relative;
     width: var(--control);
     height: var(--control);
   }
-  html:is([data-shell="ios"], [data-shell="android"]) .shell:not(.shell--side) .rail-compose::after {
+  html:is([data-shell="ios"], [data-shell="android"]) .shell .rail-compose::after {
     content: "";
     position: absolute;
     inset: calc((var(--control) - 44px) / 2) 0;
+  }
+  /* The column's New session row is 28 px: its finger target reaches past it too. */
+  html:is([data-shell="ios"], [data-shell="android"]) .tree-col .stree-new {
+    position: relative;
+  }
+  html:is([data-shell="ios"], [data-shell="android"]) .tree-col .stree-new::after {
+    content: "";
+    position: absolute;
+    inset: calc((var(--side-row) - 44px) / 2) 0;
   }
 }

@@ -82,9 +82,10 @@ test.describe("quick settings", () => {
     await page.locator("nav.rail button[aria-label='Quick settings']").click();
     const pop = page.getByRole("dialog", { name: "Quick settings" });
     await expect(pop).toBeVisible();
-    const rail = (await page.locator("nav.rail").boundingBox())!;
+    // The icon rail, where its button is (the sessions column beside it is passed over).
+    const rail = (await page.locator("nav.rail .rail-icons").boundingBox())!;
     const height = page.viewportSize()!.height;
-    // Its rise ends where it stays: 8 px right of the sidebar, 12 px over the window's foot.
+    // Its rise ends where it stays: 8 px right of the rail, 12 px over the window's foot.
     await expect
       .poll(async () => {
         const b = (await pop.boundingBox())!;
@@ -226,7 +227,7 @@ test.describe("settings dialog", () => {
     await expect(page.locator("nav.rail a[data-nav='feed']")).toBeVisible();
   });
 
-  test("the sidebar's groups are set off by hairlines, and its rows are 13 px regular, selected too", async ({
+  test("the rail's groups are set off by hairlines, its pages named by tooltips, and Settings' tabs are 13 px regular", async ({
     page,
   }) => {
     // The rows and the hairlines, in order, the views' own aside.
@@ -256,15 +257,16 @@ test.describe("settings dialog", () => {
     await page.evaluate(() => localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ mode: "simple" })));
     await openBoard(page);
     expect((await order()).slice(0, 7)).toEqual(["board", "inbox", "search", "hr", "workflows", "machines", "hr"]);
-    // Finder's sidebar type: 13 px, regular weight, the selected row too; 16 px glyphs.
+    // The icon rail: 20 px glyphs, each page named by its tooltip, its label kept for
+    // assistive tech only.
     const type = await page.locator("nav.rail .rail-nav > a.nav-link").evaluateAll((els) =>
       els.map((el) => {
         const glyph = el.querySelector(".nav-glyph")!.getBoundingClientRect();
-        const s = getComputedStyle(el);
-        return `${s.fontSize} ${s.fontWeight} ${glyph.width}x${glyph.height}`;
+        const label = el.querySelector(".nav-label")!.getBoundingClientRect();
+        return `${glyph.width}x${glyph.height} ${label.width} ${el.hasAttribute("data-tip")}`;
       }),
     );
-    expect(new Set(type)).toEqual(new Set(["13px 400 16x16"]));
+    expect(new Set(type)).toEqual(new Set(["20x20 1 true"]));
     await expect(page.locator("nav.rail a[data-nav='board']")).toHaveAttribute("aria-current", "page");
     // So is the Settings window's section list.
     await openPage(page, "/settings");

@@ -302,7 +302,7 @@ test.describe("phone", () => {
       if (!regular) return tabBarIsOn(page);
       await expect(page.locator("nav.rail"), at).toBeVisible();
       await expect(page.locator("nav.tabbar"), at).toBeHidden();
-      await expect(page.locator(".shell--side"), at).toHaveCount(0);
+      await expect(page.locator(".shell--tree"), at).toHaveCount(0);
     };
     for (const [size, regular] of [
       [{ width: 1180, height: 820 }, true],
@@ -314,11 +314,8 @@ test.describe("phone", () => {
       await openBoard(page);
       await chrome(at, regular);
       await noSidewaysScroll(page);
-      // New session: the page bar's, or the sidebar's head.
-      await expect(
-        page.locator(regular ? "nav.rail .rail-compose" : ".page.board .compose-btn--phone"),
-        at,
-      ).toBeVisible();
+      // New session: the page bar's, or the sidebar's first row.
+      await expect(page.locator(regular ? "nav.rail .stree-new" : ".page.board .compose-btn--phone"), at).toBeVisible();
       // A row pushes its session's page, with Board behind Back: never a panel beside the list.
       await page.locator("article.card a.card-link").first().click();
       await expect(page, at).toHaveURL(/\/s\//);
@@ -333,16 +330,16 @@ test.describe("phone", () => {
   test("a sidebar with more rows than a short tablet holds scrolls its rows alone: Display and Settings stay at its foot", async ({
     page,
   }) => {
-    // Advanced, with the server's views under their headings: more rows than 600 pt hold.
+    // The demo's sessions: more rows than 600 pt hold.
     await page.setViewportSize({ width: 820, height: 600 });
     await openBoard(page);
     await expect(page.locator("nav.rail")).toBeVisible();
-    await expect(page.locator("nav.rail .rail-section").first()).toBeVisible();
+    await expect(page.locator("nav.rail .stree-scroll [data-tree-row]").first()).toBeVisible();
     const measure = () =>
       page.evaluate(() => {
         const el = (s: string) => document.querySelector<HTMLElement>(s)!;
         const rail = el("nav.rail");
-        const nav = el("nav.rail .rail-nav");
+        const nav = el("nav.rail .stree-scroll");
         return {
           railScrolls: rail.scrollHeight > rail.clientHeight,
           rowsScroll: nav.scrollHeight > nav.clientHeight,
@@ -355,7 +352,7 @@ test.describe("phone", () => {
     expect(m.railScrolls).toBe(false);
     expect(m.settings).toBeLessThanOrEqual(m.height);
     // The rows scrolled to their end: the foot has not moved.
-    await page.locator("nav.rail .rail-nav").evaluate((el) => {
+    await page.locator("nav.rail .stree-scroll").evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
     expect((await measure()).settings).toBe(m.settings);

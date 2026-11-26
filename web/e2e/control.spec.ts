@@ -272,7 +272,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   sinkToken = info.sinkToken;
   daemon = new Daemon(base, sinkToken, MACHINE);
   events = new Events(base, sinkToken, SID, MACHINE);
-  context = await browser.newContext({ viewport: { width: 1280, height: 900 }, baseURL: base });
+  context = await browser.newContext({ viewport: { width: 1440, height: 900 }, baseURL: base });
   page = await context.newPage();
   await virtualPasskey(context, page);
 });

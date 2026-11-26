@@ -3,7 +3,8 @@
 // reads the same on a board row, an inbox row, a panel tab, a toast and the session's own
 // "⋯": whatever the surface can answer, first; open (as a page, beside, in the background,
 // in a new window), New session here, Ask another agent (the Handoff sheet), its colour
-// label, go to the parent or a subagent, copy, forget. Only actions that exist, and none
+// label, where it sits in the person's tree (Pin, Move under…, Move to top level: display
+// only, lib/arrange.ts), go to the parent or a subagent, copy, forget. Only actions that exist, and none
 // that would only be refused; a key beside an item only where pressing it there does that
 // to this session. A surface adds its own groups around these. Builders run when a menu
 // opens, so they read the current URL and settings, never a stale render.
@@ -15,9 +16,10 @@ import type { Store } from "../data/store";
 import { askableSessions, canAskFrom } from "../orchestrate/handoff/handoff";
 import { openHandoffFor } from "../orchestrate/handoff/handoffState";
 import { agentGlyph, agentLabel, openAgent } from "./agents";
+import { arrangeItems } from "./arrange";
 import { copyText } from "./clipboard";
 import { phoneLayout, wideLayout } from "./device";
-import { harnessMark, repoBranch, sessionTitle } from "./format";
+import { harnessMark, repoBranch, rowTime, STATE_LABEL, sessionTitle } from "./format";
 import { canHideUntilNeeded, hiddenNow, hide, hideUntilNeeded, unhide } from "./hidden";
 import { labelMenu } from "./labels";
 import { canMark, isUnread, notifyMenu, setUnread } from "./marks";
@@ -25,6 +27,7 @@ import { accountMode, accountSessionUrl, receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
 import { closeTab, openSplit, openWay, parseSplit } from "./split";
+import { since } from "./time";
 
 export { copyText };
 
@@ -78,6 +81,11 @@ export interface SessionMenuContext {
   extra?: MenuList;
   /** The session's subagents, when the surface knows them. */
   children?: readonly SessionSummary[];
+  /** Sessions a folded row stands for (its glyph rolled up from under it): Mark as read
+   *  acts on them too (components/SessionTree.tsx). */
+  under?: readonly SessionSummary[];
+  /** Opened from the sidebar session tree: arrangement moves return focus to the row. */
+  inTree?: boolean;
   /** After a successful forget, beyond the default (close its tab, leave its page). */
   onForgotten?: () => void;
 }
@@ -162,6 +170,8 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     labelMenu(ctx.store, [s.key]),
     notifyMenu(ctx.store, s),
     { sep: true },
+    ...arrangeItems(s, ctx.store, { inTree: ctx.inTree }),
+    { sep: true },
     s.parentId && {
       label: "Open parent session",
       run: () => navigate(sessionPath(s.harness, s.parentId!)),
@@ -209,7 +219,7 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
         run: () => hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key }),
       },
     hideHere && hidden && { label: "Unhide", action: onBoard ? "list.hide" : undefined, run: () => unhide(s.key) },
-    unreadItem(ctx.store, s, list),
+    unreadItem(ctx.store, s, list, ctx.under),
     { sep: true },
     {
       label: "Copy",
@@ -230,13 +240,21 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
 
 /** "Mark as read" on an unread session, else "Mark as unread" (lib/marks.ts), on a row
  *  that can draw unread. Its key, `u`, works on a list's cursor, so a list shows it. */
-function unreadItem(store: Store, s: SessionSummary, list: boolean): MenuItem | null {
-  if (!canMark(s)) return null;
-  const unread = isUnread(s, store.get().marks);
+function unreadItem(
+  store: Store,
+  s: SessionSummary,
+  list: boolean,
+  under: readonly SessionSummary[] = [],
+): MenuItem | null {
+  const marks = store.get().marks;
+  // A folded row's news below it is read with it; nothing below is ever marked unread by it.
+  const below = under.filter((x) => canMark(x) && isUnread(x, marks));
+  if (!canMark(s) && below.length === 0) return null;
+  const unread = (canMark(s) && isUnread(s, marks)) || below.length > 0;
   return {
     label: unread ? "Mark as read" : "Mark as unread",
     action: list ? "list.unread" : undefined,
-    run: () => setUnread(store, [s], !unread),
+    run: () => setUnread(store, unread ? [...(canMark(s) ? [s] : []), ...below] : [s], !unread),
   };
 }
 
@@ -300,6 +318,25 @@ export function canMessage(parent: SessionSummary, child: SessionSummary, store:
 export const sessionMenuTitle = (s: SessionSummary) => sessionTitle(s);
 export const sessionMenuSubtitle = (s: SessionSummary) =>
   [s.machine, repoBranch(s)].filter(Boolean).slice(0, 2).join(" · ");
+
+const TIP_LINE_MAX = 60;
+const clipTip = (line: string): string =>
+  line.length > TIP_LINE_MAX ? `${line.slice(0, TIP_LINE_MAX - 1).trimEnd()}…` : line;
+
+/** Multi-line sidebar row tooltip (data-tip-wrap, right side): full title only when cut,
+ *  "<State> · <since>", where it runs, and "Placed by you". Each line at most 60 chars. */
+export function sessionRowTip(s: SessionSummary, placed: boolean, cut: boolean, now = Date.now()): string {
+  const lbl = STATE_LABEL[s.state];
+  const state = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+  const elapsed = since(rowTime(s, now).iso, now);
+  const lines = [
+    cut ? sessionTitle(s) : "",
+    elapsed ? `${state} · ${elapsed}` : state,
+    sessionMenuSubtitle(s),
+    placed ? "Placed by you" : "",
+  ];
+  return lines.filter(Boolean).map(clipTip).join("\n");
+}
 
 /** The menu of one subagent (a board's agent row, a session view's agent block, the
  *  palette): open it beside or as a page, its parent when the surface is elsewhere, and

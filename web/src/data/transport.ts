@@ -2,6 +2,8 @@
 // Everything that crosses the wire goes through a Transport: the real one speaks SSE and
 // fetch to our own origin, the mock one (web/src/mock) simulates a server in the page.
 import type {
+  Arrangement,
+  ArrangementPatch,
   ControlActivity,
   DetailQuery,
   Digest,
@@ -62,6 +64,10 @@ export interface Transport {
    *  the change as a `marks` frame. */
   marks(): Promise<Marks>;
   patchMarks(p: MarksPatch): Promise<Marks>;
+  /** How the person arranged the session tree, and a change to it; every page also gets
+   *  the change as an `arrangement` frame. */
+  arrangement(): Promise<Arrangement>;
+  patchArrangement(p: ArrangementPatch): Promise<Arrangement>;
   /** "Forget these numbers": one usage-limits entry goes until its next report; the
    *  change arrives as a `limits` stream frame. */
   forgetLimits(key: string): Promise<void>;
@@ -90,6 +96,7 @@ export const STREAM_KINDS = [
   "suggestion",
   "labels",
   "marks",
+  "arrangement",
   "limits",
   "viewState",
   "searchIndex",
@@ -262,6 +269,13 @@ export function createHttpTransport(): Transport {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(p),
       }).then((r) => json<Marks>(r)),
+    arrangement: () => get<Arrangement>(ROUTES.ui.arrangement),
+    patchArrangement: (p) =>
+      apiFetch(ROUTES.ui.arrangement, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(p),
+      }).then((r) => json<Arrangement>(r)),
     forgetLimits: (key) => post<void>(ROUTES.ui.limitsForget, { key }),
     refreshLimits: () => post<{ refreshed: boolean }>(ROUTES.ui.limitsRefresh, {}),
     sessionSearch: () => import("../search/http").then((m) => m.httpSearch(searchFrames)),

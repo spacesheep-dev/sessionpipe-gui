@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // React bindings for the store. One Store per page load, chosen in main.tsx (real or mock).
 import type {
+  Arrangement,
   Attention,
   LabelColor,
   Labels,
@@ -13,6 +14,7 @@ import type {
 import { isEmptySession, LABEL_DEFAULT_NAMES, SESSION_STATES } from "@shared/api";
 import {
   createContext,
+  type RefObject,
   useCallback,
   useContext,
   useEffect,
@@ -26,10 +28,21 @@ import { useBehind } from "../account/current";
 import { answerable } from "../components/ControlStrip";
 import { type AnswerOut, answersOut } from "../control/answers";
 import { answerLate, useAnswerClock } from "../lib/answerWindow";
-import { isQuestion } from "../lib/format";
-import { type Hidden, isHidden, useHidden } from "../lib/hidden";
+import { isQuestion, sessionTitle } from "../lib/format";
+import {
+  canHideUntilNeeded,
+  type Hidden,
+  hiddenNow,
+  hide,
+  hideUntilNeeded,
+  isHidden,
+  unhide,
+  useHidden,
+} from "../lib/hidden";
+import { inPanel } from "../lib/keys";
 import { canMark, isUnread, markSeen, SEEN_AFTER_MS, setUnread } from "../lib/marks";
 import { useShortcut } from "../lib/shortcuts";
+import { syncSpins } from "../lib/spin";
 import type { AppState, Store } from "./store";
 
 export const StoreContext = createContext<Store | null>(null);
@@ -111,7 +124,11 @@ export function useStreamMark(): void {
   useEffect(() => {
     const root = document.documentElement;
     if (down) root.dataset.stream = "down";
-    else delete root.dataset.stream;
+    else {
+      delete root.dataset.stream;
+      // Back: the rings that stopped turn again, all on one phase.
+      syncSpins();
+    }
     return () => {
       delete root.dataset.stream;
     };
@@ -138,6 +155,13 @@ export function useSession(key: SessionKey): SessionSummary | undefined {
 export function useLabels(): Labels {
   const store = useStore();
   const read = useCallback(() => store.get().labels, [store]);
+  return useSyncExternalStore(store.subscribe, read, read);
+}
+
+/** How the person arranged the session tree (lib/tree.ts reads it). */
+export function useArrangement(): Arrangement {
+  const store = useStore();
+  const read = useCallback(() => store.get().arrangement, [store]);
   return useSyncExternalStore(store.subscribe, read, read);
 }
 
@@ -219,16 +243,53 @@ export function useSeen(key: SessionKey | null): void {
   }, [store, key, here, ready, newsAt]);
 }
 
+/** Where a list's key handler belongs, as useShortcut takes it: the sidebar's tree passes
+ *  its own element (`within`), so its keys act on its row while the focus is in it. */
+export type ListKeyOptions = { enabled?: boolean; priority?: number; within?: RefObject<HTMLElement | null> };
+
 /** `u` marks what a list's cursor is on read when it is unread, else unread; on a row that
  *  can draw neither it does nothing. */
-export function useUnreadKeys(sessions: () => readonly SessionSummary[]): void {
+export function useUnreadKeys(sessions: () => readonly SessionSummary[], opts: ListKeyOptions = {}): void {
   const store = useStore();
-  useShortcut("list.unread", () => {
-    const list = sessions().filter(canMark);
-    if (!list.length) return false;
-    const marks = store.get().marks;
-    setUnread(store, list, !list.every((s) => isUnread(s, marks)));
-  });
+  useShortcut(
+    "list.unread",
+    () => {
+      const list = sessions().filter(canMark);
+      if (!list.length) return false;
+      const marks = store.get().marks;
+      setUnread(store, list, !list.every((s) => isUnread(s, marks)));
+    },
+    opts,
+  );
+}
+
+/** e hides the session `row()` names (the row under a list's cursor) or unhides it, ⇧E
+ *  hides it until it needs you; a key with nothing to hide passes. `leave()` runs first,
+ *  so the cursor can stay where the row was (the Board's cursor, the tree's focus). */
+export function useHideKeys(row: () => SessionSummary | undefined, leave: () => void, opts: ListKeyOptions = {}): void {
+  // Not from inside the panel beside the board (the list's own menu and ⌘1–9 keep the
+  // same rule): e there would hide whatever row the cursor last rested on.
+  useShortcut(
+    "list.hide",
+    () => {
+      const s = row();
+      if (!s || inPanel()) return false;
+      leave();
+      if (hiddenNow(s)) unhide(s.key);
+      else hide(s.key, s.stateSince, { title: sessionTitle(s), session: s.key });
+    },
+    opts,
+  );
+  useShortcut(
+    "list.hideUntil",
+    () => {
+      const s = row();
+      if (!s || inPanel() || hiddenNow(s) || !canHideUntilNeeded(s)) return false;
+      leave();
+      hideUntilNeeded(s.key, { title: sessionTitle(s), session: s.key });
+    },
+    opts,
+  );
 }
 
 /** The machines map alone (it changes at most about once a second). */

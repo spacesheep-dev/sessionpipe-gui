@@ -950,6 +950,12 @@ test.describe("the board's bar on a computer", () => {
     }) => {
       await page.setViewportSize(size);
       await openBoard(page);
+      // At 1280 the 288 px sessions column leaves less than 420 px beside the page, so the
+      // panel covers under the one-open rule; hide the sessions column to test beside at 1280.
+      if (size.width < 1300) {
+        await page.locator("[data-tree-toggle]").click();
+        await expect(page.locator("#tree-col")).toHaveCount(0);
+      }
       const board = page.locator(".page.board > .bar");
       await expect(board.locator(".search")).toBeVisible();
       // The bar's one row at full width: --bar (48) and its hairline.

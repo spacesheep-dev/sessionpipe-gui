@@ -3,10 +3,11 @@
 /* Loaded only inside the shell (native/shell.ts), every rule under html[data-shell], so a
    browser never sees one. macOS: the title bar is folded into the page (overlay), and the
    traffic lights sit inset in the window's top band, the one band the sidebar's top and
-   every page bar share (--bar, 48 px). The corner under them holds nothing: in the
-   sidebar the band keeps only the compose button at its trailing edge (a Mac app names
-   itself in the menu bar, not in its sidebar); in the compact rail the compose button
-   steps down under the band; with no rail (a narrow window, or the sidebar toggled off)
+   every page bar share (--bar, 48 px). The corner under them holds nothing: the icon
+   rail's top band is theirs (a Mac app names itself in the menu bar, not in its rail);
+   with the sessions column beside the rail, New session is the column's first row, and
+   without it the compose button steps down under the band; with no rail (a narrow
+   window, or the sidebar toggled off, which hides the rail and the column together)
    the page bar starts after the lights. The bands drag the window (shell.ts marks them). */
 
 html[data-shell="macos"] {
@@ -28,34 +29,30 @@ html[data-shell="macos"] body {
 }
 
 @media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
-  /* The sidebar: the band holds the lights at its leading edge and the compose button at
-     its trailing edge; the brand steps aside (the menu bar names the app). */
-  html[data-shell="macos"] .shell--side .rail-head {
-    justify-content: flex-end;
-    padding-left: var(--lights);
-  }
   html[data-shell="macos"] .rail-brand {
     display: none;
   }
 
-  /* The compact rail: a little wider so the lights clear its edge; the band is theirs, and
-     the compose button opens the list under it. */
-  html[data-shell="macos"] .shell:not(.shell--side) {
+  /* The icon rail: a little wider so the lights clear its edge; the band over it is theirs.
+     With the sessions column beside it, New session is the column's first row; without
+     it, the compose button opens the rail's list under the band. */
+  html[data-shell="macos"] .shell {
     --rail: 80px;
   }
-  html[data-shell="macos"] .shell:not(.shell--side) .rail-compose {
+  html[data-shell="macos"] .shell .rail-compose {
     position: absolute;
     top: calc(var(--bar) + 8px);
-    left: 50%;
+    left: calc(var(--rail) / 2);
     transform: translateX(-50%);
   }
-  html[data-shell="macos"] .shell:not(.shell--side) .rail-nav {
+  html[data-shell="macos"] .shell .rail-icons:has(.rail-compose) > .rail-nav:first-of-type {
     padding-top: calc(8px + var(--control, 28px) + 8px);
   }
 
   /* Toggle Sidebar (⌃⌘S): the page takes the window, its bar starts after the lights. */
   html[data-shell="macos"][data-rail-hidden] .shell {
     --rail: 0px;
+    --side-w: 0px;
     grid-template-columns: minmax(0, 1fr);
   }
   html[data-shell="macos"][data-rail-hidden] .rail {

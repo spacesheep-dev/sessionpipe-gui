@@ -39,12 +39,19 @@ export const PULL_PAGES: ReadonlySet<string> = new Set(["board", "inbox", "searc
  *  scrolls sideways, or the tab bar. A second finger is never a pull either. */
 function ownedElsewhere(e: TouchEvent): boolean {
   if (e.touches.length !== 1) return true;
-  if (document.querySelector("[role=dialog], .menu-sheet, [data-new-session], .panel--open")) return true;
+  if (
+    document.querySelector(
+      "[role=dialog], .menu-sheet, [data-new-session], .panel--open, .stree[data-dragging], .stree [data-pressed]",
+    )
+  )
+    return true;
   const a = document.activeElement;
   if (a instanceof HTMLElement && a.matches("input, textarea, [contenteditable]:not([contenteditable=false])"))
     return true;
   const t = e.target;
-  return t instanceof Element && !!t.closest(".bar-filters, input, textarea, select, [contenteditable], .tabbar");
+  return (
+    t instanceof Element && !!t.closest(".bar-filters, input, textarea, select, [contenteditable], .tabbar, .rail")
+  );
 }
 
 const root = () => document.documentElement;

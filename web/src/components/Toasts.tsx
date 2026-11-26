@@ -37,9 +37,9 @@ import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { ATTENTION_LABEL, attentionMessage, isQuestion, oneLine, sessionTitle, toolLabel } from "../lib/format";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { toastAllowed } from "../lib/marks";
-import { reducedMotion, tokenMs } from "../lib/motion";
+import { calmNextCommit, reducedMotion, tokenMs } from "../lib/motion";
 import { SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath, usePath } from "../lib/router";
-import { useShortcut } from "../lib/shortcuts";
+import { hintFor, useShortcut } from "../lib/shortcuts";
 import { installSoundUnlock, type SoundKind, useSounds } from "../lib/sounds";
 import { parseSplit } from "../lib/split";
 import { followSystemSound, systemSound } from "../lib/systemSound";
@@ -429,8 +429,11 @@ export function Toasts() {
     if (!phone) return;
     for (const t of list) if (t.kind !== "undo" && !visible.includes(t)) dismissToast(t.id);
   });
-  // ⌘Z: the newest undo on screen (a text field keeps its own).
-  useShortcut("undo", () => (undoLatest() ? undefined : false));
+  // ⌘Z: the newest undo on screen (a text field keeps its own). Keep tree undos calm.
+  useShortcut("undo", () => {
+    if (document.activeElement?.closest?.(".stree")) calmNextCommit();
+    return undoLatest() ? undefined : false;
+  });
   const held = useToastsHeld() && !phone;
   const leaving = useLeaving(visible, held);
   // The phone's undo sits at the bottom, after the banner. On a desktop the list is in the
@@ -481,12 +484,18 @@ export function Toasts() {
 /** "Hidden · Undo": one line, what happened and to what, and the way back. */
 function UndoCard({ toast: t }: { toast: Toast }) {
   return (
-    <div className="toast toast--undo" data-toast="undo" role="status">
+    <div className="toast toast--undo" data-toast="undo" role={t.quiet ? undefined : "status"}>
       <span className="toast-undo-text">
         <span className="toast-head">{t.title}</span>
         {t.body && <span className="toast-undo-what"> · {t.body}</span>}
       </span>
-      <button type="button" className="btn btn--sm btn--ghost toast-undo" onClick={() => runUndo(t.id)}>
+      <button
+        type="button"
+        className="btn btn--sm btn--ghost toast-undo"
+        data-tip={t.quiet ? "Undo" : undefined}
+        data-tip-keys={t.quiet ? hintFor("undo") || undefined : undefined}
+        onClick={() => runUndo(t.id)}
+      >
         Undo
       </button>
     </div>

@@ -1,0 +1,718 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* ---------- the sidebar's sessions (components/SessionTree.tsx) ---------- */
+/* The sessions column beside the icon rail (a finger's sidebar: under its four pages):
+   New session fixed at its top, in the page bars' band; then Pinned and Sessions under the
+   section labels' tier, each a tree of one-line rows, the one part that scrolls, its ends
+   fading where it goes on; the Usage line at its foot. A row: the agent's mark, the title
+   cut at its end, a small computer mark, the state's lamp in a fixed slot at the end (so a
+   spinner never moves the title). Children sit 16 px in, on one hairline rail from the
+   parent's mark down. A touch screen with a sidebar (styles/regular.css) has 44 pt rows. */
+
+.tree-col {
+  container: side / inline-size;
+}
+.stree {
+  --tree-indent: 24px;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+@container side (max-width: 259px) {
+  .stree:not(.stree--touch) {
+    --tree-indent: 16px;
+  }
+}
+/* New session, fixed: on a computer in the band every page bar has (--bar, a hairline). */
+.stree-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+}
+.tree-col .stree-head {
+  height: var(--bar);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.stree-new {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--side-row);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  text-align: left;
+  transition: background-color var(--dur-release) linear;
+}
+.stree-new-glyph {
+  flex: none;
+  color: var(--fg-3);
+}
+@media (hover: hover) {
+  .stree-new:hover {
+    background-color: var(--hover);
+    color: var(--fg);
+  }
+}
+.stree-new:active {
+  background-color: var(--press);
+  transition: none;
+}
+.stree-new:focus-visible {
+  outline-offset: -2px;
+}
+
+/* The list: the one part that scrolls. Its ends fade only where it goes on, and a thin
+   bar shows while it scrolls (a mouse's: always). Nothing fades during a drag, or under
+   forced colours. */
+.stree-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stree-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 8px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--fg) 22%, transparent) transparent;
+}
+/* Floating pill when every needs-you row is scrolled out of view. */
+.stree-needs-pill {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 12px;
+  background-color: var(--bg-3);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  animation: stree-pill-in 150ms var(--ease-out) both;
+}
+.stree-needs-pill--top {
+  top: 8px;
+}
+.stree-needs-pill--bottom {
+  bottom: 8px;
+}
+@media (hover: hover) {
+  .stree-needs-pill:hover {
+    color: var(--fg);
+  }
+}
+.stree-needs-pill:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.stree-needs-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--needs);
+}
+.stree-needs-arrow {
+  color: var(--fg-3);
+}
+@keyframes stree-pill-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+}
+.stree-scroll[data-more-above] {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 100%);
+}
+.stree-scroll[data-more-below] {
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 20px), transparent 100%);
+}
+.stree-scroll[data-more-above][data-more-below] {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 20px), transparent 100%);
+}
+.stree[data-dragging] .stree-scroll {
+  mask-image: none;
+}
+@media (forced-colors: active) {
+  .stree-scroll {
+    mask-image: none;
+  }
+}
+/* The Usage line: the column's foot, one row over a hairline (UsageGlance.tsx UsageLine). */
+.usage-line {
+  flex: none;
+  margin: 0;
+  padding: 4px 8px;
+  list-style: none;
+  border-top: var(--hairline) solid var(--line);
+}
+.usage-line .glance-line {
+  display: flex;
+  align-items: center;
+  height: var(--side-row);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg);
+}
+@media (hover: hover) {
+  .usage-line .glance-line:hover {
+    background-color: var(--hover);
+  }
+}
+.usage-line[data-here] .glance-line {
+  background-color: var(--press);
+}
+.usage-line .glance-top {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+}
+.usage-line .glance-top .glyph-wrap {
+  color: var(--fg-3);
+}
+.usage-line .glance-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-2);
+}
+.usage-line .glance-val {
+  white-space: nowrap;
+  color: var(--fg-2);
+}
+.usage-line .glance-win {
+  color: var(--fg-3);
+}
+.usage-line .glance-out {
+  color: var(--needs-fg);
+}
+.stree--touch ~ .usage-line .glance-line,
+.stree--touch .usage-line .glance-line {
+  height: 44px;
+  font-size: max(1rem, 16px);
+}
+.stree-section {
+  margin-top: 0;
+}
+/* The section labels' tier (styles/shell.css .rail-section), as tall as a pointer needs. */
+.stree-label {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  margin: 8px 0 0;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+/* During a drag, the Sessions heading stays in view at either end so "to top level" is
+   always visible (display: contents on .stree-section lets bottom: 0 stick across the scroller). */
+.stree[data-dragging] .stree-section {
+  display: contents;
+}
+.stree[data-dragging] .stree-label[data-zone="sessions"] {
+  position: sticky;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  background-color: var(--chrome);
+}
+.stree-none {
+  margin: 0;
+  padding: 2px 8px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+
+.stree-list,
+.stree-kids {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stree-item {
+  position: relative;
+}
+/* Above the rows they pass while they make room (lib/motion.ts useFlip). */
+.stree-item[data-flip-moving] {
+  z-index: 1;
+  background-color: var(--chrome);
+}
+
+/* Every row of the list keeps the pages' 28 px pitch with its fill inset 1 px top and
+   bottom (shell.css), so two fills never touch. */
+.stree-row,
+.stree-new,
+.stree-more,
+.stree-more-all {
+  border-block: 1px solid transparent;
+  background-clip: padding-box;
+}
+.stree-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--side-row);
+  padding: 0 6px 0 calc(8px + var(--lvl, 0) * var(--tree-indent));
+  border-radius: var(--radius);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  text-decoration: none;
+  -webkit-touch-callout: none;
+  transition: background-color var(--dur-release) linear;
+}
+@media (hover: hover) {
+  .stree-row:hover {
+    background-color: var(--hover);
+    color: var(--fg);
+  }
+}
+.stree-row:active,
+.stree-row[data-pressed] {
+  background-color: var(--press);
+  transition: none;
+}
+.stree-row[data-menu-open] {
+  background-color: var(--sel);
+  color: var(--fg);
+}
+/* The open session: the one filled row in the sidebar, firm enough to find at a glance. */
+.stree-row[data-open],
+.stree-row[data-open]:hover {
+  background-color: var(--press);
+  color: var(--fg);
+}
+.stree-row[data-open]:active {
+  background-color: color-mix(in oklch, var(--fg) 17%, transparent);
+  transition: none;
+}
+/* The keyboard's cursor: the app's list cursor (the --sel fill and a hairline edge,
+   tokens.css --cursor-edge), never the 2 px ring buttons have. */
+.stree-row:focus-visible,
+.stree-more:focus-visible,
+.stree-more-all:focus-visible {
+  outline: none;
+  background-color: var(--sel);
+  box-shadow: var(--cursor-edge);
+}
+.stree-row[data-open]:focus-visible {
+  background-color: var(--press);
+}
+/* Three inks, colour only: full for what needs you (its own, or rolled up from under a
+   folded row), the middle for the rest and for news unread, the faintest for what is done
+   and read. Hover and the open row take full ink. */
+.stree-row:is([data-state="needs_you"], [data-rolled="needs_you"]):not([data-open]) {
+  color: var(--fg);
+}
+.stree-row[data-state="done"]:not([data-open], :hover, [data-unread], [data-rolled]) {
+  color: var(--fg-3);
+}
+
+/* The agent's mark, in a 16 px cell where a page row has its glyph. */
+.stree-lead {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-3);
+}
+.stree-lead .glyph-wrap {
+  display: grid;
+  place-items: center;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.stree-row[data-open] .stree-lead {
+  color: var(--fg);
+}
+/* A parent's disclosure takes the mark's cell under the pointer and the keyboard, and
+   stays while it is folded: the mark gives way, nothing beside it moves. */
+.stree-disc {
+  position: absolute;
+  inset: -4px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-inner);
+  color: var(--fg-2);
+  opacity: 0;
+  cursor: default;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.stree-disc svg {
+  rotate: 90deg;
+  transition: rotate var(--dur-fast) var(--ease-out);
+}
+.stree-disc[data-folded] svg {
+  rotate: 0deg;
+}
+@media (hover: hover) {
+  .stree-disc:hover {
+    background-color: var(--hover);
+    color: var(--fg);
+  }
+  .stree-lead:hover .stree-disc {
+    opacity: 1;
+    transition: none;
+  }
+  .stree-row[data-has-kids] .stree-lead:hover .glyph-wrap {
+    opacity: 0;
+    transition: none;
+  }
+}
+.stree-row:focus-visible .stree-disc,
+.stree-disc[data-folded] {
+  opacity: 1;
+}
+.stree-row[data-has-kids]:focus-visible .stree-lead .glyph-wrap,
+.stree-row:has(.stree-disc[data-folded]) .stree-lead .glyph-wrap {
+  opacity: 0;
+}
+
+.stree-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stree-away {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 16px;
+  margin-left: -2px;
+  color: var(--fg-4);
+}
+/* The lamp: always its 16 px, empty or not, so the title ends at one x. */
+.stree-lamp {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+/* Stepped rails: each child draws its own segment on the parent's mark centre, meeting the
+   parent's mark at the top and stopping at the last direct child so depth reads as stairs. */
+.stree-kids {
+  position: relative;
+}
+.stree-kids::before {
+  content: none;
+}
+.stree-kids > .stree-item,
+.stree-kids > .stree-more {
+  position: relative;
+}
+.stree-kids > .stree-item::before,
+.stree-kids > .stree-more::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(16px + var(--lvl, 0) * var(--tree-indent) - var(--hairline) / 2);
+  width: var(--hairline);
+  background: var(--line-2);
+  pointer-events: none;
+}
+.stree-kids > .stree-more::before {
+  left: calc(16px + (var(--lvl, 1) - 1) * var(--tree-indent) - var(--hairline) / 2);
+  bottom: auto;
+  height: 50%;
+}
+.stree-kids > .stree-item:first-child::before {
+  top: -4px;
+}
+.stree-kids > .stree-item:not(:has(~ .stree-item, ~ .stree-more))::before {
+  bottom: auto;
+  height: calc(var(--side-row) - 7px);
+}
+.stree-kids > .stree-item:first-child:not(:has(~ .stree-item, ~ .stree-more))::before {
+  height: calc(var(--side-row) - 3px);
+}
+
+/* Show N more under a parent, and Show more under the list: quiet, a pointer's 24 px. */
+.stree-more,
+.stree-more-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  border-radius: var(--radius);
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.stree-more {
+  padding-left: calc(8px + var(--lvl, 0) * var(--tree-indent) + 24px);
+}
+.stree-more-all {
+  width: 100%;
+  padding: 0 8px 0 32px;
+  text-align: left;
+}
+@media (hover: hover) {
+  .stree-more:hover,
+  .stree-more-all:hover {
+    background-color: var(--hover);
+    color: var(--fg);
+  }
+}
+.stree-more:focus-visible,
+.stree-more-all:focus-visible {
+  outline-offset: -2px;
+}
+.stree-more-count {
+  color: var(--fg-4);
+}
+
+/* A row that left while the list was held still: where it was, quiet, until the hand leaves. */
+.stree-item[data-gone] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* ----- the drag ----- */
+
+.stree[data-dragging],
+.stree[data-dragging] * {
+  cursor: grabbing;
+}
+/* Its place stays as a quiet gap; what hangs under it waits, faded. */
+.stree-item[data-lifted] > .stree-row {
+  background-color: var(--hover);
+}
+.stree-item[data-lifted] > .stree-row > * {
+  visibility: hidden;
+}
+.stree-item[data-lifted] > .stree-kids {
+  opacity: 0.4;
+}
+/* On a row: under it. */
+/* A drop target: a 2 px ring and no fill of its own, so it is told from the open row (a
+   fill), the menu's row (a fill) and the cursor (a fill and a hairline) by its shape. */
+.stree-row[data-target],
+.stree-label[data-target],
+.stree-pin-zone[data-target],
+[data-zone="pin"][data-target] {
+  box-shadow: inset 0 0 0 2px var(--fg-2);
+  color: var(--fg);
+}
+/* Between top-level rows: the line, from the top-level mark to the list's end. */
+.stree-line {
+  position: absolute;
+  top: 0;
+  left: 26px;
+  right: 14px;
+  z-index: 2;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--fg);
+  pointer-events: none;
+}
+/* The knob: an 8 px ring centred on the mark column (x 24) and on the line. */
+.stree-line::before {
+  content: "";
+  box-sizing: content-box;
+  position: absolute;
+  top: -3px;
+  left: -6px;
+  width: 4px;
+  height: 4px;
+  border: 2px solid var(--fg);
+  border-radius: 50%;
+  background: var(--chrome);
+}
+.stree-line[hidden] {
+  display: none;
+}
+/* Nothing pinned yet: while a row is held up, New session's place is where it is pinned. */
+.stree-pin-zone {
+  box-shadow: inset 0 0 0 var(--hairline) var(--line-2);
+  color: var(--fg-3);
+}
+/* The lifted row, raised, in the pointer's own row band: its mark and title. */
+.stree-chip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tip);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  height: var(--side-row);
+  padding: 0 10px 0 8px;
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--fg);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+  pointer-events: none;
+  animation: stree-chip-in var(--dur-fast) var(--ease-out) both;
+}
+.stree-chip .glyph-wrap {
+  color: var(--fg-3);
+}
+.stree-chip-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stree-chip[data-touch] {
+  height: 44px;
+  padding: 0 14px 0 12px;
+  font-size: max(1rem, 16px);
+  max-width: 280px;
+}
+@keyframes stree-chip-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stree-chip,
+  .stree-needs-pill {
+    animation: none;
+  }
+  .stree-disc,
+  .stree-disc svg,
+  .stree-lead .glyph-wrap {
+    transition: none;
+  }
+}
+
+/* ----- a touch screen's sidebar: 44 pt rows (styles/regular.css) ----- */
+
+.stree--touch {
+  --tree-indent: 20px;
+}
+.stree--touch .stree-head {
+  padding: 0;
+}
+.stree--touch .stree-new {
+  gap: 12px;
+  height: 44px;
+  margin: 4px 0;
+  padding: 0 12px;
+  color: var(--fg);
+  font-size: max(1rem, 16px);
+}
+.stree--touch .stree-new-glyph {
+  width: 20px;
+  height: 20px;
+}
+.stree--touch .stree-scroll {
+  padding: 0 0 8px;
+}
+.stree--touch .stree-label {
+  height: 32px;
+  padding: 0 12px;
+  font-size: var(--text-sm);
+}
+.stree--touch .stree-row {
+  gap: 10px;
+  height: 44px;
+  padding: 0 12px 0 calc(12px + var(--lvl, 0) * var(--tree-indent));
+  color: var(--fg);
+  font-size: max(1rem, 16px);
+}
+.stree--touch .stree-row[data-state="done"]:not([data-open], [data-unread], [data-rolled]) {
+  color: var(--fg-2);
+}
+.stree--touch .stree-lead {
+  width: 20px;
+  height: 20px;
+}
+.stree--touch .stree-lamp {
+  width: 16px;
+}
+/* The disclosure before the lamp: a finger's 44 pt, always there, so every state mark
+   ends at one x (12 px from the row's right edge). */
+.stree--touch .stree-disc {
+  position: static;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin: 0 -10px;
+  opacity: 1;
+}
+.stree--touch .stree-row:has(.stree-disc[data-folded]) .stree-lead .glyph-wrap {
+  opacity: 1;
+}
+.stree--touch .stree-kids > .stree-item::before {
+  left: calc(22px + var(--lvl, 0) * var(--tree-indent) - var(--hairline) / 2);
+}
+.stree--touch .stree-kids > .stree-more::before {
+  left: calc(22px + (var(--lvl, 1) - 1) * var(--tree-indent) - var(--hairline) / 2);
+}
+.stree--touch .stree-kids > .stree-item:first-child::before {
+  top: -9px;
+}
+.stree--touch .stree-kids > .stree-item:not(:has(~ .stree-item, ~ .stree-more))::before {
+  height: 32px;
+}
+.stree--touch .stree-kids > .stree-item:first-child:not(:has(~ .stree-item, ~ .stree-more))::before {
+  height: 41px;
+}
+.stree--touch .stree-more {
+  height: 44px;
+  padding-left: calc(12px + var(--lvl, 0) * var(--tree-indent) + 32px);
+  font-size: var(--text-sm);
+}
+.stree--touch .stree-more-all {
+  height: 44px;
+  padding-left: 44px;
+  font-size: var(--text-sm);
+}
+.stree--touch .stree-line {
+  left: 24px;
+  right: 16px;
+}
+
+/* The stream is down: nothing arrives, so the rings stop where they are, one quiet tier,
+   as the Board's do (board.css .board--down); the foot's connection dot says why. */
+[data-stream="down"] .stree .dot {
+  animation-play-state: paused;
+}
+[data-stream="down"] .stree-lamp {
+  opacity: 0.55;
+}
+
+/* A start not listed yet (SessionTree StartingRows): its words a step quieter until its
+   session's own row takes its place. */
+.stree-row[data-starting] .stree-title {
+  color: var(--fg-2);
+}

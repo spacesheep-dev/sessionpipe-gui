@@ -92,9 +92,9 @@ test("c opens the sheet for the board's context, and so does the palette", async
   await page.keyboard.type("new session");
   await page.locator(".pal-row, [role=option]", { hasText: "New session…" }).first().click();
   await expect(sheet(page)).toBeVisible();
-  // The compose glyph in the sidebar header too.
+  // The sessions column's New session row too.
   await page.keyboard.press("Escape");
-  await page.locator("nav.rail [data-compose]").click();
+  await page.locator("nav.rail .tree-col .stree-new").click();
   await expect(sheet(page)).toBeVisible();
 });
 

@@ -358,6 +358,16 @@ export const ACTIONS: readonly Action[] = [
     inInputs: true,
     hint: "leaves a text field or the notifications first; then closes a popover, the panel or a confirm; on a list clears its filter, then its cursor; then goes back",
   },
+  {
+    id: "sidebar.toggle",
+    label: "Show or hide the sessions",
+    group: "Everywhere",
+    scope: "global",
+    // The app menu's Toggle Sidebar chord (native/menu.ts SIDEBAR): ⌃⌘S on a Mac, Ctrl+B elsewhere.
+    keys: [IS_MAC ? "ctrl+mod+s" : "mod+b"],
+    inInputs: true,
+    hint: "the column of sessions beside the rail; where the window has no room for it, over the page",
+  },
   { id: "appearance.toggle", label: "Dark / light", group: "Everywhere", scope: "global", keys: ["t"] },
   { id: "colorTheme.next", label: "Next skin", group: "Everywhere", scope: "global", keys: ["shift+t"] },
   { id: "lens.cycle", label: "Cycle the tier lens", group: "Everywhere", scope: "global", keys: ["l"] },
@@ -401,6 +411,27 @@ export const ACTIONS: readonly Action[] = [
   { id: "list.unread", label: "Mark as read or unread", group: "Lists", scope: "lists", keys: ["u"] },
   { id: "list.hide", label: "Hide or unhide", group: "Lists", scope: "lists", keys: ["e"] },
   { id: "list.hideUntil", label: "Hide until it needs you", group: "Lists", scope: "lists", keys: ["shift+e"] },
+
+  // Session tree outliner chords: handled only while focus is in the sidebar tree (data-keys-own).
+  {
+    id: "tree.moveIn",
+    label: "Move under the row above",
+    group: "Session tree",
+    scope: "lists",
+    keys: [IS_MAC ? "ctrl+mod+right" : "alt+shift+right"],
+  },
+  {
+    id: "tree.moveOut",
+    label: "Move out a level",
+    group: "Session tree",
+    scope: "lists",
+    keys: [IS_MAC ? "ctrl+mod+left" : "alt+shift+left"],
+  },
+  { id: "tree.pin", label: "Pin or unpin", group: "Session tree", scope: "lists", keys: ["shift+p"] },
+  { id: "tree.moveUnder", label: "Move under…", group: "Session tree", scope: "lists", keys: ["m"] },
+  { id: "tree.unfoldAll", label: "Unfold all", group: "Session tree", scope: "lists", keys: ["alt+right"] },
+  { id: "tree.foldAll", label: "Fold all", group: "Session tree", scope: "lists", keys: ["alt+left"] },
+
   { id: "board.peek", label: "Peek beside the page", group: "Board", scope: "board", keys: ["space"] },
   // Before inbox.* and session.*, which share the keys: the row under the board's cursor
   // gets them first, so they never reach a session open beside the board.
@@ -1029,8 +1060,11 @@ const hasLiveHandler = (id: string): boolean => {
   return false;
 };
 
-/** Runs the best handler for an action; true when one took the key. */
-function runAction(id: string, e: KeyboardEvent): boolean {
+/** Runs the best handler for an action; true when one took the key. `owned`: the focus is
+ *  inside an element that owns the non-global keys (`data-keys-own`, the sidebar's tree),
+ *  so only a handler that belongs to where the focus is may take it, and with none the key
+ *  is not taken: a list key never acts on another list's cursor row. */
+function runAction(id: string, e: KeyboardEvent, owned = false): boolean {
   const v = viewActions.get(id);
   if (v) {
     v.run();
@@ -1039,7 +1073,9 @@ function runAction(id: string, e: KeyboardEvent): boolean {
   const set = handlers.get(id);
   if (!set) return false;
   const active = document.activeElement;
-  const live = [...set].filter((h) => h.enabled?.() !== false);
+  const live = [...set].filter(
+    (h) => h.enabled?.() !== false && (!owned || (!!active && !!h.within?.()?.contains(active))),
+  );
   live.sort((a, b) => {
     const fa = active && a.within?.()?.contains(active) ? 1 : 0;
     const fb = active && b.within?.()?.contains(active) ? 1 : 0;
@@ -1178,6 +1214,9 @@ function onKeyDown(e: KeyboardEvent): void {
   const all = candidates().filter(
     (c) => !inView || c.action.view !== undefined || c.seq.length === 2 || c.action.id === "back",
   );
+  // Inside an element that owns the non-global keys, those reach only its own handlers.
+  const owner = !!(e.target as Element | null)?.closest?.("[data-keys-own]");
+  const owned = (a: Action) => owner && a.scope !== "global";
 
   if (pending) {
     const first = pending.chord;
@@ -1186,7 +1225,7 @@ function onKeyDown(e: KeyboardEvent): void {
       (c) => c.seq.length === 2 && sameChord(c.seq[0]!, first) && sameChord(c.seq[1]!, chord) && allowed(c.action),
     );
     for (const c of exact) {
-      if (runAction(c.action.id, e)) {
+      if (runAction(c.action.id, e, owned(c.action))) {
         e.preventDefault();
         return;
       }
@@ -1196,7 +1235,7 @@ function onKeyDown(e: KeyboardEvent): void {
 
   const singles = all.filter((c) => c.seq.length === 1 && sameChord(c.seq[0]!, chord) && allowed(c.action));
   for (const c of singles) {
-    if (runAction(c.action.id, e)) {
+    if (runAction(c.action.id, e, owned(c.action))) {
       e.preventDefault();
       return;
     }

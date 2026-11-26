@@ -54,6 +54,7 @@
         <symbol id="b-machines" viewBox="0 0 20 20"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="4" width="15" height="10" rx="1.5" /><path d="M7 17h6" /></g></symbol>
       </svg>
       <div class="rail">
+        <div class="rail-icons">
         <div class="rail-head">
           <span class="rail-brand"><svg aria-hidden="true" class="mark" width="28" height="28" viewBox="0 0 64 64"><g fill="none" stroke="var(--brand-inlet)" stroke-linecap="round" stroke-width="7"><path d="M9 47C20 47 19 32 29 32M9 32H29M9 17C20 17 19 32 29 32" /><path d="M29 32H36" stroke="var(--brand-stream)" /></g><circle cx="51" cy="32" r="7.5" fill="var(--brand-dot)" /></svg><span class="rail-word brand-name"></span></span>
           <span class="icon-btn rail-compose"><svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16h9a1.5 1.5 0 0 0 1.5-1.5V11" /><path d="M14.2 3.3a1.3 1.3 0 0 1 1.9 0l.6.6a1.3 1.3 0 0 1 0 1.9L10.5 12 8 12.5l.5-2.5z" /></svg></span>
@@ -69,6 +70,8 @@
           <span class="nav-link" data-boot="workflows"><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-workflows" /></svg><span class="nav-label">Workflows</span></span>
           <span class="nav-link" data-boot="machines"><svg aria-hidden="true" class="nav-glyph" width="20" height="20"><use href="#b-machines" /></svg><span class="nav-label">Machines</span></span>
         </div>
+        </div>
+        <div class="tree-col"></div>
       </div>
       <main class="main">
         <div class="page">
@@ -98,11 +101,18 @@
         let mode = "simple";
         let size = 1;
         let seen = false;
+        let tree = 0;
         try {
           const L = localStorage;
           a = L.getItem("sessionpipe-gui.theme");
           skin = JSON.parse(L.getItem("sessionpipe-gui.skin") || "null");
-          mode = JSON.parse(L.getItem("sessionpipe-gui.settings") || "{}").mode || mode;
+          const st = JSON.parse(L.getItem("sessionpipe-gui.settings") || "{}");
+          mode = st.mode || mode;
+          // The sessions column beside the rail (Shell.tsx treeColumn), before the first paint:
+          // the person's width as far as the window keeps its page 600 px, from 220 to 400.
+          const w = Number(st.sidebarWidth);
+          const cap = Math.min(400, innerWidth - 72 - 600);
+          tree = !st.treeHidden && cap >= 220 ? Math.max(220, Math.min(Number.isFinite(w) ? Math.round(w) : 288, cap)) : 0;
           size = Number(L.getItem("sessionpipe-gui.textSize")) || 1;
           seen = !!L.getItem("sessionpipe-gui.setup.seen");
         } catch {}
@@ -123,10 +133,13 @@
         }
         const scale = size * (skin?.typography?.scale || 1);
         if (scale !== 1) d.style.fontSize = `${Math.round(scale * 1000) / 10}%`;
-        // The labelled sidebar is a mouse window's: a touch screen has the touch app at any width,
+        // The sessions column is a mouse window's: a touch screen has the touch app at any width,
         // with its own sidebar where the window has room (lib/device.ts sizeClass).
         const touch = matchMedia("(pointer: coarse)").matches;
-        if (!touch && matchMedia("(min-width: 1200px)").matches) shell.classList.add("shell--side");
+        if (!touch && tree && matchMedia("(min-width: 720px)").matches) {
+          shell.classList.add("shell--tree");
+          d.style.setProperty("--tree-w", `${tree}px`);
+        }
         if (touch) d.setAttribute("data-size-class", innerWidth >= 600 && innerHeight >= 560 ? "regular" : "compact");
         // The page: its tab lit, its title, the loading rows on the board only. A first visit
         // may open Setup at "/", so it claims no page.

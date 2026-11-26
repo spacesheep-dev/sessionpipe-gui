@@ -69,12 +69,12 @@ test.describe("setup on the demo server (TLS off)", () => {
     await expect(steps.nth(5).locator(".step-needs")).toHaveCount(0);
     await expect(page.locator("[data-setup-done]")).toHaveCount(0);
     await expect(page.locator("[data-setup-skip]")).toBeVisible();
-    // The sidebar ends with "Finish setup" while steps remain, the words and no dot; the
-    // icon rail has room for no words, so it keeps the dot.
+    // The rail ends with "Finish setup" while steps remain: the icon rail has room for no
+    // words, so it has a dot, and its name is its label and tooltip.
     const entry = page.locator(".rail [data-nav=setup]");
     await expect(entry).toHaveText("Finish setup");
     await expect(page.locator(".rail-nav > [data-nav]").last()).toHaveAttribute("data-nav", "setup");
-    await expect(entry.locator(".nav-dot")).toBeHidden();
+    await expect(entry.locator(".nav-dot")).toBeVisible();
     await page.setViewportSize({ width: 1100, height: 800 });
     await expect(entry.locator(".nav-dot")).toBeVisible();
     await expect(entry).toHaveAttribute("data-tip", /^Finish setup {3}G S$/i);

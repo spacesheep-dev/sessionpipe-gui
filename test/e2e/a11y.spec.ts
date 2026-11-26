@@ -165,12 +165,13 @@ test.describe("accessibility", () => {
     await expect(skip).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(page.locator("main#main")).toBeFocused();
-    // From the skip link, Tab walks the rail: the brand, New session, then the pages.
+    // From the skip link, Tab walks the rail: the brand, the sessions column's button, then
+    // the pages (New session is the column's first row, after the rail).
     await skip.focus();
     await page.keyboard.press("Tab");
     await expect(page.locator("nav.rail a.rail-brand")).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(page.locator("nav.rail [data-compose]")).toBeFocused();
+    await expect(page.locator("nav.rail [data-tree-toggle]")).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.locator("nav.rail a[data-nav='board']")).toBeFocused();
     // The board's cards are one tab stop: Tab goes into the list, arrows move inside it.

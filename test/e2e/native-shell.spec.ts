@@ -334,7 +334,8 @@ test.describe("inside the native shell", () => {
   test("the traffic lights' corner holds nothing", async ({ page }) => {
     await openInShell(page, "/");
     await expect(page.locator(".conn").first()).toHaveText("live", { timeout: 15_000 });
-    // The sidebar (1440 px): the brand steps aside, the compose button sits past the lights.
+    // The rail and the sessions column (1440 px): the brand steps aside, the lights keep the
+    // rail's top band, and New session, the column's first row, starts past them.
     await expect(page.locator(".rail-brand")).toBeHidden();
     const corner = () =>
       page.evaluate(() =>
@@ -346,11 +347,13 @@ test.describe("inside the native shell", () => {
         ),
       );
     expect((await corner()).filter(Boolean)).toEqual([]);
-    const compose = await page.locator(".rail-compose").boundingBox();
-    expect(compose!.x).toBeGreaterThanOrEqual(84);
-    // The compact rail (1000 px): the compose button steps under the band.
-    await page.setViewportSize({ width: 1000, height: 800 });
-    await expect(page.locator(".shell--side")).toHaveCount(0);
+    await expect(page.locator(".shell--tree")).toHaveCount(1);
+    const start = await page.locator(".tree-col .stree-new").boundingBox();
+    expect(start!.x).toBeGreaterThanOrEqual(84);
+    expect((await page.locator(".rail-icons").boundingBox())!.width).toBe(80);
+    // The rail alone (860 px, no room for the column): the compose button steps under the band.
+    await page.setViewportSize({ width: 860, height: 800 });
+    await expect(page.locator(".shell--tree")).toHaveCount(0);
     expect((await corner()).filter(Boolean)).toEqual([]);
     const compact = await page.locator(".rail-compose").boundingBox();
     expect(compact!.y).toBeGreaterThanOrEqual(48);
@@ -1305,9 +1308,9 @@ test.describe("the app's update", () => {
     await expect(settings).toHaveAttribute("data-tip", "Settings · 0.3.1 is ready");
     // The quiet 6 px dot at the button's top right, in the sidebar and in the compact rail.
     const dot = settings.locator(".nav-dot");
-    for (const width of [1440, 1000]) {
+    for (const width of [1440, 860]) {
       await page.setViewportSize({ width, height: 900 });
-      await expect(page.locator(".shell--side")).toHaveCount(width === 1440 ? 1 : 0);
+      await expect(page.locator(".shell--tree")).toHaveCount(width === 1440 ? 1 : 0);
       await expect(dot).toBeVisible();
       const b = (await settings.boundingBox())!;
       const d = (await dot.boundingBox())!;
@@ -1732,7 +1735,7 @@ test.describe("a touch screen 760 px wide", () => {
       await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular");
       await expect(page.locator("nav.rail")).toBeVisible();
       await expect(page.locator("nav.tabbar")).toBeHidden();
-      await expect(page.locator(".shell--side")).toHaveCount(0);
+      await expect(page.locator(".shell--tree")).toHaveCount(0);
       await expect(page.locator(".main > .page > .bar")).toHaveClass(/bar--large/);
       expect(
         await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bar").trim()),
@@ -1750,19 +1753,20 @@ test.describe("a touch screen 760 px wide", () => {
     await expect(settings).toHaveAttribute("href", "/?settings=about");
     const dot = settings.locator(".nav-dot");
     await expect(dot).toBeVisible();
-    // At the row's trailing edge, beside its label.
+    // On the compact foot button's top-right corner, inside its 44×44 hit area.
     const b = (await settings.boundingBox())!;
     const d = (await dot.boundingBox())!;
-    const label = (await settings.locator(".nav-label").boundingBox())!;
-    expect(d.x).toBeGreaterThan(label.x);
+    expect(d.x).toBeGreaterThanOrEqual(b.x);
     expect(d.x + d.width).toBeLessThanOrEqual(b.x + b.width);
+    expect(d.y).toBeGreaterThanOrEqual(b.y);
+    expect(d.y + d.height).toBeLessThanOrEqual(b.y + b.height);
     await settings.click();
     await expect(page).toHaveURL(/\/\?settings=about$/);
     await expect(page.getByRole("tabpanel", { name: "About" })).toBeVisible();
     // Installed, or checked again: the dot goes with it.
     await emit(page, "update", { state: "checking" });
     await expect(dot).toHaveCount(0);
-    await expect(settings).not.toHaveAttribute("aria-label");
+    await expect(settings).toHaveAttribute("aria-label", "Settings");
   });
 });
 

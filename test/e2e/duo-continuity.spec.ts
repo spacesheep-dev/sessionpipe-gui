@@ -936,7 +936,7 @@ test.describe("what duo.ts promises a test, in both engines", () => {
           return {
             tabbar: shows(".tabbar"),
             rail: shows(".rail"),
-            side: shell.classList.contains("shell--side"),
+            side: shell.classList.contains("shell--tree"),
             at: { bar: box(".bar"), tabbar: box(".tabbar"), rail: box(".rail") },
           };
         });

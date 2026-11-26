@@ -13,12 +13,37 @@
 // (PullRefresh), and shows a dropped stream as a pill under the bar, which that same
 // pull retries. The wide sidebar ends with what each account has left (UsageGlance.tsx);
 // where those lines are not drawn Usage is a row, and the phone reaches it as More › Usage.
+// Between the pages and the usage lines, the labelled sidebar and the touch app's sidebar
+// list the sessions as a tree the person can arrange (SessionTree.tsx); the icon rail and
+// the phone list none: the phone has the Board.
+
+import { sessionKey } from "@shared/api";
 import type { InstalledTheme } from "@shared/theme-api";
-import { type CSSProperties, Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  Fragment,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ComposeButton, NewSessionHost, useNewFromUrl, useStandaloneNewKey } from "../control/NewSession";
 import { newSessionOpen, openNewSession } from "../control/newSessionState";
 import { useAppState, useNeedsYouCount, useStore, useStreamMark } from "../data/hooks";
-import { onPhoneLayout, phoneLayout, reachName, usePanelCovers, usePhoneLayout, useRegular } from "../lib/device";
+import {
+  onPhoneLayout,
+  phoneLayout,
+  reachName,
+  setShellPanelCovers,
+  usePanelCovers,
+  usePhoneLayout,
+  useRegular,
+} from "../lib/device";
 import { useKeyboardInset } from "../lib/keyboardInset";
 import { useGlobalKeys } from "../lib/keys";
 import { lazyModule, whenIdle } from "../lib/lazy";
@@ -37,10 +62,22 @@ import {
   useSearchParam,
 } from "../lib/router";
 import { useReadyUpdate } from "../lib/selfUpdate";
-import { getSettings as getAppSettings, setMode, useSimple } from "../lib/settings";
+import {
+  getSettings as getAppSettings,
+  SIDE_PAGE_MIN,
+  SIDEBAR_DEFAULT,
+  SIDEBAR_MAX,
+  SIDEBAR_MIN,
+  setMode,
+  setSettings,
+  sidebarClamp,
+  treeColumn,
+  useAppSettings,
+  useSimple,
+} from "../lib/settings";
 import { hintFor, isTyping, KeysOff, useShortcut, useShortcutMap } from "../lib/shortcuts";
 import { getSkins, isPlain } from "../lib/skins";
-import { closeSplit, leaveSplit, restoreSplit, useSplitKey, useSplitWidth } from "../lib/split";
+import { closeSplit, leaveSplit, restoreSplit, SPLIT_MIN, useSplitKey, useSplitWidth } from "../lib/split";
 import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
 import { NEW_WORDS } from "../native/accountWords";
 import { WORKFLOWS_ICON_PATHS } from "../orchestrate/workflows/glyphs";
@@ -51,14 +88,16 @@ import { reloadThemes, setThemeDisabled, useThemes } from "../themes/host/regist
 import { Mark } from "./Brand";
 import { MenuHost, type MenuList, useContextMenu } from "./ContextMenu";
 import type { MoreSheetProps } from "./MoreSheet";
+import { MoveUnderHost } from "./MoveUnder";
 import { openPalette } from "./Palette";
 import { PULL_PAGES, PullRefresh } from "./PullRefresh";
 import { GearIcon, QuickSettings } from "./QuickSettings";
 import { SessionPanel } from "./SessionPanel";
+import { SessionTree } from "./SessionTree";
 import { Settings } from "./Settings";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { TipHost } from "./Tip";
-import { UsageGlance, useGlanceShown } from "./UsageGlance";
+import { USAGE_ONE_LINE, UsageGlance, UsageLine, useGlanceShown } from "./UsageGlance";
 
 /** Whether Setup had steps to go at the last visit: the rail draws its entry from this
  *  until the status answers, so nothing below it moves ~100 ms after the first paint. A
@@ -495,12 +534,15 @@ function MoreTab({
   active,
   views,
   regular,
+  inSidebar = false,
 }: {
   items: NavItem[];
   active: string;
   views: NavItem[];
   /** The sidebar is in the tab bar's place and lists it all. */
   regular: boolean;
+  /** The touch sidebar's own More row (its pages are the iPad's four): it stays. */
+  inSidebar?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [display, setDisplay] = useState(false);
@@ -512,11 +554,11 @@ function MoreTab({
   // So does the sidebar taking the tab bar's place: a sheet left open never comes back by
   // itself when the screen is folded again.
   useEffect(() => {
-    if (regular) {
+    if (regular && !inSidebar) {
       setOpen(false);
       setDisplay(false);
     }
-  }, [regular]);
+  }, [regular, inSidebar]);
   // The exit copy marks no page current: the tab itself carries that once it closes.
   const row = (n: NavItem) => <MoreRow key={n.key} n={n} active={closing ? "" : active} action={navAction(n, views)} />;
   return (
@@ -572,12 +614,10 @@ function MoreSheetHost(p: MoreSheetProps) {
   return m ? <m.MoreSheet {...p} /> : null;
 }
 
-/** The sidebar's two forms: the labelled one from 1200 px (1360 with the panel open). */
-function useSideForm(splitOpen: boolean): boolean {
-  const wide = useMedia("(min-width: 1200px)");
-  const wider = useMedia("(min-width: 1360px)");
-  return wider || (wide && !splitOpen);
-}
+/** The icon rail's width: the tokens' 72, the Mac app's 80 (its traffic lights sit over it). */
+const railWidth = (): number => (document.documentElement.dataset.shell === "macos" ? 80 : 72);
+
+const SideUsage = USAGE_ONE_LINE ? UsageLine : UsageGlance;
 
 const LISTS = new Set(["board", "inbox", "search", "feed", "review", "workflows"]);
 let fromList = "board";
@@ -634,7 +674,35 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   }, []);
   const splitOpen = useSplitKey() !== null;
   const splitWidth = useSplitWidth();
-  const side = useSideForm(splitOpen && !phone);
+  // A computer's window: the icon rail at its edge, the sessions column beside it while the
+  // window has room for it and the person has not hidden it, else over the page on asking.
+  // The touch app's regular size keeps its own sidebar (the tree under its pages).
+  const desktop = !phone && !regular;
+  const { sidebarWidth, treeHidden } = useAppSettings();
+  const column = treeColumn({
+    window: window.innerWidth,
+    rail: railWidth(),
+    chosen: sidebarWidth,
+    panel: splitOpen ? splitWidth : 0,
+  });
+  const columnShown = desktop && column.fits && !treeHidden;
+  const [overlay, setOverlay] = useState(false);
+  const overlayShown = desktop && overlay && !columnShown;
+  const [liveWidth, setLiveWidth] = useState<number | null>(null);
+  const treeWidth = overlayShown
+    ? Math.min(sidebarWidth, window.innerWidth - railWidth() - 48)
+    : (liveWidth ?? column.width);
+  useEffect(() => {
+    document.documentElement.style.setProperty("--tree-w", `${treeWidth}px`);
+  }, [treeWidth]);
+  const toggleTree = useCallback(() => {
+    if (!desktop) return false;
+    if (column.fits) {
+      setOverlay(false);
+      setSettings({ treeHidden: !treeHidden });
+    } else setOverlay((o) => !o);
+  }, [desktop, column.fits, treeHidden]);
+  useShortcut("sidebar.toggle", toggleTree);
   const railMenuProps = useContextMenu(railMenu, { title: () => "sessionpipe gui" });
   // A route change moves focus to the page (not on the first paint, where Tab must start
   // at the skip link), unless the new page put the caret in a field of its own (Search's),
@@ -676,13 +744,20 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       navigate(v.to);
     });
   }
-  // A window with a mouse under 840 px has no room for a session beside its page: the
-  // panel covers the page (split.css), from the rail to the window's edge. The page under
-  // it leaves the tab order and the accessibility tree until the panel closes or the
-  // window widens, and its keys are off (KeysOff, below): the palette, the toasts and
-  // Settings are in <main> too, and stay live. The focus goes from the page to the panel,
-  // and back to the row it was on unless it has been put somewhere since.
-  const covers = usePanelCovers() && splitOpen;
+  // Where the panel has no room beside the page (under 840 px with a mouse, or when the
+  // sessions column leaves less than SPLIT_MIN beside the page), the panel covers the page
+  // from the sidebar's edge (split.css .shell[data-covers]). The page under it leaves the
+  // tab order and the accessibility tree until the panel closes or the window widens, and
+  // its keys are off (KeysOff, below): the palette, the toasts and Settings stay live.
+  // Focus from the page goes to the panel; focus in the rail or tree stays on its row.
+  const panelRoom = window.innerWidth - (railWidth() + treeWidth) - SIDE_PAGE_MIN;
+  const roomCovers = columnShown && panelRoom < SPLIT_MIN;
+  useLayoutEffect(() => {
+    setShellPanelCovers(roomCovers);
+    return () => setShellPanelCovers(false);
+  }, [roomCovers]);
+  const wouldCover = usePanelCovers() || roomCovers;
+  const covers = wouldCover && splitOpen;
   const stillOpen = useRef(splitOpen);
   stillOpen.current = splitOpen;
   useEffect(() => {
@@ -718,7 +793,9 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
     under.current = { path, covered: covers };
     if (was?.covered && was.path !== path && lastMove() === "navigate") leaveSplit();
   }, [path, covers]);
-  const shellStyle = { "--split-width": `${splitOpen && !phone && !covers ? splitWidth : 0}px` } as CSSProperties;
+  // Beside the sessions column the panel takes its room from the page (never the column).
+  const panelWidth = columnShown ? Math.min(splitWidth, panelRoom) : splitWidth;
+  const shellStyle = { "--split-width": `${splitOpen && !phone && !covers ? panelWidth : 0}px` } as CSSProperties;
   const entry = (n: NavItem, tip: boolean) => (
     <NavEntry
       key={n.key}
@@ -737,15 +814,87 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const more = [...nav.filter((n) => !tabs.includes(n) && !n.key.startsWith("t:")), ...views];
   // Usage is in the sidebar once: its lines where they are drawn, a row otherwise. The
   // touch app's sidebar lists what the tab bar and More do, in their order.
-  const glance = useGlanceShown() && side && !phone;
-  const inMore = moreLists(more);
-  const railNav = regular ? [...tabs, ...inMore.pages, ...inMore.plugins] : glance ? nav : withUsage(nav);
+  const glance = useGlanceShown() && (columnShown || overlayShown || regular);
+  // One element while nothing it shows changes, so the tree (memo) does not redraw on
+  // every route change, a search's keystrokes among them.
+  const onUsage = route.name === "usage";
+  const usageFoot = useMemo(() => (glance ? <SideUsage here={onUsage} /> : null), [glance, onUsage]);
+  // The touch sidebar's pages are the iPad's four: Board, Inbox, Search and More (the rest
+  // in More's sheet); the rail lists every page, Usage among them where its line is not drawn.
+  const padPages = nav.filter((n) => n.key === "board" || n.key === "inbox" || n.key === "search");
+  const padMore = [...nav.filter((n) => !padPages.includes(n) && !n.key.startsWith("t:")), ...views];
+  const railNav = regular ? padPages : glance && columnShown ? nav : withUsage(nav);
   const firstView = railNav.findIndex((n) => n.key.startsWith("t:") && !n.experimental);
   // The app's update, downloaded and waiting ("0.8.5 is ready"): the foot's Settings button marks it.
   const update = useReadyUpdate();
+  const splitKey = useSplitKey();
+  const openKey = route.name === "session" ? sessionKey(route.harness, route.id) : splitKey;
+  // The column over the page closes on Esc, a click outside it, and a session opening.
+  const columnRef = useRef<HTMLElement>(null);
+  useEffect(() => setOverlay(false), [openKey]);
+  useEffect(() => {
+    if (!overlayShown) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      setOverlay(false);
+    };
+    const down = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (columnRef.current?.contains(t) || t?.closest?.("[data-tree-toggle], .menu, .menu-sheet, [role=dialog]"))
+        return;
+      setOverlay(false);
+    };
+    window.addEventListener("keydown", key, true);
+    document.addEventListener("pointerdown", down, true);
+    return () => {
+      window.removeEventListener("keydown", key, true);
+      document.removeEventListener("pointerdown", down, true);
+    };
+  }, [overlayShown]);
+  const pagesNav = (
+    <div className="rail-nav">
+      {railNav.map((n, i) => {
+        // A hairline where the group changes; Finish setup sits apart, at the foot.
+        const prev = railNav[i - 1];
+        const split = !!prev && n.group !== undefined && n.group !== prev.group;
+        const experimental = n.group === 4 && prev?.group !== 4;
+        return (
+          <Fragment key={n.key}>
+            {split ? (
+              experimental ? (
+                /* Named for the rail, where the label below is not shown; data-nav keeps the divider's name for the tests. */
+                <hr
+                  className="rail-group"
+                  data-nav="experimental"
+                  title="Experimental views"
+                  aria-label="Experimental views"
+                />
+              ) : (
+                <hr className="rail-group" />
+              )
+            ) : null}
+            {i === firstView ? (
+              <div className="rail-section" aria-hidden="true">
+                Views
+              </div>
+            ) : null}
+            {experimental ? (
+              <div className="rail-section" aria-hidden="true">
+                Experimental
+              </div>
+            ) : null}
+            {entry(n, !regular)}
+          </Fragment>
+        );
+      })}
+    </div>
+  );
   return (
     <div
-      className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${side && !phone ? "shell--side" : ""}`}
+      className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${columnShown ? "shell--tree" : ""}`}
+      data-covers={wouldCover ? "" : undefined}
       style={shellStyle}
     >
       {/* biome-ignore lint/a11y/useValidAnchor: a real in-page link to #main; the handler only keeps the hash out of the URL */}
@@ -763,105 +912,104 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
         {announce}
       </div>
       <ConnAnnouncer owned={route.name === "board" || route.name === "inbox"} />
-      <nav className="rail" aria-label="Pages" {...(regular ? {} : railMenuProps)}>
-        <div className="rail-head">
-          <Link to="/" className="rail-brand" title="sessionpipe gui">
-            <Mark size={28} />
-            <span className="rail-word brand-name" aria-hidden="true" />
-            <span className="sr-only">sessionpipe gui</span>
-          </Link>
-          <ComposeButton className="rail-compose" />
-        </div>
-        <div className="rail-nav">
-          {railNav.map((n, i) => {
-            // A hairline where the group changes; Finish setup sits apart, at the foot.
-            const prev = railNav[i - 1];
-            const split = !!prev && n.group !== undefined && n.group !== prev.group;
-            const experimental = n.group === 4 && prev?.group !== 4;
-            return (
-              <Fragment key={n.key}>
-                {split ? (
-                  experimental ? (
-                    /* Named for the rail, where the label below is not shown; data-nav keeps the divider's name for the tests. */
-                    <hr
-                      className="rail-group"
-                      data-nav="experimental"
-                      title="Experimental views"
-                      aria-label="Experimental views"
-                    />
-                  ) : (
-                    <hr className="rail-group" />
-                  )
-                ) : null}
-                {i === firstView ? (
-                  <div className="rail-section" aria-hidden="true">
-                    Views
-                  </div>
-                ) : null}
-                {experimental ? (
-                  <div className="rail-section" aria-hidden="true">
-                    Experimental
-                  </div>
-                ) : null}
-                {entry(n, !side && !regular)}
-              </Fragment>
-            );
-          })}
-        </div>
-        {glance && <UsageGlance here={route.name === "usage"} />}
-        <div className="rail-foot">
+      <nav
+        className={`rail${regular ? " rail--tree" : ""}`}
+        aria-label="Pages"
+        data-tree-overlay={overlayShown ? "" : undefined}
+        {...(regular ? {} : railMenuProps)}
+      >
+        <div className="rail-icons">
+          <div className="rail-head">
+            <Link to="/" className="rail-brand" title="sessionpipe gui">
+              <Mark size={28} />
+              <span className="rail-word brand-name" aria-hidden="true" />
+              <span className="sr-only">sessionpipe gui</span>
+            </Link>
+            {/* New session is the column's first row where the column is drawn. */}
+            {!regular && !columnShown && !overlayShown && <ComposeButton className="rail-compose" />}
+          </div>
+          {desktop && <TreeToggle shown={columnShown || overlayShown} over={!column.fits} onToggle={toggleTree} />}
+          {regular ? null : pagesNav}
           {regular && (
-            <SideFoot
-              display={display}
-              setDisplay={setDisplay}
-              settings={settingsShown}
-              path={fullPath}
-              update={update}
+            <SessionTree
+              open={openKey}
+              touch
+              between={
+                <div className="rail-nav rail-nav--pad">
+                  {railNav.map((n) => entry(n, false))}
+                  <MoreTab items={padMore} active={active} views={views} regular={regular} inSidebar />
+                </div>
+              }
+              foot={usageFoot}
             />
           )}
-          <ConnectionPill />
-          {!account && (
-            <Link
-              to="/themes"
-              className={`theme-btn ${route.name === "themes" ? "nav-link--on" : ""}`}
-              data-tip="Views"
-              data-tip-keys={hintFor("nav.views")}
-              data-tip-side="top"
-              aria-label="Views"
-              aria-current={route.name === "themes" ? "page" : undefined}
-            >
-              <svg
-                viewBox="0 0 20 20"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+          <div className="rail-foot">
+            <ConnectionPill />
+            {regular && (
+              <SideFoot
+                display={display}
+                setDisplay={setDisplay}
+                settings={settingsShown}
+                path={fullPath}
+                update={update}
+              />
+            )}
+            {!account && (
+              <Link
+                to="/themes"
+                className={`theme-btn ${route.name === "themes" ? "nav-link--on" : ""}`}
+                data-tip="Views"
+                data-tip-keys={hintFor("nav.views")}
+                data-tip-side="top"
+                aria-label="Views"
+                aria-current={route.name === "themes" ? "page" : undefined}
               >
-                {PLUG_ICON}
-              </svg>
+                <svg
+                  viewBox="0 0 20 20"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  {PLUG_ICON}
+                </svg>
+              </Link>
+            )}
+            <QuickSettings placement="rail" />
+            {/* An update that is downloaded and waits: the quiet dot, and the way to its row. */}
+            <Link
+              to={settingsHref(update ? "about" : null, fullPath)}
+              plainClick={() => openSettings(update ? "about" : null)}
+              className={`theme-btn ${settingsShown ? "nav-link--on" : ""}`}
+              data-tip={update ? `Settings · ${update}` : "Settings"}
+              data-tip-side="top"
+              aria-label={update ? `Settings, ${update}` : "Settings"}
+              aria-haspopup="dialog"
+              aria-expanded={settingsShown}
+              data-nav="settings"
+            >
+              <SlidersIcon />
+              {update ? <span className="nav-dot" aria-hidden="true" /> : null}
             </Link>
-          )}
-          <QuickSettings placement="rail" />
-          {/* An update that is downloaded and waits: the quiet dot, and the way to its row. */}
-          <Link
-            to={settingsHref(update ? "about" : null, fullPath)}
-            plainClick={() => openSettings(update ? "about" : null)}
-            className={`theme-btn ${settingsShown ? "nav-link--on" : ""}`}
-            data-tip={update ? `Settings · ${update}` : "Settings"}
-            data-tip-side="top"
-            aria-label={update ? `Settings, ${update}` : "Settings"}
-            aria-haspopup="dialog"
-            aria-expanded={settingsShown}
-            data-nav="settings"
-          >
-            <SlidersIcon />
-            {update ? <span className="nav-dot" aria-hidden="true" /> : null}
-          </Link>
+          </div>
         </div>
+        {(columnShown || overlayShown) && (
+          <section className="tree-col" id="tree-col" ref={columnRef} aria-label="Sessions">
+            <SessionTree open={openKey} touch={false} foot={usageFoot} />
+          </section>
+        )}
+        {columnShown && (
+          <RailEdge
+            width={column.width}
+            cap={Math.max(SIDEBAR_MIN, column.cap)}
+            live={liveWidth}
+            setLive={setLiveWidth}
+          />
+        )}
       </nav>
       {/* Ahead of the page in the DOM: Esc closes the first drawn [data-dismiss]
           (lib/keys.ts), and Settings is over whatever the page has open (a file, the panel). */}
@@ -880,6 +1028,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <SessionPanel phone={phone} />
       <ShortcutHelp />
       <LabelsHost />
+      <MoveUnderHost />
       <NewSessionHost />
       {/* The workflows' signer: claims and signs a run's ready steps, whichever page is open. */}
       <RunnerHost />
@@ -889,9 +1038,132 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   );
 }
 
-/** The touch app's sidebar ends as the More sheet does: Display, which opens its sheet,
- *  and Settings, in rows like the pages', with the sheet's glyphs. Settings carries the
- *  rail's dot for an update that waits, and leads to its row. */
+/** The rail's button that shows and hides the sessions column (⌃⌘S): beside the page
+ *  where it fits, over the page where it does not (`over`). */
+function TreeToggle({ shown, over, onToggle }: { shown: boolean; over: boolean; onToggle: () => void }) {
+  const label = shown ? "Hide sessions" : "Show sessions";
+  return (
+    <div className="rail-nav rail-nav--toggle">
+      <button
+        type="button"
+        className="nav-link tree-toggle"
+        aria-label={label}
+        aria-expanded={shown}
+        aria-controls={shown ? "tree-col" : undefined}
+        data-tip={over && !shown ? "Show sessions over the page" : label}
+        data-tip-keys={hintFor("sidebar.toggle") || undefined}
+        data-tip-side="right"
+        data-tree-toggle=""
+        data-on={shown ? "" : undefined}
+        onClick={onToggle}
+      >
+        <svg
+          className="nav-glyph"
+          viewBox="0 0 20 20"
+          width="20"
+          height="20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="2.5" y="3.5" width="15" height="13" rx="1.5" />
+          <path d="M8 3.5v13" />
+          <path d="M4.5 7h1.5M4.5 9.5h1.5M4.5 12h1.5" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+/** How far an arrow key moves the sidebar's edge. */
+const EDGE_STEP = 16;
+
+/** The sessions column's edge, dragged to make it wider or narrower (SIDEBAR_MIN to
+ *  SIDEBAR_MAX, and no wider than the window allows), as a Mac's sidebar is: a double-click
+ *  puts it back at SIDEBAR_DEFAULT, and it is a window splitter for the keyboard (its value
+ *  in pixels, ← and → by 16, Home and End). The width is this device's (lib/settings.ts),
+ *  set on <html> as --tree-w (shell.css: the column's width; --rail stays the icon rail's);
+ *  index.html sets it before the first paint. While the edge is dragged the width follows
+ *  the pointer and is kept on release. */
+function RailEdge({
+  width,
+  cap,
+  live,
+  setLive,
+}: {
+  /** The width drawn when not dragged: the person's, as far as the window allows. */
+  width: number;
+  /** The widest the window allows. */
+  cap: number;
+  live: number | null;
+  setLive: (px: number | null) => void;
+}) {
+  const shown = live ?? width;
+  const keep = (px: number) => setSettings({ sidebarWidth: sidebarClamp(Math.min(px, cap)) });
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a window splitter (WAI-ARIA), which <hr> cannot be: it takes the focus and a value
+    <div
+      className="rail-edge"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Sidebar width"
+      aria-valuemin={SIDEBAR_MIN}
+      aria-valuemax={Math.min(SIDEBAR_MAX, cap)}
+      aria-valuenow={shown}
+      aria-valuetext={`${shown} pixels`}
+      tabIndex={0}
+      data-resizing={live !== null ? "" : undefined}
+      onDoubleClick={() => keep(SIDEBAR_DEFAULT)}
+      onKeyDown={(e) => {
+        const to =
+          e.key === "ArrowLeft"
+            ? shown - EDGE_STEP
+            : e.key === "ArrowRight"
+              ? shown + EDGE_STEP
+              : e.key === "Home"
+                ? SIDEBAR_MIN
+                : e.key === "End"
+                  ? SIDEBAR_MAX
+                  : null;
+        if (to === null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        keep(to);
+      }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const el = e.currentTarget;
+        const start = e.clientX;
+        const from = shown;
+        let now = from;
+        el.setPointerCapture(e.pointerId);
+        document.documentElement.setAttribute("data-rail-resizing", "");
+        const move = (ev: PointerEvent) => {
+          now = Math.min(sidebarClamp(from + ev.clientX - start), cap);
+          setLive(now);
+        };
+        const up = () => {
+          el.removeEventListener("pointermove", move);
+          el.removeEventListener("pointerup", up);
+          el.removeEventListener("pointercancel", up);
+          document.documentElement.removeAttribute("data-rail-resizing");
+          if (now !== from) keep(now);
+          setLive(null);
+        };
+        el.addEventListener("pointermove", move);
+        el.addEventListener("pointerup", up);
+        el.addEventListener("pointercancel", up);
+      }}
+    />
+  );
+}
+
+/** The touch app's sidebar ends in one compact row: Display and Settings as 44×44 icon
+ *  buttons beside the connection pill. Settings keeps the update dot when one waits. */
 function SideFoot({
   display,
   setDisplay,
@@ -911,8 +1183,9 @@ function SideFoot({
     <>
       <button
         type="button"
-        className={`nav-link ${display ? "nav-link--on" : ""}`}
+        className={`nav-link side-foot-btn ${display ? "nav-link--on" : ""}`}
         onClick={() => setDisplay(true)}
+        aria-label="Display"
         aria-haspopup="dialog"
         aria-expanded={display}
         data-nav="display"
@@ -920,13 +1193,12 @@ function SideFoot({
         <span className="nav-glyph" aria-hidden="true">
           <GearIcon size={20} />
         </span>
-        <span className="nav-label">Display</span>
       </button>
       <Link
         to={settingsHref(update ? "about" : null, path)}
         plainClick={() => openSettings(update ? "about" : null)}
-        className={`nav-link ${settings ? "nav-link--on" : ""}`}
-        aria-label={update ? `Settings, ${update}` : undefined}
+        className={`nav-link side-foot-btn ${settings ? "nav-link--on" : ""}`}
+        aria-label={update ? `Settings, ${update}` : "Settings"}
         aria-haspopup="dialog"
         aria-expanded={settings}
         data-nav="settings"
@@ -934,7 +1206,6 @@ function SideFoot({
         <span className="nav-glyph" aria-hidden="true">
           <SlidersIcon size={20} />
         </span>
-        <span className="nav-label">Settings</span>
         {update ? <span className="nav-dot" aria-hidden="true" /> : null}
       </Link>
       <QuickSettings placement="tabbar" trigger={false} open={display} onOpenChange={setDisplay} />

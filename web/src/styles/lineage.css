@@ -262,6 +262,16 @@ a.ask-link:active {
   line-height: var(--lh-tight);
   text-decoration: none;
 }
+/* A session the person placed under this one (lib/tree.ts): its row says so in a column
+   of its own before the age, in the meta's tone; only such a row has the column. */
+.kids-link--placed {
+  grid-template-columns: 10px 5.5em 8.5em minmax(0, 1fr) minmax(0, max-content) max-content 5em;
+  grid-template-areas: "dot word agent title where how age";
+}
+.kids-how {
+  grid-area: how;
+  white-space: nowrap;
+}
 .kids-meta {
   display: contents;
 }

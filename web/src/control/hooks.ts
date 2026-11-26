@@ -3,12 +3,15 @@
 // grant's expiry, and the activity (AppState.control: the stream's frames over a read of
 // GET /activity, so a reload still shows this morning's messages, and a page that
 // dropped reads what it missed; data/store.ts `loadControl`).
-import type { Attention, ControlActivity } from "@shared/api";
+import { type Attention, type ControlActivity, isEmptySession, splitKey } from "@shared/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAppState, useStore } from "../data/hooks";
+import { useAppState, useMachines, useStore } from "../data/hooks";
+import { useNow } from "../lib/time";
 import { type AnswerOut, answersOut } from "./answers";
 import { rpId } from "./api";
+import { ALIAS_WINDOW_MS } from "./newSessionState";
 import { GRANT_EVENT, grantExpiry } from "./signer";
+import { isFinal } from "./words";
 
 export function useRpId(): string | null {
   const [rp, setRp] = useState<string | null>(null);
@@ -72,4 +75,45 @@ export function useAnswersOut(open: readonly Attention[]): Readonly<Record<strin
   const known = useAppState().control;
   useEffect(() => store.loadControl(), [store]);
   return useMemo(() => answersOut(known, open), [known, open]);
+}
+
+/** A start older than this is not waited on any more. */
+const PENDING_MAX_MS = 3600_000;
+const isStart = (a: ControlActivity) => a.kind === "start";
+
+/** Starts from here whose session is not listed yet: the Board's starting cards and the
+ *  sidebar's starting rows, the same list. A start's session takes over from its row once
+ *  the list shows it: at its first turn, not at its bare start (the lists leave an empty
+ *  session out). `machine` and `harness` are the Board's filters. Also the starts
+ *  themselves, the clock they were read on (fine while one is in the alias window,
+ *  newSessionState.ts) and the paired computers, for the Board's alias check. */
+export function usePendingStarts(o: { machine?: string; harness?: string } = {}) {
+  const { machine, harness } = o;
+  const paired = useMachines().filter((m) => m.control);
+  const starts = useControlActivity(isStart);
+  const { sessions } = useAppState();
+  const recentStart = starts.some((a) => Date.now() - Date.parse(a.at) < ALIAS_WINDOW_MS);
+  const now = useNow(recentStart ? "fine" : "coarse");
+  const listed = useCallback(
+    (key: string | undefined) => {
+      const s = key ? sessions.get(key) : undefined;
+      return !!s && !isEmptySession(s);
+    },
+    [sessions],
+  );
+  const pending = useMemo(
+    () =>
+      starts.filter(
+        (a) =>
+          !!a.session &&
+          !listed(a.session) &&
+          !listed(a.ackSession) &&
+          !isFinal(a) &&
+          now - Date.parse(a.at) < PENDING_MAX_MS &&
+          (!machine || paired.find((m) => m.control?.machineId === a.machineId)?.name === machine) &&
+          (!harness || splitKey(a.session).harness === harness),
+      ),
+    [starts, listed, now, machine, harness, paired],
+  );
+  return { pending, starts, recentStart, now, paired };
 }

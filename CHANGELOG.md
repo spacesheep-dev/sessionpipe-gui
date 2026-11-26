@@ -17,6 +17,32 @@ names in the Inbox.
 
 ### Added
 
+- **The sidebar lists your sessions as a tree you can arrange.** Under the pages, New
+  session, then Pinned and Sessions: one line a session, its agent's mark, its title, a
+  small computer mark where it runs on another computer than the session above it, and
+  its state at the end (the turning ring
+  while it works, the orange disc while it needs you). A session another one asked or ran
+  sits under it on one rail; a parent folds, and stays folded on this device. The list is
+  the Board's, in the Board's order, less what you hid: thirty, then Show more. A session
+  you start is in it at once, as on the Board, and the list never says "None yet" while
+  it is still loading or reconnecting. Drag a row
+  onto another to put it under it, between rows to bring it to the top level, onto Pinned
+  to pin it; Esc puts it back, and every move has Undo. The keys walk the tree, and every
+  session's menu, on the phone too, has Pin, Move under… and Move to top level. The Board
+  nests the same way, and every device shows the same arrangement. It is how you see the
+  tree, nothing more: nothing is sent to a computer, and a session's page still says whom
+  it works for; a session you placed under another is listed there as "placed by you".
+- **On a computer, the pages are an icon rail at the window's edge, and your sessions a
+  column beside it.** The column starts with New session, always in view (and the place
+  to drop a row to pin it), then Pinned and Sessions, with one line of usage at its
+  foot: the account with the least left. Its edge drags from 220 to 400 points; it
+  starts at 288 and this device keeps what you chose, and a double-click puts it back.
+  The rail's top button, or ⌃⌘S (Ctrl+B off a Mac), hides and shows it, remembered on
+  this device. Where the window is too narrow for it beside a 600 point page it narrows
+  to 220 and then steps aside: the same button shows it over the page, and Esc, a click
+  outside or opening a session puts it away. The list fades at an end where it goes on.
+  On a tablet the sidebar keeps its own form: Board, Inbox, Search and More over your
+  sessions, from 264 to 320 points wide.
 - **A session's page lists the sessions it asked.** Under the bar, "Asked sessions": each
   agent it asked or launched, with its state, its agent, its title, the computer it runs
   on and when it last moved; one that needs you first, five and "Show all". A row opens

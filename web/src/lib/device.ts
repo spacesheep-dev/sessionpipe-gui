@@ -184,11 +184,30 @@ export const onPhoneLayout = subscribeTo(PHONE_QUERY);
  *  pointer changes (a laptop folded into a tablet). */
 export const usePhoneLayout = (): boolean => useSyncExternalStore(onPhoneLayout, phoneLayout, () => false);
 
-/** Whether an open panel covers the page right now, having no room beside it. */
-export const panelCovers = stateOf(PANEL_COVERS_QUERY);
-const onCovers = subscribeTo(PANEL_COVERS_QUERY);
+/** Whether an open panel covers the page right now, having no room beside it: either the
+ *  window is under 840 px with a mouse (PANEL_COVERS_QUERY), or the shell's room test
+ *  found less than SPLIT_MIN beside the sessions column and the page (Shell.tsx). */
+let shellCovers = false;
+const shellCoverSubs = new Set<() => void>();
+export function setShellPanelCovers(on: boolean): void {
+  if (shellCovers === on) return;
+  shellCovers = on;
+  for (const l of [...shellCoverSubs]) l();
+}
+const queryCovers = stateOf(PANEL_COVERS_QUERY);
+const onQueryCovers = subscribeTo(PANEL_COVERS_QUERY);
+export const panelCovers = (): boolean => queryCovers() || shellCovers;
+const onCovers = (l: () => void): (() => void) => {
+  const off = onQueryCovers(l);
+  shellCoverSubs.add(l);
+  return () => {
+    off();
+    shellCoverSubs.delete(l);
+  };
+};
 
-/** `panelCovers`, live: re-renders when the window crosses either end of that width. */
+/** `panelCovers`, live: re-renders when the window crosses either end of that width or
+ *  when the shell's room test changes. */
 export const usePanelCovers = (): boolean => useSyncExternalStore(onCovers, panelCovers, () => false);
 
 /** Whether the keys are a touch screen's right now: its Return is a new line, as in

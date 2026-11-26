@@ -6,7 +6,10 @@
 // the stream come back and counts as one (`resyncs`), so a page reads again what it read
 // on its own, and of two copies of a control message the one further along stays.
 import {
+  type Arrangement,
+  type ArrangementPatch,
   type ControlActivity,
+  EMPTY_ARRANGEMENT,
   EMPTY_LABELS,
   EMPTY_MARKS,
   type Labels,
@@ -23,6 +26,7 @@ import {
   type Suggestion,
   type Viewer,
 } from "@shared/api";
+import { applyArrangement } from "@shared/arrangement";
 import { noteMachineControl } from "../control/remoteRp";
 import type { Transport } from "./transport";
 
@@ -56,6 +60,9 @@ export interface AppState {
   labels: Labels;
   /** What the person has seen, the same on every device (server/ui/marks.ts). */
   marks: Marks;
+  /** How the person arranged the session tree, the same on every device
+   *  (server/ui/arrangement.ts). Display only (lib/tree.ts). */
+  arrangement: Arrangement;
   /** Each account's newest usage limits (server/ui/limits.ts), the whole list from the
    *  snapshot and from every `limits` frame. */
   limits: readonly LimitsEntry[];
@@ -138,6 +145,7 @@ const initial: AppState = {
   suggestions: [],
   labels: EMPTY_LABELS,
   marks: EMPTY_MARKS,
+  arrangement: EMPTY_ARRANGEMENT,
   limits: [],
   viewStates: new Map(),
   resyncs: 0,
@@ -321,6 +329,7 @@ export class Store {
           suggestions: s.suggestions ?? [],
           labels: s.labels ?? this.state.labels,
           marks: s.marks ?? this.state.marks,
+          arrangement: s.arrangement ?? this.state.arrangement,
           limits: s.limits ?? [],
         });
         // The frames of the drop are gone for good: what they said of the messages is asked for.
@@ -388,6 +397,9 @@ export class Store {
         return;
       case "marks":
         if (m.marks.rev >= this.state.marks.rev) this.set({ marks: m.marks });
+        return;
+      case "arrangement":
+        if (m.arrangement.rev >= this.state.arrangement.rev) this.set({ arrangement: m.arrangement });
         return;
       case "limits":
         this.set({ limits: m.limits });
@@ -469,6 +481,25 @@ export class Store {
       return next;
     } catch (e) {
       if (this.state.marks.rev === before.rev) this.set({ marks: before });
+      throw e;
+    }
+  }
+
+  /** Change the arrangement (pin, place, follow again), the way patchLabels sets labels:
+   *  shown at once by the same rules the receiver holds it to (shared/arrangement.ts), the
+   *  server's answer replaces it, a refusal puts it back. */
+  async patchArrangement(p: ArrangementPatch): Promise<Arrangement> {
+    const before = this.state.arrangement;
+    // The page cannot say which sessions the store holds: the receiver checks that.
+    const next = applyArrangement(before, p, () => true);
+    // The optimistic copy keeps the rev, so the server's answer (rev + 1) always wins.
+    if (next !== before) this.set({ arrangement: { ...next, rev: before.rev } });
+    try {
+      const kept = await this.transport.patchArrangement(p);
+      if (kept.rev >= this.state.arrangement.rev) this.set({ arrangement: kept });
+      return kept;
+    } catch (e) {
+      if (this.state.arrangement.rev === before.rev) this.set({ arrangement: before });
       throw e;
     }
   }

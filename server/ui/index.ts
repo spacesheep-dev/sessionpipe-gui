@@ -17,6 +17,7 @@ import type { Control } from "../control/index.js";
 import type { Ctx, Handler, Reply, Router } from "../http/router.js";
 import { DOOR_HEADER, throughDoor } from "../localDoor.js";
 import type { Store } from "../store/store.js";
+import { type ArrangementStore, registerArrangement } from "./arrangement.js";
 import { registerAttachments } from "./attachments.js";
 import { uiAuth } from "./auth.js";
 import { readColorThemes } from "./colorThemes.js";
@@ -61,6 +62,8 @@ export interface UiDeps {
   labels?: LabelStore;
   /** The person's read marks (marks.ts): the same three places as labels. */
   marks?: MarkStore;
+  /** How the person arranged the session tree (arrangement.ts): the same three places. */
+  arrangement?: ArrangementStore;
   /** Each account's usage limits (limits.ts): on the snapshot, on the stream, and their
    *  own routes. */
   limits?: LimitsStore;
@@ -86,6 +89,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
     ...(deps.plugins ? { suggestions: deps.plugins.currentSuggestions() } : {}),
     ...(deps.labels ? { labels: deps.labels.get() } : {}),
     ...(deps.marks ? { marks: deps.marks.get() } : {}),
+    ...(deps.arrangement ? { arrangement: deps.arrangement.get() } : {}),
     ...(deps.limits ? { limits: deps.limits.list() } : {}),
   });
 
@@ -109,7 +113,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
         viewers,
         pingMs: deps.pingMs,
         plugins: deps.plugins,
-        more: [deps.labels, deps.marks, deps.limits, deps.broadcast].filter((x) => x !== undefined),
+        more: [deps.labels, deps.marks, deps.arrangement, deps.limits, deps.broadcast].filter((x) => x !== undefined),
         allowed: (c) => uiAuth(c, deps.uiKey()),
       });
     }),
@@ -175,6 +179,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
   registerSessionFiles(router, deps.store, guard);
   if (deps.labels) registerLabels(router, deps.labels, guard);
   if (deps.marks) registerMarks(router, deps.marks, guard);
+  if (deps.arrangement) registerArrangement(router, deps.arrangement, guard);
   if (deps.limits) registerLimits(router, deps.limits, guard, { refresh: deps.refreshLimits });
 
   router.post(

@@ -3,7 +3,7 @@
 // most people never touch; Advanced is everything), the page the app opens on, whether
 // Forget asks first, whether a session opens beside the page or as the page, the tier
 // lens the whole app looks through (`null` = everything), and whether the sidebar shows
-// what each account has left. The appearance, the color theme and the text size stay in
+// what each account has left, and how wide the labelled sidebar is. The appearance, the color theme and the text size stay in
 // lib/theme.ts (the appearance popover). Only what the person set is stored, so a default
 // can change under a device that never chose (as NSUserDefaults registers defaults).
 // Reading is tolerant: an unknown or malformed field falls back to its default, so a
@@ -27,6 +27,51 @@ export interface AppSettings {
   tierLens: Lens;
   /** The sidebar's Usage lines (Shell.tsx UsageGlance), on this device. */
   usageInSidebar: boolean;
+  /** The sessions column's width in px (SIDEBAR_MIN to SIDEBAR_MAX), dragged at its edge. */
+  sidebarWidth: number;
+  /** The sessions column beside the rail is hidden on this device (⌃⌘S, the rail's button). */
+  treeHidden: boolean;
+}
+
+/** The labelled sidebar's widths: from the narrowest its rows were drawn for to where the
+ *  page would give up too much, and the width a device starts at. */
+export const SIDEBAR_MIN = 220;
+export const SIDEBAR_MAX = 400;
+export const SIDEBAR_DEFAULT = 288;
+/** A width as the sidebar takes it: whole pixels, inside its range. */
+export const sidebarClamp = (px: number): number =>
+  Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(Number.isFinite(px) ? px : SIDEBAR_DEFAULT)));
+
+/** The page beside the rail and the sessions column keeps at least this. */
+export const PAGE_ROOM = 600;
+/** With a session open beside the page and the sessions column shown, the page keeps this
+ *  (its bar stays one row) and the panel takes its room from the page, never from the
+ *  column; under PANEL_MIN the panel covers the page beside the column. */
+export const SIDE_PAGE_MIN = 542;
+const PANEL_MIN = 420;
+
+/** Whether the sessions column fits beside the rail, and how wide it and a panel beside
+ *  the page are drawn, on a computer's window (the rail at the window's edge, the column,
+ *  the page, the panel): the column keeps the width the person chose (capped only by
+ *  SIDEBAR_MAX and PAGE_ROOM, never by a panel), down to SIDEBAR_MIN; below that it is
+ *  not drawn beside the page (the rail's button shows it over the page). With a panel
+ *  open beside the column, `room = window - rail - width - SIDE_PAGE_MIN`: when room is
+ *  at least PANEL_MIN, the panel sits beside at `min(panel, room)`; otherwise `covers` is
+ *  true and the panel covers the page from the column's edge. Pure, for the tests. */
+export function treeColumn(o: { window: number; rail: number; chosen: number; panel: number }): {
+  fits: boolean;
+  width: number;
+  cap: number;
+  panel: number;
+  covers: boolean;
+} {
+  const cap = Math.min(SIDEBAR_MAX, o.window - o.rail - PAGE_ROOM);
+  const fits = cap >= SIDEBAR_MIN;
+  const width = Math.max(SIDEBAR_MIN, Math.min(o.chosen, cap));
+  const room = o.window - o.rail - width - SIDE_PAGE_MIN;
+  const covers = fits && room < PANEL_MIN;
+  const panel = o.panel > 0 && fits && !covers ? Math.min(o.panel, room) : o.panel;
+  return { fits, width, cap, panel, covers };
 }
 
 export const KEY = "sessionpipe-gui.settings";
@@ -51,6 +96,8 @@ const defaults = (phone: boolean): AppSettings => ({
   openSessions: phone ? "page" : "beside",
   tierLens: null,
   usageInSidebar: true,
+  sidebarWidth: SIDEBAR_DEFAULT,
+  treeHidden: false,
 });
 
 const isLens = (v: unknown): v is Lens => v === null || v === 0 || v === 1 || v === 2 || v === 3;
@@ -91,6 +138,8 @@ function resolve(p: Stored, d: AppSettings): AppSettings {
     openSessions: p.openSessions === "beside" || p.openSessions === "page" ? p.openSessions : d.openSessions,
     tierLens: isLens(p.tierLens) ? p.tierLens : d.tierLens,
     usageInSidebar: typeof p.usageInSidebar === "boolean" ? p.usageInSidebar : d.usageInSidebar,
+    sidebarWidth: typeof p.sidebarWidth === "number" ? sidebarClamp(p.sidebarWidth) : d.sidebarWidth,
+    treeHidden: typeof p.treeHidden === "boolean" ? p.treeHidden : d.treeHidden,
   };
 }
 

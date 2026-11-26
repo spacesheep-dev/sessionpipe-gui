@@ -26,18 +26,19 @@ export function tokenMs(name: string, fallback: number): number {
 /** An overlay's life with an exit: `mounted` stays true for `ms` after `open` turns
  *  false, with `closing` set, so the element can play its exit (`[data-closing]`) before
  *  it unmounts. No wait under reduced motion. */
-export function usePresence(open: boolean, ms = tokenMs("--dur-exit", 140)): { mounted: boolean; closing: boolean } {
+export function usePresence(open: boolean, ms?: number): { mounted: boolean; closing: boolean } {
   const [mounted, setMounted] = useState(open);
   // Opened (again, even mid-exit): mounted from this very render.
   if (open && !mounted) setMounted(true);
   // `mounted` is read, not followed: only `open` starts or stops an exit.
   useEffect(() => {
     if (open || !mounted) return;
-    if (reducedMotion() || ms <= 0) {
+    const wait = ms ?? tokenMs("--dur-exit", 140);
+    if (reducedMotion() || wait <= 0) {
       setMounted(false);
       return;
     }
-    const t = window.setTimeout(() => setMounted(false), ms);
+    const t = window.setTimeout(() => setMounted(false), wait);
     return () => window.clearTimeout(t);
   }, [open, ms]);
   // Closing from the render in which `open` turns false, and focus leaves in that same
@@ -193,6 +194,17 @@ export function useHeldOrder<T>(
 
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
+let calmUntil = 0;
+/** Suppresses FLIP row slides for 50 ms on the next commit (keyboard folds and moves in
+ *  the session tree); layouts are still recorded so the next animated move starts cleanly. */
+export function calmNextCommit(): void {
+  calmUntil = performance.now() + 50;
+}
+/** Whether FLIP row slides are currently suppressed by `calmNextCommit()`. */
+export function isCalmCommit(): boolean {
+  return performance.now() <= calmUntil;
+}
+
 /** Animates the children of `ref` that carry `data-flip="<key>"` from where they are
  *  drawn now to their new place (a translate over --dur-slow); a new one fades and drops
  *  in over --dur. Measured so it never compounds on a live list: a row's last place is its
@@ -204,16 +216,20 @@ const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
  *  its last commit (a window resized, a phone unfolded or turned): its rows are laid out
  *  anew, and none of them went anywhere. (A list that was hidden then had no width: shown,
  *  its rows come in as new ones do.) Off under reduced motion, and past `max` rows (a
- *  long list just snaps). */
-export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
+ *  long list just snaps). `move` sets a list's own travel time (the sidebar's tree makes
+ *  room faster than the board slides). */
+export function useFlip(ref: RefObject<HTMLElement | null>, max = 80, o: { move?: number; sig?: unknown } = {}): void {
   /** Each row's layout top (no transform), relative to the container, at the last commit. */
   const prev = useRef<Map<string, number> | null>(null);
   /** The container's width at the last commit; 0 while it had no box. */
   const width = useRef(0);
+  const lastSig = useRef<unknown>(undefined);
   const moving = useRef(new Map<string, Animation>());
   useLayoutEffect(() => {
     const box = ref.current;
     if (!box) return;
+    if (o.sig !== undefined && prev.current !== null && Object.is(o.sig, lastSig.current)) return;
+    lastSig.current = o.sig;
     const els = [...box.querySelectorAll<HTMLElement>("[data-flip]")].filter((el) => {
       const outer = el.parentElement?.closest("[data-flip]");
       return !outer || !box.contains(outer);
@@ -227,6 +243,7 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
     const motion =
       !reducedMotion() &&
       document.visibilityState === "visible" &&
+      performance.now() > calmUntil &&
       els.length <= max &&
       typeof Element.prototype.animate === "function";
     const now = new Map<string, number>();
@@ -240,8 +257,13 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80): void {
     }
     const before = prev.current;
     prev.current = now;
-    if (!before || !motion || rewrapped) return;
-    const slow = tokenMs("--dur-slow", 280);
+    if (!before || !motion || rewrapped) {
+      for (const a of moving.current.values()) a.cancel();
+      moving.current.clear();
+      for (const el of els) el.removeAttribute("data-flip-moving");
+      return;
+    }
+    const slow = o.move ?? tokenMs("--dur-slow", 280);
     const dur = tokenMs("--dur", 200);
     const live = new Map<string, Animation>();
     for (const el of els) {

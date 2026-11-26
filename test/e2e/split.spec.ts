@@ -255,6 +255,9 @@ test.describe("split panel", () => {
 
     test("the divider resizes the panel and the width is remembered", async ({ page }) => {
       await openBeside(page);
+      // The sessions column hidden: beside it the panel only narrows (lib/settings.ts treeColumn).
+      await page.locator("[data-tree-toggle]").click();
+      await expect(page.locator(".tree-col")).toHaveCount(0);
       // Let the slide-in finish: the grip's position is only right once the panel is still.
       const box = (await panel(page).boundingBox())!;
       await expect
@@ -494,7 +497,13 @@ test.describe("split panel", () => {
     });
 
     test("a wider window has it beside the page again, at the width it had", async ({ page }) => {
-      await page.addInitScript(() => localStorage.setItem("sessionpipe-gui.splitWidth", "520"));
+      await page.addInitScript(() => {
+        localStorage.setItem("sessionpipe-gui.splitWidth", "520");
+        // Exercise the 840 px rail-only cover threshold without the 288 px sessions column
+        // forcing cover at 1000 px under the one-open rule.
+        const cur = JSON.parse(localStorage.getItem("sessionpipe-gui.settings") ?? "{}");
+        localStorage.setItem("sessionpipe-gui.settings", JSON.stringify({ ...cur, treeHidden: true }));
+      });
       await page.setViewportSize({ width: 1000, height: 800 });
       await openBeside(page);
       const beside = async () => {

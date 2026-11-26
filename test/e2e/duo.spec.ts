@@ -399,7 +399,7 @@ test("the inner display turned is the touch app still: its own sidebar, one sent
       // The touch app's sidebar (its rows a finger's, named), not a Mac's icon rail.
       await expect(page.locator("nav.rail"), size).toBeVisible();
       await expect(page.locator("nav.tabbar"), size).toBeHidden();
-      await expect(page.locator(".shell--side"), size).toHaveCount(0);
+      await expect(page.locator(".shell--tree"), size).toHaveCount(0);
       await expect(page.locator("nav.rail").getByRole("link", { name: "Board" }), size).toBeVisible();
       // Not approved yet. The prompt's card says so in one sentence with the one way on: no
       // message field that would only refuse, and no second "Approve this iPhone" under it.
@@ -609,7 +609,7 @@ test("the keyboard up on the inner display turned: the strip stands on the keys,
 
     // From the Board, with no session page under it.
     await page.goto(b.server.url);
-    await page.locator("nav.rail .rail-compose").click();
+    await page.locator("nav.rail .stree-new").click();
     const ns = page.locator("[data-new-session]");
     await settled(page);
     await ns.locator("[data-ns-text]").click();
@@ -694,7 +694,11 @@ const sidebarRows = (page: Page) =>
       .filter((el) => el.getClientRects().length > 0)
       .map((el) => {
         const r = el.getBoundingClientRect();
-        return { name: el.querySelector(".nav-label")?.textContent ?? "", height: r.height, top: r.top };
+        return {
+          name: el.querySelector(".nav-label")?.textContent || el.getAttribute("aria-label") || "",
+          height: r.height,
+          top: r.top,
+        };
       }),
   );
 
@@ -711,13 +715,13 @@ for (const [size, insets] of REGULAR) {
       await expect(page.locator("html"), where).toHaveAttribute("data-size-class", "regular");
       await expect(page.locator("nav.rail"), where).toBeVisible();
       await expect(page.locator("nav.tabbar"), where).toBeHidden();
-      // What the tab bar and then More list, in their order, Display and Settings last
-      // (an account has no Workflows).
+      // What the tab bar lists, More for the rest, then Display and Settings at the foot;
+      // the sessions under them.
       const rows = await sidebarRows(page);
       expect(
         rows.map((r) => r.name),
         where,
-      ).toEqual(["Board", "Inbox", "Search", "Machines", "Usage", "Display", "Settings"]);
+      ).toEqual(["Board", "Inbox", "Search", "More", "Display", "Settings"]);
       for (const r of rows) expect(r.height, `${r.name}, ${where}`).toBeGreaterThanOrEqual(44);
       expect(rows.map((r) => r.top)).toEqual([...rows.map((r) => r.top)].sort((x, y) => x - y));
       // The Inbox's count: the sample's one prompt, as the tab bar says it.
@@ -728,16 +732,19 @@ for (const [size, insets] of REGULAR) {
       await expect(page.locator("nav.rail .nav-link[data-tip]"), where).toHaveCount(0);
       await expect(page.locator("nav.rail .rail-foot .theme-btn:visible"), where).toHaveCount(0);
       // The head starts under the status bar, as tall as the page's bar; the page's bar has
-      // no New session of its own.
+      // no New session of its own: the sidebar's first row is.
       const [top, right, , left] = insets;
       const head = await page.locator("nav.rail .rail-head").evaluate((el) => ({
         top: el.getBoundingClientRect().top,
         pad: Number.parseFloat(getComputedStyle(el).paddingTop),
       }));
       expect(head, where).toEqual({ top: 0, pad: top });
-      const compose = page.locator("nav.rail .rail-compose");
+      const compose = page.locator("nav.rail .stree-new");
       expect((await compose.boundingBox())!.y, where).toBeGreaterThanOrEqual(top);
-      expect(await hitSize(compose), where).toEqual({ width: 44, height: 44 });
+      // New session is the sidebar's first row: a finger's height, the sidebar's width.
+      const hit = await hitSize(compose);
+      expect(hit.height, where).toBeGreaterThanOrEqual(44);
+      expect(hit.width, where).toBeGreaterThanOrEqual(44);
       // The mark is a link to the Board, and a finger's too.
       const brand = await hitSize(page.locator("nav.rail .rail-brand"));
       expect(brand.width, where).toBeGreaterThanOrEqual(44);
@@ -756,7 +763,9 @@ for (const [size, insets] of REGULAR) {
       });
       expect(sides.glyph, where).toBeGreaterThanOrEqual(left + 8);
       expect(sides.mark, where).toBe(sides.glyph);
-      expect(sides.rail, where).toBe(220 + left);
+      // regular.css: 34vw, from 264 to 320.
+      const wide = Math.min(320, Math.max(264, (Number(size.split("x")[0]) * 34) / 100));
+      expect(sides.rail, where).toBe(wide + left);
       // The page's column (styles/regular.css): 672 pt at most, in the middle of what is
       // beside the sidebar.
       const room = Number(size.split("x")[0]) - sides.rail - 16 - (16 + right);
@@ -804,7 +813,8 @@ test("the outer display and a Split View half keep the tab bar; More or Display 
       await expect(tabbar, `${w}x${h}`).toBeVisible();
       await expect(page.locator("nav.rail"), `${w}x${h}`).toBeHidden();
     }
-    // What the tab bar and More list folded is what the sidebar lists unfolded.
+    // Unfolded, the sidebar lists the tab bar's first three pages and More (the polish
+    // plan's four), and More's own Display and Settings at its foot.
     const tabs = await tabbar.locator("a.nav-link .nav-label").allInnerTexts();
     await more.click();
     await expect(sheet).toBeVisible();
@@ -812,7 +822,8 @@ test("the outer display and a Split View half keep the tab bar; More or Display 
     await pose(page, 669, 951);
     await expect(page.locator("nav.rail")).toBeVisible();
     await expect(sheet).toHaveCount(0);
-    expect((await sidebarRows(page)).map((r) => r.name)).toEqual([...tabs, ...inMore]);
+    expect(inMore.slice(-2)).toEqual(["Display", "Settings"]);
+    expect((await sidebarRows(page)).map((r) => r.name)).toEqual([...tabs.slice(0, 3), "More", "Display", "Settings"]);
     await pose(page, 466, 678);
     await expect(tabbar).toBeVisible();
     await expect(more).toHaveAttribute("aria-expanded", "false");
@@ -965,7 +976,7 @@ for (const [size, insets] of ROOM) {
       await expect(page.getByText("Release notes for 0.8.3").first()).toBeAttached();
       // Not approved yet: New session is its sentence and its one button at the top of the
       // card, and the card ends under the button.
-      await page.locator("nav.rail .rail-compose").click();
+      await page.locator("nav.rail .stree-new").click();
       const unapproved = page.locator("[data-new-session]");
       await expect(unapproved.locator(".ns-empty [data-ns-approve]")).toBeVisible();
       await settled(page);
@@ -986,7 +997,7 @@ for (const [size, insets] of ROOM) {
       await expect(page.locator("html"), where).toHaveAttribute("data-size-class", "regular");
 
       // New session: its machine's list is a pop-up under its button, over the sheet.
-      await page.locator("nav.rail .rail-compose").click();
+      await page.locator("nav.rail .stree-new").click();
       const ns = page.locator("[data-new-session]");
       await expect(ns.locator("[data-ns-text]")).toBeVisible();
       await formSheet(ns, `New session, ${where}`);
@@ -1165,7 +1176,7 @@ for (const [size, insets] of [
       await page.reload();
       await expect(page.locator("html")).toHaveAttribute("data-size-class", "regular");
 
-      await page.locator("nav.rail .rail-compose").click();
+      await page.locator("nav.rail .stree-new").click();
       const ns = page.locator("[data-new-session]");
       await opened(ns, ns.locator("[data-ns-row=machine] button"), `New session, ${size}`);
 
@@ -1196,7 +1207,7 @@ test("with room, New session dragged down by its bar goes, its dim fading with i
         ).length,
     );
   const open = async () => {
-    await page.locator("nav.rail .rail-compose").click();
+    await page.locator("nav.rail .stree-new").click();
     await expect(ns.locator("[data-ns-text]")).toBeVisible();
     await settled(page);
   };
@@ -1256,9 +1267,9 @@ test("on a tablet on its side each page reads down one column: its title starts 
 }) => {
   const b = await duoBed(browser, "1180x820", { insets: [24, 0, 20, 0] });
   const { page } = b;
-  /** The column beside the sidebar: 1180 less the sidebar's 220 and a 16 pt gutter a side,
-   *  then 672 in the middle of that. */
-  const column = 220 + 16 + (1180 - 220 - 32 - 672) / 2;
+  /** The column beside the sidebar: 1180 less the sidebar's 320 (regular.css: 34vw, from
+   *  264 to 320) and a 16 pt gutter a side, then 672 in the middle of that. */
+  const column = 320 + 16 + (1180 - 320 - 32 - 672) / 2;
   /** Where a box's content starts: inside its padding. */
   const startOf = (l: Locator) =>
     l.first().evaluate((el) => el.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(el).paddingLeft));
@@ -1278,7 +1289,7 @@ test("on a tablet on its side each page reads down one column: its title starts 
       expect(Math.abs(title - column), path).toBeLessThanOrEqual(1);
       // The bar's ground runs on from the sidebar to the window's edge.
       const bar = await boxOf(page.locator(".main > .page > .bar"));
-      expect([bar.left, bar.right], path).toEqual([220, 1180]);
+      expect([bar.left, bar.right], path).toEqual([320, 1180]);
     }
     // A session: its bar, the line under it (machine and folder) and its messages start at
     // one edge, the column's.
