@@ -37,7 +37,7 @@ import { phoneLayout, usePhoneLayout } from "../lib/device";
 import { ATTENTION_LABEL, attentionMessage, isQuestion, oneLine, sessionTitle, toolLabel } from "../lib/format";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { toastAllowed } from "../lib/marks";
-import { reducedMotion, tokenMs } from "../lib/motion";
+import { calmNextCommit, reducedMotion, tokenMs } from "../lib/motion";
 import { SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath, usePath } from "../lib/router";
 import { hintFor, useShortcut } from "../lib/shortcuts";
 import { installSoundUnlock, type SoundKind, useSounds } from "../lib/sounds";
@@ -429,8 +429,11 @@ export function Toasts() {
     if (!phone) return;
     for (const t of list) if (t.kind !== "undo" && !visible.includes(t)) dismissToast(t.id);
   });
-  // ⌘Z: the newest undo on screen (a text field keeps its own).
-  useShortcut("undo", () => (undoLatest() ? undefined : false));
+  // ⌘Z: the newest undo on screen (a text field keeps its own). Keep tree undos calm.
+  useShortcut("undo", () => {
+    if (document.activeElement?.closest?.(".stree")) calmNextCommit();
+    return undoLatest() ? undefined : false;
+  });
   const held = useToastsHeld() && !phone;
   const leaving = useLeaving(visible, held);
   // The phone's undo sits at the bottom, after the banner. On a desktop the list is in the

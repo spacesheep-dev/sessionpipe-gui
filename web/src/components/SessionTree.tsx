@@ -461,6 +461,7 @@ export const SessionTree = memo(function SessionTree({
     if (!here.matches?.("[data-tree-nav]")) return;
     // Modified arrows/keys belong to the shortcut dispatcher (⌥←/⌥→, ⌃⌘←/⌃⌘→, ⇧↵, ⌘↵).
     if (e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    cancelAnimationFrame(landFrame.current);
     // The rows as drawn, in both lists, and the Show more rows among them.
     const items = [...(box.current?.querySelectorAll<HTMLElement>("[data-tree-nav]") ?? [])];
     const i = items.indexOf(here);
@@ -526,6 +527,7 @@ export const SessionTree = memo(function SessionTree({
   const step = (d: 1 | -1) => {
     const a = document.activeElement as HTMLElement | null;
     if (!a || !box.current?.contains(a)) return false;
+    cancelAnimationFrame(landFrame.current);
     const items = [...box.current.querySelectorAll<HTMLElement>("[data-tree-nav]")];
     const to = items[items.indexOf(a) + d];
     if (!to) return;
@@ -683,6 +685,8 @@ export const SessionTree = memo(function SessionTree({
   // ----- what a move did, said, and where focus and scroll land -----
   const [said, setSaid] = useState("");
   const pendingLand = useRef<{ key: SessionKey; source: ArrangeSource } | null>(null);
+  const landFrame = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(landFrame.current), []);
   const focusAfterExpand = useRef<SessionKey | null>(null);
   useLayoutEffect(() => {
     const next = focusAfterExpand.current;
@@ -740,7 +744,12 @@ export const SessionTree = memo(function SessionTree({
       else void Promise.all(anims.map((a) => a.finished.catch(() => {}))).then(settle);
       return;
     }
-    requestAnimationFrame(() => {
+    const beforeEl = document.activeElement;
+    cancelAnimationFrame(landFrame.current);
+    landFrame.current = requestAnimationFrame(() => {
+      landFrame.current = 0;
+      const cur = document.activeElement;
+      if (cur && cur !== beforeEl && box.current?.contains(cur)) return;
       const rowNow = rowEl(land.key);
       if (!rowNow) return;
       hadFocus.current = true;

@@ -253,7 +253,12 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80, o: { move?
     }
     const before = prev.current;
     prev.current = now;
-    if (!before || !motion || rewrapped) return;
+    if (!before || !motion || rewrapped) {
+      for (const a of moving.current.values()) a.cancel();
+      moving.current.clear();
+      for (const el of els) el.removeAttribute("data-flip-moving");
+      return;
+    }
     const slow = o.move ?? tokenMs("--dur-slow", 280);
     const dur = tokenMs("--dur", 200);
     const live = new Map<string, Animation>();
