@@ -427,9 +427,44 @@ describe("limits routes", () => {
     for (const [method, route] of [
       ["GET", ROUTES.ui.limits],
       ["POST", ROUTES.ui.limitsForget],
+      ["POST", ROUTES.ui.limitsRefresh],
     ] as const) {
       const reply = await router.match(method, route)!.handler(ctx as never);
       expect(reply).toEqual({ status: 401, json: { reason: "unauthorized" } });
+    }
+  });
+
+  it("supports observeDirect and POST /api/ui/limits/refresh (JSON only)", async () => {
+    const isolated = tempDir();
+    try {
+      const limits = new LimitsStore(isolated.dir);
+      let calls = 0;
+      const router = new Router();
+      registerLimits(router, limits, (h) => h, {
+        refresh: async () => {
+          calls++;
+          limits.observeDirect({
+            harness: "antigravity",
+            machine: "lab-mac",
+            windows: [{ id: "gemini_5h", usedPercent: 12, windowMinutes: 300 }],
+          });
+          return true;
+        },
+      });
+      const m = router.match("POST", ROUTES.ui.limitsRefresh)!;
+      const nonJson = await m.handler({ req: { headers: { "content-type": "text/plain" } } } as never);
+      expect(nonJson).toEqual({ status: 415, json: { reason: "json_only" } });
+      const ok = await m.handler({ req: { headers: { "content-type": "application/json" } } } as never);
+      expect(calls).toBe(1);
+      expect(ok).toMatchObject({
+        status: 200,
+        json: {
+          refreshed: true,
+          limits: [{ key: "antigravity m:lab-mac", harness: "antigravity", machine: "lab-mac" }],
+        },
+      });
+    } finally {
+      isolated.cleanup();
     }
   });
 

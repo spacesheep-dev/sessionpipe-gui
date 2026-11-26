@@ -7,6 +7,7 @@
 import type { ProtocolEvent } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
 import type { Store } from "../store/store.js";
+import type { LimitsCore } from "../ui/limitsCore.js";
 import { type DemoMachines, startDemoMachines } from "./machine.js";
 import { inBatches, planReplay } from "./replay.js";
 import { Simulation } from "./sim.js";
@@ -20,6 +21,8 @@ export interface DemoOptions {
   seed?: number;
   /** The receiver's control side: the demo pairs its machines there (machine.ts). */
   control?: Control;
+  /** The receiver's limits store: demo Antigravity quota windows ride directly in memory. */
+  limits?: LimitsCore;
 }
 
 export interface Runner {
@@ -43,6 +46,24 @@ export function startDemo(store: Store, opts: DemoOptions = {}): Runner {
   });
   if (opts.control)
     paired = startDemoMachines(opts.control, sim.v010Machine, (m) => sim.account(m, "claude-code"), sim.startAt);
+  if (opts.limits) {
+    const H = 3_600_000;
+    const M = 60_000;
+    const D = 24 * H;
+    const at = (ms: number) => new Date(sim.startAt + ms).toISOString();
+    opts.limits.observeDirect({
+      harness: "antigravity",
+      machine: sim.v010Machine,
+      windows: [
+        { id: "gemini_5h", usedPercent: 12, windowMinutes: 300, resetsAt: at(3 * H + 40 * M) },
+        { id: "gemini_weekly", usedPercent: 28, windowMinutes: 10_080, resetsAt: at(5 * D + 12 * H) },
+        { id: "3p_5h", usedPercent: 0, windowMinutes: 300 },
+        { id: "3p_weekly", usedPercent: 6, windowMinutes: 10_080, resetsAt: at(6 * D + 4 * H) },
+      ],
+      observedAt: at(-3 * M),
+      demo: true,
+    });
+  }
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;
   const tick = () => {

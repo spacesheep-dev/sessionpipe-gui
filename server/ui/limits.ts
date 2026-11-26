@@ -17,11 +17,16 @@ export class LimitsStore extends LimitsCore {
   }
 }
 
-/** GET ROUTES.ui.limits and POST ROUTES.ui.limitsForget, behind the UI guard. The POST
- *  takes JSON only, like the labels PATCH: the content type forces a CORS preflight this
- *  server never answers, so a page on another origin cannot forget numbers through the
- *  loopback-is-trusted rule. */
-export function registerLimits(router: Router, limits: LimitsCore, guard: (h: Handler) => Handler): void {
+/** GET ROUTES.ui.limits, POST ROUTES.ui.limitsForget and POST ROUTES.ui.limitsRefresh,
+ *  behind the UI guard. The POSTs take JSON only, like the labels PATCH: the content type
+ *  forces a CORS preflight this server never answers, so a page on another origin cannot
+ *  act through the loopback-is-trusted rule. */
+export function registerLimits(
+  router: Router,
+  limits: LimitsCore,
+  guard: (h: Handler) => Handler,
+  opts: { refresh?: () => Promise<boolean> } = {},
+): void {
   router.get(
     ROUTES.ui.limits,
     guard(() => ({ status: 200, json: { limits: limits.list() }, headers: { "cache-control": "no-store" } })),
@@ -41,6 +46,15 @@ export function registerLimits(router: Router, limits: LimitsCore, guard: (h: Ha
       if (!key) return { status: 400, json: { reason: "malformed" } };
       if (!limits.forget(key)) return { status: 404, json: { reason: "not_found" } };
       return { status: 204, text: "" };
+    }),
+  );
+  router.post(
+    ROUTES.ui.limitsRefresh,
+    guard(async (ctx): Promise<Reply> => {
+      const type = String(ctx.req.headers["content-type"] ?? "");
+      if (!/^application\/json\b/i.test(type)) return { status: 415, json: { reason: "json_only" } };
+      const refreshed = opts.refresh ? await opts.refresh() : false;
+      return { status: 200, json: { limits: limits.list(), refreshed }, headers: { "cache-control": "no-store" } };
     }),
   );
 }

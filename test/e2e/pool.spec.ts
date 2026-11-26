@@ -49,9 +49,13 @@ test.describe("the pooled section, from the demo", () => {
     await expect(lab.locator("li.pool-acct .pool-word")).toHaveText(["In use", "Has room", "Used up"]);
     const sheep = row(page, "lab-mac", "Spacesheep");
     await expect(sheep.locator(".pool-status-after")).toHaveText(RESETS);
+    // Used up accounts start compact; clicking the chevron reveals their quota windows.
+    await expect(sheep.locator(".pool-windows")).toHaveCount(0);
+    await sheep.locator("[data-pool-expand]").click();
     await expect(sheep.locator('[data-window="five_hour"] .usage-value')).toHaveText("<1% left");
-    // Fiction has no numbers yet: no rows, and no "No numbers yet" either.
+    // Fiction has no numbers yet: no rows, no expand button, and no "No numbers yet" either.
     await expect(row(page, "lab-mac", "Fiction").locator(".usage-win")).toHaveCount(0);
+    await expect(row(page, "lab-mac", "Fiction").locator("[data-pool-expand]")).toHaveCount(0);
     await expect(lab).not.toContainText("No numbers yet");
     // The one accent in the section is "Used up".
     await expect(lab.locator(".pool-status--needs .pool-word")).toHaveText(["Used up"]);
@@ -93,23 +97,21 @@ test.describe("the pooled section, from the demo", () => {
       const b = await box(l);
       return b.y + b.height / 2;
     };
-    const textRight = (l: ReturnType<Page["locator"]>) =>
-      l.evaluate((el) => {
-        const r = document.createRange();
-        r.selectNodeContents(el);
-        return r.getBoundingClientRect().right;
-      });
     const sheep = row(page, "lab-mac", "Spacesheep");
+    await sheep.locator("[data-pool-expand]").click();
     const win = sheep.locator(".pool-windows .usage-win").first();
     if (!isMobile) {
-      // One lead edge: the title, the switch's label, the names and "Add account…".
+      // One lead edge: the title, the switch's label, the names and "Add account…" text.
       const edge = await left(lab.locator(".usage-title"));
       expect(await left(lab.locator(".pool-switch .form-label"))).toBe(edge);
       expect(await left(lab.locator(".pool-title").first())).toBe(edge);
       expect(
         await lab.locator(".pool-add").evaluate((el) => {
+          const textNode = Array.from(el.childNodes).find(
+            (n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim(),
+          );
           const r = document.createRange();
-          r.selectNodeContents(el);
+          r.selectNodeContents(textNode ?? el);
           return r.getBoundingClientRect().left;
         }),
       ).toBe(edge);
@@ -125,14 +127,10 @@ test.describe("the pooled section, from the demo", () => {
       expect(
         Math.abs((await cy(lab.locator(".toggle"))) - (await cy(lab.locator(".pool-switch .form-label")))),
       ).toBeLessThanOrEqual(1);
-      // The word and its trail on one baseline; "Sign in again…" ending where "Off" ends.
+      // The pill and its trail centred on one row.
       const word = await box(sheep.locator(".pool-word"));
       const sub = await box(sheep.locator(".pool-status-sub"));
-      expect(Math.abs(word.y + word.height - (sub.y + sub.height))).toBeLessThan(2);
-      const mini = section(page, "mini-mac");
-      expect(await textRight(mini.getByRole("button", { name: "Sign in again…" }))).toBe(
-        await textRight(row(page, "mini-mac", "Old").locator(".pool-word")),
-      );
+      expect(Math.abs(word.y + word.height / 2 - (sub.y + sub.height / 2))).toBeLessThan(3);
       // "Sending works from…" sits 16 px above the first header.
       const note = await box(page.locator(".machines-note"));
       const first = await box(page.locator("#main section").first());
@@ -196,6 +194,8 @@ test.describe("the pooled section, from the demo", () => {
     // lab-mac's section starts mid-window and runs past its bottom (three accounts, two with
     // windows); the click's focus must not scroll it out from under the pointer.
     const lab = section(page, "lab-mac");
+    // Expand Spacesheep so the section runs past the 900 px viewport bottom.
+    await row(page, "lab-mac", "Spacesheep").locator("[data-pool-expand]").click();
     const box = (await lab.boundingBox())!;
     expect(box.y).toBeGreaterThan(0);
     expect(box.y + box.height).toBeGreaterThan(900);

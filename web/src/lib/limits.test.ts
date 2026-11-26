@@ -65,6 +65,17 @@ describe("windowLabel / windowShort", () => {
     expect(windowLabel({ id: "secondary", windowMinutes: 10_080 })).toBe("This week");
     expect(windowShort({ id: "secondary", windowMinutes: 10_080 })).toBe("week");
   });
+  it("names Antigravity model-group windows clearly", () => {
+    expect(windowLabel({ id: "gemini_5h", windowMinutes: 300 })).toBe("Gemini, 5 hours");
+    expect(windowLabel({ id: "gemini_weekly", windowMinutes: 10_080 })).toBe("Gemini, this week");
+    expect(windowLabel({ id: "3p_5h", windowMinutes: 300 })).toBe("Claude & GPT, 5 hours");
+    expect(windowLabel({ id: "3p_weekly", windowMinutes: 10_080 })).toBe("Claude & GPT, this week");
+    expect(windowLabel({ id: "argon_7d", windowMinutes: 10_080 })).toBe("Argon, this week");
+    expect(windowShort({ id: "gemini_5h", windowMinutes: 300 })).toBe("Gemini 5h");
+    expect(windowShort({ id: "gemini_weekly", windowMinutes: 10_080 })).toBe("Gemini 7d");
+    expect(windowShort({ id: "3p_5h", windowMinutes: 300 })).toBe("Claude/GPT 5h");
+    expect(windowShort({ id: "3p_weekly", windowMinutes: 10_080 })).toBe("Claude/GPT 7d");
+  });
   it("words an unknown id by its length, else by the id itself", () => {
     expect(windowLabel({ id: "burst", windowMinutes: 45 })).toBe("45 minutes");
     expect(windowLabel({ id: "burst", windowMinutes: 120 })).toBe("2 hours");
@@ -195,9 +206,10 @@ describe("names", () => {
     expect([...twoUnknown.values()]).toEqual(["a-mac", "b-mac"]);
     expect([...shortNames([e("a", { accountId: "u1", machine: "" })], names).values()]).toEqual(["Claude Code"]);
   });
-  it("orders Claude Code, then Codex, then the rest, each by title, never by numbers", () => {
+  it("orders Claude Code, then Codex, then Antigravity, then the rest, each by title, never by numbers", () => {
     const rows = [
       { harness: "goose", title: "goose on x", machine: "x" },
+      { harness: "antigravity", title: "Antigravity on lab-mac", machine: "lab-mac" },
       { harness: "codex", title: "Codex on lab-mac", machine: "lab-mac" },
       { harness: "claude-code", title: "dev@example.com", machine: "lab-mac" },
       { harness: "codex", title: "Codex on build-box", machine: "build-box" },
@@ -208,6 +220,7 @@ describe("names", () => {
       "dev@example.com",
       "Codex on build-box",
       "Codex on lab-mac",
+      "Antigravity on lab-mac",
       "goose on x",
     ]);
   });
@@ -368,11 +381,13 @@ describe("accountFor / agentWords", () => {
 
 describe("footnote and quiet accounts", () => {
   it("names the harnesses with no source, once", () => {
-    expect(footnote(["claude-code", "codex", "gemini-cli"], [])).toBe("Gemini CLI doesn't report its limits.");
+    expect(footnote(["claude-code", "codex", "antigravity", "gemini-cli"], [])).toBe(
+      "Gemini CLI doesn't report its limits.",
+    );
     expect(footnote(["gemini-cli", "cursor", "goose", "gemini-cli", "codex"], [])).toBe(
       "Cursor, Gemini CLI and goose don't report their limits.",
     );
-    expect(footnote(["claude-code", "codex"], [])).toBe("");
+    expect(footnote(["claude-code", "codex", "antigravity"], [])).toBe("");
   });
   it("drops a harness once it sends numbers", () => {
     expect(footnote(["gemini-cli"], [{ harness: "gemini-cli" }])).toBe("");

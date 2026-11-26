@@ -197,8 +197,12 @@ test("g u and ⌘K open Usage: every window named honestly, and nothing for a ha
   await expect(quiet).toContainText("On build-box, in a terminal:");
   await expect(quiet.locator(".cmdwell")).toContainText("sessionpipe install --status-line");
   await expect(main.locator(".usage-note")).toContainText(/Gemini CLI.* don't report their limits\./);
+  // Antigravity reports Gemini and Claude/GPT quota windows cleanly.
+  const ag = main.locator("section.usage-acct", { hasText: "Antigravity on lab-mac" });
+  await expect(ag).toContainText("Gemini, 5 hours");
+  await expect(ag).toContainText("Claude & GPT, this week");
   // Never a figure for a harness with no source, never "used".
-  await expect(main.locator("section.usage-acct", { hasText: "Gemini" })).toHaveCount(0);
+  await expect(main.locator("section.usage-acct", { hasText: "Gemini CLI" })).toHaveCount(0);
   await expect(main).not.toContainText("used");
   // The only colour is on the words that need it.
   await expect(main.locator(".usage-out")).toHaveText(["12% over", "None left"]);

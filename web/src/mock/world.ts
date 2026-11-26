@@ -93,6 +93,19 @@ export function mockLimits(now: number): LimitsEntry[] {
       ],
       observedAt: at(-3 * H),
     },
+    {
+      key: "antigravity m:demo-desktop",
+      harness: "antigravity",
+      machine: "demo-desktop",
+      machines: ["demo-desktop"],
+      windows: [
+        { id: "gemini_5h", usedPercent: 18, windowMinutes: 300, resetsAt: at(3 * H + 12 * M) },
+        { id: "gemini_weekly", usedPercent: 34, windowMinutes: 10_080, resetsAt: at(5 * D + 14 * H) },
+        { id: "3p_5h", usedPercent: 0, windowMinutes: 300 },
+        { id: "3p_weekly", usedPercent: 12, windowMinutes: 10_080, resetsAt: at(6 * D + 2 * H) },
+      ],
+      observedAt: at(-2 * M),
+    },
   ];
 }
 

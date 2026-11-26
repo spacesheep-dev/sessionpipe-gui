@@ -5,8 +5,8 @@
    at 600 and, when the report is old, its age in the meta tier; a row per window on
    hairlines in an inset panel; under it, a muted line of where it reported. On a phone
    the windows are stacked and the where-line carries the age. The bar is neutral
-   (the second hairline token for the track, the secondary ink for what is left); only
-   "None left" and "N% over" take the attention colour, on their words. */
+   (a soft track with secondary ink for healthy headroom, attention orange at <= 20% left);
+   "None left" and "N% over" take the attention colour on their words. */
 
 .usage > :not(.bar):not(.bar-below):not(.sr-only) {
   margin-inline: auto;
@@ -44,8 +44,14 @@
   font-size: var(--text-sm);
   white-space: nowrap;
 }
-.usage-head .icon-btn {
+.usage-head .icon-btn:last-child {
   margin-right: -6px;
+}
+.usage-refresh {
+  color: var(--fg-3);
+}
+.usage-refresh.is-busy svg {
+  animation: spin 0.9s linear infinite;
 }
 /* The where-line is the group's footer, under its panel. */
 .usage-acct > .usage-head {
@@ -70,7 +76,7 @@
    hairline between windows starts under the label, not at the glyph's edge. */
 .usage-win {
   display: grid;
-  grid-template-columns: 180px 160px 10ch minmax(0, 1fr);
+  grid-template-columns: 184px 160px 10ch minmax(0, 1fr);
   grid-template-areas: "label bar value when";
   align-items: center;
   column-gap: 16px;
@@ -84,17 +90,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--fg);
+  color: var(--fg-2);
   font-size: var(--text-md);
 }
 .usage-bar {
   grid-area: bar;
   display: block;
-  height: 3px;
+  height: 5px;
   border-radius: 999px;
-  /* The second hairline token: in dark the first is the rule between rows, and a track
-     drawn in it reads as another rule beside a nearly empty bar. */
-  background: var(--line-2);
+  /* Soft neutral track that stays legible in light, dark, and Paper skins alike. */
+  background: color-mix(in oklch, var(--fg) 10%, transparent);
   overflow: hidden;
 }
 .usage-bar > span {
@@ -102,11 +107,22 @@
   height: 100%;
   border-radius: 999px;
   background: var(--fg-2);
+  transition: width var(--dur) var(--ease-out);
+}
+.usage-bar--nonzero > span {
+  min-width: 4px;
+}
+.usage-bar--low > span {
+  background: var(--needs);
+}
+.usage-bar--out {
+  background: color-mix(in oklch, var(--needs) 14%, transparent);
 }
 .usage-value {
   grid-area: value;
   color: var(--fg);
   font-size: var(--text-md);
+  font-weight: 500;
   text-align: right;
   white-space: nowrap;
 }
