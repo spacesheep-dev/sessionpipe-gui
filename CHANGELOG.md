@@ -6,6 +6,17 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two sessions whose ids differ only by a `:` keep their own transcripts.** A session
+  id may hold a `:`, which a file name may not, so `run:7f3a` and `run_7f3a` were kept in
+  one file: each session's page read the other's events at its own offsets, a restart
+  folded both into whichever came first, and forgetting one deleted the other's events
+  too. Such an id now has a file of its own (its safe spelling and a hash of the id), and
+  a file an older version kept under the other id's name moves to its own on the next
+  start. An id a file name can spell, which is every id a harness makes today, keeps the
+  file it has.
+
 ## [0.8.10] - 2026-11-25
 
 The session-tree sidebar lands with its full desktop, iPad, and touch polish: an icon rail beside a resizable sessions column, receiver-backed arrangement synced across devices, stable three-block ordering, outliner keyboard chords, stepped child rails, floating needs-you jump pill, compact iPad foot row, and smoother live Feed rendering. Usage gains polished account pool cards with collapsible windows, calm status pills, and local Antigravity quota polling.

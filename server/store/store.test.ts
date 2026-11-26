@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
@@ -380,6 +380,69 @@ describe("readings", () => {
     expect(store.session(sessionKey("claude-code", "quiet"))!.state).toBe("idle");
     vi.advanceTimersByTime(DONE_AFTER_MS + 1_000);
     expect(store.session(sessionKey("claude-code", "quiet"))!.state).toBe("done");
+  });
+});
+
+describe("session files", () => {
+  // `:` is a session id character the protocol allows and a file name may not hold: two ids
+  // that differ only there (or past the 160 characters a name keeps) once shared one file.
+  const A = "run:7f3a";
+  const B = "run_7f3a";
+
+  it("keeps two ids that differ only by a character a file name cannot hold in two files", () => {
+    const a = new Session(A);
+    const b = new Session(B);
+    store.ingest([b.ev("session.started"), b.ev("prompt.submitted", { prompt: "the b prompt" })], "http");
+    store.ingest([a.ev("session.started"), a.ev("prompt.submitted", { prompt: "the a prompt" })], "http");
+    store.ingest([b.ev("turn.started", { turn_id: "tb" })], "http");
+
+    const read = (id: string) => store.sessionDetail(sessionKey("claude-code", id))!.events;
+    // Every full event read back from disk is the session's own, in its own order.
+    for (const [id, prompt] of [
+      [A, "the a prompt"],
+      [B, "the b prompt"],
+    ] as const) {
+      const evs = read(id);
+      expect(evs.map((e) => e.session.id)).toEqual(evs.map(() => id));
+      expect(evs.find((e) => e.type === "prompt.submitted")?.data.prompt).toBe(prompt);
+    }
+    expect(read(B).map((e) => e.type)).toEqual(["session.started", "prompt.submitted", "turn.started"]);
+
+    // Forgetting one leaves the other's file, and a restart reads both back apart.
+    expect(store.forget(sessionKey("claude-code", A))).toBe(true);
+    expect(read(B)).toHaveLength(3);
+    const again = new Store(tmp.dir, { tickMs: 1_000, statsMs: 1_000 });
+    onTestFinished(() => again.close());
+    expect(again.session(sessionKey("claude-code", A))).toBeUndefined();
+    expect(again.sessionDetail(sessionKey("claude-code", B))!.events.map((e) => e.session.id)).toEqual([B, B, B]);
+  });
+
+  it("keeps a plain id's file where it always was", () => {
+    const s = new Session("4b1e0f7c-2d3a-4e5f-8a9b-0c1d2e3f4a5b");
+    store.ingest([s.ev("session.started")], "http");
+    expect(existsSync(path.join(tmp.dir, "events", "claude-code", `${s.id}.jsonl`))).toBe(true);
+  });
+
+  it("moves an id's file from the name an older version gave it, on the next start", async () => {
+    // An older version kept "run:7f3a" under run_7f3a.jsonl, the plain name of another id.
+    const a = new Session(A);
+    const old = path.join(tmp.dir, "events", "claude-code", "run_7f3a.jsonl");
+    mkdirSync(path.dirname(old), { recursive: true });
+    const lines = [a.ev("session.started"), a.ev("prompt.submitted", { prompt: "kept" })].map((e) =>
+      JSON.stringify({ ...e, arrivedAt: new Date().toISOString(), source: "http" }),
+    );
+    writeFileSync(old, lines.map((l) => `${l}\n`).join(""));
+    await store.close();
+    store = new Store(tmp.dir, { tickMs: 1_000, statsMs: 1_000 });
+    expect(existsSync(old)).toBe(false);
+    const evs = store.sessionDetail(sessionKey("claude-code", A))!.events;
+    expect(evs.map((e) => e.data.prompt ?? null)).toEqual([null, "kept"]);
+    // And the id that name belongs to now starts a file of its own there.
+    const b = new Session(B);
+    store.ingest([b.ev("session.started")], "http");
+    expect(store.sessionDetail(sessionKey("claude-code", B))!.events.map((e) => e.session.id)).toEqual([B]);
+    store.ingest([a.ev("turn.started", { turn_id: "t" })], "http");
+    expect(store.sessionDetail(sessionKey("claude-code", A))!.events.map((e) => e.session.id)).toEqual([A, A, A]);
   });
 });
 

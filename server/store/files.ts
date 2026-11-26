@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Append-only JSONL per session under <stateDir>/events/<harness>/<session>.jsonl, one
-// StoredEvent per line. The index (store.ts) remembers each line's byte offset and
+// StoredEvent per line (`sessionFileName` for an id a file name cannot spell as it is). The index (store.ts) remembers each line's byte offset and
 // length so the full event can be read back from disk on demand.
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   closeSync,
@@ -10,6 +11,7 @@ import {
   openSync,
   readdirSync,
   readSync,
+  renameSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -21,6 +23,19 @@ export const safeName = (s: string): string =>
   String(s)
     .replace(/[^A-Za-z0-9_.-]/g, "_")
     .slice(0, 160);
+
+/** The name (without `.jsonl`) a session's events are kept under: the id itself when a
+ *  file name can spell it, which is every id a harness makes today. An id `safeName`
+ *  changes (a `:`, which the protocol allows in a session id, or past 160 characters) would
+ *  share its name with another id's (`run:1` and `run_1`), and then its file: each would
+ *  read the other's lines at its own offsets, and forgetting one would delete both. Such
+ *  an id gets its safe spelling and a hash of the id after a `~`, a character no plain
+ *  name holds. */
+export function sessionFileName(id: string): string {
+  const plain = safeName(id);
+  if (plain === id) return plain;
+  return `${plain}~${createHash("sha256").update(id).digest("hex").slice(0, 16)}`;
+}
 
 export interface Line {
   event: StoredEvent;
@@ -94,14 +109,17 @@ export class EventFiles {
   }
 
   file(harness: string, id: string): string {
-    return path.join(this.root, safeName(harness), `${safeName(id)}.jsonl`);
+    return path.join(this.root, safeName(harness), `${sessionFileName(id)}.jsonl`);
   }
 
   /** Every session file (directory order) with what its lines hold, handed over one
    *  line at a time as the file is read in CHUNK-sized pieces, so no file is ever whole
    *  in memory: the store keeps the slim copy and lets the full line go. A line that is
    *  not JSON is skipped; its bytes still count toward the offsets after it. The
-   *  file's harness and id come from its first valid line (the name on disk otherwise). */
+   *  file's harness and id come from its first valid line (the name on disk otherwise).
+   *  A file an older version kept under another name for its id (`run_1.jsonl` for
+   *  `run:1`, before `sessionFileName`) is moved to its own name once read, so the id
+   *  whose plain name that was gets a file of its own. */
   scanEach(visit: (file: ScannedFileInfo, line: Line) => void): ScannedFileInfo[] {
     const out: ScannedFileInfo[] = [];
     if (!existsSync(this.root)) return out;
@@ -136,6 +154,17 @@ export class EventFiles {
         } catch {
           continue;
         }
+        if (info.lines > 0) {
+          const own = this.file(info.harness, info.id);
+          if (own !== file && path.dirname(own) === dir && !existsSync(own)) {
+            try {
+              renameSync(file, own);
+              info.file = own;
+            } catch {
+              // Left where it is: read as before, and moved on a later start.
+            }
+          }
+        }
         out.push(info);
       }
     }
@@ -145,17 +174,19 @@ export class EventFiles {
   /** Every session file with all its lines in memory (tests and small stores); the
    *  store boots with `scanEach` instead. */
   scan(): ScannedFile[] {
-    const files = new Map<string, ScannedFile>();
+    // By the file's own info, which keeps its path current when an old name is moved.
+    const files = new Map<ScannedFileInfo, ScannedFile>();
     const infos = this.scanEach((f, line) => {
-      let sf = files.get(f.file);
+      let sf = files.get(f);
       if (!sf) {
         sf = { harness: f.harness, id: f.id, file: f.file, size: 0, lines: [] };
-        files.set(f.file, sf);
+        files.set(f, sf);
       }
       sf.lines.push(line);
     });
     return infos.map((f) => {
-      const sf = files.get(f.file) ?? { harness: f.harness, id: f.id, file: f.file, size: 0, lines: [] };
+      const sf = files.get(f) ?? { harness: f.harness, id: f.id, file: f.file, size: 0, lines: [] };
+      sf.file = f.file;
       sf.harness = f.harness;
       sf.id = f.id;
       sf.size = f.size;

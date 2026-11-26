@@ -4,7 +4,7 @@
 // store's file path for a key, and the environment every adapter reads from.
 import os from "node:os";
 import path from "node:path";
-import { safeName } from "../../store/files.js";
+import { safeName, sessionFileName } from "../../store/files.js";
 import type { SessionKey, SourceAdapter, SourceEnv } from "../types.js";
 import { antigravityAdapter } from "./antigravity.js";
 import { claudeAdapter } from "./claude.js";
@@ -28,7 +28,7 @@ export function eventsPath(stateDir: string, key: SessionKey): string {
   const i = key.indexOf(":");
   const harness = i < 0 ? key : key.slice(0, i);
   const id = i < 0 ? "" : key.slice(i + 1);
-  return path.join(stateDir, "events", safeName(harness), `${safeName(id)}.jsonl`);
+  return path.join(stateDir, "events", safeName(harness), `${sessionFileName(id)}.jsonl`);
 }
 
 /** The environment adapters read: `home` defaults to os.homedir() (`--search-home` /
