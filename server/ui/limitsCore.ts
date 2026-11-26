@@ -141,6 +141,36 @@ export class LimitsCore {
     });
   }
 
+  /** A direct reading from a local source (e.g. Antigravity's `agy /usage` poller):
+   *  validated with the same rules as `limits.observed`, persisted, and broadcast. */
+  observeDirect(r: {
+    harness: string;
+    account?: string;
+    machine: string;
+    windows: LimitWindow[];
+    plan?: string;
+    observedAt?: string;
+    demo?: boolean;
+  }): boolean {
+    if (!HARNESS.test(r.harness)) return false;
+    const windows = readWindows(r.windows);
+    const where = name(r.machine);
+    if (!windows.length || !where) return false;
+    const account = r.account !== undefined ? name(r.account) : undefined;
+    if (r.account !== undefined && account === undefined) return false;
+    const nowIso = new Date().toISOString();
+    return this.put({
+      harness: r.harness,
+      account,
+      machine: where,
+      windows,
+      plan: readPlan(r.plan),
+      observedAt: clamp(r.observedAt ?? nowIso, nowIso),
+      arrived: nowIso,
+      demo: r.demo === true,
+    });
+  }
+
   /** A machine's hello (MachineControl, from the control stream): each pooled account's
    *  windows, dated by the hello. The same newest-wins rule as an event's, so a session's
    *  own report a minute ago is not replaced by an idle poll from before it. A demo

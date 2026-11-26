@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* ---------- the pooled section (Usage) ---------- */
 /* One grouped section per machine that pools Claude accounts (components/PoolAccounts.tsx),
-   in the Usage page's grammar: the header row, the switch row in the form grammar, then
-   the accounts in the machine's order on hairlines, each a lead column (the grip, on hover
-   and focus), the name with the email muted after it, the status word at the right and
-   its ···; a pooled account's window rows sit under it, indented one step further with
-   their bars aligned to the page's. The last row is "Add account…", the whole row a
-   button. The section is one inset panel; no tint, stripe or chip in it: the one accent is
-   the words "Used up". On a phone the grip is at the trailing edge and always drawn. */
+   in the Usage page's grammar: the header row, a subtly tinted switch row in the form
+   grammar, then the accounts in the machine's order separated by clear account dividers.
+   Each account carries a subtle drag grip, a weighted title with muted email, a scannable
+   status pill with reset countdown, a disclosure chevron when it has quota windows (Used up
+   and Off start compact), and its ··· menu; its window rows sit cleanly nested under it with
+   bars aligned to the page's bar line. The last row is "+ Add account…". On a phone the grip
+   is at the trailing edge and always drawn. */
 
 .pool-section {
   scroll-margin-top: calc(var(--bar) + 16px);
@@ -25,6 +25,21 @@
   font-size: var(--text-sm);
   white-space: nowrap;
 }
+.pool-meta--saving {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-2);
+}
+.pool-meta--saving::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--fg-3);
+  animation: breathe 1.2s ease-in-out infinite;
+}
 .pool-foot {
   display: none;
 }
@@ -40,17 +55,21 @@
 .usage .machines-note {
   margin-bottom: -8px;
 }
-/* The switch row: the label, the hint as its caption, the Toggle at the right, on the
-   label's line (not centred on the paragraph): the row aligns to its start and the
-   Toggle's wrapper takes the half-difference between the label's line box and the
-   Toggle's own height (18 px; 26 px for a coarse pointer, shared.css), so their
-   centres meet. */
+/* The switch row: subtly tinted header band so the auto-switch policy reads as a distinct
+   control above the account list. The Toggle aligns with the label's centre line. */
 .pool-switch {
   align-items: flex-start;
-  padding-left: 24px;
+  margin-left: calc(-12px + var(--hairline));
+  padding: 10px calc(12px - var(--hairline)) 10px calc(36px - var(--hairline));
+  background: color-mix(in oklch, var(--bg-3) 65%, var(--bg-2));
+  border-top-left-radius: calc(var(--radius-pop) - var(--hairline));
+  border-top-right-radius: calc(var(--radius-pop) - var(--hairline));
+}
+.pool-switch .form-label {
+  font-weight: 500;
 }
 .pool-switch .form-caption {
-  max-width: 64ch;
+  max-width: none;
   text-wrap: pretty;
 }
 .pool-switch-tip {
@@ -76,11 +95,8 @@
   flex-direction: column;
   min-width: 0;
 }
-.pool-windows > li {
-  border-top: var(--hairline) solid var(--line);
-}
 .pool-accounts > li + li {
-  border-top: var(--hairline) solid var(--line);
+  border-top: var(--hairline) solid var(--line-2);
 }
 .pool-acct {
   position: relative;
@@ -91,7 +107,7 @@
 }
 .pool-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto auto;
   align-items: center;
   column-gap: 0;
   min-height: var(--row-lg);
@@ -99,16 +115,13 @@
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;
+  transition: background-color var(--dur-release) linear;
 }
 .pool-row:active {
   cursor: grabbing;
 }
 /* While the row's menu is up (right-click or its ···), the row is the selection pill the
-   header and every list row become; the pill clears --dur-release after the menu closes.
-   No background on hover: the grip is the hover cue. */
-.pool-row {
-  transition: background-color var(--dur-release) linear;
-}
+   header and every list row become; the pill clears --dur-release after the menu closes. */
 .pool-row[data-menu-open] {
   background: var(--sel);
   border-radius: var(--radius);
@@ -117,14 +130,39 @@
 .pool-row .btn {
   cursor: default;
 }
+.pool-expand {
+  margin-left: 6px;
+  color: var(--fg-3);
+  background: none;
+}
+.pool-expand[aria-expanded="true"] {
+  background: none;
+  color: var(--fg-3);
+}
+@media (hover: hover) {
+  .pool-expand:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.pool-expand svg {
+  transform: rotate(-90deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.pool-expand.is-open svg {
+  transform: rotate(0deg);
+}
+.pool-expand-spacer {
+  display: inline-block;
+  width: var(--control-sm);
+  margin-left: 6px;
+}
 .pool-row > .icon-btn:last-child {
-  margin-left: 8px;
+  margin-left: 2px;
   margin-right: -6px;
 }
 /* The grip's column is the glyph's: no gap after it, so the name starts on the title's
    edge, one lead edge for the title, the switch's label, the names and Add account. */
-/* The grip: drawn while the pointer is over the row or focus is within it; a non-text
-   mark in the lightest tier. */
 .pool-grip {
   position: relative;
   width: 24px;
@@ -139,7 +177,9 @@
   opacity: 0;
   cursor: grab;
   touch-action: none;
-  transition: opacity var(--dur-fast) var(--ease-out);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 .pool-grip:focus-visible {
   outline: var(--focus-width) solid var(--focus);
@@ -170,14 +210,20 @@
   transform: translate(-50%, -50%);
 }
 @media (hover: hover) {
+  /* Discoverable at rest on desktop when there are 2+ accounts to reorder, brightening on hover. */
+  .pool-accounts[data-reorderable] .pool-grip {
+    opacity: 0.34;
+  }
   .pool-row:hover .pool-grip {
     opacity: 1;
+    color: var(--fg-3);
   }
 }
 .pool-row:focus-within .pool-grip,
 .pool-acct[data-dragging] .pool-grip,
 .pool-acct[data-grabbed] .pool-grip {
   opacity: 1;
+  color: var(--fg-2);
 }
 .pool-name {
   min-width: 0;
@@ -194,6 +240,10 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
+}
+.pool-acct--active .pool-title {
+  font-weight: 600;
 }
 .pool-email {
   flex: 0 1 auto;
@@ -206,69 +256,97 @@
 .pool-acct--off .pool-title {
   color: var(--fg-3);
 }
-/* The status word, right-aligned past 60 % of the row; "Used up · resets in 2 h 10 m"
-   fits in one line at the page's measure. */
+/* The status pill and optional reset countdown, right-aligned. */
 .pool-status {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: flex-end;
   gap: 0;
   min-width: 0;
   margin-left: 8px;
   color: var(--fg-2);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   text-align: right;
   white-space: nowrap;
 }
-.pool-status--fg {
+.pool-word:not(.btn) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.35;
+}
+.pool-status--fg .pool-word:not(.btn) {
   color: var(--fg);
+  background: color-mix(in oklch, var(--ok) 12%, var(--bg-3));
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--ok) 28%, var(--line));
 }
-.pool-status--fg-3 {
+.pool-status--fg .pool-word:not(.btn)::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.pool-status--fg-2 .pool-word:not(.btn) {
+  color: var(--fg-2);
+  background: var(--bg-3);
+  box-shadow: inset 0 0 0 var(--hairline) var(--line);
+}
+.pool-status--fg-3 .pool-word:not(.btn) {
   color: var(--fg-3);
+  background: var(--bg-3);
 }
-.pool-status--needs .pool-word {
+.pool-status--needs .pool-word:not(.btn) {
   color: var(--needs-fg);
+  background: var(--needs-bg);
+  box-shadow: inset 0 0 0 var(--hairline) var(--needs-line);
 }
-/* What follows the word, in the meta tier on the word's baseline: "resets in 43 m",
-   "numbers as of 1 h ago", each after one middle dot, the header's own separator. */
+/* What follows the pill, in the meta tier: "resets in 43 m", "numbers as of 1 h ago". */
 .pool-status-sub {
-  display: inline;
+  display: inline-flex;
+  align-items: center;
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
 .pool-status-sub > * + *::before,
 .pool-status-sub > :first-child::before {
   content: "· ";
-  margin-left: 0.35em;
+  margin-left: 0.4em;
 }
 .pool-status-sub > :first-child::before {
-  margin-left: 0.45em;
+  margin-left: 0.5em;
 }
 .pool-status .btn {
-  /* The ghost button's 10 px of padding and its (transparent) border sit past the status
-     column: its text ends where "In use" and "Off" end in the rows around it. */
-  margin: -4px calc(-10px - var(--hairline)) -4px 0;
+  margin: -4px 0 -4px 0;
 }
-/* A pooled account's windows: one step further in, the label narrower, so the bars stay
-   on the page's bar line (24 + 180 = 48 + 156). The step is a margin, not a padding, so
-   the hairline over each window starts under its label (an inset separator, the way a
-   list groups rows under their owner) while the account rows' rules keep the full measure. */
+/* A pooled account's windows: nested cleanly under their owner with no heavy rule between
+   the account header and its first window, keeping bars aligned on the page's bar line
+   (24 + 184 = 48 + 160 = 208). */
 .pool-windows {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 0 8px;
+}
+.pool-windows > li + li {
+  border-top: var(--hairline) solid color-mix(in oklch, var(--line) 75%, transparent);
 }
 .pool-windows .usage-win {
-  grid-template-columns: 156px 160px 10ch minmax(0, 1fr);
+  grid-template-columns: 160px 160px 10ch minmax(0, 1fr);
+  min-height: 28px;
   margin-left: 48px;
   padding-left: 0;
 }
+.pool-windows .usage-label,
+.pool-windows .usage-value {
+  font-size: var(--text-sm);
+}
 /* The row in flight: lifted over its siblings, under the pointer (the transform is
-   written by the drag), the neighbours sliding (the FLIP in PoolAccounts.tsx). The lift
-   is a raised surface with corners: the shadow carries it in light, the raised ground
-   (--raised, a step up from the page) in dark, where a shadow on the dark page shows
-   nothing. The lift and the landing tween on the row's own transition; under reduced
-   motion they land at once, and the raised ground stays as the static cue. */
+   written by the drag), the neighbours sliding (the FLIP in PoolAccounts.tsx). */
 .pool-acct[data-dragging],
 .pool-acct[data-grabbed] {
   z-index: 2;
@@ -283,18 +361,33 @@
 .pool-acct[data-dragging] .pool-row {
   cursor: grabbing;
 }
-/* The last row: "Add account…", the whole row a button. */
+/* The last row: "+ Add account…", full-width interactive footer action. The `+` sits in
+   the grip column so the label aligns with the section's 36 px lead edge. */
 .pool-add {
-  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: calc(-12px + var(--hairline));
+  width: calc(100% + 12px - var(--hairline));
   min-height: var(--row-lg);
-  padding: var(--row-pad) 0 var(--row-pad) 24px;
+  padding: var(--row-pad) 12px var(--row-pad) calc(16px - var(--hairline));
   border: none;
+  border-bottom-left-radius: calc(var(--radius-pop) - var(--hairline));
+  border-bottom-right-radius: calc(var(--radius-pop) - var(--hairline));
   background: none;
   color: var(--fg-2);
   font: inherit;
   font-size: var(--text-md);
+  font-weight: 500;
   text-align: left;
-  cursor: default;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.pool-add-icon {
+  flex: none;
+  color: var(--fg-3);
   transition: color var(--dur-fast) var(--ease-out);
 }
 .pool-add:focus-visible {
@@ -303,11 +396,16 @@
 }
 @media (hover: hover) {
   .pool-add:hover:not(:disabled) {
+    background: var(--hover);
     color: var(--fg);
+  }
+  .pool-add:hover:not(:disabled) .pool-add-icon {
+    color: var(--fg-2);
   }
 }
 .pool-add:disabled {
   color: var(--fg-3);
+  cursor: default;
 }
 /* The footnote's "Set it up…": a link in the page's note tier. */
 .pool-setup {
@@ -327,11 +425,6 @@
 }
 
 /* ----- the Add account sheet (components/PoolAddSheet.tsx) ----- */
-/* New session's dialog (control/newSessionSheet.css), its body two groups as rows: the
-   hairline under the title spans the sheet, the one between the groups is inset to the
-   text, a list's separator between rows of one owner. Each group is its head in the body
-   tier, its one lead sentence in the muted tier, and the well or the steps; the actions
-   live in the footer, as New session's do. */
 .pa-groups {
   padding: 0 20px;
   border-top: var(--hairline) solid var(--line);
@@ -405,12 +498,9 @@
   outline: var(--focus-width) solid var(--focus);
   outline-offset: 0;
 }
-/* The footer is New session's; the hairline over it comes here with the footer itself
-   (there, with the options row above it). */
 .pa-sheet .ns-foot {
   border-top: var(--hairline) solid var(--line);
 }
-/* The actions keep to the trailing edge with no status line before them to push them. */
 .pa-sheet .ns-actions {
   margin-left: auto;
 }
@@ -456,20 +546,23 @@
     margin-bottom: -8px;
   }
   .pool-switch {
-    padding-left: 0;
+    margin-left: -16px;
+    padding: 12px 16px;
+    border-top-left-radius: var(--radius-pop);
+    border-top-right-radius: var(--radius-pop);
   }
   /* A cell: name and status on the first line, the email on the second, the grip at the
      trailing edge, always drawn, 44 pt around its mark. */
   .pool-row {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     grid-template-areas:
-      "name status grip"
-      "email email grip"
-      "after after grip";
+      "name status expand grip"
+      "email email expand grip"
+      "after after expand grip";
     column-gap: 4px;
-    row-gap: 0;
+    row-gap: 2px;
     min-height: var(--tap);
-    padding: 8px 4px 8px 0;
+    padding: 10px 4px 10px 0;
     cursor: default;
   }
   .pool-name {
@@ -494,13 +587,8 @@
   .pool-status .btn {
     grid-area: status;
     justify-self: end;
+    align-self: center;
     white-space: nowrap;
-  }
-  .pool-status--fg-3 .pool-word {
-    color: var(--fg-3);
-  }
-  .pool-status--fg .pool-word {
-    color: var(--fg);
   }
   /* The word's trail is the cell's third line, under the email: no dot opens a line. */
   .pool-status-sub {
@@ -510,6 +598,15 @@
   }
   .pool-status-sub > :first-child::before {
     content: none;
+  }
+  .pool-expand {
+    grid-area: expand;
+    margin-left: 0;
+    width: 32px;
+    height: var(--tap);
+  }
+  .pool-expand-spacer {
+    display: none;
   }
   .pool-grip {
     grid-area: grip;
@@ -521,20 +618,25 @@
   .pool-row .icon-btn:last-child {
     display: none;
   }
+  .pool-windows {
+    padding-bottom: 6px;
+  }
   .pool-windows .usage-win {
     grid-template-columns: minmax(0, 1fr) auto;
     margin-left: 16px;
-    padding: 10px 16px 10px 0;
+    padding: 8px 16px 8px 0;
   }
   .pool-add {
+    margin-left: -16px;
+    width: calc(100% + 16px);
     min-height: var(--tap);
-    padding-left: 0;
+    padding: 8px 16px;
+    border-bottom-left-radius: var(--radius-pop);
+    border-bottom-right-radius: var(--radius-pop);
   }
   .pool-foot + .usage-note {
     margin-top: 0;
   }
-  /* The sheet's groups are the phone's inset cells; Cancel and Sign in (then Done) are the
-     bar's, as New session's are, so no cell holds a button. */
   .ns-sheet--phone .pa-group {
     padding: 12px 16px 14px;
   }
@@ -545,8 +647,6 @@
     grid-column: 2;
     justify-self: start;
   }
-  /* "Add a Claude account to Misha-Petrov-laptop" between Cancel and Sign in: the title
-     ends in an ellipsis before the bar's buttons give way. */
   .pa-sheet .ns-bar-title {
     min-width: 0;
     overflow: hidden;

@@ -53,6 +53,7 @@ import { registerSetup } from "./setup/index.js";
 import { actsHere, execDefault } from "./setup/local.js";
 import { createTailscaleProbe } from "./setup/tailscale.js";
 import { registerSkins, SkinRegistry } from "./skins/index.js";
+import { type AntigravityUsageSource, startAntigravityUsageSource } from "./sources/antigravity.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
 import { type SpacesheepSource, startSpacesheepSource } from "./sources/spacesheep.js";
 import { staticFiles, webDir } from "./static.js";
@@ -80,6 +81,9 @@ export interface AppOptions {
   outbox?: boolean;
   /** The sessionpipe state dir (or its outbox folder) to tail; default: sessionpipe's own. */
   outboxPath?: string;
+  /** Poll local Antigravity CLI (`agy /usage`) for quota windows when installed. Default: true
+   *  when outbox is on and demo mode is off. */
+  antigravityUsage?: boolean;
   /** Generate synthetic sessions so the board is never empty. */
   demo?: boolean;
   /** Replay a sessionpipe JSONL file through the store. */
@@ -484,6 +488,15 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     }
   }
 
+  let antigravityUsage: AntigravityUsageSource | null = null;
+  const pollAntigravity = opts.antigravityUsage ?? (opts.outbox !== false && !opts.demo);
+  if (pollAntigravity) {
+    antigravityUsage = startAntigravityUsageSource(limits, {
+      machine: thisHostname(),
+      quiet: opts.quiet,
+    });
+  }
+
   let demo: Runner | null = null;
   /** Synthetic sessions never outlive demo mode: turning it off (or starting without
    *  --demo) forgets every session the generator wrote, and its usage limits. */
@@ -494,7 +507,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     return n;
   };
   const setDemo = (on: boolean): void => {
-    if (on && !demo) demo = startDemo(store, { speed: opts.speed, control });
+    if (on && !demo) demo = startDemo(store, { speed: opts.speed, control, limits });
     else if (!on && demo) {
       demo.stop();
       demo = null;
@@ -630,6 +643,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
     labels,
     marks,
     limits,
+    refreshLimits: () => antigravityUsage?.refresh() ?? Promise.resolve(false),
     broadcast,
     colorThemesDir: path.join(stateDir, "color-themes"),
     store,
@@ -859,6 +873,7 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
       await plugins.stop();
       setup.pairer.close();
       outbox?.stop();
+      antigravityUsage?.stop();
       spacesheep?.stop();
       setDemo(false);
       replay?.stop();

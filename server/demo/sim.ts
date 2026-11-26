@@ -1267,9 +1267,9 @@ export class Simulation {
   }
 
   /** A short session that ended before the demo began and left its account's limits:
-   *  one turn, the report after its reply (Claude Code's status line, Codex's Stop), the end. */
+   *  one turn, the report after its reply (Claude Code's status line, Codex/Antigravity Stop), the end. */
   private earlier(p: {
-    harness: "claude-code" | "codex";
+    harness: "claude-code" | "codex" | "antigravity";
     machine: string;
     account?: string;
     repo: Repo;
@@ -1308,11 +1308,11 @@ export class Simulation {
     sess.emit(
       "limits.observed",
       { windows: p.windows, plan: p.plan },
-      codex ? ev.stop : "StatusLine",
+      p.harness === "claude-code" ? "StatusLine" : ev.stop,
       true,
       p.reportAt,
     );
-    sess.emit("session.ended", { reason: "exit" }, ev.end, true, p.reportAt + 20_000);
+    if (ev.end) sess.emit("session.ended", { reason: "exit" }, ev.end, true, p.reportAt + 20_000);
   }
 
   /** The session the daemon starts for an ask or a handoff: the asked harness, on the

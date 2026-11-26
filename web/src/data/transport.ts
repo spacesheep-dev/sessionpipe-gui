@@ -65,6 +65,9 @@ export interface Transport {
   /** "Forget these numbers": one usage-limits entry goes until its next report; the
    *  change arrives as a `limits` stream frame. */
   forgetLimits(key: string): Promise<void>;
+  /** Ask local usage sources (e.g. Antigravity `agy`) for fresh numbers now; absent
+   *  where there is no local receiver (the mock, a spacesheep account). */
+  refreshLimits?(): Promise<{ refreshed: boolean }>;
   /** Session search (web/src/search): its client arrives with the search code itself. */
   sessionSearch(): Promise<SearchClient>;
   /** The receiver's control activity, newest first (GET /api/ui/control/activity): what
@@ -260,6 +263,7 @@ export function createHttpTransport(): Transport {
         body: JSON.stringify(p),
       }).then((r) => json<Marks>(r)),
     forgetLimits: (key) => post<void>(ROUTES.ui.limitsForget, { key }),
+    refreshLimits: () => post<{ refreshed: boolean }>(ROUTES.ui.limitsRefresh, {}),
     sessionSearch: () => import("../search/http").then((m) => m.httpSearch(searchFrames)),
     controlActivity: (limit) =>
       get<{ activity: ControlActivity[] }>(`${ROUTES.ui.control}/activity?limit=${limit}`).then((r) => r.activity),

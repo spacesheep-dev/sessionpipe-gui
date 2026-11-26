@@ -437,6 +437,12 @@ export function PoolSection({
   };
   const menu = useContextMenu(sectionItems, { title: () => title });
 
+  // ----- collapsible window rows: Used up / Off accounts start compact -----
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const toggleExpanded = useCallback((id: string, currentlyOpen: boolean) => {
+    setExpanded((prev) => ({ ...prev, [id]: !currentlyOpen }));
+  }, []);
+
   // ----- the header's meta -----
   const helloAt = ms(m.control?.lastHelloAt);
   const helloStale =
@@ -459,7 +465,7 @@ export function PoolSection({
       <header className="usage-head" data-nav-item="">
         <HarnessGlyph name={pool.harness} size="md" />
         <h2 className="usage-title">{title}</h2>
-        <span className="pool-meta" data-pool-meta="" title={meta}>
+        <span className={`pool-meta ${held ? "pool-meta--saving" : ""}`} data-pool-meta="" title={meta}>
           {meta}
         </span>
         <MoreButton build={sectionItems} label={`Actions for ${machine}'s accounts`} title={() => title} />
@@ -498,10 +504,18 @@ export function PoolSection({
             />
           </span>
         </div>
-        <ul className="pool-accounts" aria-label={`Accounts on ${machine}, in order`} ref={listRef}>
+        <ul
+          className="pool-accounts"
+          aria-label={`Accounts on ${machine}, in order`}
+          data-reorderable={order.length > 1 ? "" : undefined}
+          ref={listRef}
+        >
           {order.map((id) => {
             const a = byId.get(id);
             if (!a) return null;
+            const status = statusWords(a, on, now);
+            const defaultOpen = status.word !== "Used up" && status.word !== "Off";
+            const isOpen = expanded[id] ?? defaultOpen;
             return (
               <AccountRow
                 key={tokenFor(id)}
@@ -511,6 +525,8 @@ export function PoolSection({
                 on={on}
                 now={now}
                 entry={entryFor(id)}
+                open={isOpen}
+                onToggleOpen={() => toggleExpanded(id, isOpen)}
                 machine={machine}
                 helpId={helpId}
                 dragging={dragging === tokenFor(id)}
@@ -533,6 +549,19 @@ export function PoolSection({
           onClick={() => openPoolAdd({ machine })}
           data-pool-add=""
         >
+          <svg
+            className="pool-add-icon"
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <path d="M8 3.25v9.5M3.25 8h9.5" />
+          </svg>
           Add account…
         </button>
       </div>
@@ -554,6 +583,8 @@ function AccountRow({
   on,
   now,
   entry,
+  open,
+  onToggleOpen,
   machine,
   helpId,
   dragging,
@@ -570,6 +601,8 @@ function AccountRow({
   on: boolean;
   now: number;
   entry: LimitsEntry | undefined;
+  open: boolean;
+  onToggleOpen: () => void;
   machine: string;
   helpId: string;
   dragging: boolean;
@@ -583,10 +616,20 @@ function AccountRow({
   const t = rowTitle(a);
   const s = statusWords(a, on, now);
   const stale = entry ? staleWords(entry, now) : "";
+  const hasWindows = !!entry && entry.windows.length > 0;
   const menu = useContextMenu(items, { title: () => t.title, subtitle: t.muted ? () => t.muted! : undefined });
+  const rowClass = [
+    "pool-acct",
+    s.word === "Off" ? "pool-acct--off" : "",
+    s.word === "In use" ? "pool-acct--active" : "",
+    s.word === "Used up" ? "pool-acct--limited" : "",
+    hasWindows && !open ? "pool-acct--collapsed" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <li
-      className={`pool-acct ${s.word === "Off" ? "pool-acct--off" : ""}`}
+      className={rowClass}
       data-flip={token}
       data-dragging={dragging ? "" : undefined}
       data-grabbed={grabbed ? "" : undefined}
@@ -639,9 +682,36 @@ function AccountRow({
             </span>
           )}
         </span>
+        {hasWindows ? (
+          <button
+            type="button"
+            className={`icon-btn pool-expand ${open ? "is-open" : ""}`}
+            aria-expanded={open}
+            aria-label={`${open ? "Hide" : "Show"} usage windows for ${name}`}
+            data-tip={open ? "Hide windows" : "Show windows"}
+            data-pool-expand=""
+            onClick={onToggleOpen}
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M5.5 6.5 8 9l2.5-2.5" />
+            </svg>
+          </button>
+        ) : (
+          <span className="pool-expand-spacer" aria-hidden="true" />
+        )}
         <MoreButton build={items} label={`Actions for ${name}`} title={() => t.title} />
       </div>
-      {entry && (
+      {hasWindows && open && (
         <ul className="pool-windows">
           {orderWindows(entry.windows).map((w) => (
             <WindowRow key={w.id} w={w} now={now} />

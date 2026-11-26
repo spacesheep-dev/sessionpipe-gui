@@ -15,7 +15,7 @@
 // walk the sections; Enter starts a session on the newest machine that can, `.` opens the
 // menu.
 import type { MachineSummary } from "@shared/api";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CommandWell, EmptyState, HarnessGlyph } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { PageBar } from "../components/PageBar";
@@ -168,7 +168,10 @@ export function Usage() {
       ))}
       {accounts.length === 0 && pooled.length === 0 ? (
         <EmptyState center title="No limits yet">
-          <p>Codex reports them after a turn. Claude Code needs its status line, on each machine it runs on:</p>
+          <p>
+            Codex reports them after a turn, and Antigravity is read when <code>agy</code> is installed. Claude Code
+            needs its status line, on each machine it runs on:
+          </p>
           <CommandWell command={STATUS_LINE_COMMAND} prompt={false} label="Copy setup command" />
         </EmptyState>
       ) : (
@@ -218,6 +221,16 @@ function AccountSection({
   emptyPools: readonly MachineSummary[];
 }) {
   const store = useStore();
+  const [refreshing, setRefreshing] = useState(false);
+  const canRefresh = a.harness === "antigravity" && !!store.transport.refreshLimits;
+  const doRefresh = () => {
+    if (!store.transport.refreshLimits || refreshing) return;
+    setRefreshing(true);
+    void store.transport
+      .refreshLimits()
+      .catch(() => {})
+      .finally(() => setRefreshing(false));
+  };
   const build = (): MenuList => {
     const items = usageItems(a, {
       machines,
@@ -225,16 +238,20 @@ function AccountSection({
       // The entry comes back with its next report; nothing to confirm.
       forget: () => void store.transport.forgetLimits(a.key).catch(() => {}),
     });
+    const refreshItem: MenuList = canRefresh
+      ? [{ label: refreshing ? "Refreshing…" : "Refresh usage", run: doRefresh, disabled: refreshing }]
+      : [];
     // A Claude Code account seen on a machine that could pool but has none yet: the way in.
     const setup: MenuList =
       a.harness === "claude-code"
         ? emptyPools
-            .filter((m) => a.machines.includes(m.name))
+            .filter((x) => a.machines.includes(x.name))
             .map((m) => ({ label: `Switch accounts on ${m.name}…`, run: () => openPoolAdd({ machine: m.name }) }))
         : [];
-    if (!setup.length) return items;
+    const extra: MenuList = [...refreshItem, ...setup];
+    if (!extra.length) return items;
     const sep = items.findIndex((i) => i && typeof i === "object" && "sep" in i);
-    return sep < 0 ? [...items, ...setup] : [...items.slice(0, sep), ...setup, ...items.slice(sep)];
+    return sep < 0 ? [...items, ...extra] : [...items.slice(0, sep), ...extra, ...items.slice(sep)];
   };
   const menu = useContextMenu(build, { title: () => a.title });
   const e = a.entry;
@@ -254,6 +271,31 @@ function AccountSection({
         <HarnessGlyph name={a.harness} size="md" />
         <h2 className="usage-title">{a.title}</h2>
         {stale && <span className="usage-age">{stale}</span>}
+        {canRefresh && (
+          <button
+            type="button"
+            className={`icon-btn usage-refresh ${refreshing ? "is-busy" : ""}`}
+            aria-label={`Refresh usage for ${a.title}`}
+            data-tip="Refresh usage"
+            disabled={refreshing}
+            onClick={doRefresh}
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M13.25 8a5.25 5.25 0 1 1-1.2-3.35" />
+              <path d="M13.25 2.75v2.4h-2.4" />
+            </svg>
+          </button>
+        )}
         <MoreButton build={build} label={`Actions for ${a.title}`} title={() => a.title} />
       </header>
       {(where || stale) && (

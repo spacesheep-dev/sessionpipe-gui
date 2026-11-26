@@ -33,14 +33,39 @@ function span(minutes: number): { n: string; unit: "minute" | "hour" | "day"; sh
   return { n: Number.isInteger(h) ? String(h) : h.toFixed(1), unit: "hour", short: "h" };
 }
 
+const GROUP_LABELS: Readonly<Record<string, { full: string; short: string }>> = {
+  gemini: { full: "Gemini", short: "Gemini" },
+  "3p": { full: "Claude & GPT", short: "Claude/GPT" },
+  claude_gpt: { full: "Claude & GPT", short: "Claude/GPT" },
+  third_party: { full: "Claude & GPT", short: "Claude/GPT" },
+  argon: { full: "Argon", short: "Argon" },
+};
+
+/** Parse a model-group window id such as `gemini_5h`, `gemini_weekly`, `3p_5h`, `3p_7d`,
+ *  `argon_weekly` into its group label and period ("5h" or "week"). */
+function groupWindow(id: string): { full: string; short: string; period: "5h" | "week" } | null {
+  const m = /^([a-z0-9_]+?)_(5h|five_hour|weekly|7d|seven_day)$/.exec(id);
+  if (!m) return null;
+  const group = m[1]!;
+  const kind = m[2]!;
+  const period: "5h" | "week" = kind === "5h" || kind === "five_hour" ? "5h" : "week";
+  const known = GROUP_LABELS[group];
+  if (known) return { ...known, period };
+  const label = capWords(spaced(group));
+  return { full: label, short: label, period };
+}
+
 /** A window as the Usage page names it: "5 hours", "This week, all models", "This week,
- *  Fable only", "Spend limit", "90 minutes", or its id in words ("Primary"). */
+ *  Fable only", "Gemini, 5 hours", "Claude & GPT, this week", "Spend limit", "90 minutes",
+ *  or its id in words ("Primary"). */
 export function windowLabel(w: Pick<LimitWindow, "id" | "windowMinutes">): string {
   if (w.id === "five_hour") return "5 hours";
   if (w.id === "seven_day") return "This week, all models";
   const model = /^seven_day_(.+)$/.exec(w.id)?.[1];
   if (model) return `This week, ${capWords(spaced(model))} only`;
   if (w.id === "spend_limit") return "Spend limit";
+  const gw = groupWindow(w.id);
+  if (gw) return `${gw.full}, ${gw.period === "5h" ? "5 hours" : "this week"}`;
   if (w.windowMinutes === FIVE_HOURS) return "5 hours";
   if (w.windowMinutes === WEEK) return "This week";
   if (w.windowMinutes) {
@@ -50,13 +75,15 @@ export function windowLabel(w: Pick<LimitWindow, "id" | "windowMinutes">): strin
   return capFirst(spaced(w.id));
 }
 
-/** The same in the sidebar's few letters: "5h", "week", "week Fable", "spend", "90m". */
+/** The same in the sidebar's few letters: "5h", "week", "week Fable", "Gemini 5h", "spend", "90m". */
 export function windowShort(w: Pick<LimitWindow, "id" | "windowMinutes">): string {
   if (w.id === "five_hour") return "5h";
   if (w.id === "seven_day") return "week";
   const model = /^seven_day_(.+)$/.exec(w.id)?.[1];
   if (model) return `week ${capWords(spaced(model))}`;
   if (w.id === "spend_limit") return "spend";
+  const gw = groupWindow(w.id);
+  if (gw) return `${gw.short} ${gw.period === "5h" ? "5h" : "7d"}`;
   if (w.windowMinutes === FIVE_HOURS) return "5h";
   if (w.windowMinutes === WEEK) return "week";
   if (w.windowMinutes) {
@@ -223,7 +250,7 @@ export function shortNames(
 export function byPlace<
   T extends { harness: string; title: string; machine: string; named?: boolean; quiet?: unknown },
 >(a: T, b: T): number {
-  const rank = (h: string) => (h === "claude-code" ? 0 : h === "codex" ? 1 : 2);
+  const rank = (h: string) => (h === "claude-code" ? 0 : h === "codex" ? 1 : h === "antigravity" ? 2 : 3);
   const tier = (x: T) => (x.quiet ? 2 : 0) + (x.named ? 0 : 1);
   return (
     rank(a.harness) - rank(b.harness) ||
@@ -344,7 +371,9 @@ export function agentAside(r: Reading): string | undefined {
 export function footnote(harnesses: Iterable<string>, entries: readonly Pick<LimitsEntry, "harness">[]): string {
   const reporting = new Set(entries.map((e) => e.harness));
   const silent = [...new Set(harnesses)]
-    .filter((h) => h !== "claude-code" && h !== "codex" && h !== "conformance" && !reporting.has(h))
+    .filter(
+      (h) => h !== "claude-code" && h !== "codex" && h !== "antigravity" && h !== "conformance" && !reporting.has(h),
+    )
     .map((h) => harnessMark(h).label)
     .sort((a, b) => a.localeCompare(b));
   if (silent.length === 0) return "";

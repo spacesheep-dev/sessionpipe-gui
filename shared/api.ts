@@ -1923,6 +1923,9 @@ export const ROUTES = {
     /** POST { key } (application/json) → 204: forget one entry's numbers (its next report
      *  brings it back), and a `limits` frame. 400 `malformed`, 404 `not_found`, 415 `json_only`. */
     limitsForget: "/api/ui/limits/forget",
+    /** POST {} (application/json) → 200 { limits, refreshed }: ask local usage sources (e.g.
+     *  Antigravity `agy`) for fresh numbers now. 415 `json_only`. */
+    limitsRefresh: "/api/ui/limits/refresh",
     /** Workflows (server/orchestrate; ARCHITECTURE.md "UI API"), UI key like the rest.
      *  Every write takes JSON only, an empty POST too (415 `json_only`), and 403
      *  `cross_site` when the browser marks it from another site: a write here sets a

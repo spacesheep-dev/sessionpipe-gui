@@ -64,6 +64,8 @@ export interface UiDeps {
   /** Each account's usage limits (limits.ts): on the snapshot, on the stream, and their
    *  own routes. */
   limits?: LimitsStore;
+  /** On-demand refresh for local usage sources (e.g. Antigravity `agy`). */
+  refreshLimits?: () => Promise<boolean>;
   /** More stream messages from elsewhere (a view's state written, themes/routes.ts). */
   broadcast?: { subscribe(l: (m: StreamMessage) => void): () => void };
 }
@@ -173,7 +175,7 @@ export function registerUi(router: Router, deps: UiDeps): void {
   registerSessionFiles(router, deps.store, guard);
   if (deps.labels) registerLabels(router, deps.labels, guard);
   if (deps.marks) registerMarks(router, deps.marks, guard);
-  if (deps.limits) registerLimits(router, deps.limits, guard);
+  if (deps.limits) registerLimits(router, deps.limits, guard, { refresh: deps.refreshLimits });
 
   router.post(
     ROUTES.ui.rotateToken,
