@@ -82,12 +82,29 @@ function capTitle(raw: string): string | undefined {
   return `${clean.slice(0, end).replace(/[\s,;:.-]+$/, "")}…`;
 }
 
+/** Strip angle-bracket wrapper tags (`<SYSTEM_MESSAGE>`, `<USER_REQUEST>`, etc.) in one linear pass. */
+function stripAngleTags(input: string): string {
+  let out = "";
+  let i = 0;
+  while (i < input.length) {
+    if (input[i] === "<" && i + 1 < input.length && /[A-Za-z/!?]/.test(input[i + 1]!)) {
+      const close = input.indexOf(">", i + 1);
+      if (close !== -1) {
+        i = close + 1;
+        continue;
+      }
+    }
+    out += input[i]!;
+    i++;
+  }
+  return out;
+}
+
 /** Extract a clean fallback title (<= 80 chars) from an Antigravity subagent message. */
 export function extractAntigravityTitle(raw: string): string | undefined {
-  let text = raw.replace(/<\/?SYSTEM_MESSAGE\b[^>]*>/gi, "");
-  const msgMatch = /\[Message\][^\n]*?\bcontent=/i.exec(text);
-  if (msgMatch) text = text.slice(msgMatch.index + msgMatch[0].length);
-  text = text.replace(/<\/?[A-Za-z][A-Za-z0-9_-]*(?:\s[^>]*)?>/g, "");
+  const msgMatch = /\[Message\][^\n]*?\bcontent=/i.exec(raw);
+  const body = msgMatch ? raw.slice(msgMatch.index + msgMatch[0].length) : raw;
+  const text = stripAngleTags(body);
   const firstLine = text
     .split(/\r?\n/)
     .map((l) => l.trim())
