@@ -83,6 +83,8 @@ export interface SessionMenuContext {
   /** Sessions a folded row stands for (its glyph rolled up from under it): Mark as read
    *  acts on them too (components/SessionTree.tsx). */
   under?: readonly SessionSummary[];
+  /** Opened from the sidebar session tree: arrangement moves return focus to the row. */
+  inTree?: boolean;
   /** After a successful forget, beyond the default (close its tab, leave its page). */
   onForgotten?: () => void;
 }
@@ -167,7 +169,7 @@ export function sessionItems(s: SessionSummary, ctx: SessionMenuContext): MenuIt
     labelMenu(ctx.store, [s.key]),
     notifyMenu(ctx.store, s),
     { sep: true },
-    ...arrangeItems(s, ctx.store),
+    ...arrangeItems(s, ctx.store, { inTree: ctx.inTree }),
     { sep: true },
     s.parentId && {
       label: "Open parent session",

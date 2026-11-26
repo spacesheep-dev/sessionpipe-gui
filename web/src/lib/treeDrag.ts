@@ -43,30 +43,35 @@ export interface RowBox {
 export type Target =
   /** On a row: under it. */
   | { kind: "on"; key: SessionKey }
-  /** The line between top-level rows: in Pinned, before the pin at `at`; in Sessions, the
-   *  top level (Sessions keeps the Board's order, so where the line is says nothing more).
-   *  `y` is where the line is drawn. */
-  | { kind: "line"; group: Group; at: number; y: number }
-  /** The Pinned heading: pinned first. */
+  /** The line between top-level rows in Pinned: before the pin at `at`. `y` is where it draws. */
+  | { kind: "line"; group: "pinned"; at: number; y: number }
+  /** To the top level of Sessions (no line: Sessions sorts itself). */
+  | { kind: "top" }
+  /** The Pinned heading or pin zone: pinned first. */
   | { kind: "pinned" };
 
 /** The place under `y`, or null (outside the rows: a drop there cancels). `zones` are the
- *  two group headings, when drawn. A row the dragged one may not go on (itself, the
- *  sessions under it) is no place; nor is the line inside its own gap. */
+ *  two group headings and the scroll list's bottom edge, when drawn. A row the dragged one
+ *  may not go on (itself, the sessions under it) is no place; nor is the line inside its
+ *  own gap. */
 export function targetAt(
   rows: readonly RowBox[],
   y: number,
   dragged: SessionKey,
   refused: ReadonlySet<SessionKey>,
-  zones: { pinned?: { top: number; bottom: number }; sessions?: { top: number; bottom: number } } = {},
+  zones: { pinned?: { top: number; bottom: number }; sessions?: { top: number; bottom: number }; bottom?: number } = {},
 ): Target | null {
   if (zones.pinned && y >= zones.pinned.top && y < zones.pinned.bottom) return { kind: "pinned" };
-  if (zones.sessions && y >= zones.sessions.top && y < zones.sessions.bottom) {
-    const first = rows.find((r) => r.group === "sessions");
-    return { kind: "line", group: "sessions", at: 0, y: first?.top ?? zones.sessions.bottom };
-  }
+  if (zones.sessions && y >= zones.sessions.top && y < zones.sessions.bottom) return { kind: "top" };
   const i = rows.findIndex((r) => y >= r.top && y < r.bottom);
-  if (i < 0) return null;
+  if (i < 0) {
+    const lastSession = [...rows].reverse().find((r) => r.group === "sessions");
+    const after = lastSession?.bottom ?? zones.sessions?.bottom;
+    if (after !== undefined && y >= after && (zones.bottom === undefined || y < zones.bottom)) {
+      return { kind: "top" };
+    }
+    return null;
+  }
   const r = rows[i]!;
   const same = rows.filter((x) => x.group === r.group);
   const next = same[same.indexOf(r) + 1];
@@ -75,11 +80,15 @@ export function targetAt(
   const f = (y - r.top) / Math.max(1, r.bottom - r.top);
   if (f < LINE_SHARE && r.level === 0) {
     if (r.key === dragged) return null;
-    return { kind: "line", group: r.group, at: pinAt(same.indexOf(r)), y: r.top };
+    return r.group === "pinned"
+      ? { kind: "line", group: "pinned", at: pinAt(same.indexOf(r)), y: r.top }
+      : { kind: "top" };
   }
   if (f > 1 - LINE_SHARE && (!next || next.level === 0)) {
     if (r.key === dragged || (r.level > 0 && refused.has(r.key))) return null;
-    return { kind: "line", group: r.group, at: pinAt(same.indexOf(r) + 1), y: r.bottom };
+    return r.group === "pinned"
+      ? { kind: "line", group: "pinned", at: pinAt(same.indexOf(r) + 1), y: r.bottom }
+      : { kind: "top" };
   }
   if (r.key === dragged || refused.has(r.key)) return null;
   return { kind: "on", key: r.key };
@@ -89,7 +98,8 @@ export function targetAt(
 export function moveFor(t: Target): Move {
   if (t.kind === "on") return { kind: "under", parent: t.key };
   if (t.kind === "pinned") return { kind: "pin", at: 0 };
-  return t.group === "pinned" ? { kind: "pin", at: t.at } : { kind: "top" };
+  if (t.kind === "top") return { kind: "top" };
+  return { kind: "pin", at: t.at };
 }
 
 /** How far the list scrolls this frame with the pointer at `y` in a list from `top` to

@@ -145,10 +145,13 @@ export function personTree(state: Pick<AppState, "sessions" | "arrangement">): {
 
 // ----- what is said, for the tree's live region -----
 
+export type ArrangeSource = "pointer" | "key" | "menu" | "picker";
+
 /** What a move was, for the tree to show its result (unfold the parent it went under). */
 export interface Arranged {
   key: SessionKey;
   move: Move;
+  source?: ArrangeSource;
 }
 const spokenListeners = new Set<(words: string, what?: Arranged) => void>();
 /** The sidebar's tree says what a move did through its live region (SessionTree.tsx), and
@@ -166,7 +169,7 @@ const refusal = (reason: string): string =>
 
 /** Moves `key` as asked: shown at once, kept on the receiver, a toast with Undo, and said.
  *  False when the move means nothing or may not be done. */
-export function arrange(store: Store, key: SessionKey, move: Move): boolean {
+export function arrange(store: Store, key: SessionKey, move: Move, o?: { source?: ArrangeSource }): boolean {
   const state = store.get();
   const { all, tree } = personTree(state);
   const title = (k: SessionKey) => {
@@ -197,18 +200,23 @@ export function arrange(store: Store, key: SessionKey, move: Move): boolean {
       for (const l of spokenListeners) l(`Undone. ${title(key)} is back where it was.`);
     },
   });
-  for (const l of spokenListeners) l(plan.spoken, { key, move });
+  for (const l of spokenListeners) l(plan.spoken, { key, move, source: o?.source });
   return true;
 }
 
 // ----- Move under…: the picker -----
 
-const pickListeners = new Set<(key: SessionKey) => void>();
-/** Opens the "Move under…" picker for `key` (components/MoveUnder.tsx, mounted once). */
-export function requestMoveUnder(key: SessionKey): void {
-  for (const l of pickListeners) l(key);
+export interface MoveUnderRequest {
+  key: SessionKey;
+  fromTree?: boolean;
 }
-export function onMoveUnder(l: (key: SessionKey) => void): () => void {
+const pickListeners = new Set<(req: MoveUnderRequest) => void>();
+/** Opens the "Move under…" picker for `key` (components/MoveUnder.tsx, mounted once). */
+export function requestMoveUnder(key: SessionKey, o?: { fromTree?: boolean }): void {
+  const req: MoveUnderRequest = { key, ...(o?.fromTree ? { fromTree: true } : {}) };
+  for (const l of pickListeners) l(req);
+}
+export function onMoveUnder(l: (req: MoveUnderRequest) => void): () => void {
   pickListeners.add(l);
   return () => {
     pickListeners.delete(l);
@@ -234,7 +242,7 @@ export function moveTargets(tree: Tree, key: SessionKey): SessionSummary[] {
 
 /** Pin or Unpin; Move under…; Move to top level where it is under a session; Move up and
  *  Move down among the pinned. For every session's menu, on every surface (lib/menus.ts). */
-export function arrangeItems(s: SessionSummary, store: Store): MenuList {
+export function arrangeItems(s: SessionSummary, store: Store, o?: { inTree?: boolean }): MenuList {
   const state = store.get();
   if (isEmptySession(s)) return [];
   const { tree } = personTree(state);
@@ -242,17 +250,16 @@ export function arrangeItems(s: SessionSummary, store: Store): MenuList {
   const pins = state.arrangement.pinned;
   const at = pins.indexOf(s.key);
   const pinned = at >= 0;
+  const run = (move: Move) => () => void arrange(store, s.key, move, o?.inTree ? { source: "menu" } : undefined);
   return [
-    pinned
-      ? { label: "Unpin", run: () => void arrange(store, s.key, { kind: "unpin" }) }
-      : { label: "Pin", run: () => void arrange(store, s.key, { kind: "pin" }) },
-    pinned && at > 0 && { label: "Move up", run: () => void arrange(store, s.key, { kind: "pin", at: at - 1 }) },
-    pinned &&
-      at < pins.length - 1 && {
-        label: "Move down",
-        run: () => void arrange(store, s.key, { kind: "pin", at: at + 2 }),
+    pinned ? { label: "Unpin", run: run({ kind: "unpin" }) } : { label: "Pin", run: run({ kind: "pin" }) },
+    pinned && at > 0 && { label: "Move up", run: run({ kind: "pin", at: at - 1 }) },
+    pinned && at < pins.length - 1 && { label: "Move down", run: run({ kind: "pin", at: at + 2 }) },
+    !!node &&
+      moveTargets(tree, s.key).length > 0 && {
+        label: "Move under…",
+        run: () => requestMoveUnder(s.key, { fromTree: o?.inTree }),
       },
-    !!node && moveTargets(tree, s.key).length > 0 && { label: "Move under…", run: () => requestMoveUnder(s.key) },
-    !!node?.parent && { label: "Move to top level", run: () => void arrange(store, s.key, { kind: "top" }) },
+    !!node?.parent && { label: "Move to top level", run: run({ kind: "top" }) },
   ];
 }

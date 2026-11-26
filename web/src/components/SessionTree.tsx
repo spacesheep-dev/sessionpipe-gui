@@ -47,13 +47,13 @@ import { useBehind } from "../account/current";
 import { usePendingStarts } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { useHideKeys, useStore, useUnreadKeys } from "../data/hooks";
-import { arrange, onArranged, planMove } from "../lib/arrange";
+import { type ArrangeSource, arrange, onArranged, planMove } from "../lib/arrange";
 import { sessionTitle } from "../lib/format";
 import { haptic } from "../lib/haptics";
 import { isHidden, useHidden } from "../lib/hidden";
 import { isUnread } from "../lib/marks";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
-import { type Held, useFlip, useHeldOrder, useListHold } from "../lib/motion";
+import { type Held, reducedMotion, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { hrefFor, sessionPath } from "../lib/router";
 import { hintFor, useShortcut } from "../lib/shortcuts";
 import { howOf, openSession, openSplit } from "../lib/split";
@@ -381,13 +381,13 @@ export const SessionTree = memo(function SessionTree({
     }
     const here = rowEl(focusKey);
     if (here) {
-      here.focus();
+      here.focus({ preventScroll: true });
       return;
     }
     const next = drawn[Math.min(lastIndex.current, drawn.length - 1)]?.node.s.key;
     if (!next) return;
     setFocusKey(next);
-    rowEl(next)?.focus();
+    rowEl(next)?.focus({ preventScroll: true });
   });
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     const here = e.target as HTMLElement;
@@ -504,8 +504,9 @@ export const SessionTree = memo(function SessionTree({
     return s ? [s.key] : [];
   }, own);
 
-  // ----- what a move did, said -----
+  // ----- what a move did, said, and where focus and scroll land -----
   const [said, setSaid] = useState("");
+  const pendingLand = useRef<{ key: SessionKey; source: ArrangeSource } | null>(null);
   useEffect(
     () =>
       onArranged((words, what) => {
@@ -514,9 +515,53 @@ export const SessionTree = memo(function SessionTree({
         requestAnimationFrame(() => setSaid(words));
         // Moved under a parent: the parent opens, and its ancestors, so the row is in sight.
         if (what?.move.kind === "under") revealRef.current(what.move.parent, what.key);
+        if (what?.source) pendingLand.current = { key: what.key, source: what.source };
       }),
     [],
   );
+  // After a pointer drop: focus without scrolling, then once FLIP settles scroll once only
+  // if the landed row is out of view. After a key, menu or picker move: focus and scroll
+  // in the next frame (after the picker's focus trap or menu releases).
+  useLayoutEffect(() => {
+    const land = pendingLand.current;
+    if (!land) return;
+    const el = rowEl(land.key);
+    if (!el) return;
+    pendingLand.current = null;
+    if (land.source === "pointer") {
+      hadFocus.current = true;
+      focusedEl.current = el;
+      setFocusKey(land.key);
+      el.focus({ preventScroll: true });
+      const settle = () => {
+        const sc = scroller.current;
+        const rowNow = rowEl(land.key);
+        if (!sc || !rowNow) return;
+        const sr = sc.getBoundingClientRect();
+        const rr = rowNow.getBoundingClientRect();
+        if (rr.top < sr.top - 0.5 || rr.bottom > sr.bottom + 0.5) {
+          rowNow.scrollIntoView({ block: "nearest" });
+        }
+      };
+      const item = el.closest(".stree-item");
+      const anims =
+        reducedMotion() || !item || typeof item.getAnimations !== "function"
+          ? []
+          : item.getAnimations().filter((a) => a.playState === "running");
+      if (anims.length === 0) settle();
+      else void Promise.all(anims.map((a) => a.finished.catch(() => {}))).then(settle);
+      return;
+    }
+    requestAnimationFrame(() => {
+      const rowNow = rowEl(land.key);
+      if (!rowNow) return;
+      hadFocus.current = true;
+      focusedEl.current = rowNow;
+      setFocusKey(land.key);
+      rowNow.focus({ preventScroll: true });
+      rowNow.scrollIntoView({ block: "nearest" });
+    });
+  });
 
   // ----- a row is never lost: opening or moving one shows it -----
   /** Unfolds `key` and every row above it; with `also`, the row under it is drawn too
@@ -754,7 +799,12 @@ export const SessionTree = memo(function SessionTree({
           </section>
         )}
         <section className="stree-section" aria-labelledby={`${groupId}-sessions`}>
-          <h2 className="stree-label" id={`${groupId}-sessions`} data-zone="sessions">
+          <h2
+            className="stree-label"
+            id={`${groupId}-sessions`}
+            data-zone="sessions"
+            data-target={drag?.target?.kind === "top" ? "" : undefined}
+          >
             Sessions
           </h2>
           {empty ? (
@@ -1030,7 +1080,7 @@ const RowLine = memo(function RowLine({
 }: Omit<RowProps, "n" | "lifted"> & { s: SessionSummary; level: number; placed: boolean }) {
   const store = useStore();
   const title = sessionTitle(s);
-  const menu = useContextMenu(() => sessionItems(s, { store, surface: "list", under }), {
+  const menu = useContextMenu(() => sessionItems(s, { store, surface: "list", under, inTree: true }), {
     title: () => sessionMenuTitle(s),
     subtitle: () => sessionMenuSubtitle(s),
   });
@@ -1139,13 +1189,16 @@ function useDragStart(o: {
     const touch = e.pointerType === "touch";
     const el = e.currentTarget;
     const start = { x: e.clientX, y: e.clientY };
+    const downAt = performance.now();
     const id = e.pointerId;
     let at = { ...start };
     let lifted = false;
     let pressed = false;
     let held = false;
+    let hadTarget = false;
     let target: Target | null = null;
     let pressedAt = { ...start };
+    let lastEvent = { metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey };
     let openTimer = 0;
     let liftTimer = 0;
     let frame = 0;
@@ -1176,6 +1229,7 @@ function useDragStart(o: {
         zones: {
           pinned: zone('[data-zone="pin"]') ?? zone('[data-zone="pinned"]'),
           sessions: zone('[data-zone="sessions"]'),
+          bottom: ref.current.scroller.current?.getBoundingClientRect().bottom,
         },
       };
     };
@@ -1193,6 +1247,7 @@ function useDragStart(o: {
       const { rows, zones } = measure();
       let t = inside ? targetAt(rows, at.y, key, descendants(tree, key), zones) : null;
       if (t && !planMove(arrangement, tree, all, key, moveFor(t), title)) t = null;
+      if (t) hadTarget = true;
       const same = JSON.stringify(t) === JSON.stringify(target);
       target = t;
       // The insertion line, drawn straight onto the list.
@@ -1268,13 +1323,27 @@ function useDragStart(o: {
       if (ln) ln.hidden = true;
       if (!keepMenu) el.removeAttribute("data-pressed");
       if (!lifted) return;
+      // A sloppy click: never found a target, stayed inside its own row, under 500 ms.
+      if (!touch && drop && !hadTarget && performance.now() - downAt < 500) {
+        const r = el.getBoundingClientRect();
+        if (at.x >= r.left && at.x <= r.right && at.y >= r.top && at.y <= r.bottom) {
+          // Swallow a synthetic click from the same release so openSession runs once.
+          ref.current.justDragged.current = true;
+          window.setTimeout(() => {
+            ref.current.justDragged.current = false;
+          }, 0);
+          ref.current.setDrag(null);
+          openSession(key, howOf(lastEvent));
+          return;
+        }
+      }
       ref.current.justDragged.current = true;
       // A click that never comes (a drop elsewhere) leaves no mark on the next one.
       window.setTimeout(() => {
         ref.current.justDragged.current = false;
       }, 400);
       ref.current.setDrag(null);
-      if (drop && target) arrange(store, key, moveFor(target));
+      if (drop && target) arrange(store, key, moveFor(target), { source: "pointer" });
     };
 
     const move = (ev: PointerEvent) => {
@@ -1303,6 +1372,8 @@ function useDragStart(o: {
     };
     const up = (ev: PointerEvent) => {
       if (ev.pointerId !== id) return;
+      at = { x: ev.clientX, y: ev.clientY };
+      lastEvent = { metaKey: ev.metaKey, ctrlKey: ev.ctrlKey, shiftKey: ev.shiftKey, altKey: ev.altKey };
       // Released after a long-press without moving: leave the menu sheet open (data-pressed clears when it closes).
       if (touch && pressed && !lifted) {
         end(false, true);

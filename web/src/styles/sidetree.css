@@ -146,20 +146,32 @@
   font-size: max(1rem, 16px);
 }
 .stree-section {
-  margin-top: 8px;
+  margin-top: 0;
 }
 /* The section labels' tier (styles/shell.css .rail-section), as tall as a pointer needs. */
 .stree-label {
   display: flex;
   align-items: center;
   height: 24px;
-  margin: 0;
+  margin: 8px 0 0;
   padding: 0 8px;
   border-radius: var(--radius);
   color: var(--fg-3);
   font-size: var(--text-xs);
   font-weight: 600;
   line-height: var(--lh-tight);
+}
+/* During a drag, the Sessions heading stays in view at either end so "to top level" is
+   always visible (display: contents on .stree-section lets bottom: 0 stick across the scroller). */
+.stree[data-dragging] .stree-section {
+  display: contents;
+}
+.stree[data-dragging] .stree-label[data-zone="sessions"] {
+  position: sticky;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  background-color: var(--chrome);
 }
 .stree-none {
   margin: 0;
@@ -453,7 +465,7 @@
   box-shadow: inset 0 0 0 var(--hairline) var(--line-2);
   color: var(--fg-3);
 }
-/* The lifted row, small, under the pointer: its mark and title. */
+/* The lifted row, raised, in the pointer's own row band: its mark and title. */
 .stree-chip {
   position: fixed;
   top: 0;
@@ -461,12 +473,12 @@
   z-index: var(--z-tip);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   max-width: 240px;
-  height: 26px;
+  height: var(--side-row);
   padding: 0 10px 0 8px;
   border-radius: var(--radius);
-  background: var(--bg-2);
+  background: var(--raised);
   color: var(--fg);
   box-shadow: var(--shadow-pop);
   font-size: var(--text-sm);

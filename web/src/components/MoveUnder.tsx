@@ -10,7 +10,7 @@
 import type { SessionKey, SessionSummary } from "@shared/api";
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useAppState, useStore } from "../data/hooks";
-import { arrange, moveTargets, onMoveUnder, personTree } from "../lib/arrange";
+import { arrange, type MoveUnderRequest, moveTargets, onMoveUnder, personTree } from "../lib/arrange";
 import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import { sessionTitle } from "../lib/format";
@@ -22,15 +22,15 @@ import "../styles/pick.css";
 const PICK_MAX = 60;
 
 export function MoveUnderHost() {
-  const [key, setKey] = useState<SessionKey | null>(null);
-  useEffect(() => onMoveUnder(setKey), []);
+  const [req, setReq] = useState<MoveUnderRequest | null>(null);
+  useEffect(() => onMoveUnder(setReq), []);
   useEffect(() => {
-    const close = () => setKey(null);
+    const close = () => setReq(null);
     window.addEventListener("popstate", close);
     return () => window.removeEventListener("popstate", close);
   }, []);
-  if (!key) return null;
-  return <Picker key={key} moving={key} onClose={() => setKey(null)} />;
+  if (!req) return null;
+  return <Picker key={req.key} moving={req.key} fromTree={!!req.fromTree} onClose={() => setReq(null)} />;
 }
 
 /** The sessions that match `q`, best first; all of them, in order, with nothing typed. */
@@ -50,7 +50,7 @@ export function pickMatches(list: readonly SessionSummary[], q: string): Session
     .map((x) => x.s);
 }
 
-function Picker({ moving, onClose }: { moving: SessionKey; onClose: () => void }) {
+function Picker({ moving, fromTree, onClose }: { moving: SessionKey; fromTree: boolean; onClose: () => void }) {
   const store = useStore();
   const state = useAppState();
   const ref = useRef<HTMLDivElement>(null);
@@ -69,7 +69,7 @@ function Picker({ moving, onClose }: { moving: SessionKey; onClose: () => void }
   const take = (p: SessionSummary | undefined) => {
     if (!p) return;
     onClose();
-    arrange(store, moving, { kind: "under", parent: p.key });
+    arrange(store, moving, { kind: "under", parent: p.key }, fromTree ? { source: "picker" } : undefined);
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") setAt(Math.min(choice + 1, shown.length - 1));

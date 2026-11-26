@@ -9,6 +9,8 @@ import {
   EDGE_PX,
   EDGE_SPEED,
   edgeScroll,
+  LIFT_MS,
+  LONG_PRESS_MS,
   moveFor,
   type RowBox,
   targetAt,
@@ -23,7 +25,7 @@ const rows: RowBox[] = [
   { key: "c:a1", top: 228, bottom: 256, level: 1, group: "sessions" },
   { key: "c:b", top: 256, bottom: 284, level: 0, group: "sessions" },
 ];
-const zones = { pinned: { top: 76, bottom: 100 }, sessions: { top: 176, bottom: 200 } };
+const zones = { pinned: { top: 76, bottom: 100 }, sessions: { top: 176, bottom: 200 }, bottom: 400 };
 const none = new Set<string>();
 
 describe("targetAt", () => {
@@ -32,24 +34,26 @@ describe("targetAt", () => {
     expect(targetAt(rows, 242, "c:b", none, zones)).toEqual({ kind: "on", key: "c:a1" });
   });
 
-  it("is the line between top-level rows at a row's edges, and only between top-level rows", () => {
-    // Just inside b's top: the line above b.
-    expect(targetAt(rows, 258, "c:p1", none, zones)).toEqual({ kind: "line", group: "sessions", at: 1, y: 256 });
-    // Just inside a's bottom: a's next row is its kid, so there is no line: it is a.
+  it("uses insertion lines only in Pinned; Sessions edges and gap return top", () => {
+    // Just inside b's top: top level in Sessions, never a line.
+    expect(targetAt(rows, 258, "c:p1", none, zones)).toEqual({ kind: "top" });
+    // Just inside a's bottom: a's next row is its kid, so it stays on a.
     expect(targetAt(rows, 226, "c:p1", none, zones)).toEqual({ kind: "on", key: "c:a" });
-    // Just inside a1's bottom: the next row is top-level, so the line under it.
-    expect(targetAt(rows, 254, "c:p1", none, zones)).toMatchObject({ kind: "line", group: "sessions", y: 256 });
+    // Just inside a1's bottom: the next row is top-level, so top level in Sessions.
+    expect(targetAt(rows, 254, "c:p1", none, zones)).toEqual({ kind: "top" });
+    // Gap below the last row of Sessions (inside the scroller): top level.
+    expect(targetAt(rows, 310, "c:a1", none, zones)).toEqual({ kind: "top" });
     // Among the pinned the line says where: before p2 is place 1, after it place 2.
     expect(targetAt(rows, 130, "c:b", none, zones)).toEqual({ kind: "line", group: "pinned", at: 1, y: 128 });
     expect(targetAt(rows, 154, "c:b", none, zones)).toEqual({ kind: "line", group: "pinned", at: 2, y: 156 });
   });
 
-  it("is the Pinned heading, or the line atop Sessions on its heading", () => {
+  it("is the Pinned heading, or top level on the Sessions heading", () => {
     expect(targetAt(rows, 80, "c:b", none, zones)).toEqual({ kind: "pinned" });
-    expect(targetAt(rows, 180, "c:p1", none, zones)).toEqual({ kind: "line", group: "sessions", at: 0, y: 200 });
+    expect(targetAt(rows, 180, "c:p1", none, zones)).toEqual({ kind: "top" });
   });
 
-  it("is no place on the row itself, on its own sessions, or outside the rows", () => {
+  it("is no place on the row itself, on its own sessions, or outside the scroller", () => {
     expect(targetAt(rows, 214, "c:a", none, zones)).toBeNull();
     expect(targetAt(rows, 202, "c:a", none, zones)).toBeNull();
     expect(targetAt(rows, 242, "c:a", new Set(["c:a1"]), zones)).toBeNull();
@@ -63,12 +67,14 @@ describe("moveFor", () => {
     expect(moveFor({ kind: "on", key: "c:a" })).toEqual({ kind: "under", parent: "c:a" });
     expect(moveFor({ kind: "pinned" })).toEqual({ kind: "pin", at: 0 });
     expect(moveFor({ kind: "line", group: "pinned", at: 2, y: 0 })).toEqual({ kind: "pin", at: 2 });
-    expect(moveFor({ kind: "line", group: "sessions", at: 2, y: 0 })).toEqual({ kind: "top" });
+    expect(moveFor({ kind: "top" })).toEqual({ kind: "top" });
   });
 });
 
 describe("a press, a drag, a scroll", () => {
-  it("a pointer drags past 4 px; a finger only once held, and a finger that moves first scrolls", () => {
+  it("long-press matches the system 500 ms; pointer drags past 4 px", () => {
+    expect(LONG_PRESS_MS).toBe(500);
+    expect(LIFT_MS).toBe(500);
     expect(dragStarts({ touch: false, dx: 2, dy: 2, held: false })).toBe(false);
     expect(dragStarts({ touch: false, dx: DRAG_SLOP_PX, dy: 0, held: false })).toBe(true);
     expect(dragStarts({ touch: true, dx: 30, dy: 0, held: false })).toBe(false);
