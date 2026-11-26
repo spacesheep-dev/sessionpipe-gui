@@ -1438,11 +1438,11 @@ export const SessionTree = memo(function SessionTree({
   );
   const listSig = useMemo(
     () =>
-      `${grouped ? "p" : "f"};${projectGroups.map((g) => `${g.key}:${foldedGroups.has(projectFoldKey(g.key)) ? 1 : 0}`).join(",")};${shownRoots.map((h) => (h.gone ? `~${h.key}` : h.key)).join(",")};${drawn
+      `${grouped ? "p" : "f"};${projectGroups.map((g) => `${g.key}:${folded.has(`p:${g.key}`) ? 1 : 0}`).join(",")};${shownRoots.map((h) => (h.gone ? `~${h.key}` : h.key)).join(",")};${drawn
         .filter((d) => d.group === "sessions")
         .map((d) => `${d.node.s.key}:${d.folded ? 1 : 0}`)
         .join("|")}`,
-    [grouped, projectGroups, foldedGroups, shownRoots, drawn],
+    [grouped, projectGroups, folded, shownRoots, drawn],
   );
   useFlip(listRef, 80, { move: 150, sig: listSig });
   useFlip(pinRef, 80, { move: 150, sig: pinSig });

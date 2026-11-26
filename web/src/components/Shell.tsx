@@ -994,7 +994,20 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           </div>
         </div>
         {(columnShown || overlayShown) && (
-          <section className="tree-col" id="tree-col" ref={columnRef} aria-label="Sessions">
+          // biome-ignore lint/a11y/noStaticElementInteractions: closes narrow overlay when re-selecting an already-open session row
+          // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation fires click on the row's anchor
+          <section
+            className="tree-col"
+            id="tree-col"
+            ref={columnRef}
+            aria-label="Sessions"
+            onClick={(e) => {
+              if (!overlayShown) return;
+              const t = e.target as Element | null;
+              if (t?.closest?.(".stree-chev")) return;
+              if (t?.closest?.("[data-tree-row], [data-starting]")) setOverlay(false);
+            }}
+          >
             <SessionTree open={openKey} touch={false} foot={usageFoot} />
           </section>
         )}
