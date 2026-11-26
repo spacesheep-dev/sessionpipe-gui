@@ -890,7 +890,12 @@ export const SessionTree = memo(function SessionTree({
         actions={actions}
       >
         {shown.length > 0 && (
-          <KidGroup id={id} level={n.level} label={sessionTitle(s)}>
+          <KidGroup
+            id={id}
+            level={n.level}
+            label={sessionTitle(s)}
+            sig={`${shown.map((k) => k.s.key).join(",")}:${hiddenKids}`}
+          >
             {shown.map((k, i) => row(k, group, i + 1, kids.length, n))}
             {hiddenKids > 0 && !isFolded && (
               // biome-ignore lint/a11y/useKeyWithClickEvents: the tree has the keys (Enter and Space press it)
@@ -918,8 +923,26 @@ export const SessionTree = memo(function SessionTree({
 
   const listRef = useRef<HTMLDivElement>(null);
   const pinRef = useRef<HTMLDivElement>(null);
-  useFlip(listRef, 80, { move: 150 });
-  useFlip(pinRef, 80, { move: 150 });
+  // FLIP only needs to measure when the drawn row structure or fold state changes, not on
+  // every text-delta SSE tick that leaves every row in place.
+  const pinSig = useMemo(
+    () =>
+      drawn
+        .filter((d) => d.group === "pinned")
+        .map((d) => `${d.node.s.key}:${d.folded ? 1 : 0}`)
+        .join("|"),
+    [drawn],
+  );
+  const listSig = useMemo(
+    () =>
+      `${shownRoots.map((h) => (h.gone ? `~${h.key}` : h.key)).join(",")};${drawn
+        .filter((d) => d.group === "sessions")
+        .map((d) => `${d.node.s.key}:${d.folded ? 1 : 0}`)
+        .join("|")}`,
+    [shownRoots, drawn],
+  );
+  useFlip(listRef, 80, { move: 150, sig: listSig });
+  useFlip(pinRef, 80, { move: 150, sig: pinSig });
   const empty = drawn.length === 0 && heldRoots.length === 0;
   // A start not listed yet sits at the top of the live block (right after block 0 rows).
   const startAt = shownRoots.findIndex(
@@ -943,7 +966,7 @@ export const SessionTree = memo(function SessionTree({
     if (!needsPill) return;
     const el = rowEl(needsPill.targetKey);
     if (!el) return;
-    el.scrollIntoView({ block: "nearest" });
+    el.scrollIntoView({ block: "center" });
     hadFocus.current = true;
     focusedEl.current = el;
     setFocusKey(needsPill.targetKey);
@@ -1263,20 +1286,26 @@ function useScrollFades(ref: RefObject<HTMLElement | null>): { above: boolean; b
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    let raf = 0;
     const read = () => {
+      raf = 0;
       const above = el.scrollTop > 1;
       const below = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
       setFades((f) => (f.above === above && f.below === below ? f : { above, below }));
     };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(read);
+    };
     read();
-    el.addEventListener("scroll", read, { passive: true });
-    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(read) : null;
+    el.addEventListener("scroll", schedule, { passive: true });
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(schedule) : null;
     ro?.observe(el);
     for (const c of el.children) ro?.observe(c);
-    const mo = new MutationObserver(read);
+    const mo = new MutationObserver(schedule);
     mo.observe(el, { childList: true, subtree: true });
     return () => {
-      el.removeEventListener("scroll", read);
+      cancelAnimationFrame(raf);
+      el.removeEventListener("scroll", schedule);
       ro?.disconnect();
       mo.disconnect();
     };
@@ -1299,9 +1328,21 @@ function GoneRow({ h }: { h: Held<TreeNode> }) {
 }
 
 /** The rows under a parent, on one rail; its own list for the FLIP. */
-function KidGroup({ id, level, label, children }: { id: string; level: number; label: string; children: ReactNode }) {
+function KidGroup({
+  id,
+  level,
+  label,
+  sig,
+  children,
+}: {
+  id: string;
+  level: number;
+  label: string;
+  sig: string;
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDivElement>(null);
-  useFlip(ref, 80, { move: 150 });
+  useFlip(ref, 80, { move: 150, sig });
   return (
     // biome-ignore lint/a11y/useSemanticElements: a tree's group of treeitems (WAI-ARIA tree pattern), not a form's fieldset
     <div
@@ -1443,17 +1484,20 @@ const RowLine = memo(function RowLine({
       <Chevron />
     </span>
   );
-  const nameId = `${groupId}-name`;
-  const descId = `${groupId}-desc`;
   const desc = !away && s.machine ? `Runs on ${s.machine}` : "";
   const agent = harnessMark(s.harness).label;
+  const rowName =
+    `${title}${stateWords(s, unread)}${inside}` +
+    `${agent ? `, ${agent}` : ""}` +
+    `${placed ? ", placed by you" : ""}` +
+    `${away && s.machine ? `, on ${s.machine}` : ""}`;
   return (
     <a
       ref={rowRef}
       href={hrefFor(sessionPath(s.harness, s.id))}
       role="treeitem"
-      aria-labelledby={nameId}
-      aria-describedby={desc ? descId : undefined}
+      aria-label={rowName}
+      aria-description={desc || undefined}
       aria-level={level + 1}
       aria-posinset={pos}
       aria-setsize={size}
@@ -1498,19 +1542,6 @@ const RowLine = memo(function RowLine({
       <span className="stree-lamp">
         <Lamp s={s} unread={unread} rolled={rolled} size={touch ? 12 : 10} />
       </span>
-      <span id={nameId} className="sr-only">
-        {title}
-        {stateWords(s, unread)}
-        {inside}
-        {agent ? `, ${agent}` : ""}
-        {placed ? ", placed by you" : ""}
-        {away && s.machine ? `, on ${s.machine}` : ""}
-      </span>
-      {desc && (
-        <span id={descId} hidden>
-          {desc}
-        </span>
-      )}
     </a>
   );
 });

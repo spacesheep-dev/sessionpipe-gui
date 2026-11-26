@@ -217,15 +217,18 @@ export function isCalmCommit(): boolean {
  *  its rows come in as new ones do.) Off under reduced motion, and past `max` rows (a
  *  long list just snaps). `move` sets a list's own travel time (the sidebar's tree makes
  *  room faster than the board slides). */
-export function useFlip(ref: RefObject<HTMLElement | null>, max = 80, o: { move?: number } = {}): void {
+export function useFlip(ref: RefObject<HTMLElement | null>, max = 80, o: { move?: number; sig?: unknown } = {}): void {
   /** Each row's layout top (no transform), relative to the container, at the last commit. */
   const prev = useRef<Map<string, number> | null>(null);
   /** The container's width at the last commit; 0 while it had no box. */
   const width = useRef(0);
+  const lastSig = useRef<unknown>(undefined);
   const moving = useRef(new Map<string, Animation>());
   useLayoutEffect(() => {
     const box = ref.current;
     if (!box) return;
+    if (o.sig !== undefined && prev.current !== null && Object.is(o.sig, lastSig.current)) return;
+    lastSig.current = o.sig;
     const els = [...box.querySelectorAll<HTMLElement>("[data-flip]")].filter((el) => {
       const outer = el.parentElement?.closest("[data-flip]");
       return !outer || !box.contains(outer);

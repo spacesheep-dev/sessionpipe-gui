@@ -102,6 +102,18 @@ html:has(.main > .session) {
   }
 }
 @container bar (max-width: 150px) {
+  .sess-bar .bar-lead {
+    gap: 2px;
+    margin-left: -10px;
+  }
+  .sess-bar .bar-conn {
+    margin: 0;
+    padding-right: 0;
+    gap: 0;
+  }
+  .sess-bar .bar-actions {
+    margin-right: -10px;
+  }
   .sess-bar .bar-conn-label {
     display: none;
   }
