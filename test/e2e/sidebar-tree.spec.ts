@@ -123,6 +123,20 @@ const drawnUnder = (page: Page, key: string) =>
     return group ? (document.querySelector(`[aria-owns="${group.id}"]`)?.getAttribute("data-tree-row") ?? "?") : null;
   });
 
+/** Wait for WAAPI FLIP slides in the tree to finish (never infinite CSS spin dots). */
+async function settled(page: Page): Promise<void> {
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (x) =>
+          x instanceof CSSAnimation ||
+          x.playState !== "running" ||
+          !(x.effect as KeyframeEffect)?.target?.closest?.(".stree"),
+      ),
+  );
+}
+
 /** A pointer drag of `from`'s row onto a place of `to`: its middle (`on`), just inside its
  *  top edge (`above`) or its bottom edge (`below`). Released unless `hold`. */
 async function drag(
@@ -134,23 +148,12 @@ async function drag(
 ): Promise<void> {
   // The pointer on the list first, so it holds still (no row moves under a hand), then the row.
   // Rows that are still sliding (a move just made) are not where they will be.
-  const settled = () =>
-    page.waitForFunction(() =>
-      document
-        .getAnimations()
-        .every(
-          (x) =>
-            x instanceof CSSAnimation ||
-            x.playState !== "running" ||
-            !(x.effect as KeyframeEffect)?.target?.closest?.(".stree"),
-        ),
-    );
-  await settled();
+  await settled(page);
   await from.evaluate((el) => el.scrollIntoView({ block: "center" }));
   await from.hover({ position: { x: 40, y: 10 } });
   await expect(page.locator(".stree")).toHaveAttribute("data-held", "");
   // The list may have taken a new order just before it held: let that slide finish.
-  await settled();
+  await settled(page);
   await from.hover({ position: { x: 40, y: 10 } });
   const a = (await from.boundingBox())!;
   await page.mouse.move(a.x + 40, a.y + a.height / 2);
@@ -160,10 +163,14 @@ async function drag(
   await expect(page.locator(".stree-chip")).toBeVisible();
   // The place well inside the list's scroll, away from the edges that scroll it.
   await to.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  await settled();
+  await settled(page);
+  const aim = (box: { x: number; y: number; height: number }) =>
+    where === "on" ? box.y + box.height / 2 : where === "above" ? box.y + 2 : box.y + box.height - 2;
   const b = (await to.boundingBox())!;
-  const y = where === "on" ? b.y + b.height / 2 : where === "above" ? b.y + 2 : b.y + b.height - 2;
-  await page.mouse.move(b.x + 60, y, { steps: 8 });
+  await page.mouse.move(b.x + 60, aim(b), { steps: 8 });
+  // Live demo subagent rows can shift `to` mid-move; follow it onto the real row before dropping.
+  const b2 = (await to.boundingBox())!;
+  if (Math.abs(b2.y - b.y) > 1) await page.mouse.move(b2.x + 60, aim(b2), { steps: 2 });
   if (!o.hold) await page.mouse.up();
 }
 
@@ -192,17 +199,20 @@ test("the tree is a tree: role, levels, the Board's order, New session at its to
   expect(await drawnUnder(page, kid!.key)).toBe(parent!.key);
   // A working session's lamp is the board's turning ring, never a new colour.
   await expect(row(page, parent!.key).locator(".stree-lamp .dot--working")).toHaveCount(1);
-  // The Board's order: the sidebar's top level is the Board's rows, done ones at the end.
-  // Read at one moment: the live demo moves rows between two reads.
-  const [sidebar, board] = await page.evaluate(() => [
-    Array.from(document.querySelectorAll('.stree [role="tree"] > .stree-item > [data-tree-row]')).map((e) =>
-      e.getAttribute("data-tree-row"),
-    ),
-    Array.from(document.querySelectorAll(".board-list .group:not(.group--done):not(.group--hidden) article.card")).map(
-      (e) => e.getAttribute("data-flip"),
-    ),
-  ]);
-  expect(sidebar.slice(0, board.length)).toEqual(board);
+  // The sidebar's three-block order: needs-you families, then live families, then finished.
+  const states = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('.stree [role="tree"] > .stree-item > [data-tree-row]')).map((e) => {
+      const s = e.getAttribute("data-state");
+      const r = e.getAttribute("data-rolled");
+      if (s === "needs_you" || r === "needs_you") return 0;
+      if (s === "done") return 2;
+      return 1;
+    }),
+  );
+  // Needs-you block always precedes live rows.
+  const lastNeeds = states.lastIndexOf(0);
+  const firstLive = states.indexOf(1);
+  if (lastNeeds >= 0 && firstLive >= 0) expect(lastNeeds).toBeLessThan(firstLive);
   await expect(page.locator(".stree-new")).toHaveText("New session");
   await page.locator(".stree-new").click();
   await expect(page.getByRole("dialog", { name: /new session/i })).toBeVisible();
@@ -223,15 +233,20 @@ test("a pointer drag attaches, moves, detaches and pins; the Board agrees; Undo 
 
   // Attach: B on A.
   await drag(page, row(page, b!.key), row(page, a!.key), "on");
-  await expect(toast(page)).toContainText(`Moved under Tree ${tag} A`);
+  await expect(toast(page)).toContainText(`Moved under “Tree ${tag} A”`);
+  await expect(toast(page)).toContainText(`Tree ${tag} B`);
+  await expect(toast(page)).not.toHaveAttribute("role", "status");
   await expect.poll(async () => (await arrangement(request)).placed[b!.key]).toBe(a!.key);
   expect(await drawnUnder(page, b!.key)).toBe(a!.key);
-  // Placed, and on another computer than its parent: its tooltip says both.
-  await expect(row(page, b!.key)).toHaveAttribute("title", /Placed here by you/);
+  // Placed, and on another computer than its parent: its app tooltip says both, no native title.
+  await expect(row(page, b!.key)).not.toHaveAttribute("title");
+  await expect(row(page, b!.key)).toHaveAttribute("data-tip", /Placed by you/);
+  await expect(row(page, b!.key)).toHaveAttribute("data-tip-wrap", "");
+  await expect(row(page, b!.key)).toHaveAttribute("data-tip-side", "right");
   await expect(row(page, b!.key).locator(".stree-away")).toHaveCount(1);
-  // A top-level row has no mark, whatever computer it runs on: its tooltip says where.
+  // A top-level row has no mark, whatever computer it runs on: its app tooltip says where.
   await expect(row(page, a!.key).locator(".stree-away")).toHaveCount(0);
-  await expect(row(page, a!.key)).toHaveAttribute("title", /Runs on studio-mac/);
+  await expect(row(page, a!.key)).toHaveAttribute("data-tip", /studio-mac/);
   await expect(page.locator("[data-tree-said]")).toHaveText(`Tree ${tag} B moved under Tree ${tag} A.`);
   // The Board nests by the same tree.
   await expect(page.locator(`article.card[data-flip="${a!.key}"] .card-kids`)).toContainText(`Tree ${tag} B`);
@@ -242,9 +257,12 @@ test("a pointer drag attaches, moves, detaches and pins; the Board agrees; Undo 
   await expect.poll(async () => (await arrangement(request)).placed[b!.key]).toBe(c!.key);
   expect(await drawnUnder(page, b!.key)).toBe(c!.key);
 
-  // Detach: B onto the line above a top-level row.
-  await drag(page, row(page, b!.key), row(page, a!.key), "above");
-  await expect(toast(page)).toContainText("Moved to the top level");
+  // Detach: B onto the top edge of a top-level row lights Sessions heading (no line).
+  await drag(page, row(page, b!.key), row(page, a!.key), "above", { hold: true });
+  await expect(page.locator('.stree-label[data-zone="sessions"]')).toHaveAttribute("data-target", "");
+  await expect(page.locator(".stree-line")).toBeHidden();
+  await page.mouse.up();
+  await expect(toast(page)).toContainText("Moved to top level");
   // B's events name no parent: it follows them again.
   await expect.poll(async () => b!.key in (await arrangement(request)).placed).toBe(false);
   expect(await drawnUnder(page, b!.key)).toBeNull();
@@ -580,7 +598,7 @@ test("unread: the same sessions as the Board, with the Board's own mark", async 
         const c = getComputedStyle(el);
         return (
           [c.color, c.backgroundColor, c.borderTopColor].some((v) => /rgb\(255, 90, 31\)/.test(v)) &&
-          !el.closest(".dot--needs_you, .dot.dot--needs_you")
+          !el.closest(".dot--needs_you, .dot.dot--needs_you, .stree-needs-dot")
         );
       }).length,
   );
@@ -702,9 +720,9 @@ test.describe("a row is never lost", () => {
 test.describe("the phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test("has no list, and its menu still pins and moves", async ({ page, request }) => {
+  test("has no list, omits Pin, and keeps Move under…", async ({ page, request }) => {
     const tag = randomUUID().slice(0, 6);
-    const [a] = await sessions(request, [{ title: `Tree ${tag} phone` }]);
+    const [a, b] = await sessions(request, [{ title: `Tree ${tag} phone` }, { title: `Tree ${tag} phone parent` }]);
     await openPage(page, "/");
     await expect(page.locator(".stree")).toHaveCount(0);
     await expect(page.getByRole("separator", { name: "Sidebar width" })).toHaveCount(0);
@@ -724,7 +742,7 @@ test.describe("the phone", () => {
           }),
         );
       });
-      await expect(sheet.getByRole("menuitem", { name: "Pin", exact: true })).toBeVisible({ timeout: 2_000 });
+      await expect(sheet.getByRole("menuitem", { name: "Move under…" })).toBeVisible({ timeout: 2_000 });
     }).toPass();
     // The finger lifts: its click is the hold's, not a tap on the menu (ContextMenu.tsx).
     await page.evaluate(() => {
@@ -732,9 +750,14 @@ test.describe("the phone", () => {
       document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
     await sheet.evaluate((el) => Promise.all(el.getAnimations().map((x) => x.finished)));
-    await expect(sheet.getByRole("menuitem", { name: "Move under…" })).toBeVisible();
-    await sheet.getByRole("menuitem", { name: "Pin", exact: true }).click();
-    await expect.poll(async () => (await arrangement(request)).pinned).toEqual([a!.key]);
+    // Compact phone omits Pin, Unpin and Pinned moves.
+    await expect(sheet.getByRole("menuitem", { name: "Pin", exact: true })).toHaveCount(0);
+    await sheet.getByRole("menuitem", { name: "Move under…" }).click();
+    const picker = page.getByRole("dialog", { name: "Move under…" });
+    await expect(picker).toBeVisible();
+    await picker.getByRole("combobox", { name: "Find a session" }).fill(`${tag} phone parent`);
+    await picker.getByRole("option").first().click();
+    await expect.poll(async () => (await arrangement(request)).placed[a!.key]).toBe(b!.key);
   });
 });
 
@@ -820,4 +843,317 @@ test("a start shows at once, as the Board's starting card does, and its session 
   const seen = await page.evaluate(() => (window as unknown as { __seen: string[] }).__seen);
   expect(new Set(seen)).toEqual(new Set(["s", "r"]));
   await expect(row(page, key)).toHaveAttribute("aria-level", "1");
+});
+
+test.describe("Round 2 polish", () => {
+  test("one open rule: sidebar never narrows or collapses; panel covers when room runs out", async ({
+    page,
+    request,
+  }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [a] = await sessions(request, [{ title: `Rule ${tag} alpha` }]);
+    await openPage(page, "/");
+    const col = page.locator(".tree-col");
+    const panel = page.locator("aside.panel");
+
+    // 1440×900, sidebar 288: column stays 288, panel sits beside at 538.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await row(page, a!.key).focus();
+    await page.keyboard.press("Space");
+    await expect(panel).toHaveClass(/panel--open/);
+    await expect.poll(async () => Math.round((await col.boundingBox())!.width)).toBe(288);
+    await expect.poll(async () => Math.round((await panel.boundingBox())!.width)).toBe(538);
+    await expect(page.locator(".shell")).not.toHaveAttribute("data-covers", "");
+
+    // 1280×800 and 1200×800: column stays 288, panel covers from x = 360 (72 + 288), focus stays on tree row.
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await expect(page.locator(".shell")).toHaveAttribute("data-covers", "");
+    await expect.poll(async () => Math.round((await col.boundingBox())!.width)).toBe(288);
+    await expect.poll(async () => Math.round((await panel.boundingBox())!.x)).toBe(360);
+    await page.keyboard.press("Escape");
+    await expect(panel).not.toHaveClass(/panel--open/);
+
+    // Reopen from tree via Space at 1200×800: focus stays on the tree row.
+    await row(page, a!.key).focus();
+    await page.keyboard.press("Space");
+    await expect(panel).toHaveClass(/panel--open/);
+    await expect(row(page, a!.key)).toBeFocused();
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 1440, height: 1400 });
+  });
+
+  test("honest drag: sloppy click opens, steady view on drop, raised chip centred on pointer", async ({
+    page,
+    request,
+  }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [p, k] = await sessions(request, [
+      { title: `Drag ${tag} parent` },
+      { title: `Drag ${tag} kid`, asks: undefined },
+    ]);
+    expect((await request.patch(ARRANGEMENT, { data: { placed: { [k!.key]: p!.key } } })).status()).toBe(200);
+    await openPage(page, "/");
+    await expect(row(page, k!.key)).toBeVisible();
+
+    // Drag chip: vertically centred on pointer's y during drag.
+    await drag(page, row(page, k!.key), row(page, p!.key), "above", { hold: true });
+    const chipBox = (await page.locator(".stree-chip").boundingBox())!;
+    const pBox = (await row(page, p!.key).boundingBox())!;
+    const pointerY = pBox.y + 2;
+    expect(Math.abs(chipBox.y + chipBox.height / 2 - pointerY)).toBeLessThanOrEqual(2);
+    // Drop on top edge of level-0 row: detaches with scrollTop unchanged.
+    const scrollBefore = await page.locator(".stree-scroll").evaluate((el) => el.scrollTop);
+    await page.mouse.up();
+    await expect.poll(async () => k!.key in (await arrangement(request)).placed).toBe(false);
+    expect(await page.locator(".stree-scroll").evaluate((el) => el.scrollTop)).toBe(scrollBefore);
+
+    // Sloppy click: let detach FLIP settle, hover to hold, press, move 5 px inside the same row, release -> opens.
+    await settled(page);
+    await row(page, k!.key).hover({ position: { x: 40, y: 10 } });
+    await settled(page);
+    const aBox = (await row(page, k!.key).boundingBox())!;
+    await page.mouse.move(aBox.x + 40, aBox.y + aBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(aBox.x + 45, aBox.y + aBox.height / 2, { steps: 2 });
+    await page.mouse.up();
+    await expect(page).toHaveURL(new RegExp(k!.id));
+  });
+
+  test("outliner chords, fold all, heading menu, calm keyboard motion, and ShortcutHelp", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [a, b] = await sessions(request, [{ title: `Chord ${tag} A` }, { title: `Chord ${tag} B` }]);
+    await openPage(page, "/");
+    await expect(row(page, a!.key)).toBeVisible();
+    await expect(row(page, b!.key)).toBeVisible();
+
+    // ⇧P pins and unpins.
+    await row(page, a!.key).focus();
+    await page.keyboard.press("Shift+P");
+    await expect.poll(async () => (await arrangement(request)).pinned).toEqual([a!.key]);
+    await row(page, a!.key).focus();
+    await page.keyboard.press("Shift+P");
+    await expect.poll(async () => (await arrangement(request)).pinned).toEqual([]);
+
+    // m opens Move under… picker; Enter moves and returns focus to moved row.
+    await row(page, b!.key).focus();
+    await page.keyboard.press("m");
+    const picker = page.getByRole("dialog", { name: "Move under…" });
+    await expect(picker).toBeVisible();
+    await picker.getByRole("combobox", { name: "Find a session" }).fill(`${tag} A`);
+    await page.keyboard.press("Enter");
+    await expect(picker).toHaveCount(0);
+    await expect.poll(async () => (await arrangement(request)).placed[b!.key]).toBe(a!.key);
+    await expect(row(page, b!.key)).toBeFocused();
+
+    // ⌥← folds all and ⌥→ unfolds all without FLIP slide.
+    await row(page, a!.key).focus();
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect(row(page, a!.key)).toHaveAttribute("aria-expanded", "false");
+    const slides = await page.evaluate(() => document.querySelectorAll(".stree [data-flip-moving]").length);
+    expect(slides).toBe(0);
+    await page.keyboard.press("Alt+ArrowRight");
+    await expect(row(page, a!.key)).toHaveAttribute("aria-expanded", "true");
+
+    // Outdent chord moves B back to top level.
+    await row(page, b!.key).focus();
+    await page.keyboard.press(process.platform === "darwin" ? "Control+Meta+ArrowLeft" : "Alt+Shift+ArrowLeft");
+    await expect.poll(async () => b!.key in (await arrangement(request)).placed).toBe(false);
+
+    // Sessions heading context menu has Fold all / Unfold all.
+    await page.locator('.stree-label[data-zone="sessions"]').click({ button: "right" });
+    await expect(page.getByRole("menuitem", { name: "Fold all", exact: true })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Unfold all", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    // ShortcutHelp shows the Session tree group.
+    await page.locator("main#main").focus();
+    await page.keyboard.press("?");
+    await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toContainText("Session tree");
+    await page.keyboard.press("Escape");
+  });
+
+  test("geometry, title-first accessible names, single live voice, and needs pill", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [p, need] = await sessions(request, [
+      { title: `Geom ${tag} parent` },
+      { title: `Geom ${tag} urgent`, state: "needs" },
+    ]);
+    const [c] = await sessions(request, [{ title: `Geom ${tag} child`, asks: p!.key }]);
+    await openPage(page, "/");
+    await expect(row(page, c!.key)).toBeVisible();
+
+    // Title-first accessible name: starts with title and contains it once.
+    const name = await row(page, p!.key).evaluate((el) => {
+      const id = el.getAttribute("aria-labelledby");
+      return id ? (document.getElementById(id)?.textContent ?? "") : "";
+    });
+    expect(name.startsWith(`Geom ${tag} parent`)).toBe(true);
+    expect(name.split(`Geom ${tag} parent`).length - 1).toBe(1);
+
+    // Child mark left edge aligns with parent title left edge (±1 px) at 288 px.
+    const align = await page.evaluate(
+      ([pk, ck]) => {
+        const pt = document.querySelector(`.stree [data-tree-row="${pk}"] .stree-title`)!.getBoundingClientRect().left;
+        const cl = document.querySelector(`.stree [data-tree-row="${ck}"] .stree-lead`)!.getBoundingClientRect().left;
+        return Math.abs(pt - cl);
+      },
+      [p!.key, c!.key] as const,
+    );
+    expect(align).toBeLessThanOrEqual(1);
+
+    // Needs pill appears when all needs-you rows scroll out of view; click jumps to the
+    // nearest needs-you row, focuses it, and hides the pill.
+    expect(need).toBeTruthy();
+    await page.setViewportSize({ width: 1440, height: 420 });
+    await page.locator(".stree-scroll").evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    const pill = page.locator(".stree-needs-pill--top");
+    await expect(pill).toBeVisible();
+    await pill.click();
+    await expect(pill).toHaveCount(0);
+    const landed = await page.evaluate(() => {
+      const a = document.activeElement as HTMLElement | null;
+      return {
+        row: a?.getAttribute("data-tree-row"),
+        needs: a?.getAttribute("data-state") === "needs_you" || a?.getAttribute("data-rolled") === "needs_you",
+      };
+    });
+    expect(landed.row).toBeTruthy();
+    expect(landed.needs).toBe(true);
+    await expect(row(page, landed.row!)).toBeInViewport();
+    await page.setViewportSize({ width: 1440, height: 1400 });
+  });
+});
+
+test.describe("iPad touch sidebar", () => {
+  test.use({ viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true });
+
+  test("500 ms long-press opens menu while held, move lifts chip above finger, compact foot", async ({
+    page,
+    request,
+  }) => {
+    const tag = randomUUID().slice(0, 6);
+    const [a] = await sessions(request, [{ title: `Touch ${tag} alpha` }]);
+    await openPage(page, "/");
+    const targetRow = row(page, a!.key);
+    await expect(targetRow).toBeVisible();
+    // Touch rows carry no desktop tooltip and no native title.
+    await expect(targetRow).not.toHaveAttribute("data-tip");
+    await expect(targetRow).not.toHaveAttribute("title");
+
+    // Compact foot: Display and Settings sit on one row beside ConnectionPill at ≥44×44.
+    const foot = await page.evaluate(() => {
+      const disp = document.querySelector<HTMLElement>('nav.rail .rail-foot [data-nav="display"]')!;
+      const sett = document.querySelector<HTMLElement>('nav.rail .rail-foot [data-nav="settings"]')!;
+      const conn = document.querySelector<HTMLElement>("nav.rail .rail-foot .conn")!;
+      return {
+        disp: disp.getBoundingClientRect(),
+        sett: sett.getBoundingClientRect(),
+        connVisible: getComputedStyle(conn).display !== "none",
+      };
+    });
+    expect(foot.connVisible).toBe(true);
+    expect(Math.abs(foot.disp.y - foot.sett.y)).toBeLessThan(4);
+    expect(foot.disp.width).toBeGreaterThanOrEqual(44);
+    expect(foot.disp.height).toBeGreaterThanOrEqual(44);
+    expect(foot.sett.width).toBeGreaterThanOrEqual(44);
+    expect(foot.sett.height).toBeGreaterThanOrEqual(44);
+
+    // 500 ms hold and release without moving: opens menu sheet and keeps it open.
+    const r = (await targetRow.boundingBox())!;
+    const cx = r.x + 60;
+    const cy = r.y + r.height / 2;
+    await targetRow.evaluate(
+      (el, { x, y }) => {
+        el.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            bubbles: true,
+            pointerId: 10,
+            pointerType: "touch",
+            button: 0,
+            clientX: x,
+            clientY: y,
+          }),
+        );
+      },
+      { x: cx, y: cy },
+    );
+    await expect(targetRow).toHaveAttribute("data-pressed", "", { timeout: 1_500 });
+    await expect(page.locator(".menu-sheet")).toBeVisible();
+    await expect(page.locator(".stree-chip")).toHaveCount(0);
+    await page.evaluate(
+      ({ x, y }) => {
+        window.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            pointerId: 10,
+            pointerType: "touch",
+            clientX: x,
+            clientY: y,
+          }),
+        );
+      },
+      { x: cx, y: cy },
+    );
+    await expect(page.locator(".menu-sheet")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".menu-sheet")).toHaveCount(0);
+
+    // 500 ms hold then move ≥ 10 px while still held: closes menu and lifts touch chip above finger.
+    await targetRow.evaluate(
+      (el, { x, y }) => {
+        el.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            bubbles: true,
+            pointerId: 11,
+            pointerType: "touch",
+            button: 0,
+            clientX: x,
+            clientY: y,
+          }),
+        );
+      },
+      { x: cx, y: cy },
+    );
+    await expect(targetRow).toHaveAttribute("data-pressed", "", { timeout: 1_500 });
+    await expect(page.locator(".menu-sheet")).toBeVisible();
+    await page.evaluate(
+      ({ x, y }) => {
+        window.dispatchEvent(
+          new PointerEvent("pointermove", {
+            bubbles: true,
+            pointerId: 11,
+            pointerType: "touch",
+            clientX: x,
+            clientY: y + 14,
+          }),
+        );
+      },
+      { x: cx, y: cy },
+    );
+    await expect(page.locator(".menu-sheet")).toHaveCount(0);
+    const chip = page.locator(".stree-chip[data-touch]");
+    await expect(chip).toBeVisible();
+    const chipBox = (await chip.boundingBox())!;
+    expect(chipBox.y).toBeLessThan(cy + 14);
+    // Cancel / lift cleans up and leaves no pull-to-refresh transform on main.
+    await page.evaluate(
+      ({ x, y }) => {
+        window.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            pointerId: 11,
+            pointerType: "touch",
+            clientX: x,
+            clientY: y + 14,
+          }),
+        );
+      },
+      { x: cx, y: cy },
+    );
+    await expect(chip).toHaveCount(0);
+    const mainTransform = await page.locator("main#main").evaluate((el) => getComputedStyle(el).transform);
+    expect(mainTransform).toBe("none");
+  });
 });
