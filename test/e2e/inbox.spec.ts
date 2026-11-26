@@ -597,7 +597,7 @@ test.describe("inbox: under Settings", () => {
 });
 
 test.describe("inbox: one preview tab", () => {
-  test("row clicks one after another reuse one italic tab; an answer leaves it, typing and a double-click keep it", async ({
+  test("row clicks one after another reuse one upright preview tab; an answer leaves it, typing and a double-click keep it", async ({
     context,
     page,
   }) => {
@@ -622,7 +622,7 @@ test.describe("inbox: one preview tab", () => {
     const answers = () => d.seen.filter((x) => x.kind === "permission.answer").map((x) => x.for);
     const panel = page.locator("aside.panel");
     const tabs = panel.locator("[role='tablist'] [role='tab']");
-    const italic = (l: Locator) => l.evaluate((el) => getComputedStyle(el).fontStyle);
+    const fontStyle = (l: Locator) => l.evaluate((el) => getComputedStyle(el).fontStyle);
     const row = (p: { attention: string }) => page.locator(`.inbox-row[data-attention="${p.attention}"]`);
     try {
       await page.goto(`${CONTROL_BASE}/inbox`);
@@ -631,11 +631,11 @@ test.describe("inbox: one preview tab", () => {
         await row(p).locator(".inbox-main").click();
         await expect(panel).toHaveAttribute("data-split", p.key);
       }
-      // Three clicks, one tab: the preview, in italics. Alone it is the head's title.
+      // Three clicks, one tab: the preview, upright (never italicized). Alone it is the head's title.
       await expect(tabs).toHaveCount(1);
       await expect(tabs.first()).toHaveClass(/tab--preview/);
       await expect(panel.getByRole("heading", { name: "Third preview, preview" })).toBeVisible();
-      expect(await italic(panel.locator(".panel-title"))).toBe("italic");
+      expect(await fontStyle(panel.locator(".panel-title"))).toBe("normal");
       // The head is the window's drag region, where a double-click zooms: it keeps nothing.
       await panel.locator(".panel-title").dblclick();
       await expect(tabs.first()).toHaveClass(/tab--preview/);
@@ -646,18 +646,18 @@ test.describe("inbox: one preview tab", () => {
       await row(e).locator(".inbox-main").click();
       await expect(panel).toHaveAttribute("data-split", e.key);
       await expect(tabs).toHaveCount(1);
-      // Typing in its message field keeps it: upright, and the next click adds a tab.
+      // Typing in its message field keeps it: still upright, and the next click adds a tab.
       await body.locator(".ctl textarea").fill("Run the tests again");
       await expect(tabs.first()).not.toHaveClass(/tab--preview/);
-      expect(await italic(panel.locator(".panel-title"))).toBe("normal");
+      expect(await fontStyle(panel.locator(".panel-title"))).toBe("normal");
       await expect(panel.getByRole("heading", { name: "Fourth preview", exact: true })).toBeVisible();
       await row(f).locator(".inbox-main").click();
       await expect(tabs).toHaveCount(2);
       await expect(tabs.nth(1)).toHaveClass(/tab--preview/);
       await expect(tabs.nth(1)).toHaveAccessibleName("Fifth preview, preview");
       await expect(tabs.nth(0)).toHaveAccessibleName("Fourth preview");
-      expect(await italic(tabs.nth(1).locator(".tab-title"))).toBe("italic");
-      expect(await italic(tabs.nth(0).locator(".tab-title"))).toBe("normal");
+      expect(await fontStyle(tabs.nth(1).locator(".tab-title"))).toBe("normal");
+      expect(await fontStyle(tabs.nth(0).locator(".tab-title"))).toBe("normal");
       // A double-click on the tab keeps it.
       await tabs.nth(1).dblclick();
       await expect(tabs.nth(1)).not.toHaveClass(/tab--preview/);

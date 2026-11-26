@@ -54,6 +54,7 @@ import { actsHere, execDefault } from "./setup/local.js";
 import { createTailscaleProbe } from "./setup/tailscale.js";
 import { registerSkins, SkinRegistry } from "./skins/index.js";
 import { type AntigravityUsageSource, startAntigravityUsageSource } from "./sources/antigravity.js";
+import { createAntigravityParentResolver } from "./sources/antigravityParent.js";
 import { type OutboxSource, startOutboxSource } from "./sources/outbox.js";
 import { type SpacesheepSource, startSpacesheepSource } from "./sources/spacesheep.js";
 import { staticFiles, webDir } from "./static.js";
@@ -341,7 +342,11 @@ export async function createApp(opts: AppOptions = {}): Promise<App> {
   } catch {}
   const recheckTimer = setInterval(recheck, 3000);
   recheckTimer.unref();
-  const store = new Store(stateDir, { tickMs: opts.tickMs, keepDays: opts.keepDays });
+  const store = new Store(stateDir, {
+    tickMs: opts.tickMs,
+    keepDays: opts.keepDays,
+    resolveParent: opts.demo ? undefined : createAntigravityParentResolver(),
+  });
   // Each account's usage limits follow the store from its first event (the outbox's
   // first read, the demo's) on.
   const limits = new LimitsStore(stateDir);

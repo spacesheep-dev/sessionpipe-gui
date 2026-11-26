@@ -30,7 +30,7 @@ export function StepMark({ mark, label }: { mark: Mark; label: string }) {
             d="M5 10.5l3.2 3.2L15 6.8"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.65"
             strokeLinecap="round"
             strokeLinejoin="round"
           />

@@ -268,7 +268,7 @@ describe("safeSvg", () => {
     expect(out).toContain('viewBox="0 0 20 20"');
     expect(out).toContain('<clipPath id="c1">');
     expect(out).toContain('clip-path="url(#c1)"');
-    expect(out).toContain("<title>Icon</title>");
+    expect(out).not.toContain("<title");
     expect(out).not.toContain("drop-me");
     expect(out).not.toContain("data-x");
     expect(out).not.toContain("metadata");

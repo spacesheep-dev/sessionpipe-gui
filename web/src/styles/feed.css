@@ -46,6 +46,10 @@
   pointer-events: auto;
   animation: rise var(--dur) var(--ease-out);
 }
+.feed-news svg {
+  flex: none;
+  display: block;
+}
 @media (hover: hover) {
   .feed-news:hover {
     background: color-mix(in oklch, var(--bg-2), var(--fg) 5%);

@@ -110,6 +110,8 @@
   border-radius: var(--radius-inner);
 }
 .group-caret {
+  flex: none;
+  display: block;
   margin-left: -4px;
   color: var(--fg-4);
   transition: transform var(--dur-fast) var(--ease-out);

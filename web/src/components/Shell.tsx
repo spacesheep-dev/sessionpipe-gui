@@ -242,12 +242,13 @@ export function SlidersIcon({ size = 16 }: { size?: number }) {
       stroke="currentColor"
       strokeWidth="1.5"
       strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M3 5.5h14M3 10h14M3 14.5h14" />
-      <circle cx="7" cy="5.5" r="1.8" fill="var(--bg)" />
-      <circle cx="13" cy="10" r="1.8" fill="var(--bg)" />
-      <circle cx="9" cy="14.5" r="1.8" fill="var(--bg)" />
+      <path d="M3 5.5h2.2M8.8 5.5H17M3 10h8.2M14.8 10H17M3 14.5h4.2M10.8 14.5H17" />
+      <circle cx="7" cy="5.5" r="1.8" />
+      <circle cx="13" cy="10" r="1.8" />
+      <circle cx="9" cy="14.5" r="1.8" />
     </svg>
   );
 }

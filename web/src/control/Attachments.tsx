@@ -1214,6 +1214,8 @@ export function AttachButton({
         fill="none"
         stroke="currentColor"
         strokeWidth="1.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       >
         <path d="M10.5 4.5 5.7 9.3a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a3.2 3.2 0 0 0-4.5-4.5L3.3 7.3a4.8 4.8 0 0 0 6.8 6.8l3.6-3.6" />
       </svg>
@@ -1334,10 +1336,12 @@ function PictureGlyph() {
       fill="none"
       stroke="currentColor"
       strokeWidth="1.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
       <rect x="2" y="3" width="12" height="10" rx="1.5" />
       <circle cx="6" cy="6.5" r="1.2" />
-      <path d="m2.5 12 3.8-3.8 2.7 2.7 1.8-1.8 2.7 2.7" strokeLinejoin="round" />
+      <path d="m2.5 12 3.8-3.8 2.7 2.7 1.8-1.8 2.7 2.7" />
     </svg>
   );
 }
@@ -1546,8 +1550,18 @@ function FileChip({ f }: { f: ShownFile }) {
   return (
     <span className="att-chip" title={fileWords(f)} data-sent-file={f.name}>
       {!picture && (
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor">
-          <path d="M4 1.5h5.5L12.5 4.5v10h-8.5zM9.5 1.5v3h3" strokeWidth="1.25" strokeLinejoin="round" />
+        <svg
+          viewBox="0 0 16 16"
+          width="14"
+          height="14"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M4 1.5h5.5L12.5 4.5v10h-8.5zM9.5 1.5v3h3" />
         </svg>
       )}
       <span className="att-chip-name">{f.name}</span>

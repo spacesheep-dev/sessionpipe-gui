@@ -460,6 +460,10 @@
     border-color var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
+.btn > svg {
+  flex: none;
+  display: block;
+}
 @media (hover: hover) {
   .btn:hover:not(:disabled) {
     background: color-mix(in oklch, var(--raised), var(--fg) 5%);

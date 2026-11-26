@@ -1164,6 +1164,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
             fill="none"
             stroke="currentColor"
             strokeWidth="1.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
           >
             <path d="M10.5 4.5 5.7 9.3a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a3.2 3.2 0 0 0-4.5-4.5L3.3 7.3a4.8 4.8 0 0 0 6.8 6.8l3.6-3.6" />
           </svg>
@@ -1506,7 +1508,7 @@ function FolderGlyph() {
       aria-hidden="true"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.3"
+      strokeWidth="1.45"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -1525,7 +1527,7 @@ function StarGlyph({ filled }: { filled: boolean }) {
       aria-hidden="true"
       fill={filled ? "currentColor" : "none"}
       stroke="currentColor"
-      strokeWidth="1.3"
+      strokeWidth="1.45"
       strokeLinecap="round"
       strokeLinejoin="round"
     >

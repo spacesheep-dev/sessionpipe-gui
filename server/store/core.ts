@@ -45,6 +45,11 @@ export interface IngestResult {
 
 export type StoreListener = (msg: StreamMessage) => void;
 
+export interface ResolvedParent {
+  parentId: string;
+  title?: string;
+}
+
 export interface StoreOptions {
   /** How often states are re-evaluated for the timers (default 30 s). */
   tickMs?: number;
@@ -54,6 +59,8 @@ export interface StoreOptions {
    *  strings in memory (OLD_PREVIEW_CHARS instead of PREVIEW_CHARS); the full event is
    *  on disk either way. Default 14; 0 keeps every preview whole. */
   keepDays?: number;
+  /** Fallback parent resolver for sessions whose events omit `session.parent_id`. */
+  resolveParent?: (harness: string, id: string) => ResolvedParent | null;
 }
 
 /** Characters of each big `data` string kept for events past `keepDays`: enough for a
@@ -135,6 +142,7 @@ export class StoreCore {
   private readonly timers: ReturnType<typeof setInterval>[] = [];
   private closed = false;
   private readonly keepDays: number;
+  private readonly resolveParent?: (harness: string, id: string) => ResolvedParent | null;
 
   /** `log`: where the full events are kept and read back from (store/log.ts). */
   constructor(
@@ -144,6 +152,7 @@ export class StoreCore {
   ) {
     this.files = log;
     this.keepDays = opts.keepDays ?? KEEP_DAYS_DEFAULT;
+    this.resolveParent = opts.resolveParent;
     this.boot();
     const tick = unref(setInterval(() => this.tick(), opts.tickMs ?? 30_000));
     const stats = unref(setInterval(() => this.emitStats(), opts.statsMs ?? 5_000));
@@ -190,6 +199,7 @@ export class StoreCore {
       // agent its child is without its session) until the child speaks again.
       this.noteChild(entry, ev);
     });
+    for (const entry of this.sessions.values()) this.applyResolvedParent(entry);
     for (const entry of this.sessions.values()) this.refresh(entry, now);
     for (const entry of this.sessions.values()) this.syncChildren(entry);
   }
@@ -218,6 +228,7 @@ export class StoreCore {
       toolErrors: c.counts.toolErrors,
       attributed: true,
       recentTools: c.recentTools.slice(-4),
+      ...(have?.description || c.title ? { description: have?.description ?? c.title } : {}),
       ...(c.currentTool
         ? { currentTool: { tool: c.currentTool.tool, callId: c.currentTool.callId, since: c.currentTool.since } }
         : {}),
@@ -286,6 +297,7 @@ export class StoreCore {
     entry.live = fresh.live;
     entry.files = fresh.files;
     entry.track = fresh.track;
+    this.applyResolvedParent(entry);
     this.refresh(entry, now);
     this.syncChildren(entry);
   }
@@ -345,12 +357,11 @@ export class StoreCore {
     }
   }
 
-  /** A subagent's event names its parent; the parent counts it once. Returns the
-   *  parent entry when it exists and its count changed. */
-  private noteChild(entry: Entry, ev: ProtocolEvent): Entry | undefined {
-    const parentId = ev.session.parent_id;
-    if (typeof parentId !== "string" || !parentId) return undefined;
-    const parentKey = sessionKey(ev.harness.name, parentId);
+  /** Record `entry` as a child of `parentId` (once). Returns the parent entry when it
+   *  exists and its child set changed. */
+  private linkChild(entry: Entry, parentId: string): Entry | undefined {
+    if (!parentId || parentId === entry.summary.id) return undefined;
+    const parentKey = sessionKey(entry.summary.harness, parentId);
     let kids = this.childrenOf.get(parentKey);
     if (!kids) {
       kids = new Set();
@@ -363,6 +374,29 @@ export class StoreCore {
     parent.childKeys = kids;
     parent.summary.children = kids.size;
     return parent;
+  }
+
+  /** A subagent's event names its parent; the parent counts it once. Returns the
+   *  parent entry when it exists and its count changed. */
+  private noteChild(entry: Entry, ev: ProtocolEvent): Entry | undefined {
+    const parentId = ev.session.parent_id;
+    if (typeof parentId !== "string" || !parentId) return undefined;
+    return this.linkChild(entry, parentId);
+  }
+
+  /** Fallback parent lookup when events omitted `session.parent_id` (undefined only; never
+   *  overrides an explicit parent_id or explicit null from a newer sessionpipe CLI). */
+  private applyResolvedParent(entry: Entry): { resolved: boolean; parent?: Entry } {
+    if (!this.resolveParent || entry.summary.parentId !== undefined) return { resolved: false };
+    const info = this.resolveParent(entry.summary.harness, entry.summary.id);
+    if (!info?.parentId || info.parentId === entry.summary.id) return { resolved: false };
+    entry.summary.parentId = info.parentId;
+    if (!entry.summary.title && info.title) {
+      entry.summary.title = info.title;
+      entry.summary.titleSource = "first-ask";
+    }
+    const parent = this.linkChild(entry, info.parentId);
+    return { resolved: true, parent };
   }
 
   private emit(msg: StreamMessage): void {
@@ -517,6 +551,10 @@ export class StoreCore {
         this.refresh(entry, now);
         this.emit({ kind: "event", event: ev, session: entry.summary });
       }
+      let emitSelf = false;
+      const resolved = this.applyResolvedParent(entry);
+      if (resolved.resolved) emitSelf = true;
+      if (resolved.parent) parents.add(resolved.parent);
       // A child's agent entry on its parent follows the child; a parent that arrives after
       // its children picks them up.
       const parent = this.parentOf(entry);
@@ -524,7 +562,8 @@ export class StoreCore {
         this.refresh(parent, now);
         parents.add(parent);
       }
-      if (entry.childKeys.size && this.syncChildren(entry)) this.emit({ kind: "session", session: entry.summary });
+      if (entry.childKeys.size && this.syncChildren(entry)) emitSelf = true;
+      if (emitSelf) this.emit({ kind: "session", session: entry.summary });
       for (const p of parents) this.emit({ kind: "session", session: p.summary });
       if (entry.summary.machine) machines.add(entry.summary.machine);
     }
@@ -542,6 +581,11 @@ export class StoreCore {
       u.rec.bytes = line.bytes;
       this.rebuild(entry, now);
       this.emit({ kind: "session", session: entry.summary });
+      const parent = this.parentOf(entry);
+      if (parent && this.syncChildAgent(parent, entry)) {
+        this.refresh(parent, now);
+        this.emit({ kind: "session", session: parent.summary });
+      }
       if (entry.summary.machine) machines.add(entry.summary.machine);
     }
     this.emitMachines(machines);

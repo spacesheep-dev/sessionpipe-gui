@@ -18,7 +18,6 @@ const ALLOWED_ELEMENTS = new Map<string, string>([
   ["polygon", "polygon"],
   ["defs", "defs"],
   ["clippath", "clipPath"],
-  ["title", "title"],
 ]);
 
 const FORBIDDEN_ELEMENTS = new Set([
@@ -162,11 +161,6 @@ export function safeSvg(raw: string | undefined): string | undefined {
       if (canonicalAttr === "id" && !SAFE_ID.test(val)) continue;
       if (canonicalAttr === "clip-path" && val !== "none" && !SAFE_LOCAL_CLIP_URL.test(val)) continue;
       out.setAttribute(canonicalAttr, attr.value);
-    }
-    if (canonicalTag === "title") {
-      const text = el.textContent ?? "";
-      if (text) out.appendChild(document.createTextNode(text));
-      return out;
     }
     for (const child of Array.from(el.childNodes)) {
       if (child.nodeType !== 1) continue;

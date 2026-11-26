@@ -457,6 +457,7 @@ function FileMenu({
           fill="none"
           stroke="currentColor"
           strokeWidth="1.5"
+          strokeLinecap="round"
           strokeLinejoin="round"
           aria-hidden="true"
         >
@@ -891,7 +892,7 @@ function FileView({
                 height="14"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="1.6"
+                strokeWidth="1.85"
                 aria-hidden="true"
               >
                 <path d="M12 5l-5 5 5 5" strokeLinecap="round" strokeLinejoin="round" />
@@ -913,7 +914,7 @@ function FileView({
                 height="14"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="1.6"
+                strokeWidth="1.85"
                 aria-hidden="true"
               >
                 <path d="M8 5l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />

@@ -70,12 +70,6 @@ html[data-size-class="regular"] .rail-brand .mark {
 html[data-size-class="regular"] .rail-word {
   display: none;
 }
-html[data-size-class="regular"] .rail-compose {
-  flex: none;
-  width: 44px;
-  height: 44px;
-  color: var(--fg-2);
-}
 
 /* The rows: a glyph and its page's name, in the More sheet's type. */
 html[data-size-class="regular"] .rail-nav {
@@ -115,10 +109,6 @@ html[data-size-class="regular"] .rail:has(.stree-row[data-open]) .rail-nav .nav-
   background-color: transparent;
 }
 html[data-size-class="regular"] .rail .nav-glyph {
-  width: 20px;
-  height: 20px;
-}
-html[data-size-class="regular"] .rail .nav-glyph--svg svg {
   width: 20px;
   height: 20px;
 }
