@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { UI_KEY_COOKIE, UI_KEY_PARAM } from "../shared/api.js";
 import { NO_FRAMING } from "./http/guard.js";
 import type { Ctx, Handler, Reply } from "./http/router.js";
+import { secretEquals } from "./http/secret.js";
 import { WORDMARK_CSS, wordmarkHtml } from "./ui/brand.js";
 
 export const TYPES: Record<string, string> = {
@@ -53,7 +54,7 @@ export function staticFiles(dir: string, opts: StaticOptions): Handler {
 
     // `?k=<ui key>` on any page: set the cookie and come back without it in the URL.
     const k = ctx.url.searchParams.get(UI_KEY_PARAM);
-    if (k !== null && k === opts.uiKey()) {
+    if (k !== null && secretEquals(k, opts.uiKey())) {
       const rest = new URLSearchParams(ctx.url.searchParams);
       rest.delete(UI_KEY_PARAM);
       const qs = rest.toString();
