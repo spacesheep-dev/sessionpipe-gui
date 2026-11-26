@@ -236,7 +236,8 @@ not go through); `unsupported` when the daemon knows the kind but the machine ca
 proof, `token` on the first pairing; open pairing adds `sink_token` and `account`) /
 `expired`; 404 once the paired answer was handed over, or for a code never seen. A new
 `POST pair` naming an existing `machine` renews the code on the same row; the old code
-answers `expired`. `POST hello` 204, `GET ?machine=&wait=` 200/204 (wait ≤ 25 s),
+answers `expired`. With no sink token, a renewal must bring the `poll_key` of one of that
+machine's own open pairings, or it is `401 token_required` and changes nothing. `POST hello` 204, `GET ?machine=&wait=` 200/204 (wait ≤ 25 s),
 `POST ack` 202 `{ applied, unknown }`, `POST off` 204, `GET {control}/files/<sha256>`
 (HTTP.md §3: the bytes with their `content-type`, 404 when not held) — each with the
 machine's own token and nothing else. A `taken` ack pauses redelivery 35 minutes; a final ack ends it;

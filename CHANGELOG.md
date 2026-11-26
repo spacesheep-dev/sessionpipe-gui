@@ -6,6 +6,17 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **An open pairing can no longer take over a machine that is already here.** A pairing
+  request with no sink token (open pairing, a `poll_key` of its own) that named an
+  existing machine's id was taken as that machine's renewal: it rewrote the machine's
+  name, folders, harnesses and accounts on the board, ended the code its own terminal was
+  waiting on, and put a pairing under that machine's name which, once approved, handed the
+  sink token to whoever sent it. Naming a machine that exists now takes the sink token, or
+  the poll key that started one of that machine's own open pairings; anything else is
+  `401 token_required` and changes nothing.
+
 ## [0.8.10] - 2026-11-25
 
 The session-tree sidebar lands with its full desktop, iPad, and touch polish: an icon rail beside a resizable sessions column, receiver-backed arrangement synced across devices, stable three-block ordering, outliner keyboard chords, stepped child rails, floating needs-you jump pill, compact iPad foot row, and smoother live Feed rendering. Usage gains polished account pool cards with collapsible windows, calm status pills, and local Antigravity quota polling.
