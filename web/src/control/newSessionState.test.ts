@@ -309,31 +309,59 @@ describe("agentLeft", () => {
     ],
     observedAt: new Date(NOW).toISOString(),
   };
-  it("reads the pool's current account on a machine with the switch on", () => {
-    expect(agentLeft("claude-code", "lab-mac", control(pool), [entry], NOW)).toEqual({
+  it("reads the pool's calm quota state on a machine with the switch on", () => {
+    const res = agentLeft("claude-code", "lab-mac", control(pool), [entry], NOW);
+    expect(res).toMatchObject({
       hint: "62% left",
       detail: "3 accounts, 2 with room · Misha, 5 hours, resets in 2 h 21 m",
       out: false,
+      tone: "neutral",
+      aside: "62% left · 2 of 3 ready",
+    });
+    expect(res.asideTip).toContain("Misha, Claude Code on lab-mac, in use.");
+    expect(res.asideTip).toContain("Fiction has room.");
+  });
+  it("never alarms when current pooled account is exhausted while failover accounts are ready", () => {
+    const exhausted: LimitsEntry = {
+      ...entry,
+      windows: [{ ...entry.windows[0]!, usedPercent: 100 }],
+    };
+    expect(agentLeft("claude-code", "lab-mac", control(pool), [exhausted], NOW)).toMatchObject({
+      hint: "1 with room",
+      out: false,
+      tone: "neutral",
+      aside: "1 of 3 accounts ready",
     });
   });
   it("leaves other agents, a pool that is off and a machine without one to the login's own numbers", () => {
     expect(agentLeft("codex", "lab-mac", control(pool), [entry], NOW)).toEqual({});
-    const own = { hint: "62% left", detail: "5 hours, resets in 2 h 21 m", out: false };
-    expect(agentLeft("claude-code", "lab-mac", control({ ...pool, on: false }), [entry], NOW)).toEqual(own);
-    expect(agentLeft("claude-code", "lab-mac", control(undefined), [entry], NOW)).toEqual(own);
+    const own = {
+      hint: "62% left",
+      detail: "5 hours, resets in 2 h 21 m",
+      out: false,
+      tone: "neutral",
+      aside: "62% left",
+    };
+    const offRes = agentLeft("claude-code", "lab-mac", control({ ...pool, on: false }), [entry], NOW);
+    expect(offRes).toMatchObject(own);
+    expect(offRes.asideTip).toContain("Account switching is off on lab-mac.");
+    const plainRes = agentLeft("claude-code", "lab-mac", control(undefined), [entry], NOW);
+    expect(plainRes).toMatchObject(own);
+    expect(plainRes.asideTip).not.toContain("Account switching is off");
     const allOff = {
       ...pool,
       accounts: pool.accounts.map((a) => ({ ...a, enabled: false, status: "disabled" as const })),
     };
-    expect(agentLeft("claude-code", "lab-mac", control(allOff), [entry], NOW)).toEqual(own);
+    expect(agentLeft("claude-code", "lab-mac", control(allOff), [entry], NOW)).toMatchObject(own);
   });
-  it("says None left when no pooled account has room", () => {
+  it("says Pool used up when no pooled account has room", () => {
     const out = { ...pool, accounts: pool.accounts.map((a) => ({ ...a, current: false, status: "limited" as const })) };
-    expect(agentLeft("claude-code", "lab-mac", control(out), [entry], NOW)).toEqual({
+    expect(agentLeft("claude-code", "lab-mac", control(out), [entry], NOW)).toMatchObject({
       hint: "None left",
       detail: "3 accounts, none with room · first back in 2 h 10 m",
       out: true,
-      aside: "None left",
+      tone: "out",
+      aside: "Pool used up · first back in 2 h 10 m",
     });
   });
 });

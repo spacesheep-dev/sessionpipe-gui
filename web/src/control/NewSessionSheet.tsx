@@ -39,7 +39,6 @@ import {
 } from "react";
 import { useSendStates } from "../account/sendable";
 import { ActionButton, EmptyState, HarnessGlyph, withFormScrim } from "../components/bits";
-import { MoreButton } from "../components/ContextMenu";
 import { Select, type SelectOption } from "../components/Select";
 import { useAppState, useLimits, useListedSessions, useMachines } from "../data/hooks";
 import { usePhoneLayout } from "../lib/device";
@@ -65,7 +64,17 @@ import {
 import { ControlError, controlApi, wrongOriginHere } from "./api";
 import { uuid } from "./bytes";
 import { type CommandFields, sendCommand } from "./command";
-import { folderChoices, machineHome, tildify, typedFolder, unnamedHere } from "./folders";
+import {
+  folderChoices,
+  formatFolder,
+  isFavoriteFolder,
+  machineHome,
+  readFavoriteFolders,
+  tildify,
+  toggleFavoriteFolder,
+  typedFolder,
+  unnamedHere,
+} from "./folders";
 import { HeldNotice, useHeld } from "./HeldNotice";
 import type { HeldMeta } from "./held";
 import { HELD_WORDS } from "./heldWords";
@@ -221,6 +230,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         machine: mm.name,
         folders: cc.folders,
         home: machineHome(cc),
+        favorites: readFavoriteFolders(mm.name),
       });
       // A session's `~/…` folder this page can't name ("New session here" on a computer
       // reached through spacesheep) is not kept: the machine's own folders are offered.
@@ -228,7 +238,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       if (prefer.cwd && !unnamedHere(prefer.cwd, machineHome(cc))) {
         const t = typedFolder(prefer.cwd, { folders: cc.folders, home: machineHome(cc), machine: mm.name });
         folder = t.ok ? t.path : prefer.cwd;
-      } else folder = r.cwd ?? choices.recent[0]?.path ?? choices.allowed[0]?.path ?? "";
+      } else folder = r.cwd ?? choices.pinned[0]?.path ?? choices.recent[0]?.path ?? choices.allowed[0]?.path ?? "";
       const opts = harness ? cc.start?.[harness] : undefined;
       const permission: RunLevel | undefined =
         prefer.permission && permissionChoices(opts).includes(prefer.permission)
@@ -256,6 +266,12 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   }, []);
   const [harness, setHarness] = useState<string | undefined>(first.harness);
   const [folder, setFolder] = useState(first.folder);
+  const [favorites, setFavorites] = useState<string[]>(() =>
+    initial.ctx.machine ? readFavoriteFolders(initial.ctx.machine) : [],
+  );
+  useEffect(() => {
+    setFavorites(machine ? readFavoriteFolders(machine) : []);
+  }, [machine]);
   const [permission, setPermission] = useState<RunLevel | undefined>(first.permission);
   const [model, setModel] = useState(first.model ?? "");
   const [text, setText] = useState(target.text ?? initial.draft?.text ?? "");
@@ -403,7 +419,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       : !harness
         ? "[data-ns-row=agent] button"
         : !folderCheck.ok
-          ? "[data-ns-row=folder] button, [data-ns-row=folder] input"
+          ? "[data-ns-row=folder] button.sel, [data-ns-row=folder] input"
           : "textarea";
   useFocusTrap(ref, !closing, { onClose: close, initial: initialFocus });
   // A phone's sheet follows the finger down from its top, and goes past 40 % or a flick.
@@ -726,7 +742,13 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       void start();
     } else if (matches(e.nativeEvent, "newSession.folder")) {
       e.preventDefault();
-      ref.current?.querySelector<HTMLElement>("[data-ns-row=folder] button, [data-ns-row=folder] input")?.focus();
+      const folderEl = ref.current?.querySelector<HTMLElement>(
+        "[data-ns-row=folder] button.sel, [data-ns-row=folder] input",
+      );
+      if (folderEl) {
+        folderEl.focus();
+        if (folderEl.tagName === "BUTTON" && folderEl.getAttribute("aria-expanded") !== "true") folderEl.click();
+      }
     }
     // The page's own keys stay out while the sheet has focus (Esc and Tab are the trap's).
     if (e.key !== "Tab" && e.key !== "Escape") e.stopPropagation();
@@ -801,7 +823,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   // name; on a machine that pools the agent's accounts, the pool's current one and the count.
   const limits = useLimits();
   const now = useNow("coarse");
-  const left = (h: string) => (machine ? agentLeft(h, machine, c, limits, now) : {});
+  const left = (h: string) => (machine ? agentLeft(h, machine, c, limits, now, harnessMark(h).label) : {});
   const agentOptions: SelectOption<string>[] = harnesses.map((h) => {
     const w = left(h);
     return {
@@ -817,23 +839,88 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   const choices = useMemo(
     () =>
       machine && c
-        ? folderChoices({ sessions: [...sessions.values()], machine, folders: c.folders, home: machineHome(c) })
-        : { recent: [], allowed: [] },
-    [machine, c, sessions],
+        ? folderChoices({
+            sessions: [...sessions.values()],
+            machine,
+            folders: c.folders,
+            home: machineHome(c),
+            favorites,
+          })
+        : { pinned: [], recent: [], allowed: [] },
+    [machine, c, sessions, favorites],
   );
-  const folderOptions: SelectOption<string>[] = [
-    ...choices.recent.map((f) => ({ value: f.path, label: f.display, hint: f.repo })),
-    ...choices.allowed.map((f, i) => ({
+  const toFolderOption = (
+    f: { path: string; display: string; repo?: string },
+    o: { divider?: boolean; pinned?: boolean } = {},
+  ): SelectOption<string> => {
+    const fmt = formatFolder(f.display, f.repo);
+    const hint = f.repo && f.repo !== fmt.name ? f.repo : o.pinned ? "Pinned" : undefined;
+    return {
       value: f.path,
-      label: f.display,
-      divider: i === 0 && choices.recent.length > 0,
-    })),
+      label: fmt.name || f.display,
+      ...(hint ? { hint } : {}),
+      ...(fmt.parent ? { detail: fmt.parent, detailMono: true } : {}),
+      ...(o.divider ? { divider: true } : {}),
+    };
+  };
+  const folderOptions: SelectOption<string>[] = [
+    ...choices.pinned.map((f) => toFolderOption(f, { pinned: true })),
+    ...choices.recent.map((f, i) => toFolderOption(f, { divider: i === 0 && choices.pinned.length > 0 })),
+    ...choices.allowed.map((f, i) =>
+      toFolderOption(f, { divider: i === 0 && (choices.pinned.length > 0 || choices.recent.length > 0) }),
+    ),
   ];
   const typed = (t: string): SelectOption<string> | null => {
     if (!machine) return null;
     const r = typedFolder(t, { folders: c?.folders, home: machineHome(c), machine });
-    return r.ok ? { value: r.path, label: tildify(r.path, machineHome(c)) } : { value: t, label: t, hint: r.reason };
+    if (!r.ok) return { value: t, label: t, hint: r.reason };
+    const display = tildify(r.path, machineHome(c));
+    const fmt = formatFolder(display);
+    return {
+      value: r.path,
+      label: fmt.name || display,
+      ...(fmt.parent ? { detail: fmt.parent, detailMono: true } : {}),
+    };
   };
+  const renderFolderValue = (chosenList: SelectOption<string>[]): ReactNode => {
+    if (!folder) return <span className="sel-placeholder">Choose…</span>;
+    if (!folderCheck.ok && chosenList.length > 0) {
+      return (
+        <span className="ns-folder-val" title={folder}>
+          <FolderGlyph />
+          <span className="ns-folder-name mono">{folder}</span>
+        </span>
+      );
+    }
+    const display = tildify(folder, machineHome(c));
+    const fmt = formatFolder(display);
+    return (
+      <span className="ns-folder-val" title={fmt.full}>
+        <FolderGlyph />
+        <span className="ns-folder-name">{fmt.name || display}</span>
+        {fmt.compactParent && <span className="ns-folder-parent mono">{fmt.compactParent}</span>}
+      </span>
+    );
+  };
+  const folderPinned = machine && folderCheck.ok ? isFavoriteFolder(favorites, folderCheck.path) : false;
+  const togglePinFolder = () => {
+    if (!machine || !folderCheck.ok) return;
+    setFavorites(toggleFavoriteFolder(machine, folderCheck.path));
+  };
+  const folderPin =
+    machine && folderCheck.ok ? (
+      <button
+        type="button"
+        className={`icon-btn ns-pin ${folderPinned ? "ns-pin--on" : ""}`}
+        aria-label={folderPinned ? "Unpin folder" : "Pin folder"}
+        aria-pressed={folderPinned}
+        data-tip={folderPinned ? "Unpin folder" : "Pin folder"}
+        data-ns-pin
+        onClick={togglePinFolder}
+      >
+        <StarGlyph filled={folderPinned} />
+      </button>
+    ) : null;
   const permissionOptions: SelectOption<RunLevel>[] = levels.map((p) => ({
     value: p,
     label: p === "inherit" ? INHERIT_DEFAULT : PERMISSION_LABEL[p],
@@ -893,7 +980,18 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           className="ns-sel"
         />,
         chosen.aside ? (
-          <span className={`ns-aside num ${chosen.out ? "ns-aside--out" : ""}`} data-ns-left>
+          <span
+            className={`ns-aside num ns-quota ${
+              chosen.tone === "out" || chosen.out
+                ? "ns-aside--out ns-quota--out"
+                : chosen.tone === "low"
+                  ? "ns-quota--low"
+                  : "ns-quota--neutral"
+            }`}
+            data-ns-left
+            data-tone={chosen.tone ?? (chosen.out ? "out" : "neutral")}
+            title={chosen.asideTip}
+          >
             {chosen.aside}
           </span>
         ) : null,
@@ -908,9 +1006,10 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
             onChange={setFolder}
             options={folderOptions}
             placeholder="Choose…"
+            renderValue={renderFolderValue}
             custom={typed}
             filterPlaceholder="Search, or type a path"
-            className="ns-sel mono"
+            className="ns-sel ns-sel--folder"
           />
         ) : (
           <input
@@ -924,8 +1023,13 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           />
         ),
         machine && c && !listsFolders ? (
-          <span className="ns-aside">{machine} didn't list its folders; it checks the path itself</span>
-        ) : null,
+          <span className="ns-row-end">
+            <span className="ns-aside">{machine} didn't list its folders; it checks the path itself</span>
+            {folderPin}
+          </span>
+        ) : (
+          folderPin
+        ),
       )}
     </div>
   );
@@ -1035,8 +1139,8 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       ) : (
         <button
           type="button"
-          className="icon-btn ns-attach"
-          aria-label="Add files"
+          className={`icon-btn ns-attach ${files.length > 0 ? "ns-attach--has" : ""}`}
+          aria-label={files.length > 0 ? `Add files (${files.length} attached)` : "Add files"}
           data-tip="Add files"
           onClick={() => fileInput.current?.click()}
         >
@@ -1051,6 +1155,11 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           >
             <path d="M10.5 4.5 5.7 9.3a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a3.2 3.2 0 0 0-4.5-4.5L3.3 7.3a4.8 4.8 0 0 0 6.8 6.8l3.6-3.6" />
           </svg>
+          {files.length > 0 && (
+            <span className="ns-attach-count num" aria-hidden="true">
+              {files.length}
+            </span>
+          )}
         </button>
       )}
     </>
@@ -1100,7 +1209,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
   );
   const fixedNote = fixed?.note ? <span className="ns-aside">{fixed.note}</span> : null;
   const startKeys = hintFor("newSession.start");
-  const more = () => [{ label: "Discard draft", disabled: !text && !files.length, run: discard }];
+  const hasDraft = Boolean(text.trim() || files.length > 0);
   // Not approved yet: the way on is Approve this iPhone; the draft stays for when it can.
   const approveHere = () => {
     close();
@@ -1121,6 +1230,13 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
     [line && (!canStart || (phone && line.ready)) ? "ns-status" : null, passkeyNote && !phone ? "ns-passkey" : null]
       .filter(Boolean)
       .join(" ") || undefined;
+  const statusDotClass = !line?.text
+    ? null
+    : line.tone === "err"
+      ? "ns-status-dot ns-status-dot--err"
+      : line.ready
+        ? "ns-status-dot ns-status-dot--ok"
+        : "ns-status-dot ns-status-dot--ring";
   // Kept in place while empty, so what it says later is read out where it was.
   const statusLine = (line || phone) && (
     <p
@@ -1129,6 +1245,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
       role="status"
       aria-live="polite"
     >
+      {statusDotClass && <span className={statusDotClass} aria-hidden="true" />}
       {line?.text}
       {line?.approve && (
         <>
@@ -1281,9 +1398,22 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         onDrop={onDrop}
         data-new-session
       >
-        <h2 className="ns-title" id="ns-title">
-          New session
-        </h2>
+        <header className="ns-head">
+          <h2 className="ns-title" id="ns-title">
+            New session
+          </h2>
+          {form && hasDraft && (
+            <button
+              type="button"
+              className="btn btn--sm btn--ghost ns-head-discard"
+              onClick={discard}
+              title="Discard draft"
+              data-ns-discard
+            >
+              Discard
+            </button>
+          )}
+        </header>
         {!form ? (
           empty
         ) : (
@@ -1293,6 +1423,9 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
             {chips}
             <div className="ns-opts">
               {fileButton}
+              {fileButton && (showPermission || fixed || showModel) && (
+                <span className="ns-opts-sep" aria-hidden="true" />
+              )}
               {showPermission && (
                 <span className="ns-opt" data-ns-row="permission">
                   <span className="ns-opt-label" id="ns-permission">
@@ -1320,7 +1453,6 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
             <footer className="ns-foot">
               {statusLine}
               <span className="ns-actions">
-                <MoreButton build={more} label="Draft" title={() => "New session"} className="ns-more" />
                 <button type="button" className="btn" onClick={close} data-ns-cancel>
                   Cancel
                 </button>
@@ -1348,6 +1480,45 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         )}
       </div>
     </>
+  );
+}
+
+/** Crisp 14 px monochrome folder glyph for the Folder trigger. */
+function FolderGlyph() {
+  return (
+    <svg
+      className="ns-folder-icon"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6a1.5 1.5 0 0 1 1.15.54l.6.72c.24.28.59.44.96.44H12.5A1.5 1.5 0 0 1 14 6.2v5.3a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5v-7Z" />
+    </svg>
+  );
+}
+
+/** Crisp 14 px star glyph for pinning/unpinning the chosen folder. */
+function StarGlyph({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      aria-hidden="true"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m8 2.2 1.76 3.56 3.94.58-2.85 2.78.67 3.92L8 11.2l-3.52 1.84.67-3.92L2.3 6.34l3.94-.58L8 2.2Z" />
+    </svg>
   );
 }
 

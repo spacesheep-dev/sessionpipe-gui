@@ -139,6 +139,10 @@ button.sel:focus-visible {
   text-wrap: pretty;
   overflow-wrap: anywhere;
 }
+.sel-opt-detail.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
 .sel-list--icons .sel-opt-detail {
   grid-column: 3 / -1;
 }

@@ -15,9 +15,10 @@ import type {
   SessionSummary,
 } from "@shared/api";
 import {
-  agentAside,
+  type AgentQuotaWords,
   isOut,
   orderWindows,
+  type Reading,
   readWindow,
   staleWords,
   tightest,
@@ -312,36 +313,123 @@ export const isPoolActivity = (a: ControlActivity): boolean => a.kind === "pool"
 
 // ----- the picker's line, as the Agent menu draws it (§6) -----
 
-/** The Agent menu's three parts for a pooled harness, the Usage spec's picker shape: the
- *  hint at the right is the current account's tightest value ("62% left"), the detail under
- *  the name the room count and that account's window ("3 accounts, 2 with room · Misha,
- *  5 hours, resets in 2 h 21 m", with "numbers as of 3 h ago" when its entry is stale), and
- *  `out` when the hint takes the accent: "None left" when no account has room and one is
- *  used up; `aside`, the chosen agent's line, as limits.ts agentAside words it. Every account
- *  off or in error has no hint, only the count, and so has one whose windows have all reset. */
+/** The Agent menu's pool-aware quota state: never alarms when failover accounts still have
+ *  room. `tone: "out"` fires ONLY when every enabled account in the pool is exhausted (`ready
+ *  === 0`); when the current account is out or low (<=20%) while another enabled account has
+ *  room, returns calm neutral readiness (`"${ready} of ${total} accounts ready"`). Full pool
+ *  breakdown goes in `asideTip` (`poolTip`) whenever `machine` is provided. */
 export function poolPickerWords(
   pool: MachinePool,
   entryFor: (accountId: string) => LimitsEntry | undefined,
   now: number,
-): { hint?: string; detail?: string; out?: boolean; aside?: string } {
+  machine?: string,
+  agent?: string,
+): AgentQuotaWords {
   const room = roomWords(pool.accounts, now);
-  const current = pool.accounts.find((a) => a.current && hasRoom(a));
-  if (!current) {
-    const usedUp = pool.accounts.some((a) => a.enabled && a.status === "limited");
-    return usedUp ? { hint: "None left", detail: room, out: true, aside: "None left" } : { detail: room };
+  const enabled = pool.accounts.filter((a) => a.enabled);
+  const total = enabled.length;
+
+  const readingOf = (a: MachinePoolAccount): { entry: LimitsEntry; window: LimitWindow; reading: Reading } | null => {
+    const e = entryFor(a.id);
+    const t = e ? tightest(e, now) : null;
+    if (!e || !t) return null;
+    return { entry: e, window: t, reading: readWindow(t, now) };
+  };
+  const accountReady = (a: MachinePoolAccount): boolean => {
+    if (!hasRoom(a)) return false;
+    const info = readingOf(a);
+    return !info || !isOut(info.reading);
+  };
+
+  const readyAccounts = enabled.filter(accountReady);
+  const ready = readyAccounts.length;
+  const current =
+    pool.accounts.find((a) => a.current && a.enabled) ??
+    pool.accounts.find((a) => a.current && hasRoom(a)) ??
+    readyAccounts[0];
+  const currentInfo = current ? readingOf(current) : null;
+  const asideTip = machine ? poolTip(pool, machine, currentInfo?.entry, now, agent) : undefined;
+
+  if (ready === 0) {
+    const usedUp =
+      enabled.some((a) => a.status === "limited") ||
+      enabled.some((a) => {
+        const info = readingOf(a);
+        return !!info && isOut(info.reading);
+      });
+    if (!usedUp) return { detail: room, tone: "neutral", ...(asideTip ? { asideTip } : {}) };
+    const back = firstBack(pool.accounts, now) ?? (currentInfo?.reading.when || null);
+    return {
+      hint: "None left",
+      detail: room,
+      out: true,
+      tone: "out",
+      aside: back ? `Pool used up · ${back}` : "Pool used up",
+      ...(asideTip ? { asideTip } : {}),
+    };
   }
+
+  // Current account is not ready in the hello, yet other enabled accounts have room.
+  if (!current || !hasRoom(current)) {
+    return {
+      hint: `${ready} with room`,
+      detail: room,
+      out: false,
+      tone: "neutral",
+      aside: `${ready} of ${total} accounts ready`,
+      ...(asideTip ? { asideTip } : {}),
+    };
+  }
+
   const name = sentenceName(current, pool.accounts);
-  const e = entryFor(current.id);
-  const t = e ? tightest(e, now) : null;
-  // No numbers, or every window has reset since (what was used after is unknown): the count.
-  if (!e || !t) return { detail: `${room} · ${name}` };
-  const r = readWindow(t, now);
+  // No numbers, or every window has reset since (what was used after is unknown): calm readiness.
+  if (!currentInfo) {
+    return {
+      detail: `${room} · ${name}`,
+      tone: "neutral",
+      ...(total > 1 ? { aside: `${ready} of ${total} accounts ready` } : {}),
+      ...(asideTip ? { asideTip } : {}),
+    };
+  }
+
+  const { entry: e, window: t, reading: r } = currentInfo;
   const stale = staleWords(e, now);
   const detail = [`${room} · ${name}`, windowLabel(t), r.when, stale ? `numbers ${stale}` : ""]
     .filter(Boolean)
     .join(", ");
-  const aside = agentAside(r);
-  return { hint: r.value, detail, out: isOut(r), ...(aside ? { aside } : {}) };
+  const currentOut = isOut(r);
+  const currentLow = r.kind === "left" && Math.floor(r.room) <= 20;
+
+  if ((currentOut || currentLow) && (ready >= 2 || (currentOut && ready >= 1))) {
+    return {
+      hint: `${ready} with room`,
+      detail,
+      out: false,
+      tone: "neutral",
+      aside: `${ready} of ${total} accounts ready`,
+      ...(asideTip ? { asideTip } : {}),
+    };
+  }
+
+  if (ready === 1 && currentLow) {
+    return {
+      hint: r.value,
+      detail,
+      out: false,
+      tone: "low",
+      aside: `${r.value} · last account`,
+      ...(asideTip ? { asideTip } : {}),
+    };
+  }
+
+  return {
+    hint: r.value,
+    detail,
+    out: false,
+    tone: "neutral",
+    aside: total > 1 ? `${r.value} · ${ready} of ${total} ready` : r.value,
+    ...(asideTip ? { asideTip } : {}),
+  };
 }
 
 // ----- the sidebar's tooltip (§7.3) -----

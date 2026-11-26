@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // The new-session sheet's folder list (folders.ts): `~` from the hello's home, the
 // daemon's segment rule for "under", the order and the dedupe of recent folders.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   expandHome,
+  FAV_FOLDERS_MAX,
   folderChoices,
+  formatFolder,
+  isFavoriteFolder,
   machineHome,
   normalizePath,
+  readFavoriteFolders,
   tildify,
+  toggleFavoriteFolder,
   typedFolder,
   under,
   unnamedHere,
@@ -149,5 +154,116 @@ describe("a machine that expands ~/… itself (sessionpipe 0.10: no home folder 
     expect(unnamedHere("/Users/me/notes", undefined)).toBe(false);
     expect(unnamedHere("notes", undefined)).toBe(false);
     expect(unnamedHere("~notes", undefined)).toBe(false);
+  });
+});
+
+describe("formatFolder", () => {
+  it("splits long nested paths into basename, full parent, and middle-elided compactParent", () => {
+    expect(formatFolder("~/.bb-machines/startrise.getbb.app/checkouts/sessionpipe")).toEqual({
+      name: "sessionpipe",
+      parent: "~/.bb-machines/startrise.getbb.app/checkouts",
+      compactParent: "~/…/checkouts",
+      full: "~/.bb-machines/startrise.getbb.app/checkouts/sessionpipe",
+    });
+    expect(formatFolder("/Users/alice/workspace/projects/acme/web")).toEqual({
+      name: "web",
+      parent: "/Users/alice/workspace/projects/acme",
+      compactParent: "/…/projects/acme",
+      full: "/Users/alice/workspace/projects/acme/web",
+    });
+  });
+  it("keeps short parent paths verbatim and trims trailing slashes", () => {
+    expect(formatFolder("~/acme/web/")).toEqual({
+      name: "web",
+      parent: "~/acme",
+      compactParent: "~/acme",
+      full: "~/acme/web",
+    });
+    expect(formatFolder("/srv/app///")).toEqual({
+      name: "app",
+      parent: "/srv",
+      compactParent: "/srv",
+      full: "/srv/app",
+    });
+    expect(formatFolder("/srv")).toEqual({
+      name: "srv",
+      parent: "/",
+      compactParent: "/",
+      full: "/srv",
+    });
+  });
+  it("handles roots, Windows paths, and empty input cleanly", () => {
+    expect(formatFolder("~")).toEqual({ name: "~", parent: "", compactParent: "", full: "~" });
+    expect(formatFolder("~/")).toEqual({ name: "~", parent: "", compactParent: "", full: "~" });
+    expect(formatFolder("/")).toEqual({ name: "/", parent: "", compactParent: "", full: "/" });
+    expect(formatFolder("C:\\")).toEqual({ name: "C:\\", parent: "", compactParent: "", full: "C:\\" });
+    expect(formatFolder("C:\\work")).toEqual({ name: "work", parent: "C:\\", compactParent: "C:\\", full: "C:\\work" });
+    expect(formatFolder("C:\\Users\\alice\\very-long-workspace-folder\\checkouts\\app")).toEqual({
+      name: "app",
+      parent: "C:\\Users\\alice\\very-long-workspace-folder\\checkouts",
+      compactParent: "C:\\…\\checkouts",
+      full: "C:\\Users\\alice\\very-long-workspace-folder\\checkouts\\app",
+    });
+    expect(formatFolder("", "acme/web")).toEqual({ name: "web", parent: "", compactParent: "", full: "" });
+  });
+});
+
+describe("favorite folders per machine", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const stubStorage = (initial = new Map<string, string>()) => {
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => initial.get(k) ?? null,
+      setItem: (k: string, v: string) => void initial.set(k, v),
+      removeItem: (k: string) => void initial.delete(k),
+    });
+    return initial;
+  };
+
+  it("pins, unpins, isolates per machine, and caps at FAV_FOLDERS_MAX", () => {
+    stubStorage();
+    expect(readFavoriteFolders("studio")).toEqual([]);
+    expect(toggleFavoriteFolder("studio", "/Users/alice/code/a/")).toEqual(["/Users/alice/code/a"]);
+    expect(toggleFavoriteFolder("studio", "/Users/alice/code/b")).toEqual([
+      "/Users/alice/code/b",
+      "/Users/alice/code/a",
+    ]);
+    expect(isFavoriteFolder(readFavoriteFolders("studio"), "/Users/alice/code/a")).toBe(true);
+    expect(readFavoriteFolders("macbook")).toEqual([]);
+    // Unpinning removes it cleanly.
+    expect(toggleFavoriteFolder("studio", "/Users/alice/code/a")).toEqual(["/Users/alice/code/b"]);
+    expect(isFavoriteFolder(readFavoriteFolders("studio"), "/Users/alice/code/a")).toBe(false);
+    // Capped at FAV_FOLDERS_MAX (12).
+    for (let i = 0; i < FAV_FOLDERS_MAX + 4; i++) toggleFavoriteFolder("macbook", `/w/p${i}`);
+    const favs = readFavoriteFolders("macbook");
+    expect(favs).toHaveLength(FAV_FOLDERS_MAX);
+    expect(favs[0]).toBe(`/w/p${FAV_FOLDERS_MAX + 3}`);
+  });
+
+  it("is resilient to missing or corrupt storage", () => {
+    expect(readFavoriteFolders("studio")).toEqual([]);
+    const store = stubStorage(new Map([["sp.newSession.favFolders", "{not valid json"]]));
+    expect(readFavoriteFolders("studio")).toEqual([]);
+    store.set("sp.newSession.favFolders", JSON.stringify(["wrong-shape"]));
+    expect(readFavoriteFolders("studio")).toEqual([]);
+  });
+
+  it("orders pinned -> recent (deduped) -> allowed (deduped) in folderChoices", () => {
+    const sessions = [
+      { cwd: "~/acme/web", lastAt: "2026-10-23T10:00:00Z", machine: "studio", repo: "github.com/acme/web" },
+      { cwd: "~/acme/api", lastAt: "2026-10-23T11:00:00Z", machine: "studio", repo: "github.com/acme/api" },
+    ];
+    const c = folderChoices({
+      sessions,
+      machine: "studio",
+      folders: ["/Users/demo/acme/web", "/Users/demo/acme/api", "/Users/demo/acme/infra"],
+      home: HOME,
+      favorites: ["/Users/demo/acme/web", "/Users/demo/acme/infra", "/Users/demo/outside"],
+    });
+    expect(c.pinned).toEqual([
+      { path: "/Users/demo/acme/web", display: "~/acme/web", repo: "acme/web" },
+      { path: "/Users/demo/acme/infra", display: "~/acme/infra" },
+    ]);
+    expect(c.recent).toEqual([{ path: "/Users/demo/acme/api", display: "~/acme/api", repo: "acme/api" }]);
+    expect(c.allowed).toEqual([]);
   });
 });

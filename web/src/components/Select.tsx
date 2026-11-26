@@ -38,8 +38,10 @@ export interface SelectOption<T> {
   disabled?: boolean;
   /** A hairline above this row: the start of a section with no heading. */
   divider?: boolean;
-  /** One muted line under the label, in the list only (a permission level's meaning). */
+  /** One muted line under the label, in the list only (a permission level's meaning, or a parent path). */
   detail?: string;
+  /** Render `detail` in monospace (e.g. folder parent paths). */
+  detailMono?: boolean;
 }
 
 interface CommonProps<T> {
@@ -500,7 +502,7 @@ function Picker<T>({
             )}
             <span className="sel-opt-label ellipsis">{o.label}</span>
             {o.hint && <span className={`sel-opt-hint ${o.hintTone ? "sel-opt-hint--attention" : ""}`}>{o.hint}</span>}
-            {o.detail && <span className="sel-opt-detail">{o.detail}</span>}
+            {o.detail && <span className={`sel-opt-detail ${o.detailMono ? "mono" : ""}`}>{o.detail}</span>}
           </div>
         );
         return o.divider && i > 0
@@ -620,10 +622,13 @@ function withCustom<T>(
   return [...shown, { ...c, divider: shown.length > 0 }];
 }
 
-function filterOptions<T>(options: SelectOption<T>[], q: string): SelectOption<T>[] {
+export function filterOptions<T>(options: SelectOption<T>[], q: string): SelectOption<T>[] {
   const t = q.trim().toLowerCase();
   if (!t) return options;
-  return options.filter((o) => o.label.toLowerCase().includes(t) || o.hint?.toLowerCase().includes(t));
+  return options.filter(
+    (o) =>
+      o.label.toLowerCase().includes(t) || o.hint?.toLowerCase().includes(t) || o.detail?.toLowerCase().includes(t),
+  );
 }
 
 function Check() {
