@@ -10,7 +10,13 @@ import { usePresence } from "../lib/motion";
 import { setSearchParams } from "../lib/router";
 import { hintFor } from "../lib/shortcuts";
 import "./newSession.css";
-import { closeNewSession, type NewSessionTarget, openNewSession, useNewSession } from "./newSessionState";
+import {
+  closeNewSession,
+  type NewSessionTarget,
+  newSessionOpen,
+  openNewSession,
+  useNewSession,
+} from "./newSessionState";
 
 const sheetModule = lazyModule(() => import("./NewSessionSheet"));
 whenIdle(() => void sheetModule.preload().catch(() => {}));
@@ -105,6 +111,7 @@ export function useStandaloneNewKey(): void {
     const onKey = (e: KeyboardEvent) => {
       const mod = /Mac|iPhone|iPad/.test(navigator.platform ?? "") ? e.metaKey : e.ctrlKey;
       if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== "n" || e.defaultPrevented) return;
+      if (newSessionOpen() || document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
       try {
         localStorage.setItem(STANDALONE_KEY, "1");

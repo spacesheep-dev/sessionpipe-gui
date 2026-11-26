@@ -66,9 +66,18 @@
   animation: fade-out var(--dur-exit) var(--ease-in) both;
 }
 @media (prefers-reduced-motion: reduce) {
-  .ns-sheet {
+  .ns-sheet,
+  .ns-pin {
     animation: none;
+    transition: none;
   }
+}
+.ns-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 10px 20px;
 }
 .ns-title {
   margin: 0;
@@ -76,6 +85,13 @@
   font-size: var(--text-md);
   font-weight: 600;
   line-height: var(--lh-tight);
+}
+.ns-head .ns-title {
+  padding: 0;
+}
+.ns-head-discard {
+  flex: none;
+  color: var(--fg-3);
 }
 
 /* ----- the rows: Machine, Agent, Folder ----- */
@@ -101,15 +117,32 @@
   display: flex;
 }
 .ns-aside {
-  max-width: 220px;
+  max-width: 240px;
   color: var(--fg-3);
   font-size: var(--text-xs);
   line-height: var(--lh-tight);
   text-align: right;
 }
-/* The chosen agent's account has none left, or is over: the words alone carry it. */
-.ns-aside--out {
+/* Calm quota tiers: healthy stays quiet meta; low steps up to secondary ink (never orange);
+   exhausted takes a soft --needs-bg/--needs-line/--needs-fg pill. */
+.ns-quota--neutral {
+  color: var(--fg-3);
+}
+.ns-quota--low {
+  color: var(--fg-2);
+  font-weight: 500;
+}
+.ns-aside--out,
+.ns-quota--out {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--needs-bg);
+  box-shadow: inset 0 0 0 var(--hairline) var(--needs-line);
   color: var(--needs-fg);
+  font-weight: 500;
+  white-space: nowrap;
 }
 /* The rows' pop-ups are their values: no well, no border, the chevron after the text. */
 .ns-row .ns-sel {
@@ -119,6 +152,82 @@
   padding-left: 4px;
   margin-left: -4px;
   font-size: var(--text-md);
+}
+.ns-sel--folder .sel-text {
+  display: flex;
+  align-items: center;
+}
+.ns-folder-val {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.ns-folder-icon {
+  flex: none;
+  align-self: center;
+  color: var(--fg-3);
+}
+.ns-folder-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-weight: 500;
+}
+.ns-folder-parent {
+  flex: 0 2 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+}
+.ns-row-end {
+  display: inline-flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 6px;
+}
+.ns-pin {
+  flex: none;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  color: var(--fg-3);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.ns-pin--on {
+  color: var(--fg-2);
+}
+@media (hover: hover) {
+  .ns-pin:not(.ns-pin--on) {
+    opacity: 0;
+  }
+  .ns-row:hover .ns-pin,
+  .ns-row:focus-within .ns-pin {
+    opacity: 1;
+  }
+  .ns-pin:hover {
+    color: var(--fg);
+  }
+}
+@media (pointer: coarse) {
+  .ns-pin {
+    width: var(--tap);
+    height: var(--tap);
+    opacity: 0.7;
+  }
+  .ns-pin--on {
+    opacity: 1;
+  }
 }
 @media (hover: hover) {
   .ns-row .ns-sel:hover:not(:disabled) {
@@ -254,10 +363,11 @@
 
 .ns-opts {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 4px 12px;
   min-height: var(--row);
-  padding: 4px 12px 0 14px;
+  padding: 4px 14px;
   border-top: var(--hairline) solid var(--line);
 }
 .ns-opts:empty {
@@ -267,19 +377,30 @@
 .ns-opts > .ns-opt:first-child {
   margin-left: 6px;
 }
+.ns-opts-sep {
+  width: var(--hairline);
+  height: 14px;
+  flex: none;
+  background: var(--line);
+}
 .ns-opt {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
 }
 .ns-opt-label {
   color: var(--fg-3);
   font-size: var(--text-sm);
+  white-space: nowrap;
 }
 .ns-opt .ns-sel {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+  padding-left: 6px;
+  color: var(--fg);
+  font-weight: 500;
 }
 /* What the machine runs as when it offers no choice: the row stays, the value in words. */
 .ns-fixed {
@@ -294,13 +415,23 @@
 .ns-attach {
   color: var(--fg-3);
 }
+.ns-attach--has {
+  width: auto;
+  min-width: var(--control);
+  padding: 0 7px;
+  gap: 4px;
+  color: var(--fg-2);
+}
+.ns-attach-count {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1;
+}
 .ns-foot {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px 12px 20px;
-}
-.ns-opts:empty + .ns-foot {
+  padding: 10px 14px 12px 20px;
   border-top: var(--hairline) solid var(--line);
 }
 .ns-status {
@@ -313,6 +444,25 @@
 }
 .ns-status--err {
   color: var(--err);
+}
+.ns-status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  vertical-align: 1px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.ns-status-dot--ok {
+  background: var(--ok);
+}
+.ns-status-dot--ring {
+  border: 1.5px solid var(--fg-3);
+  background: transparent;
+}
+.ns-status-dot--err {
+  background: var(--err);
 }
 /* The way on after the line's sentence ("Approve this Mac"), as the composer's line has it:
    a word to the eye, 44 tall to a finger. */
@@ -351,9 +501,6 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-.ns-more {
-  color: var(--fg-3);
 }
 .ns-kbd {
   margin-left: 2px;
@@ -495,6 +642,17 @@
   min-height: var(--tap);
   padding: 0 8px 0 16px;
 }
+.ns-sheet--phone [data-ns-row="folder"]:has(.ns-pin) {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding-right: 4px;
+}
+.ns-sheet--phone [data-ns-row="folder"] .ns-pin {
+  grid-row: 1;
+  grid-column: 3;
+}
+.ns-sheet--phone .ns-row-end {
+  display: contents;
+}
 .ns-sheet--phone .ns-row:last-child {
   border-bottom: none;
 }
@@ -516,12 +674,19 @@
   text-align: right;
   pointer-events: none;
 }
+.ns-sheet--phone .ns-row .ns-quota--out[data-ns-left] {
+  margin: -6px 24px 10px 0;
+  padding: 2px 8px;
+}
 /* A disclosure row: the value at the right, then the chevron. */
 .ns-sheet--phone .ns-value {
   justify-content: flex-end;
 }
 .ns-sheet--phone .ns-row .ns-sel {
   margin: 0;
+  color: var(--fg-2);
+}
+.ns-sheet--phone .ns-folder-name {
   color: var(--fg-2);
 }
 .ns-sheet--phone .ns-text {

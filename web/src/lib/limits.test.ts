@@ -341,25 +341,28 @@ describe("accountFor / agentWords", () => {
     expect(agentWords(null, NOW)).toEqual({});
   });
   it("words the pick by its tightest window", () => {
-    expect(agentWords({ kind: "entry", entry: codex }, NOW)).toEqual({
+    expect(agentWords({ kind: "entry", entry: codex }, NOW)).toMatchObject({
       hint: "74% left",
       detail: "This week, resets in 4 d 2 h",
       out: false,
+      tone: "neutral",
+      aside: "74% left",
     });
     const stale = { ...dev, observedAt: at(-3 * H) };
     expect(agentWords({ kind: "entry", entry: stale }, NOW).detail).toBe("5 hours, resets in 2 h 21 m, as of 3 h ago");
     const out = { ...dev, windows: [win("five_hour", 100, { resetsAt: at(H + 10 * MIN) })] };
-    expect(agentWords({ kind: "entry", entry: out }, NOW)).toEqual({
+    expect(agentWords({ kind: "entry", entry: out }, NOW)).toMatchObject({
       hint: "None left",
       detail: "5 hours, resets in 1 h 10 m",
       out: true,
-      aside: "None left, resets in 1 h 10 m",
+      tone: "out",
+      aside: "None left · resets in 1 h 10 m",
     });
     // Every window reset since: no bare "Reset", nothing at all.
     const reset = { ...dev, windows: [win("five_hour", 90, { resetsAt: at(-40 * MIN) })] };
     expect(agentWords({ kind: "entry", entry: reset }, NOW)).toEqual({});
   });
-  it("under the chosen agent, only what would change what is done", () => {
+  it("gives calm quota tones and aside lines across healthy, low, and out states", () => {
     const left = (used: number, timed = true) =>
       agentWords(
         {
@@ -367,15 +370,16 @@ describe("accountFor / agentWords", () => {
           entry: { ...dev, windows: [win("five_hour", used, { resetsAt: timed ? at(H) : undefined })] },
         },
         NOW,
-      ).aside;
-    expect(left(38)).toBeUndefined();
-    expect(left(79)).toBeUndefined();
-    expect(left(80)).toBe("20% left");
-    expect(left(88)).toBe("12% left");
-    expect(left(99.5)).toBe("<1% left");
-    expect(left(100)).toBe("None left, resets in 1 h");
-    expect(left(112)).toBe("12% over, resets in 1 h");
-    expect(left(100, false)).toBe("None left");
+      );
+    expect(left(38)).toMatchObject({ aside: "62% left", tone: "neutral", out: false });
+    expect(left(79)).toMatchObject({ aside: "21% left", tone: "neutral", out: false });
+    expect(left(80)).toMatchObject({ aside: "20% left · resets in 1 h", tone: "low", out: false });
+    expect(left(88)).toMatchObject({ aside: "12% left · resets in 1 h", tone: "low", out: false });
+    expect(left(88, false)).toMatchObject({ aside: "12% left", tone: "low", out: false });
+    expect(left(99.5)).toMatchObject({ aside: "<1% left · resets in 1 h", tone: "low", out: false });
+    expect(left(100)).toMatchObject({ aside: "None left · resets in 1 h", tone: "out", out: true });
+    expect(left(112)).toMatchObject({ aside: "12% over · resets in 1 h", tone: "out", out: true });
+    expect(left(100, false)).toMatchObject({ aside: "None left", tone: "out", out: true });
   });
 });
 

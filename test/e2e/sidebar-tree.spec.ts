@@ -21,6 +21,8 @@ interface Arr {
   rev: number;
   placed: Record<string, string | null>;
   pinned: string[];
+  folders?: { id: string; name: string; color?: string }[];
+  inFolder?: Record<string, string>;
 }
 const arrangement = async (request: APIRequestContext): Promise<Arr> =>
   (await (await request.get(ARRANGEMENT)).json()) as Arr;
@@ -28,7 +30,7 @@ const arrangement = async (request: APIRequestContext): Promise<Arr> =>
 /** Back to no arrangement at all. */
 async function reset(request: APIRequestContext): Promise<void> {
   const a = await arrangement(request);
-  const res = await request.patch(ARRANGEMENT, { data: { follow: Object.keys(a.placed), pinned: [] } });
+  const res = await request.patch(ARRANGEMENT, { data: { follow: Object.keys(a.placed), pinned: [], folders: [] } });
   expect(res.status()).toBe(200);
 }
 
@@ -87,6 +89,8 @@ async function sessions(
   request: APIRequestContext,
   defs: {
     title: string;
+    repo?: string;
+    cwd?: string;
     machine?: string;
     harness?: string;
     asks?: string;
@@ -116,7 +120,8 @@ async function sessions(
           id,
           seq: seq++,
           machine: d.machine ?? "studio-mac",
-          cwd: "~/code/tree",
+          cwd: d.cwd ?? "~/code/tree",
+          ...(d.repo ? { repo: d.repo } : {}),
           title: d.title,
           title_source: "custom",
           ...(d.asks ? { delegated_by: d.asks } : {}),
@@ -1211,5 +1216,157 @@ test.describe("iPad touch sidebar", () => {
     await expect(chip).toHaveCount(0);
     const mainTransform = await page.locator("main#main").evaluate((el) => getComputedStyle(el).transform);
     expect(mainTransform).toBe("none");
+  });
+});
+
+async function dragToFolder(page: Page, from: Locator, to: Locator, holdMs = 0): Promise<void> {
+  // Match drag(): let any FLIP slide finish before & after hovering so we never grab a moving row.
+  await settled(page);
+  await from.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await from.hover({ position: { x: 40, y: 10 } });
+  await expect(page.locator(".stree")).toHaveAttribute("data-held", "");
+  await settled(page);
+  await from.hover({ position: { x: 40, y: 10 } });
+  const a = await from.boundingBox();
+  if (!a) throw new Error("missing drag source box");
+  await page.mouse.move(a.x + 40, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + 44, a.y + a.height / 2 + 6, { steps: 3 });
+  await expect(page.locator(".stree-chip")).toBeVisible();
+  await to.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await settled(page);
+  const b = await to.boundingBox();
+  if (!b) throw new Error("missing drag target box");
+  await page.mouse.move(b.x + 60, b.y + b.height / 2, { steps: 8 });
+  const b2 = await to.boundingBox();
+  if (b2 && Math.abs(b2.y - b.y) > 1) await page.mouse.move(b2.x + 60, b2.y + b2.height / 2, { steps: 2 });
+  if (holdMs > 0) {
+    await page.waitForTimeout(holdMs);
+    await settled(page);
+    const b3 = await to.boundingBox();
+    if (b3) await page.mouse.move(b3.x + 60, b3.y + b3.height / 2, { steps: 2 });
+  }
+  await page.mouse.up();
+}
+
+test.describe("Sidebar project grouping and custom folders", () => {
+  test("groups sessions by project, disambiguates colliding names, rolls up lamps when folded", async ({
+    page,
+    request,
+  }) => {
+    const [s1, s2, s3] = await sessions(request, [
+      { title: "Alpha auth", repo: "https://github.com/acme/app.git", state: "needs" },
+      { title: "Beta billing", repo: "https://github.com/other/app.git", state: "idle" },
+      { title: "Core CLI", cwd: "~/code/cli-tool", state: "idle" },
+    ]);
+    await openPage(page, "/");
+    await expect(row(page, s1!.key)).toBeVisible();
+    await expect(row(page, s2!.key)).toBeVisible();
+    await expect(row(page, s3!.key)).toBeVisible();
+
+    const toggle = page.locator(".stree [data-tree-group-toggle]");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    const acmeRow = page.locator('.stree [data-project-key="repo:acme/app"]');
+    const otherRow = page.locator('.stree [data-project-key="repo:other/app"]');
+    const cliRow = page.locator('.stree [data-project-key="cwd:~/code/cli-tool"]');
+    await expect(acmeRow).toContainText("acme/app");
+    await expect(otherRow).toContainText("other/app");
+    await expect(cliRow).toContainText("cli-tool");
+
+    // Collapsing a project with a needs_you session shows rolled-up needs_you lamp.
+    await acmeRow.click();
+    await expect(acmeRow).toHaveAttribute("aria-expanded", "false");
+    await expect(acmeRow).toHaveAttribute("data-rolled", "needs_you");
+    await expect(row(page, s1!.key)).toBeHidden();
+
+    // Expanding brings the session back.
+    await acmeRow.click();
+    await expect(row(page, s1!.key)).toBeVisible();
+  });
+
+  test("creates, renames, recolors, drags into, deletes custom folder and restores with Undo", async ({
+    page,
+    request,
+  }) => {
+    const [s1, s2] = await sessions(request, [
+      { title: "Fix login", state: "needs" },
+      { title: "Write docs", state: "idle" },
+    ]);
+    await openPage(page, "/");
+    await expect(row(page, s1!.key)).toBeVisible();
+
+    // Create a custom folder inline via header button.
+    await page.locator(".stree [data-tree-new-folder]").click();
+    const input = page.locator(".stree .stree-inline-input");
+    await expect(input).toBeVisible();
+    await input.fill("Sprint 1");
+    await input.press("Enter");
+
+    const folderRow = page.locator('.stree [data-zone="folder"]', { hasText: "Sprint 1" });
+    await expect(folderRow).toBeVisible();
+
+    // Drag s1 onto the folder row to move it in.
+    await dragToFolder(page, row(page, s1!.key), folderRow);
+    await expect.poll(async () => Object.keys((await arrangement(request)).inFolder ?? {})).toContain(s1!.key);
+
+    // Fold the folder: shows rolled-up needs_you lamp.
+    await folderRow.click();
+    await expect(folderRow).toHaveAttribute("aria-expanded", "false");
+    await expect(folderRow).toHaveAttribute("data-rolled", "needs_you");
+
+    // Drag s2 over collapsed folder and hold > 600 ms: auto-expands and moves s2 in.
+    await dragToFolder(page, row(page, s2!.key), folderRow, 700);
+    await expect(folderRow).toHaveAttribute("aria-expanded", "true");
+    await expect.poll(async () => Object.keys((await arrangement(request)).inFolder ?? {})).toContain(s2!.key);
+
+    // Rename via context menu.
+    await folderRow.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Rename…" }).click();
+    const renameInput = page.locator(".stree .stree-inline-input");
+    await renameInput.fill("Release");
+    await renameInput.press("Enter");
+    const renamedRow = page.locator('.stree [data-zone="folder"]', { hasText: "Release" });
+    await expect(renamedRow).toBeVisible();
+
+    // Delete folder via context menu -> sessions return to Sessions; Undo restores folder + memberships!
+    await renamedRow.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Delete folder" }).click();
+    await expect(renamedRow).toBeHidden();
+    await expect(row(page, s1!.key)).toBeVisible();
+    await expect.poll(async () => (await arrangement(request)).folders ?? []).toEqual([]);
+
+    // Click Undo in toast.
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(renamedRow).toBeVisible();
+    await expect
+      .poll(async () => Object.keys((await arrangement(request)).inFolder ?? {}).sort())
+      .toEqual([s1!.key, s2!.key].sort());
+  });
+
+  test("Shift+M opens Move to folder picker with inline create and persists across reload", async ({
+    page,
+    request,
+  }) => {
+    const [s1] = await sessions(request, [{ title: "Picker target", state: "idle" }]);
+    await openPage(page, "/");
+    const r1 = row(page, s1!.key);
+    await expect(r1).toBeVisible();
+    await r1.focus();
+    await page.keyboard.press("Shift+M");
+
+    const dialog = page.getByRole("dialog", { name: "Move to folder…" });
+    await expect(dialog).toBeVisible();
+    const field = dialog.getByRole("combobox");
+    await field.fill("Quick Folder");
+    await field.press("Enter");
+    await expect(dialog).toBeHidden();
+
+    const fRow = page.locator('.stree [data-zone="folder"]', { hasText: "Quick Folder" });
+    await expect(fRow).toBeVisible();
+    await page.reload();
+    await expect(page.locator('.stree [data-zone="folder"]', { hasText: "Quick Folder" })).toBeVisible();
   });
 });

@@ -16,6 +16,7 @@ import { phoneLayout } from "./device";
 export type Mode = "simple" | "advanced";
 export type DefaultPage = "/" | "/inbox" | "/feed" | "/review" | "/machines";
 export type OpenSessions = "page" | "beside";
+export type SidebarGroup = "flat" | "project";
 export type Lens = Tier | null;
 
 export interface AppSettings {
@@ -31,6 +32,8 @@ export interface AppSettings {
   sidebarWidth: number;
   /** The sessions column beside the rail is hidden on this device (⌃⌘S, the rail's button). */
   treeHidden: boolean;
+  /** How the sidebar's Sessions section groups unfoldered roots on this device. */
+  sidebarGroup: SidebarGroup;
 }
 
 /** The labelled sidebar's widths: from the narrowest its rows were drawn for to where the
@@ -98,6 +101,7 @@ const defaults = (phone: boolean): AppSettings => ({
   usageInSidebar: true,
   sidebarWidth: SIDEBAR_DEFAULT,
   treeHidden: false,
+  sidebarGroup: "flat",
 });
 
 const isLens = (v: unknown): v is Lens => v === null || v === 0 || v === 1 || v === 2 || v === 3;
@@ -140,6 +144,7 @@ function resolve(p: Stored, d: AppSettings): AppSettings {
     usageInSidebar: typeof p.usageInSidebar === "boolean" ? p.usageInSidebar : d.usageInSidebar,
     sidebarWidth: typeof p.sidebarWidth === "number" ? sidebarClamp(p.sidebarWidth) : d.sidebarWidth,
     treeHidden: typeof p.treeHidden === "boolean" ? p.treeHidden : d.treeHidden,
+    sidebarGroup: p.sidebarGroup === "project" || p.sidebarGroup === "flat" ? p.sidebarGroup : d.sidebarGroup,
   };
 }
 

@@ -15,7 +15,7 @@ import type {
   StartPermission,
 } from "@shared/api";
 import { useSyncExternalStore } from "react";
-import { accountFor, agentWords } from "../lib/limits";
+import { type AgentQuotaWords, accountFor, agentWords } from "../lib/limits";
 import { poolPickerWords } from "../lib/pool";
 import { START } from "../native/accountWords.new";
 import { expandHome, machineHome, typedFolder } from "./folders";
@@ -314,19 +314,31 @@ export const fixedLine = (f: { value: string; note?: string }): string => (f.not
 
 /** What an agent's account has left on a machine, for its row in the Agent menu: on a
  *  machine whose hello pools that harness with the switch on and an account enabled, the
- *  pool's line (UX-SPEC §6: a start there goes to the current account, so its tightest
- *  window and the room count); else the machine's own login as before (`accountFor`). */
+ *  pool's calm quota state (`poolPickerWords`); else the machine's own login (`accountFor`),
+ *  noting in `asideTip` when account switching is off for a multi-account pool. */
 export function agentLeft(
   harness: string,
   machine: string,
   c: MachineControl | undefined,
   limits: readonly LimitsEntry[],
   now: number,
-): { hint?: string; detail?: string; out?: boolean; aside?: string } {
+  agent?: string,
+): AgentQuotaWords {
   const pool = c?.pool;
   if (pool?.on && pool.harness === harness && pool.accounts.some((a) => a.enabled))
-    return poolPickerWords(pool, (id) => limits.find((e) => e.harness === harness && e.accountId === id), now);
-  return agentWords(accountFor(harness, machine, c?.accounts, limits), now);
+    return poolPickerWords(
+      pool,
+      (id) => limits.find((e) => e.harness === harness && e.accountId === id),
+      now,
+      machine,
+      agent,
+    );
+  const w = agentWords(accountFor(harness, machine, c?.accounts, limits), now);
+  if (pool && pool.harness === harness && !pool.on && pool.accounts.length > 1) {
+    const offNote = `Account switching is off on ${machine}.`;
+    return { ...w, asideTip: w.asideTip ? `${w.asideTip}\n${offNote}` : offNote };
+  }
+  return w;
 }
 
 /** A file New session uploads again when another machine is chosen: one whose bytes it

@@ -809,6 +809,19 @@ export const EMPTY_MARKS: Marks = Object.freeze({ rev: 0, read: {}, unread: {} }
 export const ARRANGEMENT_PLACED_MAX = 500;
 /** Pinned sessions the server keeps at most. */
 export const ARRANGEMENT_PINNED_MAX = 100;
+/** Custom folders the server keeps at most. */
+export const ARRANGEMENT_FOLDERS_MAX = 50;
+/** Longest custom folder name (characters after trimming). */
+export const ARRANGEMENT_FOLDER_NAME_MAX = 40;
+/** A custom folder's id: lowercase slug or generated id, 1..40 chars. */
+export const FOLDER_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+
+/** One custom folder in the sidebar's Folders section. */
+export interface ArrangementFolder {
+  id: string;
+  name: string;
+  color?: LabelColor;
+}
 
 /** `<stateDir>/arrangement.json`, as the server serves it: where the person put sessions
  *  in the tree, for their own eyes. Display only: it is never sent to a machine, never
@@ -822,14 +835,21 @@ export interface Arrangement {
   placed: Record<SessionKey, SessionKey | null>;
   /** Pinned sessions, in the person's order. */
   pinned: SessionKey[];
+  /** Custom folders, in the person's order. Omitted when empty for v1 compat. */
+  folders?: ArrangementFolder[];
+  /** Root session key -> custom folder id. Omitted when empty for v1 compat. */
+  inFolder?: Record<SessionKey, string>;
 }
 
 /** A change (PATCH). `placed` sets placements, `follow` takes them away (the session
- *  follows its events again), `pinned` is the whole new list. */
+ *  follows its events again), `pinned` is the whole new list, `folders` is the whole new
+ *  ordered list, and `inFolder` merges folder memberships (`null` removes). */
 export interface ArrangementPatch {
   placed?: Record<SessionKey, SessionKey | null>;
   follow?: SessionKey[];
   pinned?: SessionKey[];
+  folders?: ArrangementFolder[];
+  inFolder?: Record<SessionKey, string | null>;
 }
 
 export const EMPTY_ARRANGEMENT: Arrangement = Object.freeze({ rev: 0, placed: {}, pinned: [] }) as Arrangement;

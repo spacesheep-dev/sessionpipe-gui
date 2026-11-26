@@ -127,16 +127,18 @@ test("New session on lab-mac: Claude Code reads the pool, the other agents their
   ).toBe(true);
   // Misha's own numbers come from the demo's status line, which moves; the shape holds.
   const hint = claude.locator(".sel-opt-hint");
-  if (await hint.count()) await expect(hint).toHaveText(/^((<1|\d+)% left|None left|\d+% over)$/);
+  if (await hint.count()) await expect(hint).toHaveText(/^((<1|\d+)% left|None left|\d+% over|\d+ with room)$/);
   await expect(opt("Codex").locator(".sel-opt-detail")).toHaveText(/^This week, resets in /);
   await expect(opt("Gemini CLI").locator(".sel-opt-detail")).toHaveCount(0);
   await expect(claude).not.toHaveAttribute("aria-disabled", "true");
   await claude.click();
   await expect(sheet.locator("[data-ns-row=agent] button.sel")).toHaveAttribute("data-value", "claude-code");
-  // Under the chosen agent only what would change a start: 20% or less, none, or over.
+  // Chosen pooled agent displays calm neutral pool-aware quota or exhaustion status.
   const left = sheet.locator("[data-ns-left]");
   if (await left.count())
-    await expect(left).toHaveText(/^((<1|1?\d|20)% left|(None left|\d+% over)(, resets in .+)?)$/);
+    await expect(left).toHaveText(
+      /^((<1|\d+)% left( · (\d+ of \d+ ready|last account|resets in .+))?|\d+ of \d+ accounts ready|Pool used up( · .+)?|(None left|\d+% over)( · resets in .+)?)$/,
+    );
   // Start is never blocked by the pool: with a message, the one thing that can still hold
   // it on this port is the origin (sending works from the localhost address alone).
   await sheet.locator("textarea").first().fill("Say hello.");

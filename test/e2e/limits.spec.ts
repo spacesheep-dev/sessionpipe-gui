@@ -277,15 +277,16 @@ test("New session on lab-mac: each agent says what its account has left there", 
   await expect(opt("Gemini CLI").locator(".sel-opt-hint")).toHaveCount(0);
   await expect(opt("Gemini CLI").locator(".sel-opt-detail")).toHaveCount(0);
   await opt("Codex").click();
-  // 74% left changes nothing about a start: the chosen agent's row says nothing of it.
+  // 74% left renders calm neutral quota text beside the chosen agent.
   await expect(sheet.locator("[data-ns-row=agent] button.sel")).toHaveAttribute("data-value", "codex");
-  await expect(sheet.locator("[data-ns-left]")).toHaveCount(0);
+  await expect(sheet.locator("[data-ns-left]")).toHaveText("74% left");
+  await expect(sheet.locator("[data-ns-left]")).toHaveAttribute("data-tone", "neutral");
 });
 
 test("New session on a one-account machine: none left, in the attention colour", async ({ page }) => {
   await page.goto("/?mock=1&new=1&machine=demo-laptop&harness=claude-code");
   const sheet = page.locator("[data-new-session]");
-  await expect(sheet.locator("[data-ns-left]")).toHaveText(/^None left, resets in 1 h \d{2} m$/);
+  await expect(sheet.locator("[data-ns-left]")).toHaveText(/^None left · resets in 1 h \d{2} m$/);
   await expect(sheet.locator("[data-ns-left]")).toHaveClass(/ns-aside--out/);
   await sheet.locator("[data-ns-row=agent] button.sel").click();
   const claude = page.locator(".sel-opt", { hasText: "Claude Code" });

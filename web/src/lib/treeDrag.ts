@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Owned by: web. Dragging a row of the sidebar's session tree, its pure parts: when a
 // press becomes a drag (4 px with a pointer; a finger held 350 ms, before it scrolls), the
-// place under the pointer and what a drop there would be (on a row: under it; on the line
-// between top-level rows: to the top level, or a place among the pinned; on the Pinned
-// heading: pinned), and how fast the list scrolls near its edges. The component
-// (components/SessionTree.tsx) measures the rows and draws; lib/arrange.ts says what a
-// move means and does it.
+// place under the pointer and what a drop there would be (on a row: under it; on a folder
+// header: into that folder; on the line between top-level rows: to the top level, into
+// that folder, or a place among the pinned; on the Pinned heading: pinned), and how fast
+// the list scrolls near its edges. The component (components/SessionTree.tsx) measures
+// the rows and draws; lib/arrange.ts says what a move means and does it.
 import type { SessionKey } from "@shared/api";
 import type { Move } from "./arrange";
 
@@ -19,7 +19,7 @@ export const LIFT_MS = LONG_PRESS_MS;
 export const TOUCH_SLOP_PX = 8;
 /** A finger that moves this far after the long-press closes the menu and lifts the row. */
 export const TOUCH_MOVE_PX = 10;
-/** A folded parent held under the pointer this long opens. */
+/** A folded parent or folder held under the pointer this long opens. */
 export const OPEN_AFTER_MS = 600;
 /** How near the list's top or bottom edge the pointer scrolls it. */
 export const EDGE_PX = 32;
@@ -28,7 +28,7 @@ export const EDGE_SPEED = 14;
 /** The share of a row at its top and its bottom that is the line between rows. */
 const LINE_SHARE = 0.25;
 
-export type Group = "pinned" | "sessions";
+export type Group = "pinned" | "sessions" | "folder";
 
 /** One drawn row, as measured: its box on screen (px from the viewport's top). */
 export interface RowBox {
@@ -37,6 +37,27 @@ export interface RowBox {
   bottom: number;
   level: number;
   group: Group;
+  /** The custom folder this row sits inside, when `group === "folder"`. */
+  folderId?: string;
+}
+
+export interface FolderZone {
+  folderId: string;
+  top: number;
+  bottom: number;
+}
+
+export interface RectY {
+  top: number;
+  bottom: number;
+}
+
+export interface DropZones {
+  pinned?: RectY | readonly RectY[];
+  sessions?: RectY;
+  folders?: readonly FolderZone[];
+  projects?: readonly RectY[];
+  bottom?: number;
 }
 
 /** A place to drop. */
@@ -48,21 +69,38 @@ export type Target =
   /** To the top level of Sessions (no line: Sessions sorts itself). */
   | { kind: "top" }
   /** The Pinned heading or pin zone: pinned first. */
-  | { kind: "pinned" };
+  | { kind: "pinned" }
+  /** A custom folder header (or edge between root rows inside that folder). */
+  | { kind: "folder"; folderId: string };
 
 /** The place under `y`, or null (outside the rows: a drop there cancels). `zones` are the
- *  two group headings and the scroll list's bottom edge, when drawn. A row the dragged one
- *  may not go on (itself, the sessions under it) is no place; nor is the line inside its
- *  own gap. */
+ *  group headings, folder rows, project headers and the scroll list's bottom edge, when
+ *  drawn. A row the dragged one may not go on (itself, the sessions under it) is no place;
+ *  nor is the line inside its own gap. */
 export function targetAt(
   rows: readonly RowBox[],
   y: number,
   dragged: SessionKey,
   refused: ReadonlySet<SessionKey>,
-  zones: { pinned?: { top: number; bottom: number }; sessions?: { top: number; bottom: number }; bottom?: number } = {},
+  zones: DropZones = {},
 ): Target | null {
-  if (zones.pinned && y >= zones.pinned.top && y < zones.pinned.bottom) return { kind: "pinned" };
+  if (zones.pinned) {
+    const pinnedZones = Array.isArray(zones.pinned) ? zones.pinned : [zones.pinned];
+    for (const p of pinnedZones) {
+      if (y >= p.top && y < p.bottom) return { kind: "pinned" };
+    }
+  }
+  if (zones.folders) {
+    for (const f of zones.folders) {
+      if (y >= f.top && y < f.bottom) return { kind: "folder", folderId: f.folderId };
+    }
+  }
   if (zones.sessions && y >= zones.sessions.top && y < zones.sessions.bottom) return { kind: "top" };
+  if (zones.projects) {
+    for (const p of zones.projects) {
+      if (y >= p.top && y < p.bottom) return { kind: "top" };
+    }
+  }
   const i = rows.findIndex((r) => y >= r.top && y < r.bottom);
   if (i < 0) {
     const lastSession = [...rows].reverse().find((r) => r.group === "sessions");
@@ -73,22 +111,24 @@ export function targetAt(
     return null;
   }
   const r = rows[i]!;
-  const same = rows.filter((x) => x.group === r.group);
+  const same = rows.filter((x) => x.group === r.group && x.folderId === r.folderId);
   const next = same[same.indexOf(r) + 1];
   /** The pin's place among the pinned: the top-level rows of Pinned before this one. */
   const pinAt = (upTo: number) => same.slice(0, upTo).filter((x) => x.level === 0).length;
+  const edgeTarget = (pinIndex: number, lineY: number): Target =>
+    r.group === "pinned"
+      ? { kind: "line", group: "pinned", at: pinIndex, y: lineY }
+      : r.group === "folder" && r.folderId
+        ? { kind: "folder", folderId: r.folderId }
+        : { kind: "top" };
   const f = (y - r.top) / Math.max(1, r.bottom - r.top);
   if (f < LINE_SHARE && r.level === 0) {
     if (r.key === dragged) return null;
-    return r.group === "pinned"
-      ? { kind: "line", group: "pinned", at: pinAt(same.indexOf(r)), y: r.top }
-      : { kind: "top" };
+    return edgeTarget(pinAt(same.indexOf(r)), r.top);
   }
   if (f > 1 - LINE_SHARE && (!next || next.level === 0)) {
     if (r.key === dragged || (r.level > 0 && refused.has(r.key))) return null;
-    return r.group === "pinned"
-      ? { kind: "line", group: "pinned", at: pinAt(same.indexOf(r) + 1), y: r.bottom }
-      : { kind: "top" };
+    return edgeTarget(pinAt(same.indexOf(r) + 1), r.bottom);
   }
   if (r.key === dragged || refused.has(r.key)) return null;
   return { kind: "on", key: r.key };
@@ -98,6 +138,7 @@ export function targetAt(
 export function moveFor(t: Target): Move {
   if (t.kind === "on") return { kind: "under", parent: t.key };
   if (t.kind === "pinned") return { kind: "pin", at: 0 };
+  if (t.kind === "folder") return { kind: "folder", folderId: t.folderId };
   if (t.kind === "top") return { kind: "top" };
   return { kind: "pin", at: t.at };
 }

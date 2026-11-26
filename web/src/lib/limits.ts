@@ -323,16 +323,32 @@ export function accountFor(
   return seen.length === 1 ? pick(seen[0]) : null;
 }
 
+export type QuotaTone = "neutral" | "low" | "out";
+
+export interface AgentQuotaWords {
+  hint?: string;
+  detail?: string;
+  out?: boolean;
+  aside?: string;
+  asideTip?: string;
+  tone?: QuotaTone;
+}
+
+/** Calm quota tone for one window reading: only exhausted windows take `"out"`. */
+export function quotaTone(r: Reading): QuotaTone {
+  if (isOut(r)) return "out";
+  if (r.kind === "left" && Math.floor(r.room) <= 20) return "low";
+  return "neutral";
+}
+
 /** An agent's line in New session: the hint at the right of its option ("62% left"), the
  *  detail under its name ("5 hours, resets in 2 h 21 m"), whether the hint is none left or
- *  over, and the `aside` under the chosen agent (agentAside). Two accounts have no hint and no
- *  aside, since no one number is theirs; the detail has each one's tightest window ("dev 62%
- *  left, work 12% over"), or "2 accounts here" with none. A window whose reset has passed
- *  says nothing here: what was used since is unknown, and a lone "Reset" read as a button. */
-export function agentWords(
-  pick: AccountPick,
-  now: number,
-): { hint?: string; detail?: string; out?: boolean; aside?: string } {
+ *  over, and the `aside` on the chosen agent (`agentAside`), plus full window breakdown in
+ *  `asideTip`. Two accounts have no hint and no aside, since no one number is theirs; the
+ *  detail has each one's tightest window ("dev 62% left, work 12% over"), or "2 accounts
+ *  here" with none. A window whose reset has passed says nothing here: what was used since
+ *  is unknown, and a lone "Reset" read as a button. */
+export function agentWords(pick: AccountPick, now: number): AgentQuotaWords {
   if (!pick) return {};
   if (pick.kind === "ambiguous") {
     const each = pick.each.flatMap(({ name, entry }) => {
@@ -351,16 +367,30 @@ export function agentWords(
   if (!t) return {};
   const r = readWindow(t, now);
   const detail = [windowLabel(t), r.when, stale].filter(Boolean).join(", ");
+  const tone = quotaTone(r);
   const aside = agentAside(r);
-  return { hint: r.value, detail, out: isOut(r), ...(aside ? { aside } : {}) };
+  const tipLines = orderWindows(e.windows).map((w) => `${windowSentence(w, now, ": ")}.`);
+  const age = ago(e.observedAt, now);
+  if (age) tipLines.push(`As of ${age}.`);
+  const asideTip = tipLines.length ? tipLines.join("\n") : undefined;
+  return {
+    hint: r.value,
+    detail,
+    out: tone === "out",
+    tone,
+    ...(aside ? { aside } : {}),
+    ...(asideTip ? { asideTip } : {}),
+  };
 }
 
-/** The chosen agent's line under its name in New session, only where it would change what
- *  is done: "12% left" at 20% or less, "None left, resets in 2 h 21 m" or "12% over, …" when
- *  out; nothing above 20%. */
+/** The chosen agent's calm quota summary in New session: "62% left" when healthy (>20%),
+ *  "12% left · resets in 1 h" when low (<=20%), and "None left · resets in 2 h 21 m" or
+ *  "12% over · resets in 1 h" when out. */
 export function agentAside(r: Reading): string | undefined {
-  if (isOut(r)) return `${r.value}${r.when ? `, ${r.when}` : ""}`;
-  return r.kind === "left" && Math.floor(r.room) <= 20 ? r.value : undefined;
+  if (r.kind === "reset") return undefined;
+  if (isOut(r)) return r.when ? `${r.value} · ${r.when}` : r.value;
+  if (r.kind === "left" && Math.floor(r.room) <= 20) return r.when ? `${r.value} · ${r.when}` : r.value;
+  return r.value;
 }
 
 // ----- the page's edges -----

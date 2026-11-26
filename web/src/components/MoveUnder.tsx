@@ -17,6 +17,7 @@ import { sessionTitle } from "../lib/format";
 import { fuzzy } from "../lib/fuzzy";
 import { calmNextCommit } from "../lib/motion";
 import { HarnessGlyph } from "./bits";
+import { MoveFolderHost } from "./MoveFolder";
 import "../styles/pick.css";
 
 /** Rows the list draws at most; the field narrows the rest. */
@@ -30,8 +31,12 @@ export function MoveUnderHost() {
     window.addEventListener("popstate", close);
     return () => window.removeEventListener("popstate", close);
   }, []);
-  if (!req) return null;
-  return <Picker key={req.key} moving={req.key} fromTree={!!req.fromTree} onClose={() => setReq(null)} />;
+  return (
+    <>
+      {req && <Picker key={req.key} moving={req.key} fromTree={!!req.fromTree} onClose={() => setReq(null)} />}
+      <MoveFolderHost />
+    </>
+  );
 }
 
 /** The sessions that match `q`, best first; all of them, in order, with nothing typed. */
@@ -63,7 +68,10 @@ function Picker({ moving, fromTree, onClose }: { moving: SessionKey; fromTree: b
   const choice = Math.min(at, Math.max(0, shown.length - 1));
   const s = state.sessions.get(moving);
   const id = useId();
-  useFocusTrap(ref, true, { onClose, initial: "input" });
+  useFocusTrap(ref, Boolean(s), { onClose, initial: "input" });
+  useEffect(() => {
+    if (!s) onClose();
+  }, [s, onClose]);
   useEffect(() => {
     ref.current?.querySelector(`[data-pick="${choice}"]`)?.scrollIntoView({ block: "nearest" });
   }, [choice]);

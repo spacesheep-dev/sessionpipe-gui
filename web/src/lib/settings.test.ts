@@ -85,6 +85,16 @@ describe("the sidebar's width", () => {
     expect((await load({ sidebarWidth: "wide" })).getSettings().sidebarWidth).toBe(288);
     expect(m.sidebarClamp(301.4)).toBe(301);
   });
+
+  it("defaults sidebarGroup to flat and persists project per device", async () => {
+    layout(false);
+    const m = await load();
+    expect(m.getSettings().sidebarGroup).toBe("flat");
+    m.setSettings({ sidebarGroup: "project" });
+    expect(kept()?.sidebarGroup).toBe("project");
+    expect((await load()).getSettings().sidebarGroup).toBe("project");
+    expect((await load({ sidebarGroup: "bogus" })).getSettings().sidebarGroup).toBe("flat");
+  });
 });
 
 describe("the sessions column beside the rail", () => {

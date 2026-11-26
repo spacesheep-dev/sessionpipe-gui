@@ -428,42 +428,109 @@ describe("the Agent menu's pooled line (UX-SPEC §6)", () => {
     ],
     observedAt: new Date(NOW).toISOString(),
   };
-  it("puts the value at the right and the count with the window under", () => {
-    expect(poolPickerWords(pool, () => fresh, NOW)).toEqual({
+  it("puts the value at the right, calm readiness aside, and never alarms when failover has room", () => {
+    expect(poolPickerWords(pool, () => fresh, NOW, "lab-mac")).toEqual({
       hint: "62% left",
       detail: "3 accounts, 2 with room · Misha, 5 hours, resets in 2 h 21 m",
       out: false,
+      tone: "neutral",
+      aside: "62% left · 2 of 3 ready",
+      asideTip: poolTip(pool, "lab-mac", fresh, NOW),
     });
-    expect(poolPickerWords(pool, () => undefined, NOW)).toEqual({ detail: "3 accounts, 2 with room · Misha" });
-    // Every window of the current account reset since: the count, no bare "Reset".
+    // Single enabled account healthy: no redundant "1 of 1 ready" suffix.
+    expect(poolPickerWords({ ...pool, accounts: [misha] }, () => fresh, NOW)).toEqual({
+      hint: "62% left",
+      detail: "1 account · Misha, 5 hours, resets in 2 h 21 m",
+      out: false,
+      tone: "neutral",
+      aside: "62% left",
+    });
+    expect(poolPickerWords(pool, () => undefined, NOW)).toEqual({
+      detail: "3 accounts, 2 with room · Misha",
+      tone: "neutral",
+      aside: "2 of 3 accounts ready",
+    });
+    // Every window of the current account reset since: calm readiness, no bare "Reset".
     const reset = {
       ...fresh,
       windows: fresh.windows.map((w) => ({ ...w, resetsAt: new Date(NOW - H).toISOString() })),
     };
-    expect(poolPickerWords(pool, () => reset, NOW)).toEqual({ detail: "3 accounts, 2 with room · Misha" });
-    // Low on room: the chosen agent's line says it.
+    expect(poolPickerWords(pool, () => reset, NOW)).toEqual({
+      detail: "3 accounts, 2 with room · Misha",
+      tone: "neutral",
+      aside: "2 of 3 accounts ready",
+    });
+    // Current account low (<=20%) WITH another ready account: calm neutral, NOT orange!
     const low = { ...fresh, windows: [{ ...fresh.windows[0]!, usedPercent: 88 }] };
-    expect(poolPickerWords(pool, () => low, NOW)).toMatchObject({ hint: "12% left", aside: "12% left", out: false });
+    expect(poolPickerWords(pool, (id) => (id === "a" ? low : undefined), NOW, "lab-mac")).toEqual({
+      hint: "2 with room",
+      detail: "3 accounts, 2 with room · Misha, 5 hours, resets in 2 h 21 m",
+      out: false,
+      tone: "neutral",
+      aside: "2 of 3 accounts ready",
+      asideTip: poolTip(pool, "lab-mac", low, NOW),
+    });
+    // Current account exhausted (100%) WITH another ready account: calm neutral failover, NEVER orange!
+    const exhausted = { ...fresh, windows: [{ ...fresh.windows[0]!, usedPercent: 100 }] };
+    expect(poolPickerWords(pool, (id) => (id === "a" ? exhausted : undefined), NOW, "lab-mac")).toEqual({
+      hint: "1 with room",
+      detail: "3 accounts, 2 with room · Misha, 5 hours, resets in 2 h 21 m",
+      out: false,
+      tone: "neutral",
+      aside: "1 of 3 accounts ready",
+      asideTip: poolTip(pool, "lab-mac", exhausted, NOW),
+    });
+    // Single remaining ready account is low (<=20%, >0%): muted "low" tone, NOT orange!
+    const lastAccountPool = { ...pool, accounts: [misha, sheep, acc({ id: "d", status: "limited" })] };
+    expect(poolPickerWords(lastAccountPool, (id) => (id === "a" ? low : undefined), NOW)).toEqual({
+      hint: "12% left",
+      detail: "3 accounts, 1 with room · Misha, 5 hours, resets in 2 h 21 m",
+      out: false,
+      tone: "low",
+      aside: "12% left · last account",
+    });
+    // Stale entry keeps staleness note in detail.
     expect(poolPickerWords(pool, () => ({ ...fresh, observedAt: new Date(NOW - 3 * H).toISOString() }), NOW)).toEqual({
       hint: "62% left",
       detail: "3 accounts, 2 with room · Misha, 5 hours, resets in 2 h 21 m, numbers as of 3 h ago",
       out: false,
+      tone: "neutral",
+      aside: "62% left · 2 of 3 ready",
     });
   });
-  it("says None left when no account has room, and nothing when every one is off or in error", () => {
+  it("says Pool used up when no account has room, and stays calm when every one is off or in error", () => {
     const err = acc({ id: "x", status: "error" });
     expect(poolPickerWords({ ...pool, accounts: [sheep, err] }, () => undefined, NOW)).toEqual({
       hint: "None left",
       detail: "2 accounts, none with room · first back in 2 h 10 m",
       out: true,
-      aside: "None left",
+      tone: "out",
+      aside: "Pool used up · first back in 2 h 10 m",
     });
     expect(poolPickerWords({ ...pool, accounts: [{ ...sheep, until: undefined }, err] }, () => undefined, NOW)).toEqual(
-      { hint: "None left", detail: "2 accounts, none with room", out: true, aside: "None left" },
+      {
+        hint: "None left",
+        detail: "2 accounts, none with room",
+        out: true,
+        tone: "out",
+        aside: "Pool used up",
+      },
     );
     expect(
       poolPickerWords({ ...pool, accounts: [err, acc({ id: "y", enabled: false })] }, () => undefined, NOW),
-    ).toEqual({ detail: "2 accounts, none with room" });
+    ).toEqual({ detail: "2 accounts, none with room", tone: "neutral" });
+    // Current marked limited in hello while another account still has room: calm neutral.
+    const failoverHello = {
+      ...pool,
+      accounts: [{ ...sheep, current: true }, fiction, acc({ id: "z", status: "limited" })],
+    };
+    expect(poolPickerWords(failoverHello, () => undefined, NOW)).toEqual({
+      hint: "1 with room",
+      detail: "3 accounts, 1 with room",
+      out: false,
+      tone: "neutral",
+      aside: "1 of 3 accounts ready",
+    });
   });
   it("words the sidebar's tooltip a sentence a line", () => {
     expect(accountSentence(fiction, pool.accounts, NOW)).toBe("Fiction has room.");
@@ -592,6 +659,32 @@ describe("the section's words", () => {
     expect(moveIn(["a", "b", "c"], 1, 1)).toEqual(["a", "b", "c"]);
     expect(moveIn(["a", "b", "c"], 1, 7)).toEqual(["a", "b", "c"]);
   });
+  it("ignores disabled accounts' until timestamps in roomWords and poolPickerWords", () => {
+    const now = Date.parse("2026-10-23T12:00:00Z");
+    const accounts: MachinePoolAccount[] = [
+      {
+        id: "disabled-soon",
+        label: "Disabled",
+        enabled: false,
+        current: false,
+        status: "limited",
+        until: "2026-10-23T12:15:00Z",
+      },
+      {
+        id: "enabled-later",
+        label: "Active",
+        enabled: true,
+        current: true,
+        status: "limited",
+        until: "2026-10-23T14:30:00Z",
+      },
+    ];
+    expect(roomWords(accounts, now)).toBe("2 accounts, none with room · first back in 2 h 30 m");
+    const picked = poolPickerWords({ harness: "claude-code", on: true, accounts }, () => undefined, now, "lab-mac");
+    expect(picked.aside).toBe("Pool used up · first back in 2 h 30 m");
+    expect(picked.tone).toBe("out");
+  });
+
   it("says the rest once each", () => {
     expect(offlineNotice("lab-mac", true)).toMatch(/can't reach Claude while switching is on\.$/);
     expect(offlineNotice("lab-mac", false)).toBe("lab-mac's sessionpipe is offline.");

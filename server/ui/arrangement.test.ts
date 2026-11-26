@@ -153,4 +153,35 @@ describe("arrangement routes", () => {
     expect(((await next("arrangement")) as { arrangement: Arrangement }).arrangement.placed).toEqual({});
     await reader.cancel();
   });
+
+  it("persists v:1 folders and inFolder, refuses bad_folder, and reloads legacy v:1 files cleanly", () => {
+    const tmp2 = tempDir();
+    try {
+      // Legacy v:1 file without folders/inFolder loads cleanly.
+      writeFileSync(
+        path.join(tmp2.dir, "arrangement.json"),
+        JSON.stringify({ v: 1, rev: 4, placed: {}, pinned: ["claude-code:a"] }),
+      );
+      const s1 = new ArrangementStore(tmp2.dir, () => true);
+      expect(s1.get()).toEqual({ rev: 4, placed: {}, pinned: ["claude-code:a"] });
+
+      // Adding folders + inFolder saves as v:1 and reloads identically.
+      s1.patch({ folders: [{ id: "f_proj", name: "Core", color: "green" }], inFolder: { "codex:b": "f_proj" } });
+      expect(s1.get()).toEqual({
+        rev: 5,
+        placed: {},
+        pinned: ["claude-code:a"],
+        folders: [{ id: "f_proj", name: "Core", color: "green" }],
+        inFolder: { "codex:b": "f_proj" },
+      });
+      expect(JSON.parse(readFileSync(path.join(tmp2.dir, "arrangement.json"), "utf8")).v).toBe(1);
+      const s2 = new ArrangementStore(tmp2.dir, () => true);
+      expect(s2.get()).toEqual(s1.get());
+      s2.forget("codex:b");
+      expect(s2.get().inFolder).toBeUndefined();
+      expect(s2.get().folders).toEqual([{ id: "f_proj", name: "Core", color: "green" }]);
+    } finally {
+      tmp2.cleanup();
+    }
+  });
 });
