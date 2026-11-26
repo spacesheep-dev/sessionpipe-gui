@@ -208,8 +208,11 @@ export interface Rolled {
   needs: number;
   working: number;
   stale: number;
+  idle: number;
   unread: number;
 }
+
+export type RollUp = ReadonlyMap<SessionKey, Rolled>;
 
 /** One post-order walk over the tree: per session, what is under it (rolled up). `drawn`
  *  leaves out sessions this surface does not draw (hidden here), and everything under them. */
@@ -220,7 +223,7 @@ export function rollUp(
   const drawn = o.drawn ?? (() => true);
   const out = new Map<SessionKey, Rolled>();
   const walk = (n: TreeNode): Rolled => {
-    const r: Rolled = { loud: "none", inside: 0, needs: 0, working: 0, stale: 0, unread: 0 };
+    const r: Rolled = { loud: "none", inside: 0, needs: 0, working: 0, stale: 0, idle: 0, unread: 0 };
     for (const k of n.kids) {
       if (!drawn(k.s)) continue;
       const own = loudOf(k.s, o.unread);
@@ -229,6 +232,7 @@ export function rollUp(
       r.needs += below.needs + (own === "needs_you" ? 1 : 0);
       r.working += below.working + (own === "working" ? 1 : 0);
       r.stale += below.stale + (own === "stale" ? 1 : 0);
+      r.idle += below.idle + (k.s.state === "idle" ? 1 : 0);
       r.unread += below.unread + (own === "unread" ? 1 : 0);
       r.loud = louder(louder(r.loud, own), below.loud);
     }
@@ -237,6 +241,44 @@ export function rollUp(
   };
   for (const r of roots) walk(r);
   return out;
+}
+
+/** Sidebar sort block: 0 = needs you anywhere in family, 1 = live (working, stale or idle)
+ *  anywhere in family, 2 = finished family. */
+export type SidebarBlock = 0 | 1 | 2;
+
+export interface FrozenRow {
+  key: SessionKey;
+  block: SidebarBlock;
+}
+
+/** Which sidebar block a family sits in, from its own state and its rolled-up subtree. */
+export function sidebarBlock(n: TreeNode, roll: RollUp): SidebarBlock {
+  const r = roll.get(n.s.key);
+  if (n.s.state === "needs_you" || (r?.needs ?? 0) > 0) return 0;
+  if (
+    n.s.state === "working" ||
+    n.s.state === "stale" ||
+    n.s.state === "idle" ||
+    (r && (r.working > 0 || r.stale > 0 || r.idle > 0))
+  )
+    return 1;
+  return 2;
+}
+
+/** Stable sidebar order on a copy: needs-you families (0), then live families (1), then
+ *  finished families (2); newest startedAt first within each block, then key. `frozen`
+ *  keeps the open row in its starting block while it stays open. */
+export function sidebarOrder(nodes: readonly TreeNode[], roll: RollUp, frozen?: FrozenRow | null): TreeNode[] {
+  const blockOf = (n: TreeNode): SidebarBlock =>
+    frozen && n.s.key === frozen.key ? frozen.block : sidebarBlock(n, roll);
+  return [...nodes].sort((a, b) => {
+    const bd = blockOf(a) - blockOf(b);
+    if (bd !== 0) return bd;
+    const td = (Date.parse(b.s.startedAt) || 0) - (Date.parse(a.s.startedAt) || 0);
+    if (td !== 0) return td;
+    return a.s.key < b.s.key ? -1 : a.s.key > b.s.key ? 1 : 0;
+  });
 }
 
 /** Whether a row is drawn with the computer mark: its session runs on another computer

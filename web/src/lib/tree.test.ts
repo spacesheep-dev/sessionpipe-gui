@@ -14,6 +14,8 @@ import {
   eventParent,
   rollUp,
   runsElsewhere,
+  sidebarBlock,
+  sidebarOrder,
   TREE_LEVELS,
   type TreeInput,
   type TreeNode,
@@ -195,12 +197,20 @@ describe("rollUp", () => {
     const u = s("codex:ru", { state: "done", delegatedBy: p.key });
     const t = arrangeTree({ all: [p, c, g, u], arrangement: NONE });
     const r = rollUp(t.roots, { unread: (x) => x.key === u.key });
-    expect(r.get(p.key)).toEqual({ loud: "needs_you", inside: 3, needs: 1, working: 0, stale: 0, unread: 1 });
+    expect(r.get(p.key)).toEqual({
+      loud: "needs_you",
+      inside: 3,
+      needs: 1,
+      working: 0,
+      stale: 0,
+      idle: 1,
+      unread: 1,
+    });
     expect(r.get(c.key)).toMatchObject({ loud: "needs_you", inside: 1, needs: 1 });
     expect(r.get(g.key)).toMatchObject({ loud: "none", inside: 0 });
     // A session this surface does not draw (hidden here) counts for nothing, nor what is under it.
     const hid = rollUp(t.roots, { unread: () => false, drawn: (x) => x.key !== c.key });
-    expect(hid.get(p.key)).toEqual({ loud: "none", inside: 1, needs: 0, working: 0, stale: 0, unread: 0 });
+    expect(hid.get(p.key)).toEqual({ loud: "none", inside: 1, needs: 0, working: 0, stale: 0, idle: 0, unread: 0 });
   });
 });
 
@@ -245,5 +255,61 @@ describe("the order", () => {
     expect(t.roots.map((x) => x.s.key)).toEqual(board.map((x) => x.key));
     // The idle parent of a session that needs you is in Needs you, before working rows.
     expect(new Set(t.roots.slice(0, 2).map((x) => x.s.key))).toEqual(new Set(["claude-code:o4", "claude-code:o1"]));
+  });
+});
+
+describe("sidebarOrder", () => {
+  const orderOf = (all: SessionSummary[], frozen?: { key: string; block: 0 | 1 | 2 }) => {
+    const t = arrangeTree({ all, arrangement: NONE });
+    const r = rollUp(t.roots, { unread: () => false });
+    return sidebarOrder(t.roots, r, frozen).map((x) => x.s.key);
+  };
+
+  it("a turn.ended on a working root changes no index", () => {
+    const a = s("claude-code:sa", { state: "idle", startedAt: "2026-11-24T12:03:00.000Z" });
+    const b = s("claude-code:sb", { state: "working", startedAt: "2026-11-24T12:02:00.000Z" });
+    const c = s("claude-code:sc", { state: "stale", startedAt: "2026-11-24T12:01:00.000Z" });
+    const before = orderOf([a, b, c]);
+    const after = orderOf([a, { ...b, state: "idle" }, c]);
+    expect(before).toEqual(["claude-code:sa", "claude-code:sb", "claude-code:sc"]);
+    expect(after).toEqual(before);
+  });
+
+  it("an attention on an idle root moves it to index 0", () => {
+    const a = s("claude-code:na", { state: "working", startedAt: "2026-11-24T12:03:00.000Z" });
+    const b = s("claude-code:nb", { state: "idle", startedAt: "2026-11-24T12:01:00.000Z" });
+    expect(orderOf([a, b])).toEqual(["claude-code:na", "claude-code:nb"]);
+    expect(orderOf([a, { ...b, state: "needs_you" }])).toEqual(["claude-code:nb", "claude-code:na"]);
+  });
+
+  it("an idle root that ends moves once, to the head of the done block", () => {
+    const live = s("claude-code:la", { state: "working", startedAt: "2026-11-24T12:01:00.000Z" });
+    const ending = s("claude-code:lb", { state: "idle", startedAt: "2026-11-24T12:03:00.000Z" });
+    const oldDone = s("claude-code:lc", { state: "done", startedAt: "2026-11-24T12:02:00.000Z" });
+    expect(orderOf([live, ending, oldDone])).toEqual(["claude-code:lb", "claude-code:la", "claude-code:lc"]);
+    expect(orderOf([live, { ...ending, state: "done" }, oldDone])).toEqual([
+      "claude-code:la",
+      "claude-code:lb",
+      "claude-code:lc",
+    ]);
+  });
+
+  it("a done parent with a working child stays in the live block", () => {
+    const doneParent = s("claude-code:dp", { state: "done", startedAt: "2026-11-24T12:01:00.000Z" });
+    const workingKid = s("codex:wk", { state: "working", delegatedBy: doneParent.key });
+    const pureDone = s("claude-code:pd", { state: "done", startedAt: "2026-11-24T12:05:00.000Z" });
+    const t = arrangeTree({ all: [doneParent, workingKid, pureDone], arrangement: NONE });
+    const r = rollUp(t.roots, { unread: () => false });
+    expect(sidebarBlock(t.nodes.get(doneParent.key)!, r)).toBe(1);
+    expect(sidebarOrder(t.roots, r).map((x) => x.s.key)).toEqual([doneParent.key, pureDone.key]);
+  });
+
+  it("the open row that needed you keeps index 0 after it is answered, and settles when another opens", () => {
+    const answered = s("claude-code:oa", { state: "working", startedAt: "2026-11-24T12:01:00.000Z" });
+    const newer = s("claude-code:ob", { state: "working", startedAt: "2026-11-24T12:05:00.000Z" });
+    // Frozen in block 0 while open: stays ahead of newer live row.
+    expect(orderOf([answered, newer], { key: answered.key, block: 0 })).toEqual([answered.key, newer.key]);
+    // Once another row is opened, it settles into block 1 by startedAt.
+    expect(orderOf([answered, newer], { key: newer.key, block: 1 })).toEqual([newer.key, answered.key]);
   });
 });

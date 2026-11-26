@@ -60,12 +60,15 @@ import { howOf, openSession, openSplit } from "../lib/split";
 import {
   arrangeTree,
   descendants,
+  type FrozenRow,
   type Loud,
   louder,
   loudOf,
   type Rolled,
   rollUp,
   runsElsewhere,
+  sidebarBlock,
+  sidebarOrder,
   type Tree,
   type TreeNode,
 } from "../lib/tree";
@@ -295,13 +298,36 @@ export const SessionTree = memo(function SessionTree({
       }),
     [all, arrangement, hid],
   );
+  // What is under each row, rolled up: a folded row carries the loudest of it, and the
+  // sidebar's three-block order reads the same walk (lib/tree.ts).
+  const unreadOf = useCallback((x: SessionSummary) => isUnread(x, marks), [marks]);
+  const roll = useMemo(() => rollUp(tree.roots, { unread: unreadOf, drawn: (x) => !hid(x) }), [tree, unreadOf, hid]);
+  // The open row keeps its starting block while it stays open, so answering a prompt or
+  // sending a message never jumps it out from under you.
+  const frozenRef = useRef<FrozenRow | null>(null);
+  if (!open) {
+    frozenRef.current = null;
+  } else if (frozenRef.current?.key !== open) {
+    const node = tree.nodes.get(open);
+    frozenRef.current = node ? { key: open, block: sidebarBlock(node, roll) } : null;
+  }
+  const frozen = frozenRef.current;
+
   const pinSet = useMemo(() => new Set(arrangement.pinned), [arrangement.pinned]);
   const pinned = useMemo(
     () =>
       arrangement.pinned.map((k) => tree.nodes.get(k)).filter((n): n is TreeNode => !!n && n.level === 0 && !hid(n.s)),
     [arrangement.pinned, tree, hid],
   );
-  const roots = useMemo(() => tree.roots.filter((n) => !pinSet.has(n.s.key) && !hid(n.s)), [tree, pinSet, hid]);
+  const roots = useMemo(
+    () =>
+      sidebarOrder(
+        tree.roots.filter((n) => !pinSet.has(n.s.key) && !hid(n.s)),
+        roll,
+        frozen,
+      ),
+    [tree, pinSet, hid, roll, frozen],
+  );
 
   // Held still under the hand, as the board is: no row moves while the pointer is over
   // the list, the keyboard is in it or a row's menu is up; the person's own move lands at once.
@@ -320,10 +346,15 @@ export const SessionTree = memo(function SessionTree({
   const latestFolds = useRef(folded);
   latestFolds.current = folded;
   const [allKids, setAllKids] = useState<ReadonlySet<SessionKey>>(new Set());
-  const kidsOf = useCallback((n: TreeNode) => n.kids.filter((k) => !hid(k.s)), [hid]);
-  // What is under each row, rolled up: a folded row carries the loudest of it (lib/tree.ts).
-  const unreadOf = useCallback((x: SessionSummary) => isUnread(x, marks), [marks]);
-  const roll = useMemo(() => rollUp(tree.roots, { unread: unreadOf, drawn: (x) => !hid(x) }), [tree, unreadOf, hid]);
+  const kidsOf = useCallback(
+    (n: TreeNode) =>
+      sidebarOrder(
+        n.kids.filter((k) => !hid(k.s)),
+        roll,
+        frozen,
+      ),
+    [hid, roll, frozen],
+  );
   /** The sessions a folded row stands for: every one under it this device draws. */
   const underOf = useCallback(
     (key: SessionKey): SessionSummary[] => {
@@ -718,9 +749,10 @@ export const SessionTree = memo(function SessionTree({
   useFlip(listRef, 80, { move: 150 });
   useFlip(pinRef, 80, { move: 150 });
   const empty = drawn.length === 0 && heldRoots.length === 0;
-  // A start not listed yet is drawn where the Board draws it: first of the working rows,
-  // after those that need you.
-  const startAt = shownRoots.findIndex((h) => h.item.s.state !== "needs_you");
+  // A start not listed yet sits at the top of the live block (right after block 0 rows).
+  const startAt = shownRoots.findIndex(
+    (h) => (frozen?.key === h.key ? frozen.block : sidebarBlock(h.item, roll)) !== 0,
+  );
   // While a row is held up, New session's row (fixed, always in view) is where it is pinned:
   // the same height, so nothing in the list moves when a drag starts.
   const pinZone = !!drag;
