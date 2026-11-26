@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* The theme host: a full-bleed container below the shell (no padding, the theme
-   manages its own scrolling), the error panel, and the Themes page's list. */
+   manages its own scrolling), the error panel, and the /themes Views & Plugins page
+   styled as a calm macOS System Settings Extensions pane. */
 
 /* Doubled so it beats shell.css's `.main` padding at every breakpoint. */
 .main.main--bleed {
@@ -100,60 +101,190 @@
   height: 20px;
 }
 
-/* ---------- /themes (the Views page) ---------- */
-/* Rows of the grouped form: the name, the version in the mark tier, its flags as quiet
-   words (no pills), one line of what it is; Open and Disable on the trailing edge. */
+/* ---------- /themes (the Views & Plugins page) ---------- */
+/* macOS System Settings Extensions grammar: 36x36 monochrome app-tile icon wells,
+   weighted titles with quiet tabular versions, noteworthy pills only, native switches,
+   and a single collapsible Install via CLI disclosure. */
 
-.form-row.themes-row {
-  align-items: flex-start;
-  padding: 10px 0;
+/* 36x36 macOS App-Tile Icon Well shared across Views, Plugins, and Extras. */
+.ext-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin-top: 1px;
+  border-radius: 9px;
+  border: var(--hairline) solid var(--line);
+  background: var(--bg-3);
+  box-shadow: var(--shadow-sm);
+  color: var(--fg-2);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.ext-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+.themes-reload.is-busy svg {
+  animation: spin 0.9s linear infinite;
+}
+.ext-icon-svg {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+.ext-icon--dim {
+  opacity: 0.45;
+}
+.ext-icon--err {
+  color: var(--err);
+  background: var(--err-bg);
+  border-color: color-mix(in oklch, var(--err) 28%, var(--line));
+}
+
+/* Extension row layout inside grouped cards. */
+.form-row.themes-row,
+.ext-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 0;
+  transition: background-color var(--dur-release) linear;
+}
+.ext-row[data-menu-open] {
+  background: var(--sel);
+  border-radius: var(--radius);
+}
+.ext-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 .themes-row-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 8px;
+  align-items: center;
+  gap: 4px 8px;
 }
 .themes-row-name {
   color: var(--fg);
   font-size: var(--text-md);
   font-weight: 500;
+  line-height: var(--lh-tight);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+[data-disabled] > .ext-body .themes-row-name,
+[data-disabled] > .plug-row .themes-row-name {
+  color: var(--fg-3);
 }
 .themes-row-ver {
   color: var(--fg-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  line-height: 1.3;
 }
-.themes-flag {
+
+/* Subtle noteworthy badge pills (Linked, Experimental, Broken, Installed). */
+.ext-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-3);
+  box-shadow: inset 0 0 0 var(--hairline) var(--line);
   color: var(--fg-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.35;
   text-transform: capitalize;
+  white-space: nowrap;
 }
-.themes-flag + .themes-flag::before,
-.themes-row-ver + .themes-flag::before {
-  content: "·";
-  margin-right: 8px;
-  color: var(--fg-4);
-}
+.ext-pill--err,
 .themes-flag--err {
   color: var(--err);
+  background: var(--err-bg);
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--err) 28%, var(--line));
 }
+
 .themes-row-meta {
-  max-width: 60ch;
+  max-width: 58ch;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .themes-row-err {
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: var(--hairline) solid color-mix(in oklch, var(--err) 24%, var(--line));
+  background: var(--err-bg);
   color: var(--err);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   font-family: var(--font-mono);
   white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
 }
-.themes-row-open {
+.themes-row-actions {
   flex: none;
-  gap: 4px;
-  padding-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ext-more {
+  margin-left: -2px;
+}
+
+/* Generous hit area around the native switch on extension rows (matches pool.css). */
+.ext-switch {
+  position: relative;
+}
+.ext-switch::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+}
+
+/* Empty card inside grouped layout. */
+.themes-empty-card {
+  padding-right: 12px;
 }
 .themes-empty {
-  padding: 8px 0;
+  padding: 14px 0;
 }
+.themes-inline-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .themes-inline-link:hover {
+    color: var(--fg);
+  }
+}
+
+/* Live feedback & loopback hints below each section card. */
 .themes-tools {
   display: flex;
   gap: 8px;
@@ -171,47 +302,159 @@
 .themes .caption code {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  color: var(--fg-2);
 }
-.themes-trust {
-  max-width: 64ch;
+
+/* Collapsible Install via CLI disclosure panel. */
+.themes-install {
+  animation: row-in var(--dur-fast) var(--ease-out) both;
 }
-.extras-line {
-  overflow-wrap: anywhere;
+.themes-install-close {
+  width: var(--control-sm);
+  height: var(--control-sm);
+  margin-right: -4px;
+}
+.form-list.themes-install-card {
+  padding-left: 0;
+}
+.themes-install-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+}
+.themes-install-kind {
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.themes-install-row .cmdwell {
+  width: 100%;
+}
+
+/* Extras CLI well and install log. */
+.extras-cmd {
+  margin-top: 8px;
 }
 .extras-log {
   margin: 8px 0 0;
   padding: 8px 10px;
   border-radius: var(--radius);
+  border: var(--hairline) solid var(--line);
   background: var(--bg-3);
   color: var(--fg-2);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   white-space: pre-wrap;
   word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
 }
 .extras-log.is-err {
+  border-color: color-mix(in oklch, var(--err) 24%, var(--line));
+  background: var(--err-bg);
   color: var(--err);
 }
-/* On a desktop a row keeps the panel's trailing inset, and the add line stands clear of
-   the panel above it. */
+
+/* Calm, compact local-trust page footnote. */
+.themes-trust-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-inline: 12px;
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  line-height: var(--lh);
+}
+.themes-trust-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--fg-3);
+}
+.themes-trust {
+  margin: 0;
+  max-width: 68ch;
+  text-wrap: pretty;
+}
+
+/* Desktop insets. */
 @media (min-width: 720px) and (pointer: fine), (min-width: 840px) and (pointer: none) {
-  .form-row.themes-row {
-    padding-right: 12px;
+  .form-row.themes-row,
+  .ext-row {
+    padding-right: calc(12px - var(--hairline));
+  }
+  .ext-more {
+    margin-right: -4px;
+  }
+  .form-list.themes-install-card {
+    padding-left: 0;
   }
   .themes-tools .sect-note {
     padding: 8px 12px 0;
   }
-  .form-group > .form-list ~ .well-row {
-    margin-top: 8px;
+  .extras-cmd .cmdwell {
+    background: var(--bg-2);
+    box-shadow: inset 0 0 0 var(--hairline) var(--line);
   }
 }
 
+/* Phone & coarse-pointer layout. */
 @media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
-  .themes-row {
+  .form-row.themes-row,
+  .ext-row {
     flex-wrap: wrap;
+    align-items: flex-start;
+    padding: 12px 16px 12px 0;
+  }
+  .ext-body {
+    flex: 1 1 160px;
+  }
+  .themes-row-actions {
+    margin-left: auto;
+    align-self: center;
+  }
+  .form-list.themes-install-card {
+    padding-left: 0;
+  }
+  .themes-install-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding: 10px 16px;
+  }
+  .themes-empty-card {
+    padding-right: 16px;
   }
   .themes-tools .sect-note {
     padding: 8px 16px 0;
+  }
+  .themes-trust-foot {
+    padding-inline: 16px;
+  }
+  .ext-switch::after {
+    width: var(--tap);
+    height: var(--tap);
+  }
+}
+
+@media (pointer: coarse) {
+  .themes .btn--sm {
+    min-height: var(--tap);
+  }
+  .themes-install-close {
+    width: var(--tap);
+    height: var(--tap);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .themes-install {
+    animation: none;
+  }
+  .themes-reload.is-busy svg {
+    animation-duration: 1.6s;
   }
 }
 

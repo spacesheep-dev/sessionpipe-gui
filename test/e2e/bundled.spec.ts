@@ -29,12 +29,19 @@ test.describe("bundled views", () => {
 
     await openPage(page, "/themes");
     const row = page.locator("[data-theme-row='e2e-bundled']");
-    await expect(row.locator(".themes-flag")).toHaveText(["bundled"]);
-    await row.locator("[data-toggle='e2e-bundled']").click();
-    await expect(row.locator(".themes-flag")).toHaveText(["bundled", "disabled"]);
+    await expect(row).toHaveAttribute("data-bundled", "");
+    await expect(row.locator(".themes-flag")).toHaveCount(0);
+    const toggle = row.locator("[data-toggle='e2e-bundled']");
+    await expect(toggle).toHaveAttribute("role", "switch");
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(row).toHaveAttribute("data-disabled", "");
     await expect(row.getByRole("link", { name: "Open" })).toHaveCount(0);
     await expect(page.locator("nav.rail a[data-nav='t:e2e-bundled']")).toHaveCount(0);
-    await expect(page.locator(".themes-tools .sect-note")).toHaveText("e2e-bundled is off: hidden from the rail.");
+    await expect(page.locator(".themes-tools .sect-note").first()).toHaveText(
+      "e2e-bundled is off: hidden from the rail.",
+    );
 
     await openPage(page, "/t/e2e-bundled");
     await expect(page.locator(".theme-error h2")).toHaveText("E2E Bundled is disabled");
@@ -43,8 +50,8 @@ test.describe("bundled views", () => {
     expect((await request.get("/themes/e2e-bundled/index.js")).status()).toBe(404);
 
     await openPage(page, "/themes");
-    await row.locator("[data-toggle='e2e-bundled']").click();
-    await expect(row.locator(".themes-flag")).toHaveText(["bundled"]);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
     await expect(page.locator("nav.rail a[data-nav='t:e2e-bundled']")).toBeVisible();
     await expect(row.getByRole("link", { name: "Open" })).toHaveAttribute("href", "/t/e2e-bundled");
   });

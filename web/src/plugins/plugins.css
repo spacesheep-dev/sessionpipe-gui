@@ -1,156 +1,283 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* The Plugins section of the Views page: rows share the view list's look (host.css);
-   this is the generated settings form, under the row's caption, fields in the shared
-   text-field look. Status words stay quiet: red only for an error. */
+/* The Plugins section of the Views page: status pills matching pool.css, disclosure toggle
+   with rotating chevron, and a full-width nested settings drawer with crisp 2-column form
+   rows, native switches for booleans, shared Select, and pill-style multiselect chips. */
 
-.plug-status--error {
-  color: var(--err);
+/* The Views page's reading column, centred as every document page's is. */
+.themes > :not(.bar):not(.bar-below):not(.sr-only) {
+  margin-inline: auto;
 }
-.plug-form {
-  display: grid;
-  gap: 12px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: var(--hairline) solid var(--line);
-}
-.plug-field {
-  display: grid;
-  gap: 4px;
+
+.plug-item {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
-.plug-field--check {
-  grid-template-columns: auto 1fr;
+
+/* Status pills matching pool.css (.pool-word): Active with 6px --ok dot, Off muted, Error crimson. */
+.plug-pill {
+  display: inline-flex;
   align-items: center;
-  column-gap: 8px;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
 }
-.plug-field--check input {
-  accent-color: var(--fg);
+.plug-pill--active {
+  color: var(--fg);
+  background: color-mix(in oklch, var(--ok) 12%, var(--bg-3));
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--ok) 28%, var(--line));
+}
+.plug-pill--active::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.plug-pill--off {
+  color: var(--fg-3);
+  background: var(--bg-3);
+  box-shadow: inset 0 0 0 var(--hairline) var(--line);
+}
+.plug-pill--err {
+  color: var(--err);
+  background: var(--err-bg);
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in oklch, var(--err) 28%, var(--line));
+}
+
+/* Settings disclosure button with rotating chevron (-90deg collapsed -> 0deg expanded). */
+.plug-cfg-btn {
+  gap: 4px;
+  color: var(--fg-2);
+}
+.plug-cfg-btn[aria-expanded="true"] {
+  background: var(--sel);
+  color: var(--fg);
+}
+.plug-cfg-chev {
+  flex: none;
+  color: var(--fg-3);
+  transform: rotate(-90deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.plug-cfg-btn[aria-expanded="true"] .plug-cfg-chev {
+  transform: rotate(0deg);
+}
+
+/* Full-width nested settings drawer beneath the plugin header row. */
+.plug-drawer {
+  margin-left: calc(-12px + var(--hairline));
+  padding: 0 16px;
+  border-top: var(--hairline) solid var(--line);
+  background: color-mix(in oklch, var(--bg-3) 50%, var(--bg-2));
+}
+.plug-form {
+  display: flex;
+  flex-direction: column;
+}
+.plug-fields {
+  display: flex;
+  flex-direction: column;
+}
+.plug-drawer-row {
+  padding: 12px 0;
+  min-width: 0;
+}
+.plug-drawer-row + .plug-drawer-row {
+  border-top: var(--hairline) solid color-mix(in oklch, var(--line) 75%, transparent);
+}
+
+/* 2-column macOS settings grid on desktop for string / number / secret / select. */
+.plug-field-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 210px) minmax(0, 1fr);
+  align-items: start;
+  column-gap: 16px;
+  row-gap: 4px;
+}
+.plug-field-grid > .plug-label {
+  padding-top: 5px;
+}
+.plug-control {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.plug-label {
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: var(--lh-tight);
 }
 .plug-help {
   color: var(--fg-3);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   line-height: var(--lh);
+  text-wrap: pretty;
 }
-.plug-field--check .plug-help {
-  grid-column: 2;
+
+/* Boolean setting row: label + help left, native switch right. */
+.plug-field--bool {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
-.plug-label {
-  color: var(--fg-2);
-  font-size: var(--text-sm);
-  font-weight: 500;
+.plug-bool-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
-.plug-field input[type="text"],
-.plug-field input[type="password"],
-.plug-field input[type="number"] {
+
+/* Text / number / secret inputs and shared Select inside the drawer. */
+.plug-input {
   width: 100%;
   max-width: 48ch;
-  min-height: var(--control);
-  padding: 0 8px;
-  border: var(--hairline) solid var(--line-2);
-  border-radius: var(--radius);
-  background: var(--bg-2);
-  color: var(--fg);
-  font-size: var(--text-sm);
 }
-.plug-field input[type="text"]:focus,
-.plug-field input[type="password"]:focus,
-.plug-field input[type="number"]:focus {
-  outline: none;
-  border-color: var(--focus-line);
-  box-shadow: 0 0 0 3px var(--focus-halo);
+.plug-input:disabled {
+  opacity: 0.55;
 }
-.plug-field input:disabled {
-  opacity: 0.6;
-}
-.plug-field .sel {
+.plug-control .sel {
   width: 100%;
   max-width: 48ch;
 }
 .plug-secret {
   display: flex;
-  gap: 8px;
   align-items: center;
+  gap: 6px;
   flex-wrap: wrap;
+  max-width: 48ch;
 }
-.plug-secret input {
-  flex: 1 1 24ch;
+.plug-secret .plug-input {
+  flex: 1 1 20ch;
+  max-width: none;
 }
-.plug-options {
+
+/* Multiselect fieldset: draws zero browser chrome (verified by test/e2e/fieldsets.spec.ts). */
+.plug-field--multi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.plug-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 14px;
-}
-.plug-option {
-  display: inline-flex;
   gap: 6px;
-  align-items: center;
-  font-size: var(--text-sm);
 }
-.plug-option code {
+.plug-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: var(--control-sm);
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  border: var(--hairline) solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.plug-chip code {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
-.plug-form-foot {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-/* The Views page's reading column, centred as every page's is (this sheet rides with the
-   page's own chunk). */
-.themes > :not(.bar):not(.bar-below):not(.sr-only) {
-  margin-inline: auto;
-}
-
-/* A plugin's settings, folded while it is off: the same quiet disclosure as /phone's
-   "Other ways". */
-.plug-more {
-  margin-top: 4px;
-}
-.plug-more > summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  width: fit-content;
-  list-style: none;
-  color: var(--fg-2);
-  font-size: var(--text-sm);
-  -webkit-user-select: none;
-  user-select: none;
-}
-.plug-more > summary::-webkit-details-marker {
-  display: none;
-}
-.plug-more > summary::before {
-  content: "";
-  width: 10px;
-  height: 10px;
-  background: var(--fg-3);
-  -webkit-mask:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-    center / contain no-repeat;
-  mask:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-    center / contain no-repeat;
-  transition: transform var(--dur-fast) var(--ease-out);
-}
-.plug-more[open] > summary::before {
-  transform: rotate(90deg);
-}
-.plug-more > summary:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
+.plug-chip-check {
+  flex: none;
+  color: var(--fg);
 }
 @media (hover: hover) {
-  .plug-more > summary:hover {
+  .plug-chip:hover {
+    background: var(--hover);
     color: var(--fg);
   }
 }
-/* Under its disclosure the form needs no hairline of its own. */
-.plug-more > .plug-form {
-  margin-top: 8px;
-  padding-top: 0;
-  border-top: 0;
+.plug-chip.is-on {
+  background: var(--sel);
+  border-color: var(--fg-3);
+  color: var(--fg);
+}
+.plug-chip:has(input:focus-visible) {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: 2px;
+}
+.plug-field--multi:disabled .plug-chip {
+  opacity: 0.5;
+}
+
+/* Drawer footer: status/error left, Reset + Save right. */
+.plug-drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0 12px;
+  border-top: var(--hairline) solid var(--line);
+}
+.plug-drawer-status {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.plug-drawer-status .sect-note {
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+}
+.plug-drawer-status .sect-note.is-err {
+  color: var(--err);
+}
+.plug-drawer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Phone & coarse-pointer adaptations. */
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
+  .plug-drawer {
+    margin-left: -16px;
+    padding: 0 16px;
+  }
+  .plug-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 6px;
+  }
+  .plug-field-grid > .plug-label {
+    padding-top: 0;
+  }
+  .plug-input,
+  .plug-control .sel,
+  .plug-secret {
+    max-width: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .plug-cfg-btn {
+    min-height: var(--tap);
+  }
+  .plug-chip {
+    min-height: var(--tap);
+    padding: 4px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plug-cfg-chev {
+    transition: none;
+  }
 }
