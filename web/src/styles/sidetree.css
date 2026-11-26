@@ -28,7 +28,16 @@
   flex: none;
   display: flex;
   align-items: center;
+  gap: 2px;
   padding: 0 8px;
+}
+.stree-head-btn {
+  width: 24px;
+  height: 24px;
+  color: var(--fg-3);
+}
+.stree-head-btn:focus-visible {
+  outline-offset: -2px;
 }
 .tree-col .stree-head {
   height: var(--bar);
@@ -609,9 +618,149 @@
   }
   .stree-disc,
   .stree-disc svg,
+  .stree-group-chev svg,
+  .stree-project-add,
   .stree-lead .glyph-wrap {
     transition: none;
   }
+}
+
+/* ----- custom folders & project groups ----- */
+
+.stree-group-row {
+  gap: 6px;
+  cursor: default;
+  user-select: none;
+}
+.stree-group-chev {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 16px;
+  margin-left: -2px;
+  color: var(--fg-4);
+}
+.stree-group-chev svg {
+  rotate: 90deg;
+  transition: rotate var(--dur-fast) var(--ease-out);
+}
+.stree-group-chev[data-folded] svg {
+  rotate: 0deg;
+}
+.stree-folder-glyph,
+.stree-project-glyph {
+  flex: none;
+  color: var(--fg-3);
+}
+.label-dot.stree-folder-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.stree-group-count {
+  flex: none;
+  color: var(--fg-4);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.stree-group-body {
+  padding-left: 12px;
+}
+.stree-group-empty {
+  margin: 0;
+  padding: 4px 8px 6px 24px;
+  color: var(--fg-4);
+  font-size: var(--text-xs);
+}
+.stree-project-add {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-inner);
+  color: var(--fg-3);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .stree-project-row:hover .stree-project-add,
+  .stree-project-row:focus-within .stree-project-add {
+    opacity: 1;
+  }
+  .stree-project-add:hover {
+    background-color: var(--sel);
+    color: var(--fg);
+  }
+}
+.stree-project-row:focus-within .stree-project-add {
+  opacity: 1;
+}
+.stree-project-add:active {
+  background-color: var(--press);
+}
+.stree-inline-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-inner);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  box-shadow: var(--cursor-edge);
+  outline: none;
+}
+.stree-folder-row--editing {
+  background-color: var(--sel);
+}
+
+/* Folder create / rename dialog (MoveFolder.tsx) */
+.stree-folder-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stree-color-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+}
+.pick-sheet .stree-color-row {
+  margin: 0 16px;
+}
+.stree-color-opt {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: var(--hairline) solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+.stree-color-opt:hover {
+  background: var(--hover);
+}
+.stree-color-opt--on {
+  border-color: var(--focus-line);
+  background: var(--sel);
+}
+.stree-color-none {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--fg-4);
 }
 
 /* ----- a touch screen's sidebar: 44 pt rows (styles/regular.css) ----- */
@@ -621,6 +770,21 @@
 }
 .stree--touch .stree-head {
   padding: 0;
+}
+.stree--touch .stree-head-btn {
+  width: 44px;
+  height: 44px;
+}
+.stree--touch .stree-project-add {
+  width: 36px;
+  height: 36px;
+  opacity: 1;
+}
+.stree--touch .stree-group-body {
+  padding-left: 10px;
+}
+.stree--touch .stree-group-count {
+  font-size: var(--text-sm);
 }
 .stree--touch .stree-new {
   gap: 12px;

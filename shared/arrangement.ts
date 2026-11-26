@@ -5,10 +5,16 @@
 // answer comes (web/src/data/store.ts). It is display only: nothing here is ever sent to
 // a machine, and nothing here changes what a session's own events say.
 import {
+  ARRANGEMENT_FOLDER_NAME_MAX,
+  ARRANGEMENT_FOLDERS_MAX,
   ARRANGEMENT_PINNED_MAX,
   ARRANGEMENT_PLACED_MAX,
   type Arrangement,
+  type ArrangementFolder,
   type ArrangementPatch,
+  FOLDER_ID_RE,
+  LABEL_COLORS,
+  type LabelColor,
   type SessionKey,
 } from "./api.js";
 
@@ -27,9 +33,35 @@ export class ArrangementError extends Error {
   }
 }
 
-const FIELDS = new Set<string>(["placed", "follow", "pinned"]);
+const FIELDS = new Set<string>(["placed", "follow", "pinned", "folders", "inFolder"]);
+const FOLDER_FIELDS = new Set<string>(["id", "name", "color"]);
+const COLORS = new Set<string>(LABEL_COLORS);
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control and bidi override characters are stripped from folder names
+const BAD_FOLDER_CHARS = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g;
+
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const has = (o: object, k: string) => Object.hasOwn(o, k);
+
+/** Strips control characters and bidi overrides, then trims whitespace. */
+export function sanitizeFolderName(raw: string): string {
+  return raw.replace(BAD_FOLDER_CHARS, "").trim();
+}
+
+const sameFolders = (a: readonly ArrangementFolder[], b: readonly ArrangementFolder[]): boolean =>
+  a.length === b.length && a.every((x, i) => x.id === b[i]!.id && x.name === b[i]!.name && x.color === b[i]!.color);
+
+function buildDoc(
+  rev: number,
+  placed: Record<SessionKey, SessionKey | null>,
+  pinned: SessionKey[],
+  folders: ArrangementFolder[],
+  inFolder: Record<SessionKey, string>,
+): Arrangement {
+  const out: Arrangement = { rev, placed, pinned };
+  if (folders.length > 0) out.folders = folders;
+  if (Object.keys(inFolder).length > 0) out.inFolder = inFolder;
+  return out;
+}
 
 /** Whether following the placements up from `start` comes back to it. */
 export function placedLoop(placed: Readonly<Record<SessionKey, SessionKey | null>>, start: SessionKey): boolean {
@@ -44,10 +76,12 @@ export function placedLoop(placed: Readonly<Record<SessionKey, SessionKey | null
 
 /** The arrangement after `patch`; the same object when nothing changes. Throws
  *  ArrangementError: 400 `malformed` (an unknown field, a value of the wrong kind, a key
- *  not in the store's shape, a pin twice, a key both placed and followed), 400
- *  `bad_place` (a session under itself, or a loop of placements), 404 `not_found` (a
- *  session `known` says the store does not hold: placing it, under it, or pinning it), 413
- *  `too_many` (over ARRANGEMENT_PLACED_MAX placements or ARRANGEMENT_PINNED_MAX pins).
+ *  not in the store's shape, a pin twice, a key both placed and followed, an invalid folder),
+ *  400 `bad_place` (a session under itself, or a loop of placements), 400 `bad_folder` (an
+ *  `inFolder` id not in the resulting folders), 404 `not_found` (a session `known` says the
+ *  store does not hold: placing it, under it, pinning it, or assigning it to a folder),
+ *  413 `too_many` (over ARRANGEMENT_PLACED_MAX placements/inFolder, ARRANGEMENT_PINNED_MAX
+ *  pins, or ARRANGEMENT_FOLDERS_MAX folders).
  *  Following a session that has no placement, and keeping a pin the store has since
  *  forgotten, are fine. */
 export function applyArrangement(
@@ -60,6 +94,8 @@ export function applyArrangement(
   const p = patch as ArrangementPatch;
   const placed: Record<SessionKey, SessionKey | null> = { ...doc.placed };
   let pinned = doc.pinned;
+  let folders: ArrangementFolder[] = doc.folders ? doc.folders.map((f) => ({ ...f })) : [];
+  const inFolder: Record<SessionKey, string> = { ...(doc.inFolder ?? {}) };
   let changed = false;
   const follow = p.follow;
   if (follow !== undefined) {
@@ -98,21 +134,87 @@ export function applyArrangement(
       changed = true;
     }
   }
-  return changed ? { rev: doc.rev + 1, placed, pinned } : doc;
+  if (p.folders !== undefined) {
+    if (!Array.isArray(p.folders)) throw new ArrangementError(400, "malformed");
+    if (p.folders.length > ARRANGEMENT_FOLDERS_MAX) throw new ArrangementError(413, "too_many");
+    const seenIds = new Set<string>();
+    const nextFolders: ArrangementFolder[] = [];
+    for (const raw of p.folders) {
+      if (!isObject(raw)) throw new ArrangementError(400, "malformed");
+      for (const k of Object.keys(raw)) if (!FOLDER_FIELDS.has(k)) throw new ArrangementError(400, "malformed");
+      if (typeof raw.id !== "string" || !FOLDER_ID_RE.test(raw.id) || seenIds.has(raw.id))
+        throw new ArrangementError(400, "malformed");
+      if (typeof raw.name !== "string") throw new ArrangementError(400, "malformed");
+      const name = sanitizeFolderName(raw.name);
+      if (name.length < 1 || name.length > ARRANGEMENT_FOLDER_NAME_MAX) throw new ArrangementError(400, "malformed");
+      let color: LabelColor | undefined;
+      if (raw.color !== undefined) {
+        if (typeof raw.color !== "string" || !COLORS.has(raw.color)) throw new ArrangementError(400, "malformed");
+        color = raw.color as LabelColor;
+      }
+      seenIds.add(raw.id);
+      nextFolders.push(color !== undefined ? { id: raw.id, name, color } : { id: raw.id, name });
+    }
+    if (!sameFolders(folders, nextFolders)) {
+      folders = nextFolders;
+      changed = true;
+    }
+    // Prune any inFolder entries referencing removed folder IDs (zero orphans).
+    for (const [k, fid] of Object.entries(inFolder)) {
+      if (!seenIds.has(fid)) {
+        delete inFolder[k];
+        changed = true;
+      }
+    }
+  }
+  const folderIds = new Set(folders.map((f) => f.id));
+  if (p.inFolder !== undefined) {
+    if (!isObject(p.inFolder)) throw new ArrangementError(400, "malformed");
+    for (const [key, fid] of Object.entries(p.inFolder)) {
+      if (!isSessionKey(key)) throw new ArrangementError(400, "malformed");
+      if (fid === null) {
+        if (has(inFolder, key)) {
+          delete inFolder[key];
+          changed = true;
+        }
+        continue;
+      }
+      if (typeof fid !== "string") throw new ArrangementError(400, "malformed");
+      if (!folderIds.has(fid)) throw new ArrangementError(400, "bad_folder");
+      if (!known(key)) throw new ArrangementError(404, "not_found");
+      if (!has(inFolder, key) || inFolder[key] !== fid) {
+        inFolder[key] = fid;
+        changed = true;
+      }
+    }
+    if (Object.keys(inFolder).length > ARRANGEMENT_PLACED_MAX) throw new ArrangementError(413, "too_many");
+  }
+  return changed ? buildDoc(doc.rev + 1, placed, pinned, folders, inFolder) : doc;
 }
 
-/** The arrangement once the store forgot `key`: its own placement and its pin go (as its
- *  label does); a placement under it stays, inert, and works again if it comes back. */
+/** The arrangement once the store forgot `key`: its own placement, its pin and its folder
+ *  membership go (as its label does); a placement under it stays, inert, and works again
+ *  if it comes back. */
 export function forgetInArrangement(doc: Arrangement, key: SessionKey): Arrangement {
   const pinnedHere = doc.pinned.includes(key);
-  if (!has(doc.placed, key) && !pinnedHere) return doc;
+  const inFolderHere = !!doc.inFolder && has(doc.inFolder, key);
+  if (!has(doc.placed, key) && !pinnedHere && !inFolderHere) return doc;
   const placed = { ...doc.placed };
   delete placed[key];
-  return { rev: doc.rev + 1, placed, pinned: pinnedHere ? doc.pinned.filter((k) => k !== key) : doc.pinned };
+  const inFolder = { ...(doc.inFolder ?? {}) };
+  delete inFolder[key];
+  return buildDoc(
+    doc.rev + 1,
+    placed,
+    pinnedHere ? doc.pinned.filter((k) => k !== key) : doc.pinned,
+    doc.folders ? doc.folders.map((f) => ({ ...f })) : [],
+    inFolder,
+  );
 }
 
 /** What was kept, read back: entries that do not hold to the rules are dropped (a broken
- *  key, a session under itself, a loop, past the caps), never the whole document. */
+ *  key, a session under itself, a loop, an invalid or orphan folder, past the caps), never
+ *  the whole document. */
 export function cleanArrangement(raw: unknown): Arrangement {
   const r = isObject(raw) ? raw : {};
   const rev = typeof r.rev === "number" && Number.isInteger(r.rev) && r.rev >= 0 ? r.rev : 0;
@@ -127,5 +229,28 @@ export function cleanArrangement(raw: unknown): Arrangement {
   const pinned = Array.isArray(r.pinned)
     ? [...new Set(r.pinned.filter(isSessionKey))].slice(0, ARRANGEMENT_PINNED_MAX)
     : [];
-  return { rev, placed, pinned };
+  const folders: ArrangementFolder[] = [];
+  const folderIds = new Set<string>();
+  if (Array.isArray(r.folders)) {
+    for (const item of r.folders) {
+      if (folders.length >= ARRANGEMENT_FOLDERS_MAX) break;
+      if (!isObject(item)) continue;
+      if (typeof item.id !== "string" || !FOLDER_ID_RE.test(item.id) || folderIds.has(item.id)) continue;
+      if (typeof item.name !== "string") continue;
+      const name = sanitizeFolderName(item.name);
+      if (name.length < 1 || name.length > ARRANGEMENT_FOLDER_NAME_MAX) continue;
+      const color = typeof item.color === "string" && COLORS.has(item.color) ? (item.color as LabelColor) : undefined;
+      folderIds.add(item.id);
+      folders.push(color !== undefined ? { id: item.id, name, color } : { id: item.id, name });
+    }
+  }
+  const inFolder: Record<SessionKey, string> = {};
+  if (isObject(r.inFolder)) {
+    for (const [key, fid] of Object.entries(r.inFolder)) {
+      if (Object.keys(inFolder).length >= ARRANGEMENT_PLACED_MAX) break;
+      if (!isSessionKey(key) || typeof fid !== "string" || !folderIds.has(fid)) continue;
+      inFolder[key] = fid;
+    }
+  }
+  return buildDoc(rev, placed, pinned, folders, inFolder);
 }

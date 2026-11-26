@@ -5,10 +5,22 @@
 // under… where there is somewhere to go, Move to top level only where it applies.
 import "../native/test-env";
 import { type Arrangement, EMPTY_ARRANGEMENT, type SessionSummary } from "@shared/api";
+import { applyArrangement } from "@shared/arrangement";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tidy } from "../components/ContextMenu";
-import { arrangeError, arrangeItems, moveTargets, planMove } from "./arrange";
+import {
+  arrangeError,
+  arrangeItems,
+  createFolder,
+  deleteFolder,
+  moveTargets,
+  planMove,
+  recolorFolder,
+  renameFolder,
+  reorderFolder,
+} from "./arrange";
 import { PHONE_QUERY, TOUCH_QUERY } from "./device";
+import { peekToasts, undoLatest } from "./toasts";
 import { arrangeTree } from "./tree";
 
 let n = 0;
@@ -31,8 +43,11 @@ const B = s("codex:b", { title: "Beta", delegatedBy: "claude-code:a" });
 const C = s("claude-code:c", { title: "Gamma" });
 const all = [A, B, C];
 const title = (k: string) => all.find((x) => x.key === k)?.title ?? k;
-const plan = (arr: Pick<Arrangement, "placed" | "pinned">, key: string, move: Parameters<typeof planMove>[4]) =>
-  planMove(arr, arrangeTree({ all, arrangement: arr }), all, key, move, title);
+const plan = (
+  arr: Pick<Arrangement, "placed" | "pinned" | "folders" | "inFolder">,
+  key: string,
+  move: Parameters<typeof planMove>[4],
+) => planMove(arr, arrangeTree({ all, arrangement: arr }), all, key, move, title);
 const NONE = { placed: {}, pinned: [] };
 
 describe("planMove", () => {
@@ -110,10 +125,59 @@ describe("planMove", () => {
     expect(plan(pins, C.key, { kind: "top" })).toMatchObject({ patch: { pinned: [A.key] }, said: "Unpinned" });
   });
 
-  it("formats refusal messages for pin limits, move limits, and save failures", () => {
+  it("formats refusal messages for pin limits, move limits, folder errors, and save failures", () => {
     expect(arrangeError("too_many", { kind: "pin" })).toBe("Couldn't pin. Pinned holds up to 100.");
     expect(arrangeError("too_many", { kind: "under", parent: A.key })).toBe("Couldn't move. Only 500 moves are kept.");
+    expect(arrangeError("too_many", { kind: "folder", folderId: "f1" })).toBe(
+      "Couldn't move to folder. Limit reached.",
+    );
+    expect(arrangeError("bad_folder", { kind: "folder", folderId: "f1" })).toBe("That folder no longer exists.");
     expect(arrangeError("network", { kind: "top" })).toBe("Couldn't save the move. Try again.");
+  });
+
+  it("moves into/out of folders, promotes children, and clears inFolder on pin or nest with exact undo", () => {
+    const withFolder = {
+      placed: {},
+      pinned: [],
+      folders: [{ id: "f_work", name: "Work" }],
+      inFolder: {},
+    };
+    // Root session into folder.
+    expect(plan(withFolder, C.key, { kind: "folder", folderId: "f_work" })).toEqual({
+      patch: { inFolder: { [C.key]: "f_work" } },
+      undo: { inFolder: { [C.key]: null } },
+      said: "Moved to “Work”",
+      spoken: "Gamma moved to Work.",
+      undone: "Gamma is back at the top level.",
+    });
+    // Event-parented child B into folder promotes to root (placed[B] = null) + inFolder.
+    expect(plan(withFolder, B.key, { kind: "folder", folderId: "f_work" })).toMatchObject({
+      patch: { placed: { [B.key]: null }, inFolder: { [B.key]: "f_work" } },
+      undo: { follow: [B.key], inFolder: { [B.key]: null } },
+      said: "Moved to “Work”",
+    });
+    // Pinning a foldered session clears inFolder; undo restores it.
+    const foldered = { ...withFolder, inFolder: { [C.key]: "f_work" } };
+    expect(plan(foldered, C.key, { kind: "pin" })).toMatchObject({
+      patch: { pinned: [C.key], inFolder: { [C.key]: null } },
+      undo: { pinned: [], inFolder: { [C.key]: "f_work" } },
+      undone: "Gamma is back in Work.",
+    });
+    // Nesting a foldered session under A clears inFolder; undo restores it.
+    expect(plan(foldered, C.key, { kind: "under", parent: A.key })).toMatchObject({
+      patch: { placed: { [C.key]: A.key }, inFolder: { [C.key]: null } },
+      undo: { follow: [C.key], inFolder: { [C.key]: "f_work" } },
+    });
+    // Moving foldered session to top level removes from folder.
+    expect(plan(foldered, C.key, { kind: "top" })).toMatchObject({
+      patch: { inFolder: { [C.key]: null } },
+      undo: { inFolder: { [C.key]: "f_work" } },
+      said: "Removed from “Work”",
+    });
+    expect(plan(foldered, C.key, { kind: "unfolder" })).toMatchObject({
+      patch: { inFolder: { [C.key]: null } },
+      undo: { inFolder: { [C.key]: "f_work" } },
+    });
   });
 
   it("refuses a session under itself or its own sessions, and a move to where it is", () => {
@@ -146,18 +210,44 @@ describe("arrangeItems", () => {
   const labels = (arrangement: Arrangement, x: SessionSummary) =>
     tidy(arrangeItems(x, store(arrangement))).map((i) => ("label" in i ? i.label : "─"));
 
-  it("Pin, Move under…; Move to top level only where it is under a session", () => {
-    expect(labels(EMPTY_ARRANGEMENT, C)).toEqual(["Pin", "Move under…"]);
-    expect(labels(EMPTY_ARRANGEMENT, B)).toEqual(["Pin", "Move under…", "Move to top level"]);
+  it("Pin, Move to folder, Move under…; Move to top level only where it is under a session", () => {
+    expect(labels(EMPTY_ARRANGEMENT, C)).toEqual(["Pin", "Move to folder", "Move under…"]);
+    expect(labels(EMPTY_ARRANGEMENT, B)).toEqual(["Pin", "Move to folder", "Move under…", "Move to top level"]);
   });
 
   it("Unpin, and Move up and down in Pinned where there is a pin to pass", () => {
     const pins = { rev: 1, placed: {}, pinned: [A.key, C.key] };
-    expect(labels(pins, A)).toEqual(["Unpin", "Move down in Pinned", "Move under…"]);
-    expect(labels(pins, C)).toEqual(["Unpin", "Move up in Pinned", "Move under…"]);
+    expect(labels(pins, A)).toEqual(["Unpin", "Move down in Pinned", "Move to folder", "Move under…"]);
+    expect(labels(pins, C)).toEqual(["Unpin", "Move up in Pinned", "Move to folder", "Move under…"]);
   });
 
-  it("omits Pin, Unpin and Pinned moves on a compact phone, keeping Move under… and Move to top level", async () => {
+  it("lists folders with checked on current, Remove from folder, and New folder… in submenu", () => {
+    const arr: Arrangement = {
+      rev: 2,
+      placed: {},
+      pinned: [],
+      folders: [
+        { id: "f1", name: "Work", color: "blue" },
+        { id: "f2", name: "Ideas" },
+      ],
+      inFolder: { [C.key]: "f1" },
+    };
+    const menu = tidy(arrangeItems(C, store(arr)));
+    const sub = menu.find((i) => "items" in i && i.label === "Move to folder");
+    expect(sub && "items" in sub).toBe(true);
+    const subItems = tidy(sub && "items" in sub ? sub.items : []);
+    expect(subItems.map((i) => ("label" in i ? i.label : "─"))).toEqual([
+      "Work",
+      "Ideas",
+      "Remove from folder",
+      "─",
+      "New folder…",
+    ]);
+    const work = subItems[0];
+    expect(work && "checked" in work && work.checked).toBe(true);
+  });
+
+  it("omits Pin, Unpin and Pinned moves on a compact phone, keeping Move to folder, Move under… and Move to top level", async () => {
     g.matchMedia = (q: string) => ({
       matches: q === PHONE_QUERY || q === TOUCH_QUERY,
       addEventListener() {},
@@ -169,7 +259,55 @@ describe("arrangeItems", () => {
     const pins = { rev: 1, placed: {}, pinned: [A.key, C.key] };
     const phoneLabels = (arr: Arrangement, x: SessionSummary) =>
       tidy(phoneItems(x, store(arr))).map((i) => ("label" in i ? i.label : "─"));
-    expect(phoneLabels(pins, A)).toEqual(["Move under…"]);
-    expect(phoneLabels(EMPTY_ARRANGEMENT, B)).toEqual(["Move under…", "Move to top level"]);
+    expect(phoneLabels(pins, A)).toEqual(["Move to folder", "Move under…"]);
+    expect(phoneLabels(EMPTY_ARRANGEMENT, B)).toEqual(["Move to folder", "Move under…", "Move to top level"]);
+  });
+});
+
+describe("folder CRUD and atomic Undo", () => {
+  const makeStore = (initial: Arrangement = EMPTY_ARRANGEMENT) => {
+    let arrangement = initial;
+    const sessions = new Map(all.map((x) => [x.key, x]));
+    return {
+      get: () => ({ sessions, arrangement }),
+      patchArrangement: async (p: Parameters<typeof applyArrangement>[1]) => {
+        arrangement = applyArrangement(arrangement, p, (k) => sessions.has(k));
+        return arrangement;
+      },
+    } as never;
+  };
+
+  it("creates, renames, recolors, reorders, and deletes a folder with Undo restoring sessions", () => {
+    const st = makeStore();
+    const f1 = createFolder(st, "Work", { color: "blue", moveSession: C.key });
+    expect(f1).not.toBeNull();
+    expect((st as { get(): { arrangement: Arrangement } }).get().arrangement.folders).toEqual([
+      { id: f1!.id, name: "Work", color: "blue" },
+    ]);
+    expect((st as { get(): { arrangement: Arrangement } }).get().arrangement.inFolder).toEqual({ [C.key]: f1!.id });
+
+    const f2 = createFolder(st, "Play");
+    expect(f2).not.toBeNull();
+    expect(renameFolder(st, f1!.id, "Core")).toBe(true);
+    expect(recolorFolder(st, f1!.id, "green")).toBe(true);
+    expect(reorderFolder(st, f1!.id, 1)).toBe(true);
+    expect((st as { get(): { arrangement: Arrangement } }).get().arrangement.folders?.map((f) => f.name)).toEqual([
+      "Play",
+      "Core",
+    ]);
+
+    // Delete folder: sessions return to Sessions, and Undo restores BOTH folder and memberships!
+    expect(deleteFolder(st, f1!.id)).toBe(true);
+    expect((st as { get(): { arrangement: Arrangement } }).get().arrangement.folders?.map((f) => f.name)).toEqual([
+      "Play",
+    ]);
+    expect((st as { get(): { arrangement: Arrangement } }).get().arrangement.inFolder).toBeUndefined();
+
+    const toast = peekToasts().find((t) => t.id === "undo|arrange");
+    expect(toast?.undo).toBeDefined();
+    expect(undoLatest()).toBe(true);
+    const afterUndo = (st as { get(): { arrangement: Arrangement } }).get().arrangement;
+    expect(afterUndo.folders?.map((f) => f.name)).toEqual(["Play", "Core"]);
+    expect(afterUndo.inFolder).toEqual({ [C.key]: f1!.id });
   });
 });

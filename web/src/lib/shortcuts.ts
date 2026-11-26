@@ -429,6 +429,8 @@ export const ACTIONS: readonly Action[] = [
   },
   { id: "tree.pin", label: "Pin or unpin", group: "Session tree", scope: "lists", keys: ["shift+p"] },
   { id: "tree.moveUnder", label: "Move under…", group: "Session tree", scope: "lists", keys: ["m"] },
+  { id: "tree.moveFolder", label: "Move to folder…", group: "Session tree", scope: "lists", keys: ["shift+m"] },
+  { id: "tree.newFolder", label: "New folder", group: "Session tree", scope: "lists", keys: ["shift+n"] },
   { id: "tree.unfoldAll", label: "Unfold all", group: "Session tree", scope: "lists", keys: ["alt+right"] },
   { id: "tree.foldAll", label: "Fold all", group: "Session tree", scope: "lists", keys: ["alt+left"] },
 

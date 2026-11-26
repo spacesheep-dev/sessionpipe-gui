@@ -1,28 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
-// Owned by: web. The sidebar's sessions, under its pages: New session, then Pinned (only
-// while something is pinned) and Sessions, as one tree each (lib/tree.ts, the Board's own
-// tree and order, less what this device hid). A row is one line: the agent's mark, the
-// title cut at its end, a small computer mark where the session runs on another computer
-// than the session it hangs under (a top-level row has its computer in its tooltip), and
-// the state's lamp at the end (the board's glyphs: the turning ring while
-// it works, the orange disc while it needs you, the dashed ring while it is quiet, the ink
-// disc for news unread, as the Board draws it; nothing for the rest). Titles keep three
-// inks: full only for what needs you, the middle for the rest and for news, the faintest
-// for what is done and read. The open session's row is filled. A parent
-// has a disclosure, in the mark's place under the pointer or the keyboard (at the row's
-// end on a touch screen), and what it folds is remembered on this device. Thirty top
-// rows, then Show more; eight under a parent, then Show N more.
+// Owned by: web. The sidebar's sessions, under its pages: New session (with Group by
+// project toggle and New folder button), then Pinned (only while something is pinned),
+// Custom Folders (when any exist or while creating one), and Sessions (flat or grouped
+// by project), as one tree each (lib/tree.ts, the Board's own tree and order, less what
+// this device hid). A row is one line: the agent's mark, the title cut at its end, a
+// small computer mark where the session runs on another computer than the session it
+// hangs under (a top-level row has its computer in its tooltip), and the state's lamp at
+// the end. A parent, folder, or project group has a disclosure whose fold state is
+// remembered on this device, and collapsed groups roll up the loudest status lamp.
 //
-// A row is dragged to arrange the tree: past 4 px with a pointer, after 350 ms held still
-// with a finger (a tick under it; before that the list scrolls). It follows the pointer as
-// a small chip; its place stays as a quiet gap. On a row it goes under it (an inset ring);
-// on the line between top-level rows it goes to the top level, or to that place among the
-// pinned; on the Pinned heading it is pinned. A row may not go under itself or its own
-// sessions: those show no place. A folded parent held under it 600 ms opens; the list
-// scrolls near its edges; Esc, or a drop anywhere else, puts it all back. The keys and
-// the menu do the same (lib/arrange.ts), and a live region says what a move did. None of
-// it reaches a machine: it is how this person sees the tree.
-import { type ControlActivity, isEmptySession, type SessionKey, type SessionSummary, splitKey } from "@shared/api";
+// A row is dragged to arrange the tree: past 4 px with a pointer, after 500 ms held still
+// with a finger. On a row it goes under it; on a folder header it moves into that folder
+// (auto-expanding a collapsed folder after 600 ms hover); on the line between top-level
+// rows in Pinned it reorders pins; on the Pinned heading or Drop to pin zone it pins; on
+// the Sessions heading or a Project heading it returns to unfoldered Sessions.
+import {
+  ARRANGEMENT_FOLDER_NAME_MAX,
+  type Arrangement,
+  type ArrangementFolder,
+  type ControlActivity,
+  isEmptySession,
+  LABEL_COLORS,
+  LABEL_DEFAULT_NAMES,
+  type SessionKey,
+  type SessionSummary,
+  splitKey,
+} from "@shared/api";
 import {
   type CSSProperties,
   Fragment,
@@ -47,14 +50,30 @@ import { useBehind } from "../account/current";
 import { usePendingStarts } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { useHideKeys, useStore, useUnreadKeys } from "../data/hooks";
-import { type ArrangeSource, arrange, moveTargets, onArranged, planMove, requestMoveUnder } from "../lib/arrange";
+import {
+  type ArrangeSource,
+  arrange,
+  createFolder,
+  deleteFolder,
+  moveTargets,
+  onArranged,
+  planMove,
+  recolorFolder,
+  renameFolder,
+  reorderFolder,
+  requestFolderPrompt,
+  requestMoveFolder,
+  requestMoveUnder,
+} from "../lib/arrange";
 import { harnessMark, sessionTitle } from "../lib/format";
 import { haptic } from "../lib/haptics";
 import { isHidden, useHidden } from "../lib/hidden";
 import { isUnread } from "../lib/marks";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle, sessionRowTip } from "../lib/menus";
 import { calmNextCommit, type Held, reducedMotion, useFlip, useHeldOrder, useListHold } from "../lib/motion";
+import { groupByProject, type ProjectGroup, projectOf } from "../lib/projects";
 import { hrefFor, sessionPath } from "../lib/router";
+import { setSettings, useAppSettings } from "../lib/settings";
 import { hintFor, useShortcut } from "../lib/shortcuts";
 import { howOf, openSession, openSplit } from "../lib/split";
 import {
@@ -73,8 +92,10 @@ import {
   type TreeNode,
 } from "../lib/tree";
 import {
+  DRAG_SLOP_PX,
   dragStarts,
   edgeScroll,
+  type FolderZone,
   type Group,
   LONG_PRESS_MS,
   moveFor,
@@ -86,7 +107,7 @@ import {
   touchScrolls,
 } from "../lib/treeDrag";
 import { HarnessGlyph, StateDot } from "./bits";
-import { closeMenu, useContextMenu } from "./ContextMenu";
+import { closeMenu, type MenuList, useContextMenu } from "./ContextMenu";
 import { useLabelKeys } from "./LabelDot";
 import "../styles/sidetree.css";
 
@@ -95,10 +116,13 @@ export const TREE_SHOWN = 30;
 /** Rows under one parent shown before Show N more. */
 export const KIDS_SHOWN = 8;
 
-// ----- what this device folded -----
+// Keep unused constant lint clean if referenced only for docs.
+void DRAG_SLOP_PX;
+
+// ----- what this device folded (session keys, custom folders `f:<id>`, projects `p:<key>`) -----
 
 const FOLDED_KEY = "sessionpipe-gui.sidebar.folded";
-/** Folded parents remembered at most (the oldest go first). */
+/** Folded parents / groups remembered at most (the oldest go first). */
 const FOLDED_MAX = 500;
 const readFolded = (): string[] => {
   try {
@@ -109,19 +133,19 @@ const readFolded = (): string[] => {
   }
 };
 function useFolded(): [
-  ReadonlySet<SessionKey>,
-  (key: SessionKey, fold: boolean) => void,
-  (keys: readonly SessionKey[], fold: boolean) => void,
+  ReadonlySet<string>,
+  (key: string, fold: boolean) => void,
+  (keys: readonly string[], fold: boolean) => void,
 ] {
-  const [folded, set] = useState<ReadonlySet<SessionKey>>(() => new Set(readFolded()));
-  const persist = (next: ReadonlySet<SessionKey>) => {
+  const [folded, set] = useState<ReadonlySet<string>>(() => new Set(readFolded()));
+  const persist = (next: ReadonlySet<string>) => {
     try {
       localStorage.setItem(FOLDED_KEY, JSON.stringify([...next].slice(-FOLDED_MAX)));
     } catch {
       // a private window: folded for this visit
     }
   };
-  const toggle = useCallback((key: SessionKey, fold: boolean) => {
+  const toggle = useCallback((key: string, fold: boolean) => {
     set((was) => {
       if (was.has(key) === fold) return was;
       const next = new Set(was);
@@ -131,7 +155,7 @@ function useFolded(): [
       return next;
     });
   }, []);
-  const toggleMany = useCallback((keys: readonly SessionKey[], fold: boolean) => {
+  const toggleMany = useCallback((keys: readonly string[], fold: boolean) => {
     if (keys.length === 0) return;
     set((was) => {
       let changed = false;
@@ -152,14 +176,18 @@ function useFolded(): [
 
 // ----- the rows as drawn -----
 
-/** One row as drawn, top to bottom (the keys and the drag walk these). */
+/** One session row as drawn, top to bottom (the keys and the drag walk these). */
 interface Drawn {
   node: TreeNode;
   group: Group;
   hasKids: boolean;
   folded: boolean;
   /** The row it is drawn under, when it is drawn under one. */
-  up?: SessionKey;
+  up?: string;
+  /** Custom folder id when drawn inside a folder. */
+  folderId?: string;
+  /** Project group key when drawn inside a project group. */
+  projectKey?: string;
 }
 
 interface Drag {
@@ -192,6 +220,14 @@ function Lamp({ s, unread, rolled, size }: { s: SessionSummary; unread: boolean;
   return null;
 }
 
+/** Rolled-up lamp for a collapsed custom folder or project group. */
+function GroupLamp({ loud, size }: { loud: Loud; size: number }) {
+  if (loud === "needs_you" || loud === "working" || loud === "stale")
+    return <StateDot state={loud} size={size} decorative />;
+  if (loud === "unread") return <StateDot state="idle" size={size} decorative unread />;
+  return null;
+}
+
 /** What a screen reader hears after the title. */
 const stateWords = (s: SessionSummary, unread: boolean): string =>
   s.state === "needs_you"
@@ -201,6 +237,17 @@ const stateWords = (s: SessionSummary, unread: boolean): string =>
       : s.state === "stale"
         ? ", stale"
         : unread
+          ? ", unread"
+          : "";
+
+const loudWords = (l: Loud): string =>
+  l === "needs_you"
+    ? ", needs you"
+    : l === "working"
+      ? ", working"
+      : l === "stale"
+        ? ", stale"
+        : l === "unread"
           ? ", unread"
           : "";
 
@@ -280,6 +327,113 @@ function Chevron() {
   );
 }
 
+/** Monochrome 16 px folder icon for custom folders. */
+function FolderIcon({ open }: { open?: boolean }) {
+  return (
+    <svg
+      className="stree-folder-glyph"
+      viewBox="0 0 16 16"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {open ? (
+        <>
+          <path d="M2 5a1.5 1.5 0 0 1 1.5-1.5h2.6l1.3 1.4h4.6a1.5 1.5 0 0 1 1.4 1.1" />
+          <path d="M2 6.5h11.3a1 1 0 0 1 .97 1.24l-.9 3.6A1.5 1.5 0 0 1 11.9 12.5H3.5A1.5 1.5 0 0 1 2 11z" />
+        </>
+      ) : (
+        <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
+      )}
+    </svg>
+  );
+}
+
+/** Monochrome 16 px project / repository icon for project groups. */
+function ProjectIcon() {
+  return (
+    <svg
+      className="stree-project-glyph"
+      viewBox="0 0 16 16"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+      <path d="M5.5 6h5M5.5 9h3.5" />
+    </svg>
+  );
+}
+
+/** Header button icon: group sessions by project. */
+function GroupProjectsIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2" y="2.5" width="12" height="4.5" rx="1.2" />
+      <rect x="2" y="9" width="12" height="4.5" rx="1.2" />
+      <path d="M4.5 4.75h3M4.5 11.25h4.5" />
+    </svg>
+  );
+}
+
+/** Header button icon: new custom folder. */
+function NewFolderIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.3 1.5h5.1A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
+      <path d="M8 7v3.5M6.25 8.75h3.5" />
+    </svg>
+  );
+}
+
+/** Small `+` glyph for "New session in <project>". */
+function PlusSmallIcon() {
+  return (
+    <svg
+      viewBox="0 0 14 14"
+      width="12"
+      height="12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M7 3.2v7.6M3.2 7h7.6" />
+    </svg>
+  );
+}
+
 export const SessionTree = memo(function SessionTree({
   open,
   touch,
@@ -299,6 +453,8 @@ export const SessionTree = memo(function SessionTree({
   const arrangement = useSyncExternalStore(store.subscribe, () => store.get().arrangement);
   const marks = useSyncExternalStore(store.subscribe, () => store.get().marks);
   const snapshotAt = useSyncExternalStore(store.subscribe, () => store.get().snapshotAt);
+  const { sidebarGroup } = useAppSettings();
+  const grouped = sidebarGroup === "project";
   const behind = useBehind();
   const hidden = useHidden();
   const hid = useCallback(
@@ -337,19 +493,143 @@ export const SessionTree = memo(function SessionTree({
   const frozen = frozenRef.current;
 
   const pinSet = useMemo(() => new Set(arrangement.pinned), [arrangement.pinned]);
+  const folders = useMemo(() => arrangement.folders ?? [], [arrangement.folders]);
+  const inFolder = useMemo(() => arrangement.inFolder ?? {}, [arrangement.inFolder]);
+  const folderIdSet = useMemo(() => new Set(folders.map((f) => f.id)), [folders]);
+
   const pinned = useMemo(
     () =>
       arrangement.pinned.map((k) => tree.nodes.get(k)).filter((n): n is TreeNode => !!n && n.level === 0 && !hid(n.s)),
     [arrangement.pinned, tree, hid],
   );
+
+  // Root sessions grouped into each custom folder (sorted by sidebarOrder).
+  const folderRoots = useMemo(() => {
+    const map = new Map<string, TreeNode[]>();
+    for (const f of folders) map.set(f.id, []);
+    for (const n of tree.roots) {
+      if (pinSet.has(n.s.key) || hid(n.s)) continue;
+      const fid = inFolder[n.s.key];
+      if (fid && map.has(fid)) map.get(fid)!.push(n);
+    }
+    for (const [fid, list] of map) map.set(fid, sidebarOrder(list, roll, frozen));
+    return map;
+  }, [folders, inFolder, tree, pinSet, hid, roll, frozen]);
+
+  // Remaining unpinned, unfoldered roots for the Sessions section.
   const roots = useMemo(
     () =>
       sidebarOrder(
-        tree.roots.filter((n) => !pinSet.has(n.s.key) && !hid(n.s)),
+        tree.roots.filter((n) => {
+          if (pinSet.has(n.s.key) || hid(n.s)) return false;
+          const fid = inFolder[n.s.key];
+          return !fid || !folderIdSet.has(fid);
+        }),
         roll,
         frozen,
       ),
-    [tree, pinSet, hid, roll, frozen],
+    [tree, pinSet, hid, inFolder, folderIdSet, roll, frozen],
+  );
+
+  // Project groups for Sessions when `sidebarGroup === "project"`.
+  const projectGroups = useMemo(
+    () => (grouped ? groupByProject(roots, roll, { unread: unreadOf, frozen }) : []),
+    [grouped, roots, roll, unreadOf, frozen],
+  );
+
+  // Inline create / rename state for custom folders on desktop.
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [folderDraft, setFolderDraft] = useState("");
+  const inlineInputRef = useRef<HTMLInputElement>(null);
+  const cancelledEdit = useRef(false);
+  const editingFolderRef = useRef(false);
+  editingFolderRef.current = creatingFolder || renamingFolderId !== null;
+
+  const cancelFolderEdit = useCallback(() => {
+    cancelledEdit.current = true;
+    setCreatingFolder(false);
+    setRenamingFolderId(null);
+    setFolderDraft("");
+  }, []);
+  const cancelFolderEditRef = useRef(cancelFolderEdit);
+  cancelFolderEditRef.current = cancelFolderEdit;
+
+  // Registered on mount (before Shell's overlayShown listener) so Esc cancels inline folder
+  // create/rename without closing a narrow desktop sidebar overlay.
+  useEffect(() => {
+    const onEsc = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || !editingFolderRef.current) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cancelFolderEditRef.current();
+    };
+    window.addEventListener("keydown", onEsc, true);
+    return () => window.removeEventListener("keydown", onEsc, true);
+  }, []);
+
+  useEffect(() => {
+    if (!creatingFolder && !renamingFolderId) return;
+    const inp = inlineInputRef.current;
+    if (!inp) return;
+    inp.focus({ preventScroll: true });
+    if (renamingFolderId) inp.select();
+  }, [creatingFolder, renamingFolderId]);
+
+  const startCreateFolder = useCallback(() => {
+    if (touch) {
+      requestFolderPrompt({ mode: "create" });
+      return;
+    }
+    cancelledEdit.current = false;
+    setRenamingFolderId(null);
+    setFolderDraft("");
+    setCreatingFolder(true);
+  }, [touch]);
+
+  const startRenameFolder = useCallback(
+    (f: ArrangementFolder) => {
+      if (touch) {
+        requestFolderPrompt({ mode: "rename", folderId: f.id, initialName: f.name });
+        return;
+      }
+      cancelledEdit.current = false;
+      setCreatingFolder(false);
+      setFolderDraft(f.name);
+      setRenamingFolderId(f.id);
+    },
+    [touch],
+  );
+
+  const commitFolderCreate = useCallback(() => {
+    if (cancelledEdit.current) {
+      cancelledEdit.current = false;
+      return;
+    }
+    const text = folderDraft.trim();
+    setCreatingFolder(false);
+    setFolderDraft("");
+    if (text) {
+      calmNextCommit();
+      createFolder(store, text);
+    }
+  }, [folderDraft, store]);
+
+  const commitFolderRename = useCallback(
+    (folderId: string) => {
+      if (cancelledEdit.current) {
+        cancelledEdit.current = false;
+        return;
+      }
+      const text = folderDraft.trim();
+      setRenamingFolderId(null);
+      setFolderDraft("");
+      if (text) {
+        calmNextCommit();
+        renameFolder(store, folderId, text);
+      }
+    },
+    [folderDraft, store],
   );
 
   // Held still under the hand, as the board is: no row moves while the pointer is over
@@ -363,7 +643,7 @@ export const SessionTree = memo(function SessionTree({
   const heldRoots = useHeldOrder(roots, nodeKey, hold);
   const [limit, setLimit] = useState(TREE_SHOWN);
   const shownRoots = heldRoots.slice(0, limit);
-  const more = heldRoots.length - shownRoots.length;
+  const more = grouped ? 0 : heldRoots.length - shownRoots.length;
 
   const [folded, setFolded, setFoldedMany] = useFolded();
   const latestFolds = useRef(folded);
@@ -407,27 +687,77 @@ export const SessionTree = memo(function SessionTree({
     [tree, kidsOf],
   );
 
-  // The rows as drawn, for the keys and the drag.
+  // Rolled-up loudness per custom folder.
+  const folderLoud = useMemo(() => {
+    const out = new Map<string, Loud>();
+    for (const f of folders) {
+      let l: Loud = "none";
+      for (const n of folderRoots.get(f.id) ?? []) {
+        l = louder(l, loudOf(n.s, unreadOf));
+        l = louder(l, roll.get(n.s.key)?.loud ?? "none");
+      }
+      out.set(f.id, l);
+    }
+    return out;
+  }, [folders, folderRoots, unreadOf, roll]);
+
+  // The session rows as drawn, for the keys and the drag.
   const drawn = useMemo(() => {
     const out: Drawn[] = [];
-    const walk = (n: TreeNode, group: Group, up?: SessionKey) => {
+    const walk = (n: TreeNode, group: Group, up?: string, folderId?: string, projectKey?: string) => {
       const kids = kidsOf(n);
       const isFolded = kids.length > 0 && folded.has(n.s.key);
-      out.push({ node: n, group, hasKids: kids.length > 0, folded: isFolded, ...(up ? { up } : {}) });
+      out.push({
+        node: n,
+        group,
+        hasKids: kids.length > 0,
+        folded: isFolded,
+        ...(up ? { up } : {}),
+        ...(folderId ? { folderId } : {}),
+        ...(projectKey ? { projectKey } : {}),
+      });
       if (isFolded) return;
       const shown = allKids.has(n.s.key) ? kids : kids.slice(0, KIDS_SHOWN);
-      for (const k of shown) walk(k, group, n.s.key);
+      for (const k of shown) walk(k, group, n.s.key, folderId, projectKey);
     };
     for (const n of pinned) walk(n, "pinned");
-    for (const h of shownRoots) if (!h.gone) walk(h.item, "sessions");
+    for (const f of folders) {
+      const fk = `f:${f.id}`;
+      if (folded.has(fk)) continue;
+      for (const n of folderRoots.get(f.id) ?? []) walk(n, "folder", fk, f.id);
+    }
+    if (grouped) {
+      for (const pg of projectGroups) {
+        const pk = `p:${pg.key}`;
+        if (folded.has(pk)) continue;
+        for (const n of pg.roots) walk(n, "sessions", pk, undefined, pg.key);
+      }
+    } else {
+      for (const h of shownRoots) if (!h.gone) walk(h.item, "sessions");
+    }
     return out;
-  }, [pinned, shownRoots, kidsOf, folded, allKids]);
+  }, [pinned, folders, folderRoots, grouped, projectGroups, shownRoots, kidsOf, folded, allKids]);
 
   // ----- focus: one row in the tab order, the arrows walk the rest -----
-  const [focusKey, setFocusKey] = useState<SessionKey | null>(null);
-  const has = (k: SessionKey | null | undefined) => !!k && drawn.some((d) => d.node.s.key === k);
-  const tabKey = has(focusKey) ? focusKey : has(open) ? open : drawn[0]?.node.s.key;
-  const rowEl = (key: string) => box.current?.querySelector<HTMLElement>(`[data-tree-row="${CSS.escape(key)}"]`);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const groupKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of folders) set.add(`f:${f.id}`);
+    if (grouped) for (const pg of projectGroups) set.add(`p:${pg.key}`);
+    return set;
+  }, [folders, grouped, projectGroups]);
+  const hasNavKey = (k: string | null | undefined) =>
+    !!k && (drawn.some((d) => d.node.s.key === k) || groupKeys.has(k));
+  const firstNavKey =
+    pinned[0]?.s.key ??
+    (folders[0] ? `f:${folders[0].id}` : undefined) ??
+    (grouped && projectGroups[0] ? `p:${projectGroups[0].key}` : undefined) ??
+    drawn[0]?.node.s.key;
+  const tabKey = hasNavKey(focusKey) ? focusKey : hasNavKey(open) ? open : firstNavKey;
+  const rowEl = (key: string) =>
+    box.current?.querySelector<HTMLElement>(
+      `[data-tree-row="${CSS.escape(key)}"], [data-group-row="${CSS.escape(key)}"]`,
+    );
   // A move by the keys or the menu draws the row in another list: the focus goes with it.
   const hadFocus = useRef(false);
   /** The row element that last had the focus: only its leaving the page (a move drew the
@@ -451,7 +781,7 @@ export const SessionTree = memo(function SessionTree({
       here.focus({ preventScroll: true });
       return;
     }
-    const next = drawn[Math.min(lastIndex.current, drawn.length - 1)]?.node.s.key;
+    const next = drawn[Math.min(lastIndex.current, drawn.length - 1)]?.node.s.key ?? firstNavKey;
     if (!next) return;
     setFocusKey(next);
     rowEl(next)?.focus({ preventScroll: true });
@@ -462,10 +792,11 @@ export const SessionTree = memo(function SessionTree({
     // Modified arrows/keys belong to the shortcut dispatcher (⌥←/⌥→, ⌃⌘←/⌃⌘→, ⇧↵, ⌘↵).
     if (e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
     cancelAnimationFrame(landFrame.current);
-    // The rows as drawn, in both lists, and the Show more rows among them.
+    // The rows as drawn, in all lists, including folder/project headers and Show more rows.
     const items = [...(box.current?.querySelectorAll<HTMLElement>("[data-tree-nav]") ?? [])];
     const i = items.indexOf(here);
     const key = here.dataset.treeRow;
+    const groupKey = here.dataset.groupRow;
     const kids = here.hasAttribute("data-has-kids");
     const isFolded = here.getAttribute("aria-expanded") === "false";
     let to: HTMLElement | undefined;
@@ -483,27 +814,44 @@ export const SessionTree = memo(function SessionTree({
         to = items[items.length - 1];
         break;
       case "ArrowRight":
-        if (key && kids && isFolded) {
+        if (groupKey) {
+          if (isFolded) {
+            calmNextCommit();
+            setFolded(groupKey, false);
+          } else to = items[i + 1];
+        } else if (key && kids && isFolded) {
           calmNextCommit();
           setFolded(key, false);
         } else if (kids) to = items[i + 1];
         else return;
         break;
       case "ArrowLeft":
-        if (key && kids && !isFolded) {
+        if (groupKey) {
+          if (!isFolded) {
+            calmNextCommit();
+            setFolded(groupKey, true);
+          } else return;
+        } else if (key && kids && !isFolded) {
           calmNextCommit();
           setFolded(key, true);
         } else if (here.dataset.up) to = rowEl(here.dataset.up) ?? undefined;
         else return;
         break;
       case "Enter":
+        if (groupKey) {
+          calmNextCommit();
+          setFolded(groupKey, !isFolded);
+          break;
+        }
         // A row's ↵, ⇧↵ and ⌘↵ are the Lists keys (below); Show N more presses itself.
         if (key) return;
         here.click();
         break;
       case " ":
-        // The Board's peek: the row beside the page, the focus staying here.
-        if (key) openSplit(key, { preview: true });
+        if (groupKey) {
+          calmNextCommit();
+          setFolded(groupKey, !isFolded);
+        } else if (key) openSplit(key, { preview: true });
         else here.click();
         break;
       default:
@@ -512,7 +860,8 @@ export const SessionTree = memo(function SessionTree({
     e.preventDefault();
     e.stopPropagation();
     if (to) {
-      if (to.dataset.treeRow) setFocusKey(to.dataset.treeRow);
+      const nextKey = to.dataset.treeRow ?? to.dataset.groupRow;
+      if (nextKey) setFocusKey(nextKey);
       to.focus();
     }
   };
@@ -531,7 +880,8 @@ export const SessionTree = memo(function SessionTree({
     const items = [...box.current.querySelectorAll<HTMLElement>("[data-tree-nav]")];
     const to = items[items.indexOf(a) + d];
     if (!to) return;
-    if (to.dataset.treeRow) setFocusKey(to.dataset.treeRow);
+    const nextKey = to.dataset.treeRow ?? to.dataset.groupRow;
+    if (nextKey) setFocusKey(nextKey);
     to.focus();
   };
   const own = { within: box };
@@ -548,8 +898,11 @@ export const SessionTree = memo(function SessionTree({
   useShortcut(
     "list.menu",
     () => {
-      const s = focusedRow();
-      const el = s ? rowEl(s.key) : null;
+      const a = document.activeElement as HTMLElement | null;
+      const el =
+        a && box.current?.contains(a) && (a.hasAttribute("data-tree-row") || a.hasAttribute("data-group-row"))
+          ? a
+          : null;
       if (!el) return false;
       const r = el.getBoundingClientRect();
       const ce = new MouseEvent("contextmenu", {
@@ -604,7 +957,13 @@ export const SessionTree = memo(function SessionTree({
       let above: SessionKey | null = null;
       for (let j = idx - 1; j >= 0; j--) {
         const d = rows[j]!;
-        if (d.group !== cur.group || d.node.level < cur.node.level) break;
+        if (
+          d.group !== cur.group ||
+          d.folderId !== cur.folderId ||
+          d.projectKey !== cur.projectKey ||
+          d.node.level < cur.node.level
+        )
+          break;
         if (d.node.level === cur.node.level) {
           above = d.node.s.key;
           break;
@@ -652,6 +1011,22 @@ export const SessionTree = memo(function SessionTree({
     own,
   );
   useShortcut(
+    "tree.moveFolder",
+    () => {
+      const s = focusedRow();
+      if (!s) return false;
+      requestMoveFolder(s.key, { fromTree: true });
+    },
+    own,
+  );
+  useShortcut(
+    "tree.newFolder",
+    () => {
+      startCreateFolder();
+    },
+    own,
+  );
+  useShortcut(
     "tree.unfoldAll",
     () => {
       const s = focusedRow();
@@ -669,8 +1044,8 @@ export const SessionTree = memo(function SessionTree({
   );
 
   // Heading menus: Unfold all / Fold all for Pinned and Sessions.
-  const sectionMenu = (nodes: readonly TreeNode[]) => {
-    const keys = parentKeysIn(nodes);
+  const sectionMenu = (nodes: readonly TreeNode[], extraGroupKeys?: readonly string[]): MenuList | null => {
+    const keys = [...(extraGroupKeys ?? []), ...parentKeysIn(nodes)];
     if (keys.length === 0) return null;
     const anyFolded = keys.some((k) => latestFolds.current.has(k));
     const anyOpen = keys.some((k) => !latestFolds.current.has(k));
@@ -680,7 +1055,39 @@ export const SessionTree = memo(function SessionTree({
     ];
   };
   const pinnedHeadingMenu = useContextMenu(() => sectionMenu(pinned), { title: () => "Pinned" });
-  const sessionsHeadingMenu = useContextMenu(() => sectionMenu(roots), { title: () => "Sessions" });
+  const sessionsHeadingMenu = useContextMenu(
+    () => sectionMenu(roots, grouped ? projectGroups.map((pg) => `p:${pg.key}`) : undefined),
+    { title: () => "Sessions" },
+  );
+  const foldersHeadingMenu = useContextMenu(
+    () => [
+      { label: "New folder…", action: "tree.newFolder", run: startCreateFolder },
+      ...(folders.length > 0
+        ? [
+            { sep: true as const },
+            {
+              label: "Unfold all",
+              disabled: !folders.some((f) => latestFolds.current.has(`f:${f.id}`)),
+              run: () =>
+                setFoldedMany(
+                  folders.map((f) => `f:${f.id}`),
+                  false,
+                ),
+            },
+            {
+              label: "Fold all",
+              disabled: !folders.some((f) => !latestFolds.current.has(`f:${f.id}`)),
+              run: () =>
+                setFoldedMany(
+                  folders.map((f) => `f:${f.id}`),
+                  true,
+                ),
+            },
+          ]
+        : []),
+    ],
+    { title: () => "Folders" },
+  );
 
   // ----- what a move did, said, and where focus and scroll land -----
   const [said, setSaid] = useState("");
@@ -707,9 +1114,11 @@ export const SessionTree = memo(function SessionTree({
         requestAnimationFrame(() => setSaid(words));
         // Moved under a parent: the parent opens, and its ancestors, so the row is in sight.
         if (what?.move.kind === "under") revealRef.current(what.move.parent, what.key);
+        // Moved into a custom folder: expand that folder so the row is in sight.
+        if (what?.move.kind === "folder") setFolded(`f:${what.move.folderId}`, false);
         if (what?.source) pendingLand.current = { key: what.key, source: what.source };
       }),
-    [],
+    [setFolded],
   );
   // After a pointer drop: focus without scrolling, then once FLIP settles scroll once only
   // if the landed row is out of view. After a key, menu or picker move: focus and scroll
@@ -761,8 +1170,8 @@ export const SessionTree = memo(function SessionTree({
   });
 
   // ----- a row is never lost: opening or moving one shows it -----
-  /** Unfolds `key` and every row above it; with `also`, the row under it is drawn too
-   *  (past Show N more, past the thirty top rows). */
+  /** Unfolds `key` and every row above it (plus its custom folder or project group);
+   *  with `also`, the row under it is drawn too (past Show N more, past the thirty top rows). */
   const reveal = (key: SessionKey, also?: SessionKey) => {
     const chain: SessionKey[] = [];
     for (let k: SessionKey | undefined = key; k; k = tree.nodes.get(k)?.parent) chain.push(k);
@@ -774,8 +1183,16 @@ export const SessionTree = memo(function SessionTree({
       if (at >= KIDS_SHOWN) setAllKids((was) => new Set(was).add(parent));
     }
     const top = chain[chain.length - 1] ?? key;
-    const i = heldRoots.findIndex((h) => h.key === top);
-    if (i >= limit) setLimit(i + 1);
+    const fid = inFolder[top];
+    if (fid && folderIdSet.has(fid)) {
+      setFolded(`f:${fid}`, false);
+    } else if (grouped) {
+      const topNode = tree.nodes.get(top);
+      if (topNode) setFolded(`p:${projectOf(topNode.s).key}`, false);
+    } else {
+      const i = heldRoots.findIndex((h) => h.key === top);
+      if (i >= limit) setLimit(i + 1);
+    }
   };
   const revealRef = useRef(reveal);
   revealRef.current = reveal;
@@ -799,7 +1216,7 @@ export const SessionTree = memo(function SessionTree({
   const scroller = useRef<HTMLDivElement>(null);
   const chip = useRef<HTMLDivElement>(null);
   const line = useRef<HTMLDivElement>(null);
-  const live = useRef({ tree, all, arrangement, drawn, folded });
+  const live = useRef<Live>({ tree, all, arrangement, drawn, folded });
   live.current = { tree, all, arrangement, drawn, folded };
   /** A click right after a drag is not a click on the row. */
   const justDragged = useRef(false);
@@ -845,7 +1262,15 @@ export const SessionTree = memo(function SessionTree({
   );
 
   const groupId = useId();
-  const row = (n: TreeNode, group: Group, pos: number, size: number, parent?: TreeNode): ReactElement => {
+  const row = (
+    n: TreeNode,
+    group: Group,
+    pos: number,
+    size: number,
+    parent?: TreeNode,
+    folderId?: string,
+    groupUp?: string,
+  ): ReactElement => {
     const s = n.s;
     const key = s.key;
     const kids = kidsOf(n);
@@ -865,12 +1290,15 @@ export const SessionTree = memo(function SessionTree({
     const inside = isFolded && r ? foldWords(r) : "";
     // Only a row under a session on another computer is marked (lib/tree.ts runsElsewhere).
     const away = runsElsewhere(tree, key);
-    const id = `${groupId}-${group}-${key}`;
+    const id = `${groupId}-${group}-${folderId ?? ""}-${key}`;
+    const ariaLevel = n.level + (groupUp ? 2 : 1);
     return (
       <TreeRow
         key={key}
         n={n}
         group={group}
+        folderId={folderId}
+        ariaLevel={ariaLevel}
         pos={pos}
         size={size}
         open={key === open}
@@ -886,7 +1314,7 @@ export const SessionTree = memo(function SessionTree({
         target={drag?.target?.kind === "on" && drag.target.key === key}
         lifted={drag?.key === key}
         touch={touch}
-        up={parent?.s.key}
+        up={parent?.s.key ?? groupUp}
         actions={actions}
       >
         {shown.length > 0 && (
@@ -896,12 +1324,12 @@ export const SessionTree = memo(function SessionTree({
             label={sessionTitle(s)}
             sig={`${shown.map((k) => k.s.key).join(",")}:${hiddenKids}`}
           >
-            {shown.map((k, i) => row(k, group, i + 1, kids.length, n))}
+            {shown.map((k, i) => row(k, group, i + 1, kids.length, n, folderId, groupUp))}
             {hiddenKids > 0 && !isFolded && (
               // biome-ignore lint/a11y/useKeyWithClickEvents: the tree has the keys (Enter and Space press it)
               <div
                 role="treeitem"
-                aria-level={n.level + 2}
+                aria-level={ariaLevel + 1}
                 tabIndex={-1}
                 className="stree-more"
                 data-tree-nav=""
@@ -935,15 +1363,16 @@ export const SessionTree = memo(function SessionTree({
   );
   const listSig = useMemo(
     () =>
-      `${shownRoots.map((h) => (h.gone ? `~${h.key}` : h.key)).join(",")};${drawn
+      `${grouped ? "p" : "f"};${projectGroups.map((g) => `${g.key}:${foldedGroups.has(projectFoldKey(g.key)) ? 1 : 0}`).join(",")};${shownRoots.map((h) => (h.gone ? `~${h.key}` : h.key)).join(",")};${drawn
         .filter((d) => d.group === "sessions")
         .map((d) => `${d.node.s.key}:${d.folded ? 1 : 0}`)
         .join("|")}`,
-    [shownRoots, drawn],
+    [grouped, projectGroups, foldedGroups, shownRoots, drawn],
   );
   useFlip(listRef, 80, { move: 150, sig: listSig });
   useFlip(pinRef, 80, { move: 150, sig: pinSig });
-  const empty = drawn.length === 0 && heldRoots.length === 0;
+  const anyFolderSessions = folders.some((f) => (folderRoots.get(f.id)?.length ?? 0) > 0);
+  const empty = drawn.length === 0 && heldRoots.length === 0 && pinned.length === 0 && !anyFolderSessions;
   // A start not listed yet sits at the top of the live block (right after block 0 rows).
   const startAt = shownRoots.findIndex(
     (h) => (frozen?.key === h.key ? frozen.block : sidebarBlock(h.item, roll)) !== 0,
@@ -952,15 +1381,26 @@ export const SessionTree = memo(function SessionTree({
   // the same height, so nothing in the list moves when a drag starts.
   const pinZone = !!drag;
   const fades = useScrollFades(scroller);
-  // Signature of drawn rows that need you (own or rolled), so the needs-pill observer refreshes.
-  const needsSig = useMemo(
-    () =>
-      drawn
-        .filter((d) => d.node.s.state === "needs_you" || (d.folded && roll.get(d.node.s.key)?.loud === "needs_you"))
-        .map((d) => d.node.s.key)
-        .join(","),
-    [drawn, roll],
-  );
+  // Signature of drawn rows (and folded folders/projects) that need you, so the needs-pill refreshes.
+  const needsSig = useMemo(() => {
+    const keys: string[] = [];
+    for (const d of drawn) {
+      if (d.node.s.state === "needs_you" || (d.folded && roll.get(d.node.s.key)?.loud === "needs_you")) {
+        keys.push(d.node.s.key);
+      }
+    }
+    for (const f of folders) {
+      const fk = `f:${f.id}`;
+      if (folded.has(fk) && folderLoud.get(f.id) === "needs_you") keys.push(fk);
+    }
+    if (grouped) {
+      for (const pg of projectGroups) {
+        const pk = `p:${pg.key}`;
+        if (folded.has(pk) && pg.loud === "needs_you") keys.push(pk);
+      }
+    }
+    return keys.join(",");
+  }, [drawn, roll, folders, folded, folderLoud, grouped, projectGroups]);
   const needsPill = useNeedsPill(scroller, needsSig);
   const jumpToNeeds = () => {
     if (!needsPill) return;
@@ -991,30 +1431,59 @@ export const SessionTree = memo(function SessionTree({
             <span>Drop to pin</span>
           </div>
         ) : (
-          <button
-            type="button"
-            className="stree-new"
-            onClick={() => openNewSession()}
-            data-tip={touch ? undefined : "New session"}
-            data-tip-keys={touch ? undefined : hintFor("newSession.open") || undefined}
-            data-tip-side="right"
-          >
-            <svg
-              className="stree-new-glyph"
-              viewBox="0 0 20 20"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              aria-hidden="true"
+          <>
+            <button
+              type="button"
+              className="stree-new"
+              onClick={() => openNewSession()}
+              data-tip={touch ? undefined : "New session"}
+              data-tip-keys={touch ? undefined : hintFor("newSession.open") || undefined}
+              data-tip-side="right"
             >
-              <circle cx="10" cy="10" r="7" />
-              <path d="M10 7v6M7 10h6" />
-            </svg>
-            <span>New session</span>
-          </button>
+              <svg
+                className="stree-new-glyph"
+                viewBox="0 0 20 20"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <circle cx="10" cy="10" r="7" />
+                <path d="M10 7v6M7 10h6" />
+              </svg>
+              <span>New session</span>
+            </button>
+            <button
+              type="button"
+              className="icon-btn stree-head-btn"
+              aria-label={grouped ? "Show flat list" : "Group by project"}
+              aria-pressed={grouped}
+              data-tree-group-toggle=""
+              data-tip={touch ? undefined : grouped ? "Show flat list" : "Group by project"}
+              data-tip-side="bottom"
+              onClick={() => {
+                calmNextCommit();
+                setSettings({ sidebarGroup: grouped ? "flat" : "project" });
+              }}
+            >
+              <GroupProjectsIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-btn stree-head-btn"
+              aria-label="New folder"
+              data-tree-new-folder=""
+              data-tip={touch ? undefined : "New folder"}
+              data-tip-keys={touch ? undefined : hintFor("tree.newFolder") || undefined}
+              data-tip-side="bottom"
+              onClick={startCreateFolder}
+            >
+              <NewFolderIcon />
+            </button>
+          </>
         )}
       </div>
       {between}
@@ -1047,6 +1516,100 @@ export const SessionTree = memo(function SessionTree({
               </div>
             </section>
           )}
+          {(folders.length > 0 || creatingFolder) && (
+            <section className="stree-section" aria-labelledby={`${groupId}-folders`}>
+              <h2 className="stree-label" id={`${groupId}-folders`} {...foldersHeadingMenu}>
+                Folders
+              </h2>
+              <div className="stree-list" role="tree" aria-labelledby={`${groupId}-folders`} onKeyDown={onKey}>
+                {folders.map((f, fi) => {
+                  const fk = `f:${f.id}`;
+                  const isFolded = folded.has(fk);
+                  const fRoots = folderRoots.get(f.id) ?? [];
+                  const fLoud = folderLoud.get(f.id) ?? "none";
+                  const fGroupId = `${groupId}-folder-${f.id}`;
+                  const isRenaming = renamingFolderId === f.id;
+                  return (
+                    <FolderGroupRow
+                      key={f.id}
+                      folder={f}
+                      index={fi}
+                      total={folders.length}
+                      foldKey={fk}
+                      groupId={fGroupId}
+                      folded={isFolded}
+                      count={fRoots.length}
+                      loud={fLoud}
+                      tab={tabKey === fk}
+                      target={drag?.target?.kind === "folder" && drag.target.folderId === f.id}
+                      touch={touch}
+                      renaming={isRenaming}
+                      draft={folderDraft}
+                      inputRef={isRenaming ? inlineInputRef : undefined}
+                      onDraftChange={setFolderDraft}
+                      onCommitRename={() => commitFolderRename(f.id)}
+                      onCancelEdit={cancelFolderEdit}
+                      onStartRename={() => startRenameFolder(f)}
+                      onToggleFold={() => {
+                        calmNextCommit();
+                        setFolded(fk, !isFolded);
+                      }}
+                      onFocus={() => actions.focus(fk)}
+                      kidsInFolder={() => parentKeysIn(fRoots)}
+                      latestFolds={latestFolds}
+                      setFoldedMany={setFoldedMany}
+                    >
+                      {!isFolded && (
+                        // biome-ignore lint/a11y/useSemanticElements: a tree's group of treeitems (WAI-ARIA tree pattern), not a form's fieldset
+                        <div className="stree-group-body" role="group" id={fGroupId} aria-label={f.name}>
+                          {fRoots.length > 0 ? (
+                            fRoots.map((n, i) => row(n, "folder", i + 1, fRoots.length, undefined, f.id, fk))
+                          ) : (
+                            <p className="stree-group-empty">Drop sessions here</p>
+                          )}
+                        </div>
+                      )}
+                    </FolderGroupRow>
+                  );
+                })}
+                {creatingFolder && (
+                  <div role="none" className="stree-item">
+                    <div className="stree-row stree-group-row stree-folder-row stree-folder-row--editing">
+                      <span className="stree-group-chev" aria-hidden="true">
+                        <Chevron />
+                      </span>
+                      <span className="stree-lead">
+                        <FolderIcon />
+                      </span>
+                      <input
+                        ref={inlineInputRef}
+                        type="text"
+                        className="stree-inline-input"
+                        value={folderDraft}
+                        maxLength={ARRANGEMENT_FOLDER_NAME_MAX}
+                        placeholder="Folder name"
+                        aria-label="New folder name"
+                        autoComplete="off"
+                        spellCheck={false}
+                        onChange={(e) => setFolderDraft(e.target.value)}
+                        onBlur={commitFolderCreate}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            commitFolderCreate();
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            cancelFolderEdit();
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
           <section className="stree-section" aria-labelledby={`${groupId}-sessions`}>
             <h2
               className="stree-label"
@@ -1063,6 +1626,49 @@ export const SessionTree = memo(function SessionTree({
                 none={loaded ? (all.length > 0 ? "All hidden on this device" : "None yet") : null}
                 label={`${groupId}-sessions`}
               />
+            ) : grouped ? (
+              <div
+                className="stree-list"
+                role="tree"
+                aria-labelledby={`${groupId}-sessions`}
+                onKeyDown={onKey}
+                ref={listRef}
+              >
+                <StartingRows touch={touch} />
+                {projectGroups.map((pg, pi) => {
+                  const pk = `p:${pg.key}`;
+                  const isFolded = folded.has(pk);
+                  const pGroupId = `${groupId}-proj-${pi}`;
+                  return (
+                    <ProjectGroupRow
+                      key={pg.key}
+                      group={pg}
+                      index={pi}
+                      total={projectGroups.length}
+                      foldKey={pk}
+                      groupId={pGroupId}
+                      folded={isFolded}
+                      tab={tabKey === pk}
+                      touch={touch}
+                      onToggleFold={() => {
+                        calmNextCommit();
+                        setFolded(pk, !isFolded);
+                      }}
+                      onFocus={() => actions.focus(pk)}
+                      kidsInProject={() => parentKeysIn(pg.roots)}
+                      latestFolds={latestFolds}
+                      setFoldedMany={setFoldedMany}
+                    >
+                      {!isFolded && (
+                        // biome-ignore lint/a11y/useSemanticElements: a tree's group of treeitems (WAI-ARIA tree pattern), not a form's fieldset
+                        <div className="stree-group-body" role="group" id={pGroupId} aria-label={pg.label}>
+                          {pg.roots.map((n, i) => row(n, "sessions", i + 1, pg.roots.length, undefined, undefined, pk))}
+                        </div>
+                      )}
+                    </ProjectGroupRow>
+                  );
+                })}
+              </div>
             ) : (
               <div
                 className="stree-list"
@@ -1134,6 +1740,366 @@ export const SessionTree = memo(function SessionTree({
 
 const nodeKey = (n: TreeNode) => n.s.key;
 
+/** Touch long-press menu trigger for folder / project group rows inside `.stree`
+ *  (ContextMenu.tsx skips `.stree` so session rows own their own press/drag gesture). */
+function useTouchMenu(touch: boolean) {
+  return useCallback(
+    (e: ReactPointerEvent<HTMLElement>) => {
+      if (!touch || e.pointerType !== "touch") return;
+      const el = e.currentTarget;
+      const start = { x: e.clientX, y: e.clientY };
+      let timer = 0;
+      const cleanup = () => {
+        window.clearTimeout(timer);
+        window.removeEventListener("pointermove", onMove, true);
+        window.removeEventListener("pointerup", cleanup, true);
+        window.removeEventListener("pointercancel", cleanup, true);
+      };
+      const onMove = (ev: PointerEvent) => {
+        if (touchScrolls(ev.clientX - start.x, ev.clientY - start.y)) cleanup();
+      };
+      timer = window.setTimeout(() => {
+        cleanup();
+        haptic("selection");
+        const ce = new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: start.x,
+          clientY: start.y,
+        });
+        el.dispatchEvent(Object.assign(ce, { __touch: true }));
+        const swallow = (c: Event) => {
+          c.preventDefault();
+          c.stopPropagation();
+        };
+        window.addEventListener("click", swallow, { capture: true, once: true });
+        window.setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 800);
+      }, LONG_PRESS_MS);
+      window.addEventListener("pointermove", onMove, true);
+      window.addEventListener("pointerup", cleanup, true);
+      window.addEventListener("pointercancel", cleanup, true);
+    },
+    [touch],
+  );
+}
+
+/** One custom folder header + its expanded session tree. */
+function FolderGroupRow({
+  folder,
+  index,
+  total,
+  foldKey,
+  groupId,
+  folded,
+  count,
+  loud,
+  tab,
+  target,
+  touch,
+  renaming,
+  draft,
+  inputRef,
+  onDraftChange,
+  onCommitRename,
+  onCancelEdit,
+  onStartRename,
+  onToggleFold,
+  onFocus,
+  kidsInFolder,
+  latestFolds,
+  setFoldedMany,
+  children,
+}: {
+  folder: ArrangementFolder;
+  index: number;
+  total: number;
+  foldKey: string;
+  groupId: string;
+  folded: boolean;
+  count: number;
+  loud: Loud;
+  tab: boolean;
+  target: boolean;
+  touch: boolean;
+  renaming: boolean;
+  draft: string;
+  inputRef?: RefObject<HTMLInputElement | null>;
+  onDraftChange: (v: string) => void;
+  onCommitRename: () => void;
+  onCancelEdit: () => void;
+  onStartRename: () => void;
+  onToggleFold: () => void;
+  onFocus: () => void;
+  kidsInFolder: () => SessionKey[];
+  latestFolds: RefObject<ReadonlySet<string>>;
+  setFoldedMany: (keys: readonly string[], fold: boolean) => void;
+  children?: ReactNode;
+}) {
+  const store = useStore();
+  const onTouchDown = useTouchMenu(touch);
+  const menu = useContextMenu(
+    () => {
+      const kidKeys = kidsInFolder();
+      const anyKidFolded = kidKeys.some((k) => latestFolds.current.has(k));
+      const anyKidOpen = kidKeys.some((k) => !latestFolds.current.has(k));
+      return [
+        { label: "Rename…", run: onStartRename },
+        {
+          label: "Color",
+          items: [
+            {
+              label: "None",
+              radio: true,
+              checked: !folder.color,
+              run: () => void recolorFolder(store, folder.id, null),
+            },
+            { sep: true },
+            ...LABEL_COLORS.map((c) => ({
+              label: LABEL_DEFAULT_NAMES[c],
+              swatch: c,
+              radio: true,
+              checked: folder.color === c,
+              run: () => void recolorFolder(store, folder.id, c),
+            })),
+          ],
+        },
+        index > 0 && { label: "Move up", run: () => void reorderFolder(store, folder.id, -1) },
+        index < total - 1 && { label: "Move down", run: () => void reorderFolder(store, folder.id, 1) },
+        kidKeys.length > 0 && { sep: true },
+        kidKeys.length > 0 && {
+          label: "Unfold all",
+          disabled: !anyKidFolded,
+          run: () => setFoldedMany(kidKeys, false),
+        },
+        kidKeys.length > 0 && {
+          label: "Fold all",
+          disabled: !anyKidOpen,
+          run: () => setFoldedMany(kidKeys, true),
+        },
+        { sep: true },
+        {
+          label: "Delete folder",
+          danger: true,
+          run: () => {
+            calmNextCommit();
+            deleteFolder(store, folder.id);
+          },
+        },
+      ];
+    },
+    { title: () => folder.name },
+  );
+  const rolled = folded && loud !== "none" ? loud : undefined;
+  return (
+    <div role="none" className="stree-item stree-group-item">
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the tree's onKey handler owns Enter, Space, and arrows */}
+      <div
+        role="treeitem"
+        aria-level={1}
+        aria-posinset={index + 1}
+        aria-setsize={total}
+        aria-expanded={!folded}
+        aria-owns={!folded ? groupId : undefined}
+        tabIndex={tab ? 0 : -1}
+        className={`stree-row stree-group-row stree-folder-row${renaming ? " stree-folder-row--editing" : ""}`}
+        data-tree-nav=""
+        data-group-row={foldKey}
+        data-zone="folder"
+        data-folder-id={folder.id}
+        data-rolled={rolled}
+        data-target={target ? "" : undefined}
+        onClick={() => {
+          if (!renaming) onToggleFold();
+        }}
+        onDoubleClick={(e) => {
+          if (touch || renaming) return;
+          e.stopPropagation();
+          onStartRename();
+        }}
+        onPointerDown={onTouchDown}
+        onFocus={onFocus}
+        {...menu}
+      >
+        <span className="stree-group-chev" data-folded={folded ? "" : undefined} aria-hidden="true">
+          <Chevron />
+        </span>
+        <span className="stree-lead">
+          <FolderIcon open={!folded} />
+        </span>
+        {folder.color && (
+          <span className={`stree-folder-dot label-dot label-dot--${folder.color}`} aria-hidden="true" />
+        )}
+        {renaming ? (
+          <input
+            ref={inputRef}
+            type="text"
+            className="stree-inline-input"
+            value={draft}
+            maxLength={ARRANGEMENT_FOLDER_NAME_MAX}
+            aria-label="Folder name"
+            autoComplete="off"
+            spellCheck={false}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onChange={(e) => onDraftChange(e.target.value)}
+            onBlur={onCommitRename}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onCommitRename();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onCancelEdit();
+              }
+            }}
+          />
+        ) : (
+          <span className="stree-title" dir="auto">
+            {folder.name}
+          </span>
+        )}
+        <span className="stree-group-count num" aria-hidden="true">
+          {count}
+        </span>
+        <span className="stree-lamp">{rolled && <GroupLamp loud={rolled} size={touch ? 12 : 10} />}</span>
+        <span className="sr-only">
+          , folder, {count} {count === 1 ? "session" : "sessions"}
+          {rolled ? loudWords(rolled) : ""}
+        </span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** One auto-grouped project header + hover `+` new-session button + its expanded sessions. */
+function ProjectGroupRow({
+  group,
+  index,
+  total,
+  foldKey,
+  groupId,
+  folded,
+  tab,
+  touch,
+  onToggleFold,
+  onFocus,
+  kidsInProject,
+  latestFolds,
+  setFoldedMany,
+  children,
+}: {
+  group: ProjectGroup;
+  index: number;
+  total: number;
+  foldKey: string;
+  groupId: string;
+  folded: boolean;
+  tab: boolean;
+  touch: boolean;
+  onToggleFold: () => void;
+  onFocus: () => void;
+  kidsInProject: () => SessionKey[];
+  latestFolds: RefObject<ReadonlySet<string>>;
+  setFoldedMany: (keys: readonly string[], fold: boolean) => void;
+  children?: ReactNode;
+}) {
+  const onTouchDown = useTouchMenu(touch);
+  const startInProject = () => {
+    openNewSession({
+      ...(group.latest.machine ? { machine: group.latest.machine } : {}),
+      ...(group.latest.harness ? { harness: group.latest.harness } : {}),
+      ...(group.latest.cwd ? { cwd: group.latest.cwd } : {}),
+    });
+  };
+  const menu = useContextMenu(
+    () => {
+      const kidKeys = kidsInProject();
+      const anyKidFolded = kidKeys.some((k) => latestFolds.current.has(k));
+      const anyKidOpen = kidKeys.some((k) => !latestFolds.current.has(k));
+      return [
+        { label: `New session in ${group.label}`, run: startInProject },
+        kidKeys.length > 0 && { sep: true },
+        kidKeys.length > 0 && {
+          label: "Unfold all",
+          disabled: !anyKidFolded,
+          run: () => setFoldedMany(kidKeys, false),
+        },
+        kidKeys.length > 0 && {
+          label: "Fold all",
+          disabled: !anyKidOpen,
+          run: () => setFoldedMany(kidKeys, true),
+        },
+      ];
+    },
+    { title: () => group.label, subtitle: () => group.subtitle ?? "" },
+  );
+  const rolled = folded && group.loud !== "none" ? group.loud : undefined;
+  const tip = group.subtitle ? `${group.label}\n${group.subtitle}` : group.label;
+  return (
+    <div role="none" className="stree-item stree-group-item">
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the tree's onKey handler owns Enter, Space, and arrows */}
+      <div
+        role="treeitem"
+        aria-level={1}
+        aria-posinset={index + 1}
+        aria-setsize={total}
+        aria-expanded={!folded}
+        aria-owns={!folded ? groupId : undefined}
+        tabIndex={tab ? 0 : -1}
+        className="stree-row stree-group-row stree-project-row"
+        data-tree-nav=""
+        data-group-row={foldKey}
+        data-zone="project"
+        data-project-key={group.key}
+        data-rolled={rolled}
+        data-tip={touch ? undefined : tip}
+        data-tip-wrap={touch ? undefined : ""}
+        data-tip-side={touch ? undefined : "right"}
+        onClick={onToggleFold}
+        onPointerDown={onTouchDown}
+        onFocus={onFocus}
+        {...menu}
+      >
+        <span className="stree-group-chev" data-folded={folded ? "" : undefined} aria-hidden="true">
+          <Chevron />
+        </span>
+        <span className="stree-lead">
+          <ProjectIcon />
+        </span>
+        <span className="stree-title" dir="auto">
+          {group.label}
+        </span>
+        <button
+          type="button"
+          className="stree-project-add"
+          aria-label={`New session in ${group.label}`}
+          data-tip={touch ? undefined : `New session in ${group.label}`}
+          data-tip-side="right"
+          tabIndex={-1}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            startInProject();
+          }}
+        >
+          <PlusSmallIcon />
+        </button>
+        <span className="stree-group-count num" aria-hidden="true">
+          {group.count}
+        </span>
+        <span className="stree-lamp">{rolled && <GroupLamp loud={rolled} size={touch ? 12 : 10} />}</span>
+        <span className="sr-only">
+          , project, {group.count} {group.count === 1 ? "session" : "sessions"}
+          {rolled ? loudWords(rolled) : ""}
+        </span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 /** The starts from here whose session is not listed yet (the Board's starting cards): a
  *  row each, its agent's mark, the start's words or "New session" and the turning ring,
  *  opening its session, never dragged. Keyed by the session's key, as its real row will
@@ -1198,11 +2164,11 @@ function StartingRow({ a, touch }: { a: ControlActivity; touch: boolean }) {
   );
 }
 
-/** Floating pill when every needs-you row (own or rolled) is scrolled out of view. */
+/** Floating pill when every needs-you row (own or rolled, including folded groups) is scrolled out of view. */
 interface NeedsPillState {
   count: number;
   edge: "top" | "bottom";
-  targetKey: SessionKey;
+  targetKey: string;
 }
 function useNeedsPill(ref: RefObject<HTMLElement | null>, sig: string): NeedsPillState | null {
   const [pill, setPill] = useState<NeedsPillState | null>(null);
@@ -1213,7 +2179,9 @@ function useNeedsPill(ref: RefObject<HTMLElement | null>, sig: string): NeedsPil
       return;
     }
     const rows = Array.from(
-      sc.querySelectorAll<HTMLElement>('[data-tree-row]:is([data-state="needs_you"], [data-rolled="needs_you"])'),
+      sc.querySelectorAll<HTMLElement>(
+        '[data-tree-row]:is([data-state="needs_you"], [data-rolled="needs_you"]), [data-group-row][data-rolled="needs_you"]',
+      ),
     );
     if (rows.length === 0) {
       setPill(null);
@@ -1258,7 +2226,7 @@ function useNeedsPill(ref: RefObject<HTMLElement | null>, sig: string): NeedsPil
           target = firstBelow;
         }
       }
-      const targetKey = target.dataset.treeRow!;
+      const targetKey = target.dataset.treeRow ?? target.dataset.groupRow!;
       const count = rows.length;
       setPill((p) =>
         p && p.count === count && p.edge === edge && p.targetKey === targetKey ? p : { count, edge, targetKey },
@@ -1360,7 +2328,7 @@ function KidGroup({
 
 interface RowActions {
   down: (e: ReactPointerEvent<HTMLElement>, s: SessionSummary) => void;
-  focus: (key: SessionKey) => void;
+  focus: (key: string) => void;
   fold: (key: SessionKey, fold: boolean, deep?: boolean) => void;
   click: (e: ReactMouseEvent<HTMLAnchorElement>, key: SessionKey) => void;
 }
@@ -1368,6 +2336,8 @@ interface RowActions {
 interface RowProps {
   n: TreeNode;
   group: Group;
+  folderId?: string;
+  ariaLevel: number;
   pos: number;
   size: number;
   open: boolean;
@@ -1390,7 +2360,7 @@ interface RowProps {
   lifted: boolean;
   touch: boolean;
   /** The row it is drawn under (← goes there). */
-  up?: SessionKey;
+  up?: string;
   actions: RowActions;
 }
 
@@ -1400,8 +2370,10 @@ function TreeRow({ children, ...p }: RowProps & { children?: ReactNode }) {
       <RowLine
         s={p.n.s}
         level={p.n.level}
+        ariaLevel={p.ariaLevel}
         placed={p.n.placed}
         group={p.group}
+        folderId={p.folderId}
         pos={p.pos}
         size={p.size}
         open={p.open}
@@ -1428,8 +2400,10 @@ function TreeRow({ children, ...p }: RowProps & { children?: ReactNode }) {
 const RowLine = memo(function RowLine({
   s,
   level,
+  ariaLevel,
   placed,
   group,
+  folderId,
   pos,
   size,
   open,
@@ -1498,7 +2472,7 @@ const RowLine = memo(function RowLine({
       role="treeitem"
       aria-label={rowName}
       aria-description={desc || undefined}
-      aria-level={level + 1}
+      aria-level={ariaLevel}
       aria-posinset={pos}
       aria-setsize={size}
       aria-expanded={hasKids ? !folded : undefined}
@@ -1512,6 +2486,7 @@ const RowLine = memo(function RowLine({
       data-up={up}
       data-level={level}
       data-group={group}
+      data-folder-id={folderId}
       data-state={s.state}
       data-unread={unread ? "" : undefined}
       data-rolled={rolled}
@@ -1551,9 +2526,9 @@ const RowLine = memo(function RowLine({
 interface Live {
   tree: Tree;
   all: SessionSummary[];
-  arrangement: { placed: Record<string, string | null>; pinned: string[]; rev: number };
+  arrangement: Arrangement;
   drawn: Drawn[];
-  folded: ReadonlySet<SessionKey>;
+  folded: ReadonlySet<string>;
 }
 
 function useDragStart(o: {
@@ -1565,7 +2540,7 @@ function useDragStart(o: {
   live: RefObject<Live>;
   setDrag: (d: Drag | null | ((was: Drag | null) => Drag | null)) => void;
   justDragged: RefObject<boolean>;
-  unfold: (key: SessionKey) => void;
+  unfold: (key: string) => void;
 }) {
   const ref = useRef(o);
   ref.current = o;
@@ -1597,7 +2572,7 @@ function useDragStart(o: {
     let frame = 0;
     const key = session.key;
 
-    /** Where the rows are now, and the headings. */
+    /** Where the rows are now, and the headings, folders, and projects. */
     const measure = () => {
       const root = ref.current.box.current;
       const rows: RowBox[] = [];
@@ -1610,18 +2585,33 @@ function useDragStart(o: {
           bottom: b.bottom,
           level: Number(r.dataset.level),
           group: r.dataset.group as Group,
+          ...(r.dataset.folderId ? { folderId: r.dataset.folderId } : {}),
         });
       }
       const zone = (sel: string) => {
         const z = root.querySelector<HTMLElement>(sel)?.getBoundingClientRect();
         return z ? { top: z.top, bottom: z.bottom } : undefined;
       };
+      const folders: FolderZone[] = [];
+      for (const f of root.querySelectorAll<HTMLElement>('[data-zone="folder"]')) {
+        const fid = f.dataset.folderId;
+        if (!fid) continue;
+        const b = f.getBoundingClientRect();
+        folders.push({ folderId: fid, top: b.top, bottom: b.bottom });
+      }
+      const projects: { top: number; bottom: number }[] = [];
+      for (const p of root.querySelectorAll<HTMLElement>('[data-zone="project"]')) {
+        const b = p.getBoundingClientRect();
+        projects.push({ top: b.top, bottom: b.bottom });
+      }
       // New session's row, during a drag the place to pin (Pinned's own heading as well).
       return {
         rows,
         zones: {
           pinned: zone('[data-zone="pin"]') ?? zone('[data-zone="pinned"]'),
           sessions: zone('[data-zone="sessions"]'),
+          folders,
+          projects,
           bottom: ref.current.scroller.current?.getBoundingClientRect().bottom,
         },
       };
@@ -1660,6 +2650,10 @@ function useDragStart(o: {
       if (t?.kind === "on") {
         const row = ref.current.live.current!.drawn.find((d) => d.node.s.key === t.key);
         if (row?.folded) openTimer = window.setTimeout(() => ref.current.unfold(t.key), OPEN_AFTER_MS);
+      } else if (t?.kind === "folder") {
+        const fk = `f:${t.folderId}`;
+        if (ref.current.live.current!.folded.has(fk))
+          openTimer = window.setTimeout(() => ref.current.unfold(fk), OPEN_AFTER_MS);
       }
     };
 

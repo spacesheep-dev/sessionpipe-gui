@@ -199,6 +199,7 @@ export function Board() {
   const [machine, setMachine] = useState("");
   const [harness, setHarness] = useState("");
   const [label, setLabelFilter] = useState<LabelFilter>("");
+  const [folder, setFolder] = useState("");
   const labels = useLabels();
   const lq = useMemo(() => labelQuery(labels, q), [labels, q]);
   const [showDone, setShowDoneState] = useState(doneOpen);
@@ -270,11 +271,28 @@ export function Board() {
     [hidden],
   );
   const arrangement = useArrangement();
+  const customFolders = arrangement.folders ?? [];
+  const inFolderMap = arrangement.inFolder;
+  useEffect(() => {
+    if (folder && folder !== "none" && !customFolders.some((f) => f.id === folder)) {
+      setFolder("");
+    }
+  }, [folder, customFolders]);
+  const folderPasses = useCallback(
+    (key: string) => {
+      if (!folder) return true;
+      const fid = inFolderMap?.[key];
+      if (folder === "none") return !fid || !customFolders.some((f) => f.id === fid);
+      return fid === folder;
+    },
+    [folder, inFolderMap, customFolders],
+  );
   const { roots, childrenOf } = useMemo(() => {
     const drawn = (p: SessionSummary) =>
       (!machine || p.machine === machine) &&
       (!harness || p.harness === harness) &&
       labelPasses(labels, p.key, label) &&
+      folderPasses(p.key) &&
       lq.test(p.key) &&
       !aliased(p) &&
       !isHidden(hidden, p.key, p.stateSince, p.state === "needs_you");
@@ -286,7 +304,7 @@ export function Board() {
       needs: needsHere,
     });
     return { roots: t.roots.map((n) => n.s), childrenOf: t.childrenOf };
-  }, [all, arrangement, machine, harness, labels, label, lq, aliased, hidden, showDone, needsHere]);
+  }, [all, arrangement, machine, harness, labels, label, folderPasses, lq, aliased, hidden, showDone, needsHere]);
   // A row is in Needs you while a session under it needs you (one hidden on this device in
   // that state, which the Inbox badge leaves out, takes it nowhere), so the section holds
   // every session the badge counts; it goes back when the child stops needing you.
@@ -301,11 +319,12 @@ export function Board() {
       (!machine || s.machine === machine) &&
       (!harness || s.harness === harness) &&
       labelPasses(labels, s.key, label) &&
+      folderPasses(s.key) &&
       lq.test(s.key) &&
       (matches(s, lq.rest) ||
         agentsMatch(s, lq.rest) ||
         (childrenOf.get(s.key) ?? []).some((c) => matches(c, lq.rest))),
-    [machine, harness, label, labels, lq, childrenOf, aliased],
+    [machine, harness, label, labels, folderPasses, lq, childrenOf, aliased],
   );
   const visible = useMemo(
     () =>
@@ -318,7 +337,7 @@ export function Board() {
   // Held still under the hand: rows keep their place and section; new ones wait.
   const listHold = useListHold(listRef, { idle: false });
   // A filter is an explicit change: apply it even while focus holds the old rows.
-  const filterKey = JSON.stringify([q, machine, harness, label]);
+  const filterKey = JSON.stringify([q, machine, harness, label, folder]);
   const heldFilter = useRef(filterKey);
   const hold = listHold && heldFilter.current === filterKey;
   heldFilter.current = filterKey;
@@ -403,12 +422,13 @@ export function Board() {
   const hrefs = useMemo(() => ordered.map((h) => sessionPath(h.item.harness, h.item.id)), [ordered]);
   const keys = useMemo(() => ordered.map((h) => h.key), [ordered]);
 
-  const filtered = !!(q || machine || harness || label);
+  const filtered = !!(q || machine || harness || label || folder);
   const clear = useCallback(() => {
     setQ("");
     setMachine("");
     setHarness("");
     setLabelFilter("");
+    setFolder("");
   }, []);
   const clearRef = useRef<() => boolean>(() => false);
   clearRef.current = () => {
@@ -528,6 +548,47 @@ export function Board() {
     label,
     setLabel: setLabelFilter,
   };
+  const folderName = !folder
+    ? ""
+    : folder === "none"
+      ? "No folder"
+      : (customFolders.find((f) => f.id === folder)?.name ?? "");
+  const anyFilterOn = !!(machine || harness || label || folder);
+  const fullFilterSummary = [boardFilterSummary(filterState), folderName].filter(Boolean).join(" · ");
+  const buildFilterMenu = (): MenuList => {
+    const base = boardFilterItems(filterState);
+    if (customFolders.length === 0 && !folder) return base;
+    const withoutClear = base.filter((i) => !(i && "label" in i && i.label === "Clear filters"));
+    const folderSub = {
+      label: folder ? `Folder: ${folderName}` : "Folder",
+      items: [
+        { label: "All folders", radio: true, checked: !folder, run: () => setFolder("") },
+        ...customFolders.map((f) => ({
+          label: f.name,
+          swatch: f.color,
+          radio: true,
+          checked: folder === f.id,
+          run: () => setFolder(f.id),
+        })),
+        { label: "No folder", radio: true, checked: folder === "none", run: () => setFolder("none") },
+      ],
+    };
+    return [
+      ...withoutClear,
+      withoutClear.length > 0 && { sep: true as const },
+      folderSub,
+      anyFilterOn && { sep: true as const },
+      anyFilterOn && {
+        label: "Clear filters",
+        run: () => {
+          setMachine("");
+          setHarness("");
+          setLabelFilter("");
+          setFolder("");
+        },
+      },
+    ];
+  };
   // The field narrows what the board holds; the way on to every session, what was sent
   // included, is Search, which the end of a filtered list and ⇧⌘F take its words to.
   const search = <SearchInput value={q} onChange={setQ} placeholder="Filter" label="Filter sessions" />;
@@ -576,7 +637,19 @@ export function Board() {
                 />
               )}
               <LabelChip value={label} onChange={setLabelFilter} />
-              {(machine || harness || label) && (
+              {(customFolders.length > 0 || !!folder) && (
+                <ChipSelect
+                  value={folder}
+                  options={[...customFolders.map((f) => f.id), "none"]}
+                  onChange={setFolder}
+                  all="All folders"
+                  label="Folder"
+                  optionLabel={(id) =>
+                    id === "none" ? "No folder" : (customFolders.find((f) => f.id === id)?.name ?? id)
+                  }
+                />
+              )}
+              {anyFilterOn && (
                 <button type="button" className="btn btn--ghost btn--sm" onClick={clear}>
                   Clear
                 </button>
@@ -588,12 +661,16 @@ export function Board() {
             // field at the trailing edge, so a filter that grows its button never
             // moves the field.
             <>
-              {boardFilterItems(filterState).length > 0 && (
+              {buildFilterMenu().length > 0 && (
                 <FilterMenu
-                  on={!!(machine || harness || label)}
-                  summary={boardFilterSummary(filterState)}
-                  hint="Filter by machine, agent or label"
-                  build={() => boardFilterItems(filterState)}
+                  on={anyFilterOn}
+                  summary={fullFilterSummary}
+                  hint={
+                    customFolders.length > 0
+                      ? "Filter by machine, agent, label or folder"
+                      : "Filter by machine, agent or label"
+                  }
+                  build={buildFilterMenu}
                 />
               )}
               <LensChip />

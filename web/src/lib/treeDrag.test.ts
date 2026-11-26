@@ -60,6 +60,27 @@ describe("targetAt", () => {
     expect(targetAt(rows, 500, "c:a", none, zones)).toBeNull();
     expect(targetAt(rows, 170, "c:a", none, zones)).toBeNull();
   });
+
+  it("targets custom folder headers, root edges inside folders, and returns to top on project headings", () => {
+    const folderRows: RowBox[] = [
+      { key: "c:f1", top: 130, bottom: 158, level: 0, group: "folder", folderId: "f_work" },
+      { key: "c:a", top: 230, bottom: 258, level: 0, group: "sessions" },
+    ];
+    const folderZones = {
+      folders: [{ folderId: "f_work", top: 100, bottom: 128 }],
+      sessions: { top: 170, bottom: 194 },
+      projects: [{ top: 198, bottom: 226 }],
+      bottom: 400,
+    };
+    // On folder header -> folder target.
+    expect(targetAt(folderRows, 114, "c:a", none, folderZones)).toEqual({ kind: "folder", folderId: "f_work" });
+    // Top edge of a root row inside a folder -> stays in that folder.
+    expect(targetAt(folderRows, 132, "c:a", none, folderZones)).toEqual({ kind: "folder", folderId: "f_work" });
+    // Middle of a row inside a folder -> nests under that row.
+    expect(targetAt(folderRows, 144, "c:a", none, folderZones)).toEqual({ kind: "on", key: "c:f1" });
+    // Project header -> returns foldered session to unfoldered Sessions (top).
+    expect(targetAt(folderRows, 212, "c:f1", none, folderZones)).toEqual({ kind: "top" });
+  });
 });
 
 describe("moveFor", () => {
@@ -67,6 +88,7 @@ describe("moveFor", () => {
     expect(moveFor({ kind: "on", key: "c:a" })).toEqual({ kind: "under", parent: "c:a" });
     expect(moveFor({ kind: "pinned" })).toEqual({ kind: "pin", at: 0 });
     expect(moveFor({ kind: "line", group: "pinned", at: 2, y: 0 })).toEqual({ kind: "pin", at: 2 });
+    expect(moveFor({ kind: "folder", folderId: "f_work" })).toEqual({ kind: "folder", folderId: "f_work" });
     expect(moveFor({ kind: "top" })).toEqual({ kind: "top" });
   });
 });

@@ -42,7 +42,16 @@ describe("board.allow and board.deny", () => {
 
 describe("Session tree actions", () => {
   it("registers the outliner chords under Session tree with no conflicts", () => {
-    const ids = ["tree.moveIn", "tree.moveOut", "tree.pin", "tree.moveUnder", "tree.unfoldAll", "tree.foldAll"];
+    const ids = [
+      "tree.moveIn",
+      "tree.moveOut",
+      "tree.pin",
+      "tree.moveUnder",
+      "tree.moveFolder",
+      "tree.newFolder",
+      "tree.unfoldAll",
+      "tree.foldAll",
+    ];
     for (const id of ids) {
       const a = ACTIONS.find((x) => x.id === id);
       expect(a, id).toBeDefined();
