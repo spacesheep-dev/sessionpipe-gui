@@ -17,6 +17,7 @@ import {
 } from "@shared/api";
 import type { MenuList } from "../components/ContextMenu";
 import type { AppState, Store } from "../data/store";
+import { phoneLayout, sizeClass } from "./device";
 import { sessionTitle } from "./format";
 import { hiddenNow } from "./hidden";
 import { pushToast, pushUndo } from "./toasts";
@@ -36,10 +37,12 @@ export interface Plan {
   patch: ArrangementPatch;
   /** The change that puts it back as it was. */
   undo: ArrangementPatch;
-  /** The toast's words: "Moved under Fix the login form". */
+  /** The toast's words: "Moved under “Fix the login form”". */
   said: string;
   /** What a screen reader hears: "Write the tests moved under Fix the login form." */
   spoken: string;
+  /** What a screen reader hears when this move is undone. */
+  undone: string;
 }
 
 const has = (o: object, k: string) => Object.hasOwn(o, k);
@@ -83,6 +86,11 @@ export function planMove(
   let change: Pick<Plan, "patch" | "undo">;
   let said: string;
   let spoken: string;
+  const undone = pinned
+    ? `${name} is back in Pinned.`
+    : node.parent
+      ? `${name} is back under ${title(node.parent)}.`
+      : `${name} is back at the top level.`;
   switch (move.kind) {
     case "under": {
       const to = move.parent;
@@ -90,7 +98,7 @@ export function planMove(
       if (node.parent === to && !pinned) return null;
       // Back under the session its events name: it follows them again.
       change = join(place(events === to ? "follow" : to), pinned ? pins(unpinned) : none());
-      said = `Moved under ${title(to)}`;
+      said = `Moved under “${title(to)}”`;
       spoken = `${name} moved under ${title(to)}.`;
       break;
     }
@@ -100,8 +108,8 @@ export function planMove(
       const hangs = has(arr.placed, key) ? arr.placed[key] !== null : !!events;
       const onlyPin = pinned && !hangs;
       change = join(hangs ? place(events ? null : "follow") : none(), pinned ? pins(unpinned) : none());
-      said = onlyPin ? "Unpinned" : "Moved to the top level";
-      spoken = onlyPin ? `${name} unpinned.` : `${name} moved to the top level.`;
+      said = onlyPin ? "Unpinned" : "Moved to top level";
+      spoken = onlyPin ? `${name} unpinned.` : `${name} moved to top level.`;
       break;
     }
     case "pin": {
@@ -109,9 +117,15 @@ export function planMove(
       const from = arr.pinned.indexOf(key);
       const raw = move.at ?? arr.pinned.length;
       const i = Math.max(0, Math.min(from >= 0 && raw > from ? raw - 1 : raw, unpinned.length));
-      change = pins([...unpinned.slice(0, i), key, ...unpinned.slice(i)]);
-      said = pinned ? "Moved in Pinned" : "Pinned";
-      spoken = pinned ? `${name} moved in Pinned.` : `${name} pinned.`;
+      const next = [...unpinned.slice(0, i), key, ...unpinned.slice(i)];
+      change = pins(next);
+      const wasChild = !pinned && !!node.parent;
+      said = pinned ? "Moved within Pinned" : wasChild ? "Pinned and moved to top level" : "Pinned";
+      spoken = pinned
+        ? `${name} moved to ${i + 1} of ${next.length} in Pinned.`
+        : wasChild
+          ? `${name} pinned and moved to top level.`
+          : `${name} pinned.`;
       break;
     }
     case "unpin": {
@@ -123,7 +137,7 @@ export function planMove(
     }
   }
   if (empty(change.patch)) return null;
-  return { ...change, said, spoken };
+  return { ...change, said, spoken, undone };
 }
 
 /** The sessions the tree is made of: those the list holds (an empty one is not), less
@@ -164,8 +178,12 @@ export function onArranged(l: (words: string, what?: Arranged) => void): () => v
 }
 
 /** Why a change was not kept, in words. */
-const refusal = (reason: string): string =>
-  reason === "too_many" ? "Not saved: that is more than the receiver keeps" : "Not saved. Try again.";
+export const arrangeError = (reason: string, move: Move): string =>
+  reason === "too_many"
+    ? move.kind === "pin"
+      ? "Couldn't pin. Pinned holds up to 100."
+      : "Couldn't move. Only 500 moves are kept."
+    : "Couldn't save the move. Try again.";
 
 /** Moves `key` as asked: shown at once, kept on the receiver, a toast with Undo, and said.
  *  False when the move means nothing or may not be done. */
@@ -184,20 +202,22 @@ export function arrange(store: Store, key: SessionKey, move: Move, o?: { source?
       kind: "error",
       sticky: false,
       session: key,
-      title: refusal(e.message),
+      title: arrangeError(e.message, move),
       label: "error",
       at: Date.now(),
     });
   });
   // One way back at a time: a newer move takes the older one's toast (its undo is the one
-  // that matches what is drawn now).
+  // that matches what is drawn now). Quiet: the tree's live region is the one voice.
   pushUndo({
     id: "arrange",
     title: plan.said,
+    body: title(key),
+    quiet: true,
     session: key,
     undo: () => {
       void store.patchArrangement(plan.undo).catch(() => {});
-      for (const l of spokenListeners) l(`Undone. ${title(key)} is back where it was.`);
+      for (const l of spokenListeners) l(plan.undone);
     },
   });
   for (const l of spokenListeners) l(plan.spoken, { key, move, source: o?.source });
@@ -250,13 +270,16 @@ export function arrangeItems(s: SessionSummary, store: Store, o?: { inTree?: boo
   const pins = state.arrangement.pinned;
   const at = pins.indexOf(s.key);
   const pinned = at >= 0;
+  // On a phone (compact layout, no sidebar), omit Pin, Unpin and Pinned moves.
+  const showPin = !phoneLayout() || sizeClass() === "regular";
   const run = (move: Move) => () => void arrange(store, s.key, move, o?.inTree ? { source: "menu" } : undefined);
   return [
-    pinned
-      ? { label: "Unpin", action: "tree.pin", run: run({ kind: "unpin" }) }
-      : { label: "Pin", action: "tree.pin", run: run({ kind: "pin" }) },
-    pinned && at > 0 && { label: "Move up", run: run({ kind: "pin", at: at - 1 }) },
-    pinned && at < pins.length - 1 && { label: "Move down", run: run({ kind: "pin", at: at + 2 }) },
+    showPin &&
+      (pinned
+        ? { label: "Unpin", action: "tree.pin", run: run({ kind: "unpin" }) }
+        : { label: "Pin", action: "tree.pin", run: run({ kind: "pin" }) }),
+    showPin && pinned && at > 0 && { label: "Move up in Pinned", run: run({ kind: "pin", at: at - 1 }) },
+    showPin && pinned && at < pins.length - 1 && { label: "Move down in Pinned", run: run({ kind: "pin", at: at + 2 }) },
     !!node &&
       moveTargets(tree, s.key).length > 0 && {
         label: "Move under…",

@@ -49,6 +49,8 @@ export interface Toast {
   at: number;
   /** An undo toast's way back. */
   undo?: () => void;
+  /** Omit role="status" when another live region (the session tree) is the sole voice. */
+  quiet?: boolean;
   /** How long it stays when it leaves by itself (TOAST_MS unless set). */
   ms?: number;
 }
@@ -193,6 +195,7 @@ export function pushUndo(o: {
   title: string;
   body?: string;
   session?: SessionKey;
+  quiet?: boolean;
   undo: () => void;
 }): void {
   const id = `undo|${o.id ?? ++undoSeq}`;
@@ -205,6 +208,7 @@ export function pushUndo(o: {
     title: o.title,
     label: "undo",
     body: o.body,
+    quiet: o.quiet,
     at: Date.now(),
     undo: o.undo,
     ms: UNDO_MS,

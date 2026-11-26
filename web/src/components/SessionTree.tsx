@@ -48,7 +48,7 @@ import { usePendingStarts } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { useHideKeys, useStore, useUnreadKeys } from "../data/hooks";
 import { type ArrangeSource, arrange, moveTargets, onArranged, planMove, requestMoveUnder } from "../lib/arrange";
-import { sessionTitle } from "../lib/format";
+import { harnessMark, sessionTitle } from "../lib/format";
 import { haptic } from "../lib/haptics";
 import { isHidden, useHidden } from "../lib/hidden";
 import { isUnread } from "../lib/marks";
@@ -199,7 +199,7 @@ const stateWords = (s: SessionSummary, unread: boolean): string =>
     : s.state === "working"
       ? ", working"
       : s.state === "stale"
-        ? ", quiet"
+        ? ", stale"
         : unread
           ? ", unread"
           : "";
@@ -214,7 +214,7 @@ function foldWords(r: Rolled): string {
       : r.loud === "working"
         ? `${r.working} working`
         : r.loud === "stale"
-          ? `${r.stale} quiet`
+          ? `${r.stale} stale`
           : r.loud === "unread"
             ? `${r.unread} unread`
             : "";
@@ -683,6 +683,18 @@ export const SessionTree = memo(function SessionTree({
   // ----- what a move did, said, and where focus and scroll land -----
   const [said, setSaid] = useState("");
   const pendingLand = useRef<{ key: SessionKey; source: ArrangeSource } | null>(null);
+  const focusAfterExpand = useRef<SessionKey | null>(null);
+  useLayoutEffect(() => {
+    const next = focusAfterExpand.current;
+    if (!next) return;
+    const el = rowEl(next);
+    if (!el) return;
+    focusAfterExpand.current = null;
+    hadFocus.current = true;
+    focusedEl.current = el;
+    setFocusKey(next);
+    el.focus({ preventScroll: true });
+  });
   useEffect(
     () =>
       onArranged((words, what) => {
@@ -870,7 +882,7 @@ export const SessionTree = memo(function SessionTree({
       >
         {shown.length > 0 && (
           <KidGroup id={id} level={n.level} label={sessionTitle(s)}>
-            {shown.map((k, i) => row(k, group, i + 1, shown.length, n))}
+            {shown.map((k, i) => row(k, group, i + 1, kids.length, n))}
             {hiddenKids > 0 && !isFolded && (
               // biome-ignore lint/a11y/useKeyWithClickEvents: the tree has the keys (Enter and Space press it)
               <div
@@ -881,7 +893,10 @@ export const SessionTree = memo(function SessionTree({
                 data-tree-nav=""
                 data-up={key}
                 style={{ "--lvl": n.level + 1 } as CSSProperties}
-                onClick={() => setAllKids((was) => new Set(was).add(key))}
+                onClick={() => {
+                  focusAfterExpand.current = kids[KIDS_SHOWN]?.s.key ?? null;
+                  setAllKids((was) => new Set(was).add(key));
+                }}
               >
                 Show {hiddenKids} more
               </div>
@@ -1006,7 +1021,7 @@ export const SessionTree = memo(function SessionTree({
               {shownRoots.map((h, i) => (
                 <Fragment key={h.key}>
                   {i === startAt && <StartingRows touch={touch} />}
-                  {h.gone ? <GoneRow h={h} /> : row(h.item, "sessions", i + 1, shownRoots.length)}
+                  {h.gone ? <GoneRow h={h} /> : row(h.item, "sessions", i + 1, heldRoots.length)}
                 </Fragment>
               ))}
               {startAt === -1 && <StartingRows touch={touch} />}
@@ -1016,7 +1031,10 @@ export const SessionTree = memo(function SessionTree({
             <button
               type="button"
               className="stree-more-btn stree-more-all"
-              onClick={() => setLimit((n) => n + TREE_SHOWN)}
+              onClick={() => {
+                focusAfterExpand.current = heldRoots[limit]?.key ?? null;
+                setLimit((n) => n + TREE_SHOWN);
+              }}
             >
               Show more
               <span className="stree-more-count num">{more}</span>
@@ -1038,7 +1056,7 @@ export const SessionTree = memo(function SessionTree({
             data-touch={drag.touch ? "" : undefined}
             style={{ transform: chipPos(drag.x, drag.y, drag.touch) }}
           >
-            <HarnessGlyph name={drag.harness} size="sm" />
+            <HarnessGlyph name={drag.harness} size="sm" decorative />
             <span className="stree-chip-title">{drag.title}</span>
           </div>,
           document.body,
@@ -1097,7 +1115,7 @@ function StartingRow({ a, touch }: { a: ControlActivity; touch: boolean }) {
         {...menu}
       >
         <span className="stree-lead">
-          <HarnessGlyph name={harness} size={touch ? "md" : "sm"} />
+          <HarnessGlyph name={harness} size={touch ? "md" : "sm"} decorative />
         </span>
         <span className="stree-title" dir="auto">
           {title}
@@ -1144,7 +1162,7 @@ function GoneRow({ h }: { h: Held<TreeNode> }) {
     <div role="none" className="stree-item" data-flip={h.key} data-gone="">
       <span className="stree-row" style={{ "--lvl": 0 } as CSSProperties}>
         <span className="stree-lead">
-          <HarnessGlyph name={h.item.s.harness} size="sm" />
+          <HarnessGlyph name={h.item.s.harness} size="sm" decorative />
         </span>
         <span className="stree-title">{sessionTitle(h.item.s)}</span>
       </span>
@@ -1284,10 +1302,16 @@ const RowLine = memo(function RowLine({
       <Chevron />
     </span>
   );
+  const nameId = `${groupId}-name`;
+  const descId = `${groupId}-desc`;
+  const desc = !away && s.machine ? `Runs on ${s.machine}` : "";
+  const agent = harnessMark(s.harness).label;
   return (
     <a
       href={hrefFor(sessionPath(s.harness, s.id))}
       role="treeitem"
+      aria-labelledby={nameId}
+      aria-describedby={desc ? descId : undefined}
       aria-level={level + 1}
       aria-posinset={pos}
       aria-setsize={size}
@@ -1319,10 +1343,10 @@ const RowLine = memo(function RowLine({
       {...menu}
     >
       <span className="stree-lead">
-        <HarnessGlyph name={s.harness} size={touch ? "md" : "sm"} />
+        <HarnessGlyph name={s.harness} size={touch ? "md" : "sm"} decorative />
         {!touch && disclose}
       </span>
-      <span className="stree-title" dir="auto">
+      <span className="stree-title" dir="auto" aria-hidden="true">
         {title}
       </span>
       {!touch && away && s.machine && <AwayMark />}
@@ -1330,12 +1354,19 @@ const RowLine = memo(function RowLine({
       <span className="stree-lamp">
         <Lamp s={s} unread={unread} rolled={rolled} size={touch ? 12 : 10} />
       </span>
-      <span className="sr-only">
+      <span id={nameId} className="sr-only">
+        {title}
         {stateWords(s, unread)}
         {inside}
-        {placed ? ", placed here by you" : ""}
+        {agent ? `, ${agent}` : ""}
+        {placed ? ", placed by you" : ""}
         {away && s.machine ? `, on ${s.machine}` : ""}
       </span>
+      {desc && (
+        <span id={descId} hidden>
+          {desc}
+        </span>
+      )}
     </a>
   );
 });

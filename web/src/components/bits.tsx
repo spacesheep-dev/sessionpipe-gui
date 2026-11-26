@@ -88,24 +88,31 @@ export function HarnessGlyph({
   name,
   size = "md",
   withLabel = false,
+  decorative = false,
 }: {
   name: string;
   size?: "sm" | "md" | "lg";
   withLabel?: boolean;
+  decorative?: boolean;
 }) {
   const m = harnessMark(name);
   const icon = HARNESS_ICONS[name];
   const px = size === "sm" ? 14 : size === "md" ? 16 : 18;
   return (
-    <span className={`glyph-wrap ${withLabel ? "glyph-wrap--label" : ""}`} title={m.label}>
+    <span
+      className={`glyph-wrap ${withLabel ? "glyph-wrap--label" : ""}`}
+      title={decorative ? undefined : m.label}
+      aria-hidden={decorative || undefined}
+    >
       {icon ? (
         <svg
           className={`glyph glyph--${size} glyph--icon`}
           width={px}
           height={px}
           viewBox={icon.viewBox}
-          role="img"
-          aria-label={m.label}
+          role={decorative ? undefined : "img"}
+          aria-label={decorative ? undefined : m.label}
+          aria-hidden={decorative || undefined}
         >
           <path fill="currentColor" d={icon.path} />
         </svg>
@@ -116,7 +123,7 @@ export function HarnessGlyph({
       )}
       {withLabel ? (
         <span className="glyph-label">{m.label}</span>
-      ) : icon ? null : (
+      ) : icon || decorative ? null : (
         <span className="sr-only">{m.label}</span>
       )}
     </span>
