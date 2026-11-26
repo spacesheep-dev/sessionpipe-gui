@@ -313,6 +313,63 @@ describe("the pairing link and the board's key", () => {
     }
   });
 
+  it("names a machine that already exists only with the poll_key that started its pairing", async () => {
+    const b = await boot();
+    tmpDirs.push(b.stateDir);
+    try {
+      // A machine paired with the sink token: its row has a token, keys and its facts.
+      const pk = await TestPasskey.create();
+      const { machine } = await enrolled(b, pk, "m_pairedmachine000000001");
+      await call(b.url, "POST", `${CONTROL}/pair`, {
+        bearer: SINK,
+        body: { ...facts, name: "build-box", folders: ["/srv/app"], machine },
+      });
+      const renewal = await call(b.url, "POST", `${CONTROL}/pair`, {
+        bearer: SINK,
+        body: { ...facts, name: "build-box", folders: ["/srv/app"], machine },
+      });
+      expect(renewal.status).toBe(201);
+      const row = (id: string) => {
+        const file = JSON.parse(readFileSync(path.join(b.stateDir, "control", "machines.json"), "utf8"));
+        const { pairings: _p, ...rest } = (file.machines as { id: string; pairings: unknown }[]).find(
+          (m) => m.id === id,
+        )!;
+        return rest as Record<string, unknown>;
+      };
+      const before = JSON.stringify(row(machine));
+
+      // Anyone on the network who learned its id, with no sink token and a poll key of their own.
+      const hijack = await call(b.url, "POST", `${CONTROL}/pair`, {
+        body: { ...facts, name: "build-box", folders: ["/"], harnesses: ["codex"], poll_key: "p".repeat(32), machine },
+      });
+      expect(hijack.status).toBe(401);
+      expect(hijack.body.reason).toBe("token_required");
+      // Nothing about the machine changed, and the renewal its own terminal started still waits.
+      expect(JSON.stringify(row(machine))).toBe(before);
+      const status = await call(b.url, "GET", `${CONTROL}/pair?code=${renewal.body.code}`, { bearer: SINK });
+      expect(status.body).toEqual({ status: "pending" });
+      const listed = await call(b.url, "GET", `${UI}/pairings`);
+      expect((listed.body.pairings as { open: boolean }[]).some((p) => p.open)).toBe(false);
+
+      // An open pairing's row is renewed by the terminal that holds its poll key, and no other.
+      const mine = "q".repeat(32);
+      const open = await call(b.url, "POST", `${CONTROL}/pair`, { body: { ...facts, poll_key: mine } });
+      expect(open.status).toBe(201);
+      const theirs = await call(b.url, "POST", `${CONTROL}/pair`, {
+        body: { ...facts, name: "evil", poll_key: "r".repeat(32), machine: open.body.machine },
+      });
+      expect(theirs.status).toBe(401);
+      expect(row(open.body.machine as string).name).toBe("mac-mini");
+      const again = await call(b.url, "POST", `${CONTROL}/pair`, {
+        body: { ...facts, poll_key: mine, machine: open.body.machine },
+      });
+      expect(again.status).toBe(201);
+      expect(again.body.machine).toBe(open.body.machine);
+    } finally {
+      await b.close();
+    }
+  });
+
   it("an open pairing is approved on its code by a browser the board already lets in", async () => {
     const b = await boot({ uiKey: KEY });
     tmpDirs.push(b.stateDir);

@@ -114,6 +114,16 @@ export function registerMachineRoutes(to: Router, d: MachineRouteDeps): void {
         reason: "not_found",
         error: "This machine was forgotten here. Pair it again without its old id.",
       });
+    // An open pairing carries no credential, so it may only renew a row it started: one of
+    // that machine's own open pairings holds the same poll key. Anyone else naming a machine
+    // that is already here, a paired one above all, would rewrite its name, folders and
+    // harnesses, end the code its own terminal is waiting on, and put a pairing under its
+    // name that hands the sink token to whoever holds the new poll key once approved.
+    if (m && pollKey !== undefined && !m.pairings.some((p) => state.pollKeyMatches(p, pollKey)))
+      throw new HttpError(401, {
+        reason: "token_required",
+        error: "This machine is known here: renew it with the sink token (--token), or the poll_key that started it.",
+      });
     if (m) state.applyFacts(m, facts);
     else m = state.createMachine(state.newMachineId(), facts);
     const p = state.startPairing(m, { fromIp: ctx.remote.ip, ...(pollKey ? { pollKey } : {}) });
