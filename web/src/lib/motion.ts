@@ -193,6 +193,17 @@ export function useHeldOrder<T>(
 
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
+let calmUntil = 0;
+/** Suppresses FLIP row slides for 50 ms on the next commit (keyboard folds and moves in
+ *  the session tree); layouts are still recorded so the next animated move starts cleanly. */
+export function calmNextCommit(): void {
+  calmUntil = performance.now() + 50;
+}
+/** Whether FLIP row slides are currently suppressed by `calmNextCommit()`. */
+export function isCalmCommit(): boolean {
+  return performance.now() <= calmUntil;
+}
+
 /** Animates the children of `ref` that carry `data-flip="<key>"` from where they are
  *  drawn now to their new place (a translate over --dur-slow); a new one fades and drops
  *  in over --dur. Measured so it never compounds on a live list: a row's last place is its
@@ -228,6 +239,7 @@ export function useFlip(ref: RefObject<HTMLElement | null>, max = 80, o: { move?
     const motion =
       !reducedMotion() &&
       document.visibilityState === "visible" &&
+      performance.now() > calmUntil &&
       els.length <= max &&
       typeof Element.prototype.animate === "function";
     const now = new Map<string, number>();

@@ -15,6 +15,7 @@ import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import { sessionTitle } from "../lib/format";
 import { fuzzy } from "../lib/fuzzy";
+import { calmNextCommit } from "../lib/motion";
 import { HarnessGlyph } from "./bits";
 import "../styles/pick.css";
 
@@ -66,15 +67,16 @@ function Picker({ moving, fromTree, onClose }: { moving: SessionKey; fromTree: b
   useEffect(() => {
     ref.current?.querySelector(`[data-pick="${choice}"]`)?.scrollIntoView({ block: "nearest" });
   }, [choice]);
-  const take = (p: SessionSummary | undefined) => {
+  const take = (p: SessionSummary | undefined, viaKey = false) => {
     if (!p) return;
     onClose();
+    if (viaKey && fromTree) calmNextCommit();
     arrange(store, moving, { kind: "under", parent: p.key }, fromTree ? { source: "picker" } : undefined);
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") setAt(Math.min(choice + 1, shown.length - 1));
     else if (e.key === "ArrowUp") setAt(Math.max(choice - 1, 0));
-    else if (e.key === "Enter") take(shown[choice]);
+    else if (e.key === "Enter") take(shown[choice], true);
     else if (e.key === "Escape") onClose();
     else return;
     e.preventDefault();

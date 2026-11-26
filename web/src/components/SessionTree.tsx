@@ -47,13 +47,13 @@ import { useBehind } from "../account/current";
 import { usePendingStarts } from "../control/hooks";
 import { openNewSession } from "../control/newSessionState";
 import { useHideKeys, useStore, useUnreadKeys } from "../data/hooks";
-import { type ArrangeSource, arrange, onArranged, planMove } from "../lib/arrange";
+import { type ArrangeSource, arrange, moveTargets, onArranged, planMove, requestMoveUnder } from "../lib/arrange";
 import { sessionTitle } from "../lib/format";
 import { haptic } from "../lib/haptics";
 import { isHidden, useHidden } from "../lib/hidden";
 import { isUnread } from "../lib/marks";
 import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
-import { type Held, reducedMotion, useFlip, useHeldOrder, useListHold } from "../lib/motion";
+import { calmNextCommit, type Held, reducedMotion, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { hrefFor, sessionPath } from "../lib/router";
 import { hintFor, useShortcut } from "../lib/shortcuts";
 import { howOf, openSession, openSplit } from "../lib/split";
@@ -108,23 +108,46 @@ const readFolded = (): string[] => {
     return [];
   }
 };
-function useFolded(): [ReadonlySet<SessionKey>, (key: SessionKey, fold: boolean) => void] {
+function useFolded(): [
+  ReadonlySet<SessionKey>,
+  (key: SessionKey, fold: boolean) => void,
+  (keys: readonly SessionKey[], fold: boolean) => void,
+] {
   const [folded, set] = useState<ReadonlySet<SessionKey>>(() => new Set(readFolded()));
+  const persist = (next: ReadonlySet<SessionKey>) => {
+    try {
+      localStorage.setItem(FOLDED_KEY, JSON.stringify([...next].slice(-FOLDED_MAX)));
+    } catch {
+      // a private window: folded for this visit
+    }
+  };
   const toggle = useCallback((key: SessionKey, fold: boolean) => {
     set((was) => {
       if (was.has(key) === fold) return was;
       const next = new Set(was);
       if (fold) next.add(key);
       else next.delete(key);
-      try {
-        localStorage.setItem(FOLDED_KEY, JSON.stringify([...next].slice(-FOLDED_MAX)));
-      } catch {
-        // a private window: folded for this visit
-      }
+      persist(next);
       return next;
     });
   }, []);
-  return [folded, toggle];
+  const toggleMany = useCallback((keys: readonly SessionKey[], fold: boolean) => {
+    if (keys.length === 0) return;
+    set((was) => {
+      let changed = false;
+      const next = new Set(was);
+      for (const k of keys) {
+        if (next.has(k) === fold) continue;
+        changed = true;
+        if (fold) next.add(k);
+        else next.delete(k);
+      }
+      if (!changed) return was;
+      persist(next);
+      return next;
+    });
+  }, []);
+  return [folded, toggle, toggleMany];
 }
 
 // ----- the rows as drawn -----
@@ -342,7 +365,7 @@ export const SessionTree = memo(function SessionTree({
   const shownRoots = heldRoots.slice(0, limit);
   const more = heldRoots.length - shownRoots.length;
 
-  const [folded, setFolded] = useFolded();
+  const [folded, setFolded, setFoldedMany] = useFolded();
   const latestFolds = useRef(folded);
   latestFolds.current = folded;
   const [allKids, setAllKids] = useState<ReadonlySet<SessionKey>>(new Set());
@@ -354,6 +377,19 @@ export const SessionTree = memo(function SessionTree({
         frozen,
       ),
     [hid, roll, frozen],
+  );
+  const parentKeysIn = useCallback(
+    (nodes: readonly TreeNode[]): SessionKey[] => {
+      const out: SessionKey[] = [];
+      const walk = (n: TreeNode) => {
+        const kids = kidsOf(n);
+        if (kids.length > 0) out.push(n.s.key);
+        for (const k of kids) walk(k);
+      };
+      for (const n of nodes) walk(n);
+      return out;
+    },
+    [kidsOf],
   );
   /** The sessions a folded row stands for: every one under it this device draws. */
   const underOf = useCallback(
@@ -423,6 +459,8 @@ export const SessionTree = memo(function SessionTree({
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     const here = e.target as HTMLElement;
     if (!here.matches?.("[data-tree-nav]")) return;
+    // Modified arrows/keys belong to the shortcut dispatcher (⌥←/⌥→, ⌃⌘←/⌃⌘→, ⇧↵, ⌘↵).
+    if (e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
     // The rows as drawn, in both lists, and the Show more rows among them.
     const items = [...(box.current?.querySelectorAll<HTMLElement>("[data-tree-nav]") ?? [])];
     const i = items.indexOf(here);
@@ -444,13 +482,17 @@ export const SessionTree = memo(function SessionTree({
         to = items[items.length - 1];
         break;
       case "ArrowRight":
-        if (key && kids && isFolded) setFolded(key, false);
-        else if (kids) to = items[i + 1];
+        if (key && kids && isFolded) {
+          calmNextCommit();
+          setFolded(key, false);
+        } else if (kids) to = items[i + 1];
         else return;
         break;
       case "ArrowLeft":
-        if (key && kids && !isFolded) setFolded(key, true);
-        else if (here.dataset.up) to = rowEl(here.dataset.up) ?? undefined;
+        if (key && kids && !isFolded) {
+          calmNextCommit();
+          setFolded(key, true);
+        } else if (here.dataset.up) to = rowEl(here.dataset.up) ?? undefined;
         else return;
         break;
       case "Enter":
@@ -534,6 +576,109 @@ export const SessionTree = memo(function SessionTree({
     const s = focusedRow();
     return s ? [s.key] : [];
   }, own);
+
+  // ----- Session tree outliner chords (lib/shortcuts.ts 'Session tree' group) -----
+  const foldSubtree = useCallback(
+    (key: SessionKey, fold: boolean, calm: boolean): boolean => {
+      const node = live.current.tree.nodes.get(key);
+      if (!node) return false;
+      const keys = parentKeysIn([node]);
+      if (keys.length === 0) return false;
+      if (calm) calmNextCommit();
+      setFoldedMany(keys, fold);
+      return true;
+    },
+    [parentKeysIn, setFoldedMany],
+  );
+  useShortcut(
+    "tree.moveIn",
+    () => {
+      const s = focusedRow();
+      if (!s) return false;
+      const { drawn: rows } = live.current;
+      const idx = rows.findIndex((d) => d.node.s.key === s.key);
+      if (idx <= 0) return false;
+      const cur = rows[idx]!;
+      let above: SessionKey | null = null;
+      for (let j = idx - 1; j >= 0; j--) {
+        const d = rows[j]!;
+        if (d.group !== cur.group || d.node.level < cur.node.level) break;
+        if (d.node.level === cur.node.level) {
+          above = d.node.s.key;
+          break;
+        }
+      }
+      if (!above) return false;
+      calmNextCommit();
+      return arrange(store, s.key, { kind: "under", parent: above }, { source: "key" }) ? undefined : false;
+    },
+    own,
+  );
+  useShortcut(
+    "tree.moveOut",
+    () => {
+      const s = focusedRow();
+      if (!s) return false;
+      const node = live.current.tree.nodes.get(s.key);
+      if (!node?.parent) return false;
+      const grand = live.current.tree.nodes.get(node.parent)?.parent;
+      const move = grand ? ({ kind: "under", parent: grand } as const) : ({ kind: "top" } as const);
+      calmNextCommit();
+      return arrange(store, s.key, move, { source: "key" }) ? undefined : false;
+    },
+    own,
+  );
+  useShortcut(
+    "tree.pin",
+    () => {
+      const s = focusedRow();
+      if (!s) return false;
+      const isPinned = store.get().arrangement.pinned.includes(s.key);
+      calmNextCommit();
+      return arrange(store, s.key, { kind: isPinned ? "unpin" : "pin" }, { source: "key" }) ? undefined : false;
+    },
+    own,
+  );
+  useShortcut(
+    "tree.moveUnder",
+    () => {
+      const s = focusedRow();
+      if (!s) return false;
+      if (moveTargets(live.current.tree, s.key).length === 0) return false;
+      requestMoveUnder(s.key, { fromTree: true });
+    },
+    own,
+  );
+  useShortcut(
+    "tree.unfoldAll",
+    () => {
+      const s = focusedRow();
+      return s && foldSubtree(s.key, false, true) ? undefined : false;
+    },
+    own,
+  );
+  useShortcut(
+    "tree.foldAll",
+    () => {
+      const s = focusedRow();
+      return s && foldSubtree(s.key, true, true) ? undefined : false;
+    },
+    own,
+  );
+
+  // Heading menus: Unfold all / Fold all for Pinned and Sessions.
+  const sectionMenu = (nodes: readonly TreeNode[]) => {
+    const keys = parentKeysIn(nodes);
+    if (keys.length === 0) return null;
+    const anyFolded = keys.some((k) => latestFolds.current.has(k));
+    const anyOpen = keys.some((k) => !latestFolds.current.has(k));
+    return [
+      { label: "Unfold all", disabled: !anyFolded, run: () => setFoldedMany(keys, false) },
+      { label: "Fold all", disabled: !anyOpen, run: () => setFoldedMany(keys, true) },
+    ];
+  };
+  const pinnedHeadingMenu = useContextMenu(() => sectionMenu(pinned), { title: () => "Pinned" });
+  const sessionsHeadingMenu = useContextMenu(() => sectionMenu(roots), { title: () => "Sessions" });
 
   // ----- what a move did, said, and where focus and scroll land -----
   const [said, setSaid] = useState("");
@@ -650,8 +795,8 @@ export const SessionTree = memo(function SessionTree({
   });
 
   // One set of handlers for every row, stable, so a row redraws only when what it shows does.
-  const latest = useRef({ setFocusKey, setFolded, onRowDown });
-  latest.current = { setFocusKey, setFolded, onRowDown };
+  const latest = useRef({ setFocusKey, setFolded, foldSubtree, onRowDown });
+  latest.current = { setFocusKey, setFolded, foldSubtree, onRowDown };
   const actions = useMemo<RowActions>(
     () => ({
       down: (e, s) => latest.current.onRowDown(e, s),
@@ -660,7 +805,10 @@ export const SessionTree = memo(function SessionTree({
         focusedEl.current = document.activeElement as HTMLElement | null;
         latest.current.setFocusKey(key);
       },
-      fold: (key, fold) => latest.current.setFolded(key, fold),
+      fold: (key, fold, deep) => {
+        if (deep) latest.current.foldSubtree(key, fold, false);
+        else latest.current.setFolded(key, fold);
+      },
       click: (e, key) => {
         if (justDragged.current) {
           e.preventDefault();
@@ -816,6 +964,7 @@ export const SessionTree = memo(function SessionTree({
               id={`${groupId}-pinned`}
               data-zone="pinned"
               data-target={drag?.target?.kind === "pinned" ? "" : undefined}
+              {...pinnedHeadingMenu}
             >
               Pinned
             </h2>
@@ -836,6 +985,7 @@ export const SessionTree = memo(function SessionTree({
             id={`${groupId}-sessions`}
             data-zone="sessions"
             data-target={drag?.target?.kind === "top" ? "" : undefined}
+            {...sessionsHeadingMenu}
           >
             Sessions
           </h2>
@@ -1024,7 +1174,7 @@ function KidGroup({ id, level, label, children }: { id: string; level: number; l
 interface RowActions {
   down: (e: ReactPointerEvent<HTMLElement>, s: SessionSummary) => void;
   focus: (key: SessionKey) => void;
-  fold: (key: SessionKey, fold: boolean) => void;
+  fold: (key: SessionKey, fold: boolean, deep?: boolean) => void;
   click: (e: ReactMouseEvent<HTMLAnchorElement>, key: SessionKey) => void;
 }
 
@@ -1128,7 +1278,7 @@ const RowLine = memo(function RowLine({
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        actions.fold(s.key, !folded);
+        actions.fold(s.key, !folded, e.altKey);
       }}
     >
       <Chevron />

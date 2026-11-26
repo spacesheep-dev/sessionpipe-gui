@@ -252,14 +252,17 @@ export function arrangeItems(s: SessionSummary, store: Store, o?: { inTree?: boo
   const pinned = at >= 0;
   const run = (move: Move) => () => void arrange(store, s.key, move, o?.inTree ? { source: "menu" } : undefined);
   return [
-    pinned ? { label: "Unpin", run: run({ kind: "unpin" }) } : { label: "Pin", run: run({ kind: "pin" }) },
+    pinned
+      ? { label: "Unpin", action: "tree.pin", run: run({ kind: "unpin" }) }
+      : { label: "Pin", action: "tree.pin", run: run({ kind: "pin" }) },
     pinned && at > 0 && { label: "Move up", run: run({ kind: "pin", at: at - 1 }) },
     pinned && at < pins.length - 1 && { label: "Move down", run: run({ kind: "pin", at: at + 2 }) },
     !!node &&
       moveTargets(tree, s.key).length > 0 && {
         label: "Move under…",
+        action: "tree.moveUnder",
         run: () => requestMoveUnder(s.key, { fromTree: o?.inTree }),
       },
-    !!node?.parent && { label: "Move to top level", run: run({ kind: "top" }) },
+    !!node?.parent && { label: "Move to top level", action: "tree.moveOut", run: run({ kind: "top" }) },
   ];
 }

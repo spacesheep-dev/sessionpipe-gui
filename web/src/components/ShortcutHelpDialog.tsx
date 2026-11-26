@@ -18,6 +18,7 @@ const GROUP_ORDER = [
   "Everywhere",
   "Go to",
   "Lists",
+  "Session tree",
   "Labels",
   "Session",
   "Inbox",

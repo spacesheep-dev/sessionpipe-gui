@@ -411,6 +411,27 @@ export const ACTIONS: readonly Action[] = [
   { id: "list.unread", label: "Mark as read or unread", group: "Lists", scope: "lists", keys: ["u"] },
   { id: "list.hide", label: "Hide or unhide", group: "Lists", scope: "lists", keys: ["e"] },
   { id: "list.hideUntil", label: "Hide until it needs you", group: "Lists", scope: "lists", keys: ["shift+e"] },
+
+  // Session tree outliner chords: handled only while focus is in the sidebar tree (data-keys-own).
+  {
+    id: "tree.moveIn",
+    label: "Move under the row above",
+    group: "Session tree",
+    scope: "lists",
+    keys: [IS_MAC ? "ctrl+mod+right" : "alt+shift+right"],
+  },
+  {
+    id: "tree.moveOut",
+    label: "Move out a level",
+    group: "Session tree",
+    scope: "lists",
+    keys: [IS_MAC ? "ctrl+mod+left" : "alt+shift+left"],
+  },
+  { id: "tree.pin", label: "Pin or unpin", group: "Session tree", scope: "lists", keys: ["shift+p"] },
+  { id: "tree.moveUnder", label: "Move under…", group: "Session tree", scope: "lists", keys: ["m"] },
+  { id: "tree.unfoldAll", label: "Unfold all", group: "Session tree", scope: "lists", keys: ["alt+right"] },
+  { id: "tree.foldAll", label: "Fold all", group: "Session tree", scope: "lists", keys: ["alt+left"] },
+
   { id: "board.peek", label: "Peek beside the page", group: "Board", scope: "board", keys: ["space"] },
   // Before inbox.* and session.*, which share the keys: the row under the board's cursor
   // gets them first, so they never reach a session open beside the board.

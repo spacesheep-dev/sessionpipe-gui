@@ -13,6 +13,7 @@
 // had left, never less than HOLD_FLOOR_MS, and the waiting ones come in.
 import type { SessionKey } from "@shared/api";
 import { useSyncExternalStore } from "react";
+import { calmNextCommit } from "./motion";
 import { playSound, type SoundKind } from "./sounds";
 
 export const TOAST_MS = 8000;
@@ -223,7 +224,9 @@ export function runUndo(id: string): boolean {
  *  is none. */
 export function undoLatest(): boolean {
   const t = [...toasts, ...waiting].reverse().find((x) => x.kind === "undo");
-  return t ? runUndo(t.id) : false;
+  if (!t) return false;
+  if (typeof document !== "undefined" && document.activeElement?.closest?.(".stree")) calmNextCommit();
+  return runUndo(t.id);
 }
 
 /** Drops the attention toasts whose attention is no longer open (`keep` is the set of
