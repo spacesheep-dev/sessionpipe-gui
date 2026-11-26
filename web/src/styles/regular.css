@@ -144,18 +144,40 @@ html[data-size-class="regular"] .rail-section {
   font-size: var(--text-sm);
 }
 
-/* Its foot: Display and Settings, rows like the others, under a hairline. The stream's
-   state is the page bar's to say in the touch app, and Views is in Settings. */
+/* Its foot: one compact row with the connection pill on the left and Display and
+   Settings as 44×44 icon buttons on the right, under a hairline. */
 html[data-size-class="regular"] .rail-foot {
   flex: none;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 8px;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
   border-top: var(--hairline) solid var(--line);
 }
-html[data-size-class="regular"] .rail-foot > :is(.conn, .theme-btn, .qs--rail) {
+html[data-size-class="regular"] .rail-foot > :is(.theme-btn, .qs--rail) {
   display: none;
+}
+html[data-size-class="regular"] .rail-foot > .conn {
+  margin-right: auto;
+  padding-left: 12px;
+}
+html[data-size-class="regular"] .rail-foot > .side-foot-btn {
+  flex: none;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  gap: 0;
+  color: var(--fg-2);
+}
+html[data-size-class="regular"] .rail-foot > .side-foot-btn > .nav-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  left: auto;
+  margin: 0;
 }
 
 /* New session is the sidebar's: the page bar's copy goes. */

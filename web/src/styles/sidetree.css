@@ -213,7 +213,8 @@
     color: var(--fg);
   }
 }
-.stree-row:active {
+.stree-row:active,
+.stree-row[data-pressed] {
   background-color: var(--press);
   transition: none;
 }
@@ -481,6 +482,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.stree-chip[data-touch] {
+  height: 44px;
+  padding: 0 14px 0 12px;
+  font-size: max(1rem, 16px);
+  max-width: 280px;
 }
 @keyframes stree-chip-in {
   from {

@@ -158,6 +158,7 @@ export function openMenu(list: MenuList, at: { x: number; y: number } | DOMRect 
   lastOpenAt = Date.now();
   openedAt = point;
   menu?.owner?.removeAttribute("data-menu-open");
+  menu?.owner?.removeAttribute("data-pressed");
   const owner = o.owner ?? el;
   owner?.setAttribute("data-menu-open", "");
   menu = {
@@ -175,10 +176,12 @@ export function openMenu(list: MenuList, at: { x: number; y: number } | DOMRect 
   emit();
 }
 
-export function closeMenu(restoreFocus = true) {
+export function closeMenu(restoreFocus = true, o: { immediate?: boolean } = {}) {
   if (!menu) return;
+  if (o.immediate) draggedOut = true;
   const inv = menu.invoker;
   menu.owner?.removeAttribute("data-menu-open");
+  menu.owner?.removeAttribute("data-pressed");
   menu = null;
   emit();
   if (restoreFocus && inv?.isConnected) inv.focus({ preventScroll: true });
@@ -346,12 +349,13 @@ function useMenuPolicy() {
     };
 
     // A long-press on touch: the same event, marked, after 450 ms held still.
+    // The session tree runs its own 500 ms long-press (SessionTree.tsx), so skip targets inside it.
     const onDown = (e: PointerEvent) => {
       if (e.pointerType !== "touch") return;
       lastTouchDown = Date.now();
       clear();
       const el = (e.target as HTMLElement | null)?.closest?.("[data-menu]");
-      if (!el || editable(e.target)) return;
+      if (!el || editable(e.target) || el.closest(".stree")) return;
       touch = { x: e.clientX, y: e.clientY, t: Date.now(), target: e.target };
       timer = window.setTimeout(() => {
         const at = touch;

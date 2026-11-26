@@ -944,6 +944,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
             />
           )}
           <div className="rail-foot">
+            <ConnectionPill />
             {regular && (
               <SideFoot
                 display={display}
@@ -953,7 +954,6 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
                 update={update}
               />
             )}
-            <ConnectionPill />
             {!account && (
               <Link
                 to="/themes"
@@ -1162,9 +1162,8 @@ function RailEdge({
   );
 }
 
-/** The touch app's sidebar ends as the More sheet does: Display, which opens its sheet,
- *  and Settings, in rows like the pages', with the sheet's glyphs. Settings carries the
- *  rail's dot for an update that waits, and leads to its row. */
+/** The touch app's sidebar ends in one compact row: Display and Settings as 44×44 icon
+ *  buttons beside the connection pill. Settings keeps the update dot when one waits. */
 function SideFoot({
   display,
   setDisplay,
@@ -1184,8 +1183,9 @@ function SideFoot({
     <>
       <button
         type="button"
-        className={`nav-link ${display ? "nav-link--on" : ""}`}
+        className={`nav-link side-foot-btn ${display ? "nav-link--on" : ""}`}
         onClick={() => setDisplay(true)}
+        aria-label="Display"
         aria-haspopup="dialog"
         aria-expanded={display}
         data-nav="display"
@@ -1193,13 +1193,12 @@ function SideFoot({
         <span className="nav-glyph" aria-hidden="true">
           <GearIcon size={20} />
         </span>
-        <span className="nav-label">Display</span>
       </button>
       <Link
         to={settingsHref(update ? "about" : null, path)}
         plainClick={() => openSettings(update ? "about" : null)}
-        className={`nav-link ${settings ? "nav-link--on" : ""}`}
-        aria-label={update ? `Settings, ${update}` : undefined}
+        className={`nav-link side-foot-btn ${settings ? "nav-link--on" : ""}`}
+        aria-label={update ? `Settings, ${update}` : "Settings"}
         aria-haspopup="dialog"
         aria-expanded={settings}
         data-nav="settings"
@@ -1207,7 +1206,6 @@ function SideFoot({
         <span className="nav-glyph" aria-hidden="true">
           <SlidersIcon size={20} />
         </span>
-        <span className="nav-label">Settings</span>
         {update ? <span className="nav-dot" aria-hidden="true" /> : null}
       </Link>
       <QuickSettings placement="tabbar" trigger={false} open={display} onOpenChange={setDisplay} />

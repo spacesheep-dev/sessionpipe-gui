@@ -11,10 +11,14 @@ import type { Move } from "./arrange";
 
 /** A pointer that moves this far while pressed has started a drag; less is a click. */
 export const DRAG_SLOP_PX = 4;
-/** A finger held this long lifts the row (before it, a move is a scroll). */
-export const LIFT_MS = 350;
-/** A finger that moves this far before the lift is scrolling, not lifting. */
+/** A finger held this long presses the row and opens its menu (the system's 500 ms). */
+export const LONG_PRESS_MS = 500;
+/** Kept under the old name for callers: a finger's long-press matches the system's. */
+export const LIFT_MS = LONG_PRESS_MS;
+/** A finger that moves this far before the hold is scrolling, not long-pressing. */
 export const TOUCH_SLOP_PX = 8;
+/** A finger that moves this far after the long-press closes the menu and lifts the row. */
+export const TOUCH_MOVE_PX = 10;
 /** A folded parent held under the pointer this long opens. */
 export const OPEN_AFTER_MS = 600;
 /** How near the list's top or bottom edge the pointer scrolls it. */

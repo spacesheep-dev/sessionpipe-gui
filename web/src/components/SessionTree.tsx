@@ -73,10 +73,11 @@ import {
   dragStarts,
   edgeScroll,
   type Group,
-  LIFT_MS,
+  LONG_PRESS_MS,
   moveFor,
   OPEN_AFTER_MS,
   type RowBox,
+  TOUCH_MOVE_PX,
   type Target,
   targetAt,
   touchScrolls,
@@ -140,10 +141,16 @@ interface Drag {
   title: string;
   harness: string;
   target: Target | null;
+  touch: boolean;
   /** Where the pointer was at the lift: the chip's first place. */
   x: number;
   y: number;
 }
+
+const chipPos = (x: number, y: number, touch: boolean): string =>
+  touch
+    ? `translate(${Math.round(x - 24)}px, ${Math.round(y - 64)}px)`
+    : `translate(${Math.round(x + 16)}px, ${Math.round(y - 14)}px)`;
 
 /** The lamp at a row's end: the board's glyph where the state asks for one. */
 function Lamp({ s, unread, rolled, size }: { s: SessionSummary; unread: boolean; rolled?: Loud; size: number }) {
@@ -796,7 +803,8 @@ export const SessionTree = memo(function SessionTree({
             className="stree-chip"
             ref={chip}
             aria-hidden="true"
-            style={{ transform: `translate(${Math.round(drag.x + 10)}px, ${Math.round(drag.y + 10)}px)` }}
+            data-touch={drag.touch ? "" : undefined}
+            style={{ transform: chipPos(drag.x, drag.y, drag.touch) }}
           >
             <HarnessGlyph name={drag.harness} size="sm" />
             <span className="stree-chip-title">{drag.title}</span>
@@ -1134,9 +1142,10 @@ function useDragStart(o: {
     const id = e.pointerId;
     let at = { ...start };
     let lifted = false;
+    let pressed = false;
     let held = false;
     let target: Target | null = null;
-    let liftedAt = { ...start };
+    let pressedAt = { ...start };
     let openTimer = 0;
     let liftTimer = 0;
     let frame = 0;
@@ -1208,7 +1217,7 @@ function useDragStart(o: {
 
     const place = () => {
       const c = ref.current.chip.current;
-      if (c) c.style.transform = `translate(${Math.round(at.x + 10)}px, ${Math.round(at.y + 10)}px)`;
+      if (c) c.style.transform = chipPos(at.x, at.y, touch);
     };
 
     const scrollLoop = () => {
@@ -1226,7 +1235,6 @@ function useDragStart(o: {
 
     const lift = () => {
       lifted = true;
-      liftedAt = { ...at };
       if (!touch) {
         try {
           el.setPointerCapture(id);
@@ -1234,9 +1242,9 @@ function useDragStart(o: {
           // the pointer is already gone
         }
       }
-      closeMenu(false);
+      closeMenu(false, { immediate: true });
       const s = session;
-      ref.current.setDrag({ key, title: sessionTitle(s), harness: s.harness, target: null, x: at.x, y: at.y });
+      ref.current.setDrag({ key, title: sessionTitle(s), harness: s.harness, target: null, touch, x: at.x, y: at.y });
       if (touch) haptic("selection");
       requestAnimationFrame(() => {
         place();
@@ -1245,7 +1253,7 @@ function useDragStart(o: {
       frame = requestAnimationFrame(scrollLoop);
     };
 
-    const end = (drop: boolean) => {
+    const end = (drop: boolean, keepMenu = false) => {
       window.clearTimeout(liftTimer);
       window.clearTimeout(openTimer);
       cancelAnimationFrame(frame);
@@ -1258,6 +1266,7 @@ function useDragStart(o: {
       active.current = null;
       const ln = ref.current.line.current;
       if (ln) ln.hidden = true;
+      if (!keepMenu) el.removeAttribute("data-pressed");
       if (!lifted) return;
       ref.current.justDragged.current = true;
       // A click that never comes (a drop elsewhere) leaves no mark on the next one.
@@ -1273,7 +1282,15 @@ function useDragStart(o: {
       at = { x: ev.clientX, y: ev.clientY };
       if (!lifted) {
         if (touch) {
-          if (touchScrolls(at.x - start.x, at.y - start.y)) end(false);
+          if (!pressed) {
+            if (touchScrolls(at.x - start.x, at.y - start.y)) end(false);
+            return;
+          }
+          if (Math.hypot(at.x - pressedAt.x, at.y - pressedAt.y) >= TOUCH_MOVE_PX) {
+            pressed = false;
+            el.removeAttribute("data-pressed");
+            lift();
+          }
           return;
         }
         if (!dragStarts({ touch, dx: at.x - start.x, dy: at.y - start.y, held })) return;
@@ -1286,33 +1303,34 @@ function useDragStart(o: {
     };
     const up = (ev: PointerEvent) => {
       if (ev.pointerId !== id) return;
-      // A finger lifted where it was lifted: the row's menu, as a long-press gives it.
-      if (touch && lifted && !target && Math.hypot(at.x - liftedAt.x, at.y - liftedAt.y) < 8) {
-        end(false);
-        // Marked as a finger's, as ContextMenu.tsx marks its own long-press: the sheet opens.
-        const menu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y });
-        el.dispatchEvent(Object.assign(menu, { __touch: true }));
+      // Released after a long-press without moving: leave the menu sheet open (data-pressed clears when it closes).
+      if (touch && pressed && !lifted) {
+        end(false, true);
         return;
       }
       end(true);
     };
     const cancel = (ev: PointerEvent) => {
-      if (ev.pointerId === id) end(false);
+      if (ev.pointerId !== id) return;
+      if (pressed && !lifted) closeMenu(false, { immediate: true });
+      end(false);
     };
     const esc = (ev: globalThis.KeyboardEvent) => {
       if (ev.key !== "Escape") return;
       ev.preventDefault();
       ev.stopImmediatePropagation();
+      if (pressed && !lifted) closeMenu(false, { immediate: true });
       end(false);
     };
-    // While a finger holds a row up, the long-press menu waits for it to come down.
+    // While pressed or lifted on touch, suppress the browser's own contextmenu; let our own __touch through.
     const noMenu = (ev: Event) => {
-      if (!lifted) return;
+      if ((ev as { __touch?: boolean }).__touch) return;
+      if (!lifted && !pressed) return;
       ev.preventDefault();
       ev.stopImmediatePropagation();
     };
     const noScroll = (ev: TouchEvent) => {
-      if (lifted && ev.cancelable) ev.preventDefault();
+      if ((lifted || pressed) && ev.cancelable) ev.preventDefault();
     };
 
     window.addEventListener("pointermove", move, true);
@@ -1324,8 +1342,28 @@ function useDragStart(o: {
     if (touch)
       liftTimer = window.setTimeout(() => {
         held = true;
-        lift();
-      }, LIFT_MS);
-    active.current = () => end(false);
+        pressed = true;
+        pressedAt = { ...at };
+        el.setAttribute("data-pressed", "");
+        haptic("selection");
+        const menuEv = new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: at.x,
+          clientY: at.y,
+        });
+        el.dispatchEvent(Object.assign(menuEv, { __touch: true }));
+        // Lifting the finger after a long-press is not a tap on the row.
+        const swallow = (c: Event) => {
+          c.preventDefault();
+          c.stopPropagation();
+        };
+        window.addEventListener("click", swallow, { capture: true, once: true });
+        window.setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 800);
+      }, LONG_PRESS_MS);
+    active.current = () => {
+      if (pressed && !lifted) closeMenu(false, { immediate: true });
+      end(false);
+    };
   }, []);
 }
