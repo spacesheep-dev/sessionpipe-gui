@@ -1220,18 +1220,32 @@ test.describe("iPad touch sidebar", () => {
 });
 
 async function dragToFolder(page: Page, from: Locator, to: Locator, holdMs = 0): Promise<void> {
-  await from.scrollIntoViewIfNeeded();
-  // Hover the tree first so useListHold freezes live demo reorders before reading boxes.
-  await from.hover();
+  // Match drag(): let any FLIP slide finish before & after hovering so we never grab a moving row.
+  await settled(page);
+  await from.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await from.hover({ position: { x: 40, y: 10 } });
   await expect(page.locator(".stree")).toHaveAttribute("data-held", "");
+  await settled(page);
+  await from.hover({ position: { x: 40, y: 10 } });
   const a = await from.boundingBox();
-  const b = await to.boundingBox();
-  if (!a || !b) throw new Error("missing drag box");
-  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  if (!a) throw new Error("missing drag source box");
+  await page.mouse.move(a.x + 40, a.y + a.height / 2);
   await page.mouse.down();
-  await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
-  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 });
-  if (holdMs > 0) await page.waitForTimeout(holdMs);
+  await page.mouse.move(a.x + 44, a.y + a.height / 2 + 6, { steps: 3 });
+  await expect(page.locator(".stree-chip")).toBeVisible();
+  await to.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await settled(page);
+  const b = await to.boundingBox();
+  if (!b) throw new Error("missing drag target box");
+  await page.mouse.move(b.x + 60, b.y + b.height / 2, { steps: 8 });
+  const b2 = await to.boundingBox();
+  if (b2 && Math.abs(b2.y - b.y) > 1) await page.mouse.move(b2.x + 60, b2.y + b2.height / 2, { steps: 2 });
+  if (holdMs > 0) {
+    await page.waitForTimeout(holdMs);
+    await settled(page);
+    const b3 = await to.boundingBox();
+    if (b3) await page.mouse.move(b3.x + 60, b3.y + b3.height / 2, { steps: 2 });
+  }
   await page.mouse.up();
 }
 
