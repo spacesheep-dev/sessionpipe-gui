@@ -279,7 +279,9 @@ export function arrangeItems(s: SessionSummary, store: Store, o?: { inTree?: boo
         ? { label: "Unpin", action: "tree.pin", run: run({ kind: "unpin" }) }
         : { label: "Pin", action: "tree.pin", run: run({ kind: "pin" }) }),
     showPin && pinned && at > 0 && { label: "Move up in Pinned", run: run({ kind: "pin", at: at - 1 }) },
-    showPin && pinned && at < pins.length - 1 && { label: "Move down in Pinned", run: run({ kind: "pin", at: at + 2 }) },
+    showPin &&
+      pinned &&
+      at < pins.length - 1 && { label: "Move down in Pinned", run: run({ kind: "pin", at: at + 2 }) },
     !!node &&
       moveTargets(tree, s.key).length > 0 && {
         label: "Move under…",

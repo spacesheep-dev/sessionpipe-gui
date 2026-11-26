@@ -49,7 +49,9 @@ function ownedElsewhere(e: TouchEvent): boolean {
   if (a instanceof HTMLElement && a.matches("input, textarea, [contenteditable]:not([contenteditable=false])"))
     return true;
   const t = e.target;
-  return t instanceof Element && !!t.closest(".bar-filters, input, textarea, select, [contenteditable], .tabbar, .rail");
+  return (
+    t instanceof Element && !!t.closest(".bar-filters, input, textarea, select, [contenteditable], .tabbar, .rail")
+  );
 }
 
 const root = () => document.documentElement;

@@ -19,7 +19,7 @@ import { agentGlyph, agentLabel, openAgent } from "./agents";
 import { arrangeItems } from "./arrange";
 import { copyText } from "./clipboard";
 import { phoneLayout, wideLayout } from "./device";
-import { harnessMark, repoBranch, sessionTitle } from "./format";
+import { harnessMark, repoBranch, rowTime, STATE_LABEL, sessionTitle } from "./format";
 import { canHideUntilNeeded, hiddenNow, hide, hideUntilNeeded, unhide } from "./hidden";
 import { labelMenu } from "./labels";
 import { canMark, isUnread, notifyMenu, setUnread } from "./marks";
@@ -27,6 +27,7 @@ import { accountMode, accountSessionUrl, receiverOrigin } from "./net";
 import { hrefFor, navigate, SPLIT_ACTIVE_PARAM, SPLIT_PARAM, sessionPath } from "./router";
 import { getSettings } from "./settings";
 import { closeTab, openSplit, openWay, parseSplit } from "./split";
+import { since } from "./time";
 
 export { copyText };
 
@@ -317,6 +318,25 @@ export function canMessage(parent: SessionSummary, child: SessionSummary, store:
 export const sessionMenuTitle = (s: SessionSummary) => sessionTitle(s);
 export const sessionMenuSubtitle = (s: SessionSummary) =>
   [s.machine, repoBranch(s)].filter(Boolean).slice(0, 2).join(" · ");
+
+const TIP_LINE_MAX = 60;
+const clipTip = (line: string): string =>
+  line.length > TIP_LINE_MAX ? `${line.slice(0, TIP_LINE_MAX - 1).trimEnd()}…` : line;
+
+/** Multi-line sidebar row tooltip (data-tip-wrap, right side): full title only when cut,
+ *  "<State> · <since>", where it runs, and "Placed by you". Each line at most 60 chars. */
+export function sessionRowTip(s: SessionSummary, placed: boolean, cut: boolean, now = Date.now()): string {
+  const lbl = STATE_LABEL[s.state];
+  const state = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+  const elapsed = since(rowTime(s, now).iso, now);
+  const lines = [
+    cut ? sessionTitle(s) : "",
+    elapsed ? `${state} · ${elapsed}` : state,
+    sessionMenuSubtitle(s),
+    placed ? "Placed by you" : "",
+  ];
+  return lines.filter(Boolean).map(clipTip).join("\n");
+}
 
 /** The menu of one subagent (a board's agent row, a session view's agent block, the
  *  palette): open it beside or as a page, its parent when the surface is elsewhere, and

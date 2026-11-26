@@ -68,6 +68,13 @@
 /* The list: the one part that scrolls. Its ends fade only where it goes on, and a thin
    bar shows while it scrolls (a mouse's: always). Nothing fades during a drag, or under
    forced colours. */
+.stree-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .stree-scroll {
   position: relative;
   flex: 1 1 auto;
@@ -77,6 +84,59 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in oklch, var(--fg) 22%, transparent) transparent;
+}
+/* Floating pill when every needs-you row is scrolled out of view. */
+.stree-needs-pill {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--line);
+  border-radius: 12px;
+  background-color: var(--bg-3);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg-2);
+  font-size: var(--text-xs);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  animation: stree-pill-in 150ms var(--ease-out) both;
+}
+.stree-needs-pill--top {
+  top: 8px;
+}
+.stree-needs-pill--bottom {
+  bottom: 8px;
+}
+@media (hover: hover) {
+  .stree-needs-pill:hover {
+    color: var(--fg);
+  }
+}
+.stree-needs-pill:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.stree-needs-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--needs);
+}
+.stree-needs-arrow {
+  color: var(--fg-3);
+}
+@keyframes stree-pill-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
 }
 .stree-scroll[data-more-above] {
   mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 100%);
@@ -543,7 +603,8 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .stree-chip {
+  .stree-chip,
+  .stree-needs-pill {
     animation: none;
   }
   .stree-disc,

@@ -52,7 +52,7 @@ import { harnessMark, sessionTitle } from "../lib/format";
 import { haptic } from "../lib/haptics";
 import { isHidden, useHidden } from "../lib/hidden";
 import { isUnread } from "../lib/marks";
-import { sessionItems, sessionMenuSubtitle, sessionMenuTitle } from "../lib/menus";
+import { sessionItems, sessionMenuSubtitle, sessionMenuTitle, sessionRowTip } from "../lib/menus";
 import { calmNextCommit, type Held, reducedMotion, useFlip, useHeldOrder, useListHold } from "../lib/motion";
 import { hrefFor, sessionPath } from "../lib/router";
 import { hintFor, useShortcut } from "../lib/shortcuts";
@@ -80,8 +80,8 @@ import {
   moveFor,
   OPEN_AFTER_MS,
   type RowBox,
-  TOUCH_MOVE_PX,
   type Target,
+  TOUCH_MOVE_PX,
   targetAt,
   touchScrolls,
 } from "../lib/treeDrag";
@@ -920,6 +920,26 @@ export const SessionTree = memo(function SessionTree({
   // the same height, so nothing in the list moves when a drag starts.
   const pinZone = !!drag;
   const fades = useScrollFades(scroller);
+  // Signature of drawn rows that need you (own or rolled), so the needs-pill observer refreshes.
+  const needsSig = useMemo(
+    () =>
+      drawn
+        .filter((d) => d.node.s.state === "needs_you" || (d.folded && roll.get(d.node.s.key)?.loud === "needs_you"))
+        .map((d) => d.node.s.key)
+        .join(","),
+    [drawn, roll],
+  );
+  const needsPill = useNeedsPill(scroller, needsSig);
+  const jumpToNeeds = () => {
+    if (!needsPill) return;
+    const el = rowEl(needsPill.targetKey);
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest" });
+    hadFocus.current = true;
+    focusedEl.current = el;
+    setFocusKey(needsPill.targetKey);
+    el.focus({ preventScroll: true });
+  };
   return (
     <div
       className={`stree${touch ? " stree--touch" : ""}`}
@@ -966,82 +986,97 @@ export const SessionTree = memo(function SessionTree({
         )}
       </div>
       {between}
-      <div
-        className="stree-scroll"
-        ref={scroller}
-        data-more-above={fades.above ? "" : undefined}
-        data-more-below={fades.below ? "" : undefined}
-      >
-        {pinned.length > 0 && (
-          <section className="stree-section" aria-labelledby={`${groupId}-pinned`}>
+      <div className="stree-body">
+        <div
+          className="stree-scroll"
+          ref={scroller}
+          data-more-above={fades.above ? "" : undefined}
+          data-more-below={fades.below ? "" : undefined}
+        >
+          {pinned.length > 0 && (
+            <section className="stree-section" aria-labelledby={`${groupId}-pinned`}>
+              <h2
+                className="stree-label"
+                id={`${groupId}-pinned`}
+                data-zone="pinned"
+                data-target={drag?.target?.kind === "pinned" ? "" : undefined}
+                {...pinnedHeadingMenu}
+              >
+                Pinned
+              </h2>
+              <div
+                className="stree-list"
+                role="tree"
+                aria-labelledby={`${groupId}-pinned`}
+                onKeyDown={onKey}
+                ref={pinRef}
+              >
+                {pinned.map((n, i) => row(n, "pinned", i + 1, pinned.length))}
+              </div>
+            </section>
+          )}
+          <section className="stree-section" aria-labelledby={`${groupId}-sessions`}>
             <h2
               className="stree-label"
-              id={`${groupId}-pinned`}
-              data-zone="pinned"
-              data-target={drag?.target?.kind === "pinned" ? "" : undefined}
-              {...pinnedHeadingMenu}
+              id={`${groupId}-sessions`}
+              data-zone="sessions"
+              data-target={drag?.target?.kind === "top" ? "" : undefined}
+              {...sessionsHeadingMenu}
             >
-              Pinned
+              Sessions
             </h2>
-            <div
-              className="stree-list"
-              role="tree"
-              aria-labelledby={`${groupId}-pinned`}
-              onKeyDown={onKey}
-              ref={pinRef}
-            >
-              {pinned.map((n, i) => row(n, "pinned", i + 1, pinned.length))}
-            </div>
+            {empty ? (
+              <StartingRows
+                touch={touch}
+                none={loaded ? (all.length > 0 ? "All hidden on this device" : "None yet") : null}
+                label={`${groupId}-sessions`}
+              />
+            ) : (
+              <div
+                className="stree-list"
+                role="tree"
+                aria-labelledby={`${groupId}-sessions`}
+                onKeyDown={onKey}
+                ref={listRef}
+              >
+                {shownRoots.map((h, i) => (
+                  <Fragment key={h.key}>
+                    {i === startAt && <StartingRows touch={touch} />}
+                    {h.gone ? <GoneRow h={h} /> : row(h.item, "sessions", i + 1, heldRoots.length)}
+                  </Fragment>
+                ))}
+                {startAt === -1 && <StartingRows touch={touch} />}
+              </div>
+            )}
+            {more > 0 && (
+              <button
+                type="button"
+                className="stree-more-btn stree-more-all"
+                onClick={() => {
+                  focusAfterExpand.current = heldRoots[limit]?.key ?? null;
+                  setLimit((n) => n + TREE_SHOWN);
+                }}
+              >
+                Show more
+                <span className="stree-more-count num">{more}</span>
+              </button>
+            )}
           </section>
-        )}
-        <section className="stree-section" aria-labelledby={`${groupId}-sessions`}>
-          <h2
-            className="stree-label"
-            id={`${groupId}-sessions`}
-            data-zone="sessions"
-            data-target={drag?.target?.kind === "top" ? "" : undefined}
-            {...sessionsHeadingMenu}
+          <div className="stree-line" ref={line} aria-hidden="true" hidden />
+        </div>
+        {needsPill && !drag && (
+          <button
+            type="button"
+            className={`stree-needs-pill stree-needs-pill--${needsPill.edge}`}
+            onClick={jumpToNeeds}
           >
-            Sessions
-          </h2>
-          {empty ? (
-            <StartingRows
-              touch={touch}
-              none={loaded ? (all.length > 0 ? "All hidden on this device" : "None yet") : null}
-              label={`${groupId}-sessions`}
-            />
-          ) : (
-            <div
-              className="stree-list"
-              role="tree"
-              aria-labelledby={`${groupId}-sessions`}
-              onKeyDown={onKey}
-              ref={listRef}
-            >
-              {shownRoots.map((h, i) => (
-                <Fragment key={h.key}>
-                  {i === startAt && <StartingRows touch={touch} />}
-                  {h.gone ? <GoneRow h={h} /> : row(h.item, "sessions", i + 1, heldRoots.length)}
-                </Fragment>
-              ))}
-              {startAt === -1 && <StartingRows touch={touch} />}
-            </div>
-          )}
-          {more > 0 && (
-            <button
-              type="button"
-              className="stree-more-btn stree-more-all"
-              onClick={() => {
-                focusAfterExpand.current = heldRoots[limit]?.key ?? null;
-                setLimit((n) => n + TREE_SHOWN);
-              }}
-            >
-              Show more
-              <span className="stree-more-count num">{more}</span>
-            </button>
-          )}
-        </section>
-        <div className="stree-line" ref={line} aria-hidden="true" hidden />
+            <span className="stree-needs-dot" aria-hidden="true" />
+            <span>{needsPill.count === 1 ? "1 needs you" : `${needsPill.count} need you`}</span>
+            <span className="stree-needs-arrow" aria-hidden="true">
+              {needsPill.edge === "top" ? "↑" : "↓"}
+            </span>
+          </button>
+        )}
       </div>
       {foot}
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-tree-said="">
@@ -1104,7 +1139,9 @@ function StartingRow({ a, touch }: { a: ControlActivity; touch: boolean }) {
         data-starting={key}
         data-state="working"
         style={{ "--lvl": 0 } as CSSProperties}
-        title={`${title}\nStarting`}
+        data-tip={touch ? undefined : `${title}\nStarting`}
+        data-tip-wrap={touch ? undefined : ""}
+        data-tip-side={touch ? undefined : "right"}
         onClick={(e) => {
           if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
           e.preventDefault();
@@ -1127,6 +1164,88 @@ function StartingRow({ a, touch }: { a: ControlActivity; touch: boolean }) {
       </a>
     </div>
   );
+}
+
+/** Floating pill when every needs-you row (own or rolled) is scrolled out of view. */
+interface NeedsPillState {
+  count: number;
+  edge: "top" | "bottom";
+  targetKey: SessionKey;
+}
+function useNeedsPill(ref: RefObject<HTMLElement | null>, sig: string): NeedsPillState | null {
+  const [pill, setPill] = useState<NeedsPillState | null>(null);
+  useEffect(() => {
+    const sc = ref.current;
+    if (!sc || !sig || typeof IntersectionObserver !== "function") {
+      setPill(null);
+      return;
+    }
+    const rows = Array.from(
+      sc.querySelectorAll<HTMLElement>('[data-tree-row]:is([data-state="needs_you"], [data-rolled="needs_you"])'),
+    );
+    if (rows.length === 0) {
+      setPill(null);
+      return;
+    }
+    const visible = new Set<Element>();
+    const update = () => {
+      if (visible.size > 0) {
+        setPill((p) => (p ? null : p));
+        return;
+      }
+      const sr = sc.getBoundingClientRect();
+      const above: HTMLElement[] = [];
+      const below: HTMLElement[] = [];
+      for (const r of rows) {
+        const rr = r.getBoundingClientRect();
+        if (rr.bottom <= sr.top + 1) above.push(r);
+        else if (rr.top >= sr.bottom - 1) below.push(r);
+      }
+      if (above.length === 0 && below.length === 0) {
+        setPill((p) => (p ? null : p));
+        return;
+      }
+      let edge: "top" | "bottom";
+      let target: HTMLElement;
+      if (above.length > 0 && below.length === 0) {
+        edge = "top";
+        target = above[above.length - 1]!;
+      } else if (below.length > 0 && above.length === 0) {
+        edge = "bottom";
+        target = below[0]!;
+      } else {
+        const lastAbove = above[above.length - 1]!;
+        const firstBelow = below[0]!;
+        const dTop = sr.top - lastAbove.getBoundingClientRect().bottom;
+        const dBot = firstBelow.getBoundingClientRect().top - sr.bottom;
+        if (dTop <= dBot) {
+          edge = "top";
+          target = lastAbove;
+        } else {
+          edge = "bottom";
+          target = firstBelow;
+        }
+      }
+      const targetKey = target.dataset.treeRow!;
+      const count = rows.length;
+      setPill((p) =>
+        p && p.count === count && p.edge === edge && p.targetKey === targetKey ? p : { count, edge, targetKey },
+      );
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) visible.add(e.target);
+          else visible.delete(e.target);
+        }
+        update();
+      },
+      { root: sc, threshold: 0.1 },
+    );
+    for (const r of rows) io.observe(r);
+    return () => io.disconnect();
+  }, [ref, sig]);
+  return pill;
 }
 
 /** Whether the list goes on above and below what is in view: its ends fade only where it does. */
@@ -1279,14 +1398,27 @@ const RowLine = memo(function RowLine({
   actions,
 }: Omit<RowProps, "n" | "lifted"> & { s: SessionSummary; level: number; placed: boolean }) {
   const store = useStore();
+  const rowRef = useRef<HTMLAnchorElement>(null);
+  const titleRef = useRef<HTMLSpanElement>(null);
   const title = sessionTitle(s);
   const menu = useContextMenu(() => sessionItems(s, { store, surface: "list", under, inTree: true }), {
     title: () => sessionMenuTitle(s),
     subtitle: () => sessionMenuSubtitle(s),
   });
-  const tip = [title, placed ? "Placed here by you" : "", s.machine ? `Runs on ${s.machine}` : ""]
-    .filter(Boolean)
-    .join("\n");
+  // Refresh the app tooltip right before TipHost reads it, so cut-title detection and
+  // elapsed time are always live without measuring on render.
+  useEffect(() => {
+    if (touch) return;
+    const el = rowRef.current;
+    if (!el) return;
+    const prepare = () => {
+      const t = titleRef.current;
+      const cut = !!t && t.scrollWidth > t.clientWidth + 0.5;
+      el.setAttribute("data-tip", sessionRowTip(s, placed, cut));
+    };
+    el.addEventListener("tip:prepare", prepare);
+    return () => el.removeEventListener("tip:prepare", prepare);
+  }, [touch, s, placed]);
   const disclose = hasKids && (
     <span
       className="stree-disc"
@@ -1308,6 +1440,7 @@ const RowLine = memo(function RowLine({
   const agent = harnessMark(s.harness).label;
   return (
     <a
+      ref={rowRef}
       href={hrefFor(sessionPath(s.harness, s.id))}
       role="treeitem"
       aria-labelledby={nameId}
@@ -1333,8 +1466,10 @@ const RowLine = memo(function RowLine({
       data-placed={placed ? "" : undefined}
       data-target={target ? "" : undefined}
       data-has-kids={hasKids ? "" : undefined}
+      data-tip={touch ? undefined : sessionRowTip(s, placed, false)}
+      data-tip-wrap={touch ? undefined : ""}
+      data-tip-side={touch ? undefined : "right"}
       style={{ "--lvl": level } as CSSProperties}
-      title={tip}
       onClick={(e) => actions.click(e, s.key)}
       onFocus={() => actions.focus(s.key)}
       onPointerDown={(e) => actions.down(e, s)}
@@ -1346,7 +1481,7 @@ const RowLine = memo(function RowLine({
         <HarnessGlyph name={s.harness} size={touch ? "md" : "sm"} decorative />
         {!touch && disclose}
       </span>
-      <span className="stree-title" dir="auto" aria-hidden="true">
+      <span ref={titleRef} className="stree-title" dir="auto" aria-hidden="true">
         {title}
       </span>
       {!touch && away && s.machine && <AwayMark />}
@@ -1411,7 +1546,12 @@ function useDragStart(o: {
     let hadTarget = false;
     let target: Target | null = null;
     let pressedAt = { ...start };
-    let lastEvent = { metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey };
+    let lastEvent: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean } = {
+      metaKey: e.metaKey,
+      ctrlKey: e.ctrlKey,
+      shiftKey: e.shiftKey,
+      altKey: e.altKey,
+    };
     let openTimer = 0;
     let liftTimer = 0;
     let frame = 0;
