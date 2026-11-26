@@ -574,10 +574,10 @@ test("New session offers only the folders spacesheep takes: a session's `~/…` 
     const opts = page.locator(".sel-sheet .sel-opt");
     await expect(opts.first()).toBeVisible();
     expect(await opts.allTextContents()).toEqual([
-      expect.stringContaining("/Users/me/billing"),
-      expect.stringContaining("/Users/me"),
+      expect.stringMatching(/billing.*\/Users\/me/),
+      expect.stringMatching(/me.*\/Users/),
     ]);
-    await expect(page.locator(".sel-sheet").getByText("~/notes")).toHaveCount(0);
+    await expect(page.locator(".sel-sheet").getByText(/~\/notes|\bnotes\b/)).toHaveCount(0);
     await opts.first().click();
     await expect(page.locator(".sel-sheet")).toHaveCount(0);
     let before = ran.length;

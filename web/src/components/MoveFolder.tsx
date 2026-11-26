@@ -35,16 +35,8 @@ import "../styles/sidetree.css";
 export function MoveFolderHost() {
   const [pickReq, setPickReq] = useState<MoveFolderRequest | null>(null);
   const [promptReq, setPromptReq] = useState<FolderPromptRequest | null>(null);
-  const path = usePath();
-  const prevPath = useRef(path);
   useEffect(() => onMoveFolder(setPickReq), []);
   useEffect(() => onFolderPrompt(setPromptReq), []);
-  useEffect(() => {
-    if (prevPath.current === path) return;
-    prevPath.current = path;
-    setPickReq(null);
-    setPromptReq(null);
-  }, [path]);
   useEffect(() => {
     const close = () => {
       setPickReq(null);
@@ -53,21 +45,51 @@ export function MoveFolderHost() {
     window.addEventListener("popstate", close);
     return () => window.removeEventListener("popstate", close);
   }, []);
+  if (!pickReq && !promptReq) return null;
+  return (
+    <MoveFolderOpen
+      pickReq={pickReq}
+      promptReq={promptReq}
+      closePick={() => setPickReq(null)}
+      closePrompt={() => setPromptReq(null)}
+      closeAll={() => {
+        setPickReq(null);
+        setPromptReq(null);
+      }}
+    />
+  );
+}
+
+function MoveFolderOpen({
+  pickReq,
+  promptReq,
+  closePick,
+  closePrompt,
+  closeAll,
+}: {
+  pickReq: MoveFolderRequest | null;
+  promptReq: FolderPromptRequest | null;
+  closePick: () => void;
+  closePrompt: () => void;
+  closeAll: () => void;
+}) {
+  const path = usePath();
+  const prevPath = useRef(path);
+  useEffect(() => {
+    if (prevPath.current === path) return;
+    prevPath.current = path;
+    closeAll();
+  }, [path, closeAll]);
   return (
     <>
       {pickReq && (
-        <FolderPicker
-          key={pickReq.key}
-          moving={pickReq.key}
-          fromTree={!!pickReq.fromTree}
-          onClose={() => setPickReq(null)}
-        />
+        <FolderPicker key={pickReq.key} moving={pickReq.key} fromTree={!!pickReq.fromTree} onClose={closePick} />
       )}
       {promptReq && (
         <FolderPrompt
           key={`${promptReq.mode}:${promptReq.folderId ?? promptReq.moveSession ?? "new"}`}
           req={promptReq}
-          onClose={() => setPromptReq(null)}
+          onClose={closePrompt}
         />
       )}
     </>
