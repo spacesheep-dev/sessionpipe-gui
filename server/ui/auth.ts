@@ -4,12 +4,14 @@
 // (the QR code carries it).
 import { UI_KEY_COOKIE, UI_KEY_PARAM } from "../../shared/api.js";
 import type { Ctx } from "../http/router.js";
+import { secretEquals } from "../http/secret.js";
 
 export function uiAuth(ctx: Ctx, uiKey: string): boolean {
   if (ctx.remote.thisComputer) return true;
   if (!uiKey) return false;
-  if (ctx.url.searchParams.get(UI_KEY_PARAM) === uiKey) return true;
-  return ctx.cookies()[UI_KEY_COOKIE] === uiKey;
+  // In constant time (http/secret.ts): every LAN visitor brings a guess here.
+  if (secretEquals(ctx.url.searchParams.get(UI_KEY_PARAM), uiKey)) return true;
+  return secretEquals(ctx.cookies()[UI_KEY_COOKIE], uiKey);
 }
 
 /** The `(ctx) => boolean` form control and the static server take; the key is read

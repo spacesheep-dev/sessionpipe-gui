@@ -6,6 +6,15 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **The sink token and the board's key are checked in constant time.** The events
+  endpoint compared a sender's bearer with the sink token, and the board compared `?k=`
+  and the `spgui` cookie with the UI key, with `===`, which stops at the first character
+  that differs: how long a wrong guess took told a caller on the network how much of it
+  was right. Both now go through the same constant-time comparison the control routes
+  already used. With no UI key set, an empty `?k=` no longer sets an empty cookie.
+
 ## [0.8.10] - 2026-11-25
 
 The session-tree sidebar lands with its full desktop, iPad, and touch polish: an icon rail beside a resizable sessions column, receiver-backed arrangement synced across devices, stable three-block ordering, outliner keyboard chords, stepped child rails, floating needs-you jump pill, compact iPad foot row, and smoother live Feed rendering. Usage gains polished account pool cards with collapsible windows, calm status pills, and local Antigravity quota polling.

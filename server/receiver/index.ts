@@ -5,6 +5,7 @@
 import { ROUTES } from "../../shared/api.js";
 import type { Control } from "../control/index.js";
 import { type Ctx, HttpError, type Reply, type Router } from "../http/router.js";
+import { secretEquals } from "../http/secret.js";
 import type { Store } from "../store/store.js";
 import { aboveMaxTier, eventProblem, MAX_TIER } from "./validate.js";
 
@@ -42,10 +43,9 @@ export function registerReceiver(to: Router, deps: ReceiverDeps): void {
   }));
 
   router.post(ROUTES.events, async (ctx: Ctx): Promise<Reply> => {
-    // An empty token is never a token, on either side.
-    const token = deps.sinkToken();
-    const bearer = ctx.bearer();
-    if (!token || !bearer || bearer !== token) {
+    // An empty token is never a token, on either side; and the comparison takes as long
+    // whatever was guessed (http/secret.ts), so its time tells a sender nothing.
+    if (!secretEquals(ctx.bearer(), deps.sinkToken())) {
       return { status: 401, json: { reason: "unauthorized" }, headers: { "www-authenticate": "Bearer" } };
     }
     const proto = ctx.req.headers["sessionpipe-protocol"];

@@ -2,10 +2,10 @@
 // The machine wire of HTTP.md §3: pair and its status (sink token or poll key), then
 // hello, the long-poll, acks and off, each with the machine's own token and nothing
 // else. A sink token on a machine call is 401, a machine token anywhere else is 401.
-import { createHash, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import type { Ctx, Reply, Router } from "../http/router.js";
 import { HttpError, proxyEntry } from "../http/router.js";
+import { secretEquals } from "../http/secret.js";
 import { CODE_RE, MACHINE_RE, POLL_KEY_RE, parseAcks, parseHello } from "./parse.js";
 import { type ControlState, keyOf, type MachineRow, type MessageRow, WAIT_MAX_S } from "./state.js";
 
@@ -35,13 +35,9 @@ export function pairUrlFor(requestOrigin: string, origins: readonly string[], co
   return `${base}/pair?code=${encodeURIComponent(code)}`;
 }
 
-/** Equal secrets, in constant time whatever their lengths; never two empty ones. */
-export function secretEquals(a: string | undefined, b: string): boolean {
-  // An empty secret matches nothing, an empty one included.
-  if (a === undefined || a === "" || b === "") return false;
-  const h = (s: string) => createHash("sha256").update(s).digest();
-  return timingSafeEqual(h(a), h(b));
-}
+/** Equal secrets, in constant time (http/secret.ts); kept here for the callers that
+ *  import it from the control routes. */
+export { secretEquals };
 
 const unauthorized = (error: string) => new HttpError(401, { reason: "unauthorized", error });
 const notFound = () => new HttpError(404, { reason: "not_found" });
