@@ -6,6 +6,10 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-11-26
+
+Mobile refinement round bringing Pinned, Custom Folders, and Projects organization to phone and iPad: the phone Board gains a Status | Organized segmented switcher (plus View options controls) displaying active sessions grouped under Pinned, Custom Folders (with Finder color dots, collapse, rolled-up status lamps, actions menu, and + New folder), and auto-disambiguated Projects with per-project + New session launch; compact phones now support Pin/Unpin and searchable folder pickers. Hardens the iPad touch sidebar (synced fold state, reliable long-press action sheets on headings and rows, discoverable 44×44 folder ⋯ buttons, single-line New session truncation, and 44pt touch geometry) and iOS sheets (keyboard-riding --kb layout, swipe-down dismissal, native 3-column iOS folder create/rename bar with single-row color swatch picker, and 16px no-zoom mobile inputs).
+
 ## [0.8.11] - 2026-11-26
 
 Native macOS polish across Views & Plugins, New Session composer, and Sidebar session organization: Views & Plugins adopts a System Settings Extensions layout with collapsible drawers and allowlist SVG sanitization; New Session adds smart folder naming, per-machine favorites, and pool-aware quota readouts; the sidebar adds project grouping and synced custom folders with Finder color dots, drag-and-drop, spring-load expand, keyboard shortcuts, and full Undo. Also fixes macOS collapsed-rail icon overlap and icon consistency across the app, removes italics from preview titles, and automatically nests Antigravity subagents and swarm workers under their parent sessions.
@@ -2406,7 +2410,8 @@ The first public release: a sessionpipe receiver with a face.
 - **Phone.** The QR code with the UI key, a responsive layout, a PWA manifest and
   service worker.
 
-[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.11...HEAD
+[Unreleased]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.12...HEAD
+[0.8.12]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.11...v0.8.12
 [0.8.11]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.10...v0.8.11
 [0.8.10]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.9...v0.8.10
 [0.8.9]: https://github.com/spacesheep-dev/sessionpipe-gui/compare/v0.8.8...v0.8.9
