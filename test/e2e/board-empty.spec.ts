@@ -163,6 +163,8 @@ test.describe("the board before its first session", () => {
     await page.getByRole("button", { name: "View options" }).click();
     await expect(menuRows(page)).toHaveText([
       "Find…",
+      "Group by folders & projects",
+      "New folder…",
       "Show done sessions",
       "Show counts",
       "Edit labels…",
