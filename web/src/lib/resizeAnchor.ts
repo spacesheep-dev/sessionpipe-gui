@@ -28,6 +28,7 @@
 // can be) is no more the person's than the first.
 import { useCallback, useEffect, useRef } from "react";
 import { drawnY } from "./drawn";
+import { usePageScrollerRef } from "./pageScroll";
 
 /** Frames after a change of size in which the place is put back again and none is read:
  *  the other layout is rendered after the browser's "resize", and what measures itself in
@@ -289,12 +290,13 @@ export function useResizeAnchor(o: ResizeAnchorOptions): () => boolean {
   const opts = useRef(o);
   opts.current = o;
   const { scroller } = o;
+  const pageScrollRef = usePageScrollerRef();
   /** Told after each commit of the page: its rows may be others, or in another place. */
   const committed = useRef<(() => void) | null>(null);
   const keeping = useRef<PlaceKeeper | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const box = scroller?.() ?? null;
+    const box = scroller ? scroller() : (pageScrollRef?.current ?? null);
     const root = (): ParentNode | null => (opts.current.root ? opts.current.root() : document);
     const blocksOf = (row: Element) => row.querySelectorAll<HTMLElement>(opts.current.blocks ?? ":not(*)");
     let rowHint = 0;
@@ -386,7 +388,7 @@ export function useResizeAnchor(o: ResizeAnchorOptions): () => boolean {
       window.removeEventListener("resize", onSized);
       ro?.disconnect();
     };
-  }, [scroller]);
+  }, [scroller, pageScrollRef]);
   // After every commit of the page that draws the rows: one that moves them leaves their
   // box the size it was (a list sorted anew).
   useEffect(() => committed.current?.());

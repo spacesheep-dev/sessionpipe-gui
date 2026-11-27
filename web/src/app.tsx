@@ -22,6 +22,7 @@ import { markRestoring } from "./lib/keys";
 import { landingFor, type Opened } from "./lib/landing";
 import { accountMode } from "./lib/net";
 import { titlePrefix, useAttentionEffects } from "./lib/notify";
+import { pageScroller, pageScrollY, scrollPageTo } from "./lib/pageScroll";
 import { Link, navigate, parseRoute, SETTINGS_PARAM, usePath, useRoute, useSearchParam } from "./lib/router";
 import { getSettings } from "./lib/settings";
 import { NEW_WORDS, thisPhone } from "./native/accountWords";
@@ -258,17 +259,19 @@ function useScrollPlace(pathname: string): void {
   useEffect(() => {
     if (!LIST_PAGES.has(parseRoute(pathname).name)) return;
     let raf = 0;
-    const on = () => {
+    const on = (e: Event) => {
+      const sc = pageScroller();
+      if (sc ? e.target !== sc : e.target !== document && e.target !== window) return;
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        scrolled.set(pathname, window.scrollY);
+        scrolled.set(pathname, pageScrollY());
       });
     };
-    window.addEventListener("scroll", on, { passive: true });
+    window.addEventListener("scroll", on, { passive: true, capture: true });
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("scroll", on);
+      window.removeEventListener("scroll", on, true);
     };
   }, [pathname]);
   // Read once per path change, in the render that mounts the page (its cursor reads it).
@@ -282,13 +285,13 @@ function useScrollPlace(pathname: string): void {
     if (name === "session") return;
     const y = back ? scrolled.get(pathname) : undefined;
     if (y === undefined) {
-      window.scrollTo({ top: 0 });
+      scrollPageTo(0);
       return;
     }
     // The page paints its rows in this commit; the stream may add the last ones a frame
     // later, so the place is set now and once more after the next frame.
-    window.scrollTo({ top: y });
-    const raf = requestAnimationFrame(() => window.scrollTo({ top: y }));
+    scrollPageTo(y);
+    const raf = requestAnimationFrame(() => scrollPageTo(y));
     return () => cancelAnimationFrame(raf);
   }, [pathname]);
   useEffect(() => {

@@ -11,6 +11,9 @@
 .main > .session {
   min-height: 100dvh;
 }
+.shell.shell--split > .main > .session {
+  min-height: 100%;
+}
 @media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
   .main:has(> .session) {
     padding-bottom: calc(var(--tabbar) + var(--safe-bottom, env(safe-area-inset-bottom)));
@@ -21,7 +24,8 @@
 }
 /* A row scrolled into view (a jump, the focused prompt) clears the bar and the docked
    control (SessionView measures it). */
-html:has(.main > .session) {
+html:has(.main > .session),
+.shell.shell--split > .main:has(> .session) {
   scroll-padding-top: calc(var(--bar) + var(--safe-top, env(safe-area-inset-top)) + 28px);
   scroll-padding-bottom: calc(var(--sess-ctl-h, 120px) + 8px);
 }

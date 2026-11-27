@@ -50,6 +50,7 @@ import { lazyModule, whenIdle } from "../lib/lazy";
 import { linkItems } from "../lib/menus";
 import { reducedMotion, usePresence } from "../lib/motion";
 import { accountMode } from "../lib/net";
+import { PageScrollerCtx, scrollPageTo } from "../lib/pageScroll";
 import {
   Link,
   lastMove,
@@ -81,13 +82,21 @@ import { getSkins, isPlain } from "../lib/skins";
 import { closeSplit, leaveSplit, restoreSplit, SPLIT_MIN, useSplitKey, useSplitWidth } from "../lib/split";
 import { getDisplaySettings as getDisplay, setSkin, setTheme, useSettings } from "../lib/theme";
 import { NEW_WORDS } from "../native/accountWords";
-import { WORKFLOWS_ICON_PATHS } from "../orchestrate/workflows/glyphs";
 import { RunnerHost } from "../orchestrate/workflows/useRunner";
 import { useSetupStatus } from "../setup/api";
 import { setupComplete } from "../setup/steps";
 import { reloadThemes, setThemeDisabled, useThemes } from "../themes/host/registry";
 import { Mark } from "./Brand";
 import { MenuHost, type MenuList, useContextMenu } from "./ContextMenu";
+import {
+  MoreDotsIcon,
+  NAV_ICON_PATHS,
+  OPTICAL_STROKE_PX,
+  PLUG_ICON,
+  PlugIcon,
+  SettingsSlidersIcon,
+  SidebarToggleIcon,
+} from "./Icons";
 import type { MoreSheetProps } from "./MoreSheet";
 import { MoveUnderHost } from "./MoveUnder";
 import { openPalette } from "./Palette";
@@ -149,119 +158,13 @@ function useResize(): void {
   }, []);
 }
 
-/* Thin 1.5 px line icons on a 20 px grid. */
-const ICON: Record<string, ReactNode> = {
-  board: (
-    <>
-      <rect x="3" y="3" width="6" height="6" rx="1" />
-      <rect x="11" y="3" width="6" height="6" rx="1" />
-      <rect x="3" y="11" width="6" height="6" rx="1" />
-      <rect x="11" y="11" width="6" height="6" rx="1" />
-    </>
-  ),
-  /* A tray with its lip: the inbox. */
-  inbox: (
-    <>
-      <path d="M3 11l2.2-6.5A1 1 0 0 1 6.2 4h7.6a1 1 0 0 1 1 .5L17 11" />
-      <path d="M3 11h4l1 2h4l1-2h4v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 15.5z" />
-    </>
-  ),
-  search: (
-    <>
-      <circle cx="8.75" cy="8.75" r="5.25" />
-      <path d="M12.6 12.6 17 17" />
-    </>
-  ),
-  feed: (
-    <>
-      <path d="M3 5h14" />
-      <path d="M3 10h14" />
-      <path d="M3 15h10" />
-    </>
-  ),
-  review: (
-    <>
-      <path d="M3 5h8" />
-      <path d="M3 10h5" />
-      <path d="M3 15h4" />
-      <circle cx="13.5" cy="12" r="3.5" />
-      <path d="M16 14.5 18 16.5" />
-    </>
-  ),
-  /* Three stacked short rules with a chevron: steps, and what follows them. */
-  workflows: (
-    <>
-      {WORKFLOWS_ICON_PATHS.map((d) => (
-        <path key={d} d={d} />
-      ))}
-    </>
-  ),
-  machines: (
-    <>
-      <rect x="2.5" y="4" width="15" height="10" rx="1.5" />
-      <path d="M7 17h6" />
-    </>
-  ),
-  /* A gauge: how much is left (Usage, a More row on a phone). */
-  usage: (
-    <>
-      <path d="M3 14.5a7 7 0 0 1 14 0" />
-      <path d="M10 14.5l3.2-4.2" />
-    </>
-  ),
-  /* A short list with a check: the first-run steps. */
-  setup: (
-    <>
-      <path d="M3 5.5l1.5 1.5 3-3" />
-      <path d="M10 5.5h7" />
-      <path d="M3 11l1.5 1.5 3-3" />
-      <path d="M10 11h7" />
-      <path d="M10 16.5h7" />
-      <path d="M3.5 16.5h3" />
-    </>
-  ),
-  /* A room with a door: the office theme, now a plugin (sessionpipe-gui-themes/packages/office), ships its
-     own copy in its manifest; this one stays for anything that wants the same mark. */
-  office: (
-    <>
-      <path d="M3 16.5V5a1.5 1.5 0 0 1 1.5-1.5h11A1.5 1.5 0 0 1 17 5v11.5" />
-      <path d="M2.5 16.5h15" />
-      <path d="M7.5 16.5v-5h5v5" />
-    </>
-  ),
-};
+/* Unified 1.25 px optical-stroke icons on a 20 px grid (Icons.tsx). */
+const ICON: Record<string, ReactNode> = NAV_ICON_PATHS;
 
-/** Three sliders: the settings dialog (the gear is the appearance popover's). */
-export function SlidersIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      width={size}
-      height={size}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M3 5.5h2.2M8.8 5.5H17M3 10h8.2M14.8 10H17M3 14.5h4.2M10.8 14.5H17" />
-      <circle cx="7" cy="5.5" r="1.8" />
-      <circle cx="13" cy="10" r="1.8" />
-      <circle cx="9" cy="14.5" r="1.8" />
-    </svg>
-  );
+/** Three sliders: the settings dialog (the sun is the appearance popover's). */
+export function SlidersIcon({ size = 20 }: { size?: number }) {
+  return <SettingsSlidersIcon size={size} />;
 }
-
-/* The default glyph for an installed theme without an icon: a plug. */
-const PLUG_ICON = (
-  <>
-    <path d="M7 3v4" />
-    <path d="M13 3v4" />
-    <path d="M4.5 7h11v3a5.5 5.5 0 0 1-11 0z" />
-    <path d="M10 15.5V18" />
-  </>
-);
 
 interface NavItem {
   to: string;
@@ -359,7 +262,7 @@ function NavGlyph({ n }: { n: NavItem }) {
       height="20"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth={OPTICAL_STROKE_PX}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -493,7 +396,7 @@ function NavEntry({
 }
 
 /** A tab tapped again: its page goes back to the top, as a native tab bar's does. */
-const toTop = () => window.scrollTo({ top: 0, behavior: reducedMotion() ? "auto" : "smooth" });
+const toTop = () => scrollPageTo(0, reducedMotion() ? "auto" : "smooth");
 
 function MoreRow({ n, active, action }: { n: NavItem; active: string; action: string | undefined }) {
   const menu = useContextMenu(() => navMenu(n, action), { title: () => n.label });
@@ -565,11 +468,7 @@ function MoreTab({
         aria-haspopup="dialog"
         data-nav="more"
       >
-        <svg className="nav-glyph" viewBox="0 0 20 20" width="20" height="20" fill="currentColor" aria-hidden="true">
-          <circle cx="4" cy="10" r="1.6" />
-          <circle cx="10" cy="10" r="1.6" />
-          <circle cx="16" cy="10" r="1.6" />
-        </svg>
+        <MoreDotsIcon size={20} className="nav-glyph" />
         <span className="nav-label">More</span>
       </button>
       {mounted && (
@@ -701,6 +600,30 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   // at the skip link), unless the new page put the caret in a field of its own (Search's),
   // and says the page's name through the live region.
   const mainRef = useRef<HTMLElement>(null);
+  // While the desktop split panel is open, the document is locked and <main> owns page
+  // scrolling (styles/split.css): transfer the outgoing scroll position across the switch
+  // before paint so opening or closing the panel never jumps the page back to the top.
+  const splitLock = splitOpen && !phone;
+  const wasSplit = useRef(splitLock);
+  const transferY = useRef<number | null>(null);
+  if (wasSplit.current === splitLock) {
+    transferY.current = null;
+  } else if (transferY.current === null) {
+    transferY.current = splitLock ? window.scrollY : (mainRef.current?.scrollTop ?? 0);
+  }
+  useLayoutEffect(() => {
+    wasSplit.current = splitLock;
+    const y = transferY.current;
+    if (y === null) return;
+    transferY.current = null;
+    if (splitLock) {
+      const main = mainRef.current;
+      if (main) main.scrollTop = y;
+      window.scrollTo(0, 0);
+    } else {
+      window.scrollTo(0, y);
+    }
+  }, [splitLock]);
   const [announce, setAnnounce] = useState("");
   const fullPath = usePath();
   const path = fullPath.split("?")[0] ?? "/";
@@ -890,7 +813,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   );
   return (
     <div
-      className={`shell ${splitOpen && !phone ? "shell--split" : ""} ${columnShown ? "shell--tree" : ""}`}
+      className={`shell ${splitLock ? "shell--split" : ""} ${columnShown ? "shell--tree" : ""}`}
       data-covers={wouldCover ? "" : undefined}
       style={shellStyle}
     >
@@ -961,19 +884,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
                 aria-label="Views"
                 aria-current={route.name === "themes" ? "page" : undefined}
               >
-                <svg
-                  viewBox="0 0 20 20"
-                  width="16"
-                  height="16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  {PLUG_ICON}
-                </svg>
+                <PlugIcon size={20} />
               </Link>
             )}
             <QuickSettings placement="rail" />
@@ -1025,9 +936,11 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           (lib/keys.ts), and Settings is over whatever the page has open (a file, the panel). */}
       <SettingsHost />
       <main className={`main ${route.name === "theme" ? "main--bleed" : ""}`} id="main" ref={mainRef} tabIndex={-1}>
-        {/* Off under Settings too: the page stays mounted under it, and no a, d or Enter
-            may act on a row nobody can see. */}
-        <KeysOff.Provider value={covers || settingsShown}>{children}</KeysOff.Provider>
+        <PageScrollerCtx.Provider value={splitLock ? mainRef : null}>
+          {/* Off under Settings too: the page stays mounted under it, and no a, d or Enter
+              may act on a row nobody can see. */}
+          <KeysOff.Provider value={covers || settingsShown}>{children}</KeysOff.Provider>
+        </PageScrollerCtx.Provider>
       </main>
       <nav className="tabbar" aria-label="Pages">
         {tabs.map((n) => entry(n, false))}
@@ -1067,22 +980,7 @@ function TreeToggle({ shown, over, onToggle }: { shown: boolean; over: boolean; 
         data-on={shown ? "" : undefined}
         onClick={onToggle}
       >
-        <svg
-          className="nav-glyph"
-          viewBox="0 0 20 20"
-          width="20"
-          height="20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <rect x="2.5" y="3.5" width="15" height="13" rx="1.5" />
-          <path d="M8 3.5v13" />
-          <path d="M4.5 7h1.5M4.5 9.5h1.5M4.5 12h1.5" />
-        </svg>
+        <SidebarToggleIcon size={20} className="nav-glyph" />
       </button>
     </div>
   );

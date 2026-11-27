@@ -18,6 +18,7 @@ import type { MachineSummary } from "@shared/api";
 import { useEffect, useMemo, useState } from "react";
 import { CommandWell, EmptyState, HarnessGlyph } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
+import { RefreshIcon } from "../components/Icons";
 import { PageBar } from "../components/PageBar";
 import { PoolSection } from "../components/PoolAccounts";
 import { PoolAddHost } from "../components/PoolAddSheet";
@@ -280,20 +281,7 @@ function AccountSection({
             disabled={refreshing}
             onClick={doRefresh}
           >
-            <svg
-              viewBox="0 0 16 16"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M13.25 8a5.25 5.25 0 1 1-1.2-3.35" />
-              <path d="M13.25 2.75v2.4h-2.4" />
-            </svg>
+            <RefreshIcon size={14} />
           </button>
         )}
         <MoreButton build={build} label={`Actions for ${a.title}`} title={() => a.title} />

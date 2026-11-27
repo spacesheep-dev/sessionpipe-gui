@@ -62,6 +62,7 @@ import { SearchDataGroup } from "../search/SettingsRows";
 import { useThemes } from "../themes/host/registry";
 import { AppIcon } from "./AppIcon";
 import { CopyIconButton, Segmented, Toggle } from "./bits";
+import { BackIcon, CloseIcon, NAV_ICON_PATHS, opticalStroke } from "./Icons";
 import { LensPicker } from "./LensChip";
 import { NotificationsSettings } from "./NotificationsSettings";
 import { OlderReceiverNotice } from "./OlderReceiverNotice";
@@ -73,53 +74,55 @@ export type Section = "general" | "app" | "lens" | "notifications" | "keyboard" 
 
 /** The section list's 16 px line glyphs, one per section. */
 const GLYPH: Record<Section, ReactNode> = {
-  general: (
-    <>
-      <path d="M4 6h7M15 6h1M4 14h1M9 14h7" />
-      <circle cx="13" cy="6" r="2" />
-      <circle cx="7" cy="14" r="2" />
-    </>
-  ),
+  general: NAV_ICON_PATHS.settingsSliders,
   app: (
     <>
-      <rect x="2.5" y="3.5" width="15" height="13" rx="2.5" />
-      <path d="M2.5 7.5h15M5.2 5.5h.01M7.2 5.5h.01M9.2 5.5h.01" />
+      <rect x="2.75" y="3.5" width="14.5" height="13" rx="2.75" />
+      <path d="M2.75 7.5h14.5" />
+      <circle cx="5.5" cy="5.5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="7.75" cy="5.5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="5.5" r="0.6" fill="currentColor" stroke="none" />
     </>
   ),
   lens: (
     <>
-      <path d="m10 3 7 3.5-7 3.5-7-3.5Z" />
-      <path d="m3 10 7 3.5 7-3.5M3 13.5 10 17l7-3.5" />
+      <path d="m10 3 6.75 3.5L10 10 3.25 6.5Z" />
+      <path d="m3.25 10 6.75 3.5L16.75 10M3.25 13.5 10 17l6.75-3.5" />
     </>
   ),
   notifications: (
     <>
-      <path d="M5.5 13.5V9a4.5 4.5 0 0 1 9 0v4.5l1.5 1.5H4Z" />
-      <path d="M8.5 17h3" />
+      <path d="M5.5 13.25V9a4.5 4.5 0 0 1 9 0v4.25l1.25 1.75H4.25Z" />
+      <path d="M8.35 17a1.85 1.85 0 0 0 3.3 0" />
     </>
   ),
   keyboard: (
     <>
-      <rect x="2.5" y="5" width="15" height="10" rx="2" />
-      <path d="M6 8.5h.01M9 8.5h.01M12 8.5h.01M15 8.5h.01M6.5 11.8h7" />
+      <rect x="2.75" y="5" width="14.5" height="10" rx="2.25" />
+      <circle cx="6.25" cy="8.5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="8.75" cy="8.5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="11.25" cy="8.5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="13.75" cy="8.5" r="0.6" fill="currentColor" stroke="none" />
+      <path d="M6.5 12h7" />
     </>
   ),
   views: (
     <>
-      <rect x="3" y="3.5" width="14" height="13" rx="2" />
-      <path d="M3 7.5h14M8 7.5v9" />
+      <rect x="2.75" y="3.5" width="14.5" height="13" rx="2.5" />
+      <path d="M2.75 7.5h14.5M8.25 7.5v9" />
     </>
   ),
   data: (
     <>
-      <ellipse cx="10" cy="5.5" rx="6" ry="2.5" />
-      <path d="M4 5.5v9c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-9M4 10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" />
+      <ellipse cx="10" cy="5.5" rx="6" ry="2.25" />
+      <path d="M4 5.5v9c0 1.24 2.69 2.25 6 2.25s6-1.01 6-2.25v-9M4 10c0 1.24 2.69 2.25 6 2.25s6-1.01 6-2.25" />
     </>
   ),
   about: (
     <>
       <circle cx="10" cy="10" r="7" />
-      <path d="M10 9v4.5M10 6.5h.01" />
+      <path d="M10 9.25v4.25" />
+      <circle cx="10" cy="6.65" r="0.65" fill="currentColor" stroke="none" />
     </>
   ),
 };
@@ -343,7 +346,7 @@ export function Settings() {
                       height="16"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="1.5"
+                      strokeWidth={opticalStroke(16, 20)}
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
@@ -363,16 +366,7 @@ export function Settings() {
                 className="settings-back"
                 onClick={() => (picker ? setPicker(null) : settingsBackToList())}
               >
-                <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
-                  <path
-                    d="M12.5 4.5 7 10l5.5 5.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+                <BackIcon size={20} />
                 {picker ? label : "Settings"}
               </button>
               <h2 className="settings-bar-title">{picker ? picker.label : label}</h2>
@@ -383,15 +377,7 @@ export function Settings() {
                 aria-label="Close"
                 data-tip-keys="Esc"
               >
-                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                  <path
-                    d="M4 4l8 8M12 4l-8 8"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    fill="none"
-                  />
-                </svg>
+                <CloseIcon size={14} />
               </button>
               <button type="button" className="settings-done" onClick={close}>
                 Done

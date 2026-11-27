@@ -5,10 +5,11 @@
 // step's row shows for its state (UX-SPEC §4: a spinner, the tick, the ✕, a dash for
 // cancelled, the orange dot only for "waiting for a signer", a hollow ring otherwise).
 import { StateDot } from "../../components/bits";
+import { ChevronIcon, CloseIcon, opticalStroke, WORKFLOWS_ICON_PATHS } from "../../components/Icons";
 import type { RunGlyph, StepGlyph } from "./words";
 
 /** The nav icon's paths on the 20 px grid; Shell.tsx draws the same for the rail. */
-export const WORKFLOWS_ICON_PATHS = ["M3 5h8", "M3 10h8", "M3 15h8", "M14 7l3 3-3 3"];
+export { WORKFLOWS_ICON_PATHS };
 
 export function WorkflowGlyph({ size = 16 }: { size?: number }) {
   return (
@@ -19,7 +20,7 @@ export function WorkflowGlyph({ size = 16 }: { size?: number }) {
       height={size}
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth={opticalStroke(size, 20)}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -33,32 +34,11 @@ export function WorkflowGlyph({ size = 16 }: { size?: number }) {
 
 /** The small ✕ that is an error's one signal in a row: red, 10 px, in the glyph column. */
 export function ErrGlyph() {
-  return (
-    <svg className="err-glyph" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-      <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
+  return <CloseIcon size={10} className="err-glyph" />;
 }
 
 export function Chevron({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className ? `chev ${className}` : "chev"}
-      viewBox="0 0 12 12"
-      width="10"
-      height="10"
-      aria-hidden="true"
-    >
-      <path
-        d="M4.5 2.5 8 6l-3.5 3.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <ChevronIcon size={10} className={className ? `chev ${className}` : "chev"} />;
 }
 
 /** A row's one state mark. `label` is what assistive tech reads for it. */

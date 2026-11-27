@@ -16,6 +16,7 @@ import { type NotifyPermission, setNotifyPref, useNotifyPref } from "../lib/noti
 import { Link, openSettings, settingsHref, usePath } from "../lib/router";
 import { settingsApp } from "../native/logic";
 import { Notice, Toggle } from "./bits";
+import { BellIcon } from "./Icons";
 
 type AppState = typeof import("../native/appState");
 let appState: Promise<AppState> | null = null;
@@ -172,21 +173,7 @@ export function NotifyMenu() {
         data-notify={on ? "on" : "off"}
         onClick={() => setOpen((v) => !v)}
       >
-        <svg
-          viewBox="0 0 20 20"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M5.5 13.5V9a4.5 4.5 0 0 1 9 0v4.5l1.2 1.5H4.3z" />
-          <path d="M8.3 17a1.8 1.8 0 0 0 3.4 0" />
-          {!on && <path d="M3.5 3.5l13 13" />}
-        </svg>
+        <BellIcon size={16} muted={!on} />
       </button>
       {mounted && (
         <div

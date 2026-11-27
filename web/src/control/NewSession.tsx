@@ -5,6 +5,7 @@
 // first load nothing and opens at once; asked for before that, an invisible field holds
 // the keys typed meanwhile so none of them reaches the page. Mounted once, in the shell.
 import { useEffect } from "react";
+import { ComposeIcon } from "../components/Icons";
 import { lazyModule, whenIdle } from "../lib/lazy";
 import { usePresence } from "../lib/motion";
 import { setSearchParams } from "../lib/router";
@@ -64,20 +65,7 @@ export function ComposeButton({ className = "" }: { className?: string }) {
       onClick={() => openNewSession()}
       data-compose
     >
-      <svg
-        viewBox="0 0 20 20"
-        width="16"
-        height="16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16h9a1.5 1.5 0 0 0 1.5-1.5V11" />
-        <path d="M14.2 3.3a1.3 1.3 0 0 1 1.9 0l.6.6a1.3 1.3 0 0 1 0 1.9L10.5 12 8 12.5l.5-2.5z" />
-      </svg>
+      <ComposeIcon size={16} />
     </button>
   );
 }

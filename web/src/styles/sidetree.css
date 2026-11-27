@@ -28,12 +28,12 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   padding: 0 8px;
 }
 .stree-head-btn {
-  width: 24px;
-  height: 24px;
+  width: var(--control);
+  height: var(--control);
   color: var(--fg-3);
 }
 .stree-head-btn:focus-visible {
@@ -49,7 +49,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: var(--side-row);
+  height: var(--control);
   padding: 0 8px;
   border-radius: var(--radius);
   color: var(--fg-2);
@@ -181,6 +181,9 @@
   list-style: none;
   border-top: var(--hairline) solid var(--line);
 }
+.tree-col .usage-line {
+  padding: 6px 8px 10px;
+}
 .usage-line .glance-line {
   display: flex;
   align-items: center;
@@ -298,7 +301,6 @@
 /* Every row of the list keeps the pages' 28 px pitch with its fill inset 1 px top and
    bottom (shell.css), so two fills never touch. */
 .stree-row,
-.stree-new,
 .stree-more,
 .stree-more-all {
   border-block: 1px solid transparent;
@@ -716,14 +718,14 @@
 }
 .stree-project-add {
   position: absolute;
-  right: 24px;
+  right: 22px;
   top: 50%;
   transform: translateY(-50%);
   flex: none;
   display: inline-grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-inner);
   color: var(--fg-3);
   opacity: 0;

@@ -7,91 +7,39 @@ import { deleteFolder, recolorFolder, reorderFolder } from "../lib/arrange";
 import type { Loud } from "../lib/tree";
 import { StateDot } from "./bits";
 import type { MenuList } from "./ContextMenu";
+import {
+  FolderIcon as BaseFolderIcon,
+  PinIcon as BasePinIcon,
+  ProjectIcon as BaseProjectIcon,
+  PlusIcon,
+} from "./Icons";
 
 /** Monochrome 16 px folder icon for custom folders. */
-export function FolderIcon({ open, className = "stree-folder-glyph" }: { open?: boolean; className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {open ? (
-        <>
-          <path d="M2 5a1.5 1.5 0 0 1 1.5-1.5h2.6l1.3 1.4h4.6a1.5 1.5 0 0 1 1.4 1.1" />
-          <path d="M2 6.5h11.3a1 1 0 0 1 .97 1.24l-.9 3.6A1.5 1.5 0 0 1 11.9 12.5H3.5A1.5 1.5 0 0 1 2 11z" />
-        </>
-      ) : (
-        <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
-      )}
-    </svg>
-  );
+export function FolderIcon({
+  open,
+  size = 16,
+  className = "stree-folder-glyph",
+}: {
+  open?: boolean;
+  size?: number;
+  className?: string;
+}) {
+  return <BaseFolderIcon open={open} size={size} className={className} />;
 }
 
 /** Monochrome 16 px project / repository icon for project groups. */
-export function ProjectIcon({ className = "stree-project-glyph" }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
-      <path d="M5.5 6h5M5.5 9h3.5" />
-    </svg>
-  );
+export function ProjectIcon({ size = 16, className = "stree-project-glyph" }: { size?: number; className?: string }) {
+  return <BaseProjectIcon size={size} className={className} />;
 }
 
 /** Monochrome 16 px pin icon for the Pinned section header. */
-export function PinIcon({ className = "group-org-glyph" }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M6 2.5h4l-.6 3.6L11.5 8v1.2H4.5V8l2.1-1.9zM8 9.2v4.3" />
-    </svg>
-  );
+export function PinIcon({ size = 16, className = "group-org-glyph" }: { size?: number; className?: string }) {
+  return <BasePinIcon size={size} className={className} />;
 }
 
 /** Small `+` glyph for "New session in <project>" and "New folder". */
-export function PlusSmallIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg
-      viewBox="0 0 14 14"
-      width={size}
-      height={size}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <path d="M7 3.2v7.6M3.2 7h7.6" />
-    </svg>
-  );
+export function PlusSmallIcon({ size = 12, className }: { size?: number; className?: string }) {
+  return <PlusIcon size={size} className={className} />;
 }
 
 /** Rolled-up status lamp for a collapsed custom folder or project group. */

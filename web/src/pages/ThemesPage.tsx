@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { CommandWell } from "../components/bits";
 import { MoreButton, useContextMenu } from "../components/ContextMenu";
 import { Extras } from "../components/Extras";
+import { CloseIcon, NAV_ICON_PATHS, opticalStroke, PlusIcon, RefreshIcon, ShieldInfoIcon } from "../components/Icons";
 import { PageBar } from "../components/PageBar";
 import { copyText } from "../lib/menus";
 import { Link, navigate } from "../lib/router";
@@ -104,20 +105,7 @@ export function Themes() {
               aria-label="Reload"
               title={loopback ? "Reload views and plugins" : ONLY_HERE}
             >
-              <svg
-                viewBox="0 0 16 16"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M13 8a5 5 0 1 1-1.5-3.6" />
-                <path d="M13 2.5v3h-3" />
-              </svg>
+              <RefreshIcon size={16} />
             </button>
             <button
               type="button"
@@ -127,18 +115,7 @@ export function Themes() {
               aria-controls="themes-install-panel"
               data-add-toggle
             >
-              <svg
-                viewBox="0 0 12 12"
-                width="12"
-                height="12"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                aria-hidden="true"
-              >
-                <path d="M6 2.25v7.5M2.25 6h7.5" />
-              </svg>
+              <PlusIcon size={12} />
               Add…
             </button>
           </>
@@ -163,18 +140,7 @@ export function Themes() {
               aria-label="Close install instructions"
               title="Close"
             >
-              <svg
-                viewBox="0 0 12 12"
-                width="12"
-                height="12"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                aria-hidden="true"
-              >
-                <path d="M2.5 2.5 9.5 9.5M9.5 2.5 2.5 9.5" />
-              </svg>
+              <CloseIcon size={12} />
             </button>
           </div>
           <div className="form-list themes-install-card">
@@ -236,22 +202,7 @@ export function Themes() {
       <PluginsSection reloading={reloading} onAddClick={() => setAddOpen(true)} />
 
       <footer className="themes-trust-foot">
-        <svg
-          className="themes-trust-icon"
-          viewBox="0 0 16 16"
-          width="14"
-          height="14"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M8 1.75 2.75 3.75v4.1c0 3.1 2.25 5.45 5.25 6.4 3-.95 5.25-3.3 5.25-6.4v-4.1L8 1.75Z" />
-          <path d="M8 7v3" />
-          <circle cx="8" cy="4.9" r="0.6" fill="currentColor" stroke="none" />
-        </svg>
+        <ShieldInfoIcon size={14} className="themes-trust-icon" />
         <p className="themes-trust">
           Views run inside this page with access to your sessions and events; plugins run inside the receiver process
           and can notify or suggest answers, never sign permissions (only your passkey signs those). Neither is
@@ -278,6 +229,7 @@ export function ViewIconTile({ theme }: { theme: Pick<InstalledTheme, "id" | "ic
 }
 
 function FallbackViewIcon({ id }: { id: string }) {
+  const sw = opticalStroke(20, 20);
   if (id === "canvas") {
     return (
       <svg
@@ -286,14 +238,14 @@ function FallbackViewIcon({ id }: { id: string }) {
         height="20"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.5"
+        strokeWidth={sw}
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
       >
-        <rect x="2.5" y="2.5" width="8.5" height="6" rx="1.25" />
-        <rect x="9" y="11.5" width="8.5" height="6" rx="1.25" />
-        <path d="M2.5 5.25h8.5M9 14.25h8.5" />
+        <rect x="2.75" y="2.75" width="8.5" height="6" rx="1.75" />
+        <rect x="8.75" y="11.25" width="8.5" height="6" rx="1.75" />
+        <path d="M2.75 5.5h8.5M8.75 14h8.5" />
       </svg>
     );
   }
@@ -305,14 +257,12 @@ function FallbackViewIcon({ id }: { id: string }) {
         height="20"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.5"
+        strokeWidth={sw}
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
       >
-        <path d="M3 16.5V5a1.5 1.5 0 0 1 1.5-1.5h11A1.5 1.5 0 0 1 17 5v11.5" />
-        <path d="M2.5 16.5h15" />
-        <path d="M7.5 16.5v-5h5v5" />
+        {NAV_ICON_PATHS.office}
       </svg>
     );
   }
@@ -323,14 +273,14 @@ function FallbackViewIcon({ id }: { id: string }) {
       height="20"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth={sw}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <rect x="2.75" y="3.5" width="14.5" height="13" rx="2" />
-      <path d="M2.75 7.25h14.5" />
-      <path d="M8.5 7.25v9.25" />
+      <rect x="2.75" y="3.5" width="14.5" height="13" rx="2.5" />
+      <path d="M2.75 7.5h14.5" />
+      <path d="M8.25 7.5v9" />
     </svg>
   );
 }

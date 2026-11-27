@@ -29,6 +29,7 @@ import { phoneLayout, useTouchKeys } from "../lib/device";
 import { reducedMotion, tokenMs, useSheetDrag } from "../lib/motion";
 import { usePath } from "../lib/router";
 import { hintFor } from "../lib/shortcuts";
+import { CheckIcon, ChevronIcon, MoreDotsIcon } from "./Icons";
 import "../styles/menu.css";
 
 export type MenuItem =
@@ -446,33 +447,11 @@ const rowProps = (o: {
 });
 
 function Chevron() {
-  return (
-    <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-      <path
-        d="M4.5 2.5 8 6l-3.5 3.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <ChevronIcon size={10} />;
 }
 /** The one check, for a toggled item and a chosen one alike (macOS draws both with ✓). */
 function Check(_: { radio?: boolean }) {
-  return (
-    <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-      <path
-        d="M2.5 6.5 5 9l4.5-6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <CheckIcon size={12} />;
 }
 
 /** One level of the desktop menu; a submenu is another level beside its row. */
@@ -1157,13 +1136,7 @@ export function MoreButton({
         }
       }}
     >
-      {children ?? (
-        <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true">
-          <circle cx="4.5" cy="10" r="1.5" />
-          <circle cx="10" cy="10" r="1.5" />
-          <circle cx="15.5" cy="10" r="1.5" />
-        </svg>
-      )}
+      {children ?? <MoreDotsIcon size={16} />}
     </button>
   );
 }

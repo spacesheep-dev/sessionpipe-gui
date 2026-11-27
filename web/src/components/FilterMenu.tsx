@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { harnessMark } from "../lib/format";
 import { anyLabel, type LabelFilter, labelName } from "../lib/labels";
 import { type MenuItem, type MenuList, openMenu, useMenuOpen } from "./ContextMenu";
+import { FilterIcon } from "./Icons";
 
 /** Radio items for one filter: "All …", then each option, the current one checked. */
 export function pick(
@@ -149,9 +150,7 @@ export function FilterMenu({
         show(true);
       }}
     >
-      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-        <path d="M2.5 4h11M4.5 8h7M6.5 12h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
+      <FilterIcon size={14} />
       <span className="filter-btn-text">{on ? summary : "Filter"}</span>
     </button>
   );

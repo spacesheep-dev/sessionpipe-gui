@@ -59,7 +59,7 @@
   flex: none;
   position: relative;
   border-radius: 50%;
-  border: 1.5px solid var(--fg-4);
+  border: 1.25px solid var(--fg-4);
   background: transparent;
 }
 .dot--needs_you {
@@ -98,10 +98,10 @@
   border-radius: 0;
   background: var(--fg-4);
   -webkit-mask:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.8 5.3 4 7.5 8.2 2.8' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.8 5.3 4 7.5 8.2 2.8' fill='none' stroke='black' stroke-width='1.45' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
     center / contain no-repeat;
   mask:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.8 5.3 4 7.5 8.2 2.8' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.8 5.3 4 7.5 8.2 2.8' fill='none' stroke='black' stroke-width='1.45' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
 
@@ -109,9 +109,10 @@
    glyph as a disc in ink, in place of the ring or the check. No accent: the orange disc
    stays the one thing that asks. Arriving, it settles like any glyph, never wiped in. */
 .dot--unread {
-  border: 1.5px solid var(--fg);
+  border: 1.5px solid transparent;
   border-radius: 50%;
   background: var(--fg);
+  background-clip: content-box;
   -webkit-mask: none;
   mask: none;
 }

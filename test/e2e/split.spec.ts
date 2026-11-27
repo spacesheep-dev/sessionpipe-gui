@@ -415,6 +415,97 @@ test.describe("split panel", () => {
       ]);
       expect(Math.abs(dot!.x - (mark!.x - 18)), "the dot hangs 18 px left of the reply").toBeLessThanOrEqual(1);
     });
+
+    test("opening beside locks the outer window, keeps <main> and the panel scrolling independently, and preserves scroll position", async ({
+      page,
+      request,
+    }) => {
+      await page.setViewportSize({ width: 1440, height: 500 });
+      const { sinkToken } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+      const b = tier1Batch({ title: "A tall session for independent scrolling" });
+      for (const e of b.events) e.tier = 3;
+      const end = b.events[b.events.length - 1]!;
+      const turnId = (end.data as Record<string, unknown>).turn_id;
+      const paragraphs = Array.from(
+        { length: 24 },
+        (_, i) => `Paragraph ${i + 1}: enough prose to guarantee the split panel overflows a 500 px viewport.`,
+      ).join("\n\n");
+      b.events.splice(4, 0, {
+        ...end,
+        id: ulid(),
+        type: "turn.transcript",
+        session: { ...(end.session as Record<string, unknown>), seq: 5 },
+        data: { turn: 1, turn_id: turnId, user: "Write a long answer.", assistant: paragraphs },
+      });
+      (end.session as Record<string, unknown>).seq = 6;
+      const res = await request.post(EVENTS, {
+        headers: { authorization: `Bearer ${sinkToken}` },
+        data: { events: b.events },
+      });
+      expect(res.status()).toBe(202);
+      const href = sessionUrl(b.harness, b.sessionId);
+
+      await openBoard(page);
+      await holdBoard(page);
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight))
+        .toBeGreaterThan(80);
+      const beforeY = await page.evaluate(() => {
+        const y = Math.min(120, document.documentElement.scrollHeight - window.innerHeight);
+        window.scrollTo(0, y);
+        return window.scrollY;
+      });
+      expect(beforeY).toBeGreaterThan(0);
+
+      await click(page, href, ["Shift"]);
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      const body = panel(page).locator(".panel-body:not(.panel-body--off)");
+      await expect(body.locator("ol.timeline li.turn").first()).toBeVisible();
+
+      // Zero outer window scrollbar: <html> is locked to the viewport.
+      const doc = await page.evaluate(() => ({
+        scrollHeight: document.documentElement.scrollHeight,
+        innerHeight: window.innerHeight,
+        overflowY: getComputedStyle(document.documentElement).overflowY,
+        scrollY: window.scrollY,
+      }));
+      expect(doc.scrollHeight).toBeLessThanOrEqual(doc.innerHeight);
+      expect(doc.overflowY).toBe("hidden");
+      expect(doc.scrollY).toBe(0);
+
+      // <main> preserves the pre-open scroll position and scrolls independently of .panel-body.
+      await expect(page.locator(".shell")).not.toHaveAttribute("data-covers", "");
+      const main = page.locator("main.main");
+      await expect.poll(() => main.evaluate((el, y) => Math.abs(el.scrollTop - y), beforeY)).toBeLessThanOrEqual(2);
+      expect(await main.evaluate((el) => getComputedStyle(el).overflowY)).toBe("auto");
+      expect(await main.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      await expect.poll(() => body.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+
+      const panelStart = await body.evaluate((el) => el.scrollTop);
+      const targetPanel = panelStart > 40 ? 0 : 80;
+      await body.evaluate((el, y) => {
+        el.scrollTop = y;
+      }, targetPanel);
+      expect(await body.evaluate((el) => el.scrollTop)).toBe(targetPanel);
+      expect(await main.evaluate((el, y) => Math.abs(el.scrollTop - y), beforeY)).toBeLessThanOrEqual(2);
+
+      const nextMainY = await main.evaluate((el) => {
+        const max = el.scrollHeight - el.clientHeight;
+        const y = el.scrollTop > 40 ? Math.max(0, el.scrollTop - 40) : Math.min(max, el.scrollTop + 40);
+        el.scrollTop = y;
+        return el.scrollTop;
+      });
+      expect(Math.abs(nextMainY - beforeY)).toBeGreaterThan(10);
+      expect(await body.evaluate((el) => el.scrollTop)).toBe(targetPanel);
+
+      // Closing restores window.scrollY to where <main> was scrolled.
+      await page.keyboard.press("Escape");
+      await expect(panel(page)).not.toHaveClass(/panel--open/);
+      await expect
+        .poll(() => page.evaluate((want) => Math.abs(window.scrollY - want), nextMainY))
+        .toBeLessThanOrEqual(2);
+      expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflowY)).not.toBe("hidden");
+    });
   });
 
   // A window with a mouse under 840 px wide (half a 13-inch screen) keeps the desktop's
@@ -566,6 +657,49 @@ test.describe("split panel", () => {
       await expect(settings).toBeHidden();
       await expect(panel(page)).toHaveClass(/panel--open/);
       expect(new URL(page.url()).searchParams.get("s")).toBe(s);
+    });
+
+    test("covering the page locks both <html> and <main> with zero background scrollbar and restores window.scrollY on close", async ({
+      page,
+      request,
+    }) => {
+      await page.setViewportSize({ width: 760, height: 500 });
+      const key = await postLongSession(request);
+      const href = `/s/${key.replace(":", "/")}`;
+      await openBoard(page);
+      await holdBoard(page);
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight))
+        .toBeGreaterThan(80);
+      const beforeY = await page.evaluate(() => {
+        const y = Math.min(120, document.documentElement.scrollHeight - window.innerHeight);
+        window.scrollTo(0, y);
+        return window.scrollY;
+      });
+      expect(beforeY).toBeGreaterThan(0);
+
+      await click(page, href, ["Shift"]);
+      await expect(panel(page)).toHaveClass(/panel--open/);
+      await covers(page);
+
+      const state = await page.evaluate(() => {
+        const main = document.querySelector<HTMLElement>("main.main")!;
+        return {
+          scrollHeight: document.documentElement.scrollHeight,
+          innerHeight: window.innerHeight,
+          htmlOverflowY: getComputedStyle(document.documentElement).overflowY,
+          mainOverflowY: getComputedStyle(main).overflowY,
+          windowScrollY: window.scrollY,
+        };
+      });
+      expect(state.scrollHeight).toBeLessThanOrEqual(state.innerHeight);
+      expect(state.htmlOverflowY).toBe("hidden");
+      expect(state.mainOverflowY).toBe("hidden");
+      expect(state.windowScrollY).toBe(0);
+
+      await page.keyboard.press("Escape");
+      await expect(panel(page)).not.toHaveClass(/panel--open/);
+      await expect.poll(() => page.evaluate((want) => Math.abs(window.scrollY - want), beforeY)).toBeLessThanOrEqual(2);
     });
   });
 

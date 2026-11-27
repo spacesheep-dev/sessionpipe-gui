@@ -100,6 +100,7 @@ import { reducedMotion, useFlip } from "../lib/motion";
 import { accountMode } from "../lib/net";
 import { leftOff, type NewLineAt, newLinePlace } from "../lib/newLine";
 import { lastHeard } from "../lib/offline";
+import { usePageScrollerRef } from "../lib/pageScroll";
 import { clockTime, eventWindows, leftBecause, sentenceName, servedBy, swaps, swapWords } from "../lib/pool";
 import { cutReply, cutReplyStart, cutWords, said, stoppedWords, turnWords } from "../lib/replies";
 import { useResizeAnchor, windowSize } from "../lib/resizeAnchor";
@@ -395,8 +396,9 @@ export function SessionBody({ harness, id, mode, scrollRef, onSession, onForgott
   const anchor = useRef<{ seq: number | null; top: number; height: number; y: number } | null>(null);
   const firstPaint = useRef(true);
 
-  // The scroller: the panel's element, or the window.
-  const sc = useCallback(() => scrollRef?.current ?? null, [scrollRef]);
+  // The scroller: the panel's element, the split-locked <main>, or the window.
+  const pageScrollRef = usePageScrollerRef();
+  const sc = useCallback(() => scrollRef?.current ?? pageScrollRef?.current ?? null, [scrollRef, pageScrollRef]);
   const scrollHeight = useCallback(() => sc()?.scrollHeight ?? document.documentElement.scrollHeight, [sc]);
   const scrollY = useCallback(() => sc()?.scrollTop ?? window.scrollY, [sc]);
   const viewHeight = useCallback(() => sc()?.clientHeight ?? window.innerHeight, [sc]);

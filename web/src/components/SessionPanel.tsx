@@ -64,6 +64,7 @@ import { TIER_LABEL } from "../lib/tier";
 import { AgentGlyph } from "./AgentRow";
 import { StateDot } from "./bits";
 import { type MenuList, MoreButton, useContextMenu } from "./ContextMenu";
+import { CloseIcon, OpenPageIcon } from "./Icons";
 import { LabelDot } from "./LabelDot";
 import { answerItems, SessionView } from "./SessionView";
 
@@ -566,21 +567,7 @@ export function SessionPanel({ phone }: { phone: boolean }) {
               data-tip-keys={hintFor("session.openPage") || undefined}
               data-tip-side="bottom"
             >
-              <svg
-                viewBox="0 0 20 20"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M8 4H4.5A1.5 1.5 0 0 0 3 5.5v10A1.5 1.5 0 0 0 4.5 17h10a1.5 1.5 0 0 0 1.5-1.5V12" />
-                <path d="M11 3h6v6" />
-                <path d="M17 3l-7.5 7.5" />
-              </svg>
+              <OpenPageIcon size={16} />
             </Link>
           )}
           <button
@@ -593,18 +580,7 @@ export function SessionPanel({ phone }: { phone: boolean }) {
             data-tip-side="bottom"
             data-dismiss
           >
-            <svg
-              viewBox="0 0 20 20"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M5 5l10 10M15 5L5 15" />
-            </svg>
+            <CloseIcon size={16} />
             <span className="panel-done" aria-hidden="true">
               Done
             </span>
@@ -774,9 +750,7 @@ function PanelTab({
           closeTab(index);
         }}
       >
-        <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-          <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
+        <CloseIcon size={10} />
       </button>
     </div>
   );

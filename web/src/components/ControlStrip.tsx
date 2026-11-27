@@ -79,6 +79,7 @@ import { hintFor } from "../lib/shortcuts";
 import { keepTab } from "../lib/split";
 import { NEW_WORDS, ThisPhone } from "../native/accountWords";
 import { ActionButton, Spinner, StateDot, WithName } from "./bits";
+import { SendIcon, StopIcon } from "./Icons";
 import "../control/control.css";
 
 // The plan reads as Markdown, whose renderer stays out of the first paint (PlanText.tsx).
@@ -239,32 +240,6 @@ function landPicture(key: string, p: KeptPicture): void {
   const open = openStrips.get(key);
   if (open) open(p);
   else writePictures(key, [...readPictures(key).filter((q) => q.sha256 !== p.sha256), p]);
-}
-
-function SendIcon() {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      aria-hidden="true"
-    >
-      <path d="M10 16V4.5M5 9.5l5-5 5 5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-/** Stop as a media control reads: a square in a ring, at the send arrow's size. */
-function StopIcon() {
-  return (
-    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
-      <circle cx="10" cy="10" r="7.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="7.25" y="7.25" width="5.5" height="5.5" rx="1" fill="currentColor" />
-    </svg>
-  );
 }
 
 /** Whether a control answer can reach this prompt (shared/api.ts `answerable`). Claude Code
