@@ -64,13 +64,99 @@
   color: var(--fg-3);
   font-size: var(--text-sm);
 }
+/* Phone sheet presentation: 8px inner margin + .menu-sheet's 8px outer padding = 16px inset. */
 .pick-sheet .pick-what,
 .pick-sheet .pick-field,
-.pick-sheet .pick-list {
-  margin: 0 16px 10px;
+.pick-sheet .pick-list,
+.menu-sheet.pick-sheet .pick-colors {
+  margin: 0 8px 10px;
   width: auto;
 }
-.pick-sheet .pick-row {
-  height: 44px;
+.menu-sheet.pick-sheet .pick-colors {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  justify-items: center;
+  gap: 0;
+  margin-bottom: 4px;
+}
+@media (max-width: 359px) {
+  .menu-sheet.pick-sheet .pick-colors {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    row-gap: 4px;
+  }
+}
+.pick-sheet .pick-field {
+  min-height: 44px;
   font-size: max(1rem, 16px);
+}
+.pick-sheet .pick-row {
+  min-height: 44px;
+  height: auto;
+  padding-block: 6px;
+  font-size: max(1rem, 16px);
+}
+.pick-sheet .pick-colors .stree-color-opt {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-color: transparent;
+  background: transparent;
+}
+.pick-sheet .pick-colors .stree-color-opt--on::before {
+  content: "";
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid var(--focus-line);
+  background: var(--sel);
+  pointer-events: none;
+}
+.pick-sheet .pick-colors .label-dot,
+.pick-sheet .pick-colors .stree-color-none {
+  position: relative;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+}
+
+/* Native 3-column iOS sheet header bar (FolderPrompt on phone, matching .ns-bar grammar). */
+.pick-ios-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+}
+.pick-ios-bar-title {
+  margin: 0;
+  min-width: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+  text-align: center;
+  touch-action: none;
+}
+.pick-ios-btn {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 8px;
+  border: none;
+  background: none;
+  color: var(--tint-fg);
+  font: inherit;
+  font-size: max(1rem, 16px);
+  white-space: nowrap;
+}
+.pick-ios-btn--primary {
+  justify-self: end;
+  font-weight: 600;
+}
+.pick-ios-btn:disabled {
+  color: var(--fg);
+  opacity: 0.45;
 }

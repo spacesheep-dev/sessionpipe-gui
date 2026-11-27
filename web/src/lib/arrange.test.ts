@@ -247,7 +247,7 @@ describe("arrangeItems", () => {
     expect(work && "checked" in work && work.checked).toBe(true);
   });
 
-  it("omits Pin, Unpin and Pinned moves on a compact phone, keeping Move to folder, Move under… and Move to top level", async () => {
+  it("includes Pin, Unpin and Pinned moves on a compact phone alongside Move to folder, Move under… and Move to top level", async () => {
     g.matchMedia = (q: string) => ({
       matches: q === PHONE_QUERY || q === TOUCH_QUERY,
       addEventListener() {},
@@ -259,8 +259,18 @@ describe("arrangeItems", () => {
     const pins = { rev: 1, placed: {}, pinned: [A.key, C.key] };
     const phoneLabels = (arr: Arrangement, x: SessionSummary) =>
       tidy(phoneItems(x, store(arr))).map((i) => ("label" in i ? i.label : "─"));
-    expect(phoneLabels(pins, A)).toEqual(["Move to folder", "Move under…"]);
-    expect(phoneLabels(EMPTY_ARRANGEMENT, B)).toEqual(["Move to folder", "Move under…", "Move to top level"]);
+    expect(phoneLabels(pins, A)).toEqual(["Unpin", "Move down in Pinned", "Move to folder", "Move under…"]);
+    expect(phoneLabels(EMPTY_ARRANGEMENT, B)).toEqual(["Pin", "Move to folder", "Move under…", "Move to top level"]);
+  });
+
+  it("offers Search folders… in the Move to folder submenu when more than 8 folders exist", () => {
+    const folders = Array.from({ length: 9 }, (_, i) => ({ id: `f${i + 1}`, name: `Folder ${i + 1}` }));
+    const arr: Arrangement = { rev: 1, placed: {}, pinned: [], folders };
+    const menu = tidy(arrangeItems(C, store(arr)));
+    const sub = menu.find((i) => "items" in i && i.label === "Move to folder");
+    expect(sub && "items" in sub).toBe(true);
+    const subItems = tidy(sub && "items" in sub ? sub.items : []);
+    expect(subItems.map((i) => ("label" in i ? i.label : "─"))).toContain("Search folders…");
   });
 });
 

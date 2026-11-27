@@ -437,6 +437,9 @@
     width: var(--tap);
     height: var(--tap);
   }
+  .page--grouped > .bar .bar-actions .btn.btn--on {
+    font-weight: 600;
+  }
 }
 
 @media (pointer: coarse) {

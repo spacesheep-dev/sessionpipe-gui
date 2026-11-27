@@ -21,14 +21,16 @@ import {
   type MoveFolderRequest,
   onFolderPrompt,
   onMoveFolder,
+  recolorFolder,
   renameFolder,
 } from "../lib/arrange";
 import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import { sessionTitle } from "../lib/format";
 import { fuzzy } from "../lib/fuzzy";
-import { calmNextCommit } from "../lib/motion";
+import { calmNextCommit, useSheetDrag } from "../lib/motion";
 import { usePath } from "../lib/router";
+import { FolderIcon } from "./GroupBits";
 import "../styles/pick.css";
 import "../styles/sidetree.css";
 
@@ -131,25 +133,6 @@ export function folderPickerChoices(
   return out;
 }
 
-function FolderGlyph() {
-  return (
-    <svg
-      className="stree-folder-glyph"
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
-    </svg>
-  );
-}
-
 function FolderPicker({ moving, fromTree, onClose }: { moving: SessionKey; fromTree: boolean; onClose: () => void }) {
   const store = useStore();
   const state = useAppState();
@@ -164,6 +147,7 @@ function FolderPicker({ moving, fromTree, onClose }: { moving: SessionKey; fromT
   const s = state.sessions.get(moving);
   const id = useId();
   useFocusTrap(ref, Boolean(s), { onClose, initial: "input" });
+  useSheetDrag(ref, onClose, { handle: ".menu-grab, .menu-sheet-head", enabled: phone && Boolean(s) });
   useEffect(() => {
     if (!s) onClose();
   }, [s, onClose]);
@@ -238,6 +222,7 @@ function FolderPicker({ moving, fromTree, onClose }: { moving: SessionKey; fromT
           aria-controls={choices.length > 0 ? `${id}-list` : undefined}
           aria-activedescendant={choices.length ? `${id}-opt-${choice}` : undefined}
           aria-autocomplete="list"
+          enterKeyHint="search"
           autoComplete="off"
           spellCheck={false}
           onChange={(e) => {
@@ -267,7 +252,7 @@ function FolderPicker({ moving, fromTree, onClose }: { moving: SessionKey; fromT
               >
                 {item.kind === "folder" && (
                   <>
-                    <FolderGlyph />
+                    <FolderIcon />
                     {item.folder.color && (
                       <span
                         className={`stree-folder-dot label-dot label-dot--${item.folder.color}`}
@@ -298,25 +283,35 @@ function FolderPicker({ moving, fromTree, onClose }: { moving: SessionKey; fromT
 
 function FolderPrompt({ req, onClose }: { req: FolderPromptRequest; onClose: () => void }) {
   const store = useStore();
+  const state = useAppState();
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const phone = usePhoneLayout();
-  const [name, setName] = useState(req.initialName ?? "");
-  const [color, setColor] = useState<LabelColor | null>(null);
+  const existing =
+    req.mode === "rename" && req.folderId ? state.arrangement.folders?.find((f) => f.id === req.folderId) : undefined;
+  const [name, setName] = useState(req.initialName ?? existing?.name ?? "");
+  const [color, setColor] = useState<LabelColor | null>(existing?.color ?? null);
   const id = useId();
+  const formId = `${id}-form`;
   useFocusTrap(ref, true, { onClose, initial: "input" });
+  useSheetDrag(ref, onClose, { handle: ".menu-grab, .menu-sheet-head, .pick-ios-bar-title", enabled: phone });
   useEffect(() => {
     if (req.mode === "rename") inputRef.current?.select();
   }, [req.mode]);
 
   const clean = sanitizeFolderName(name);
-  const valid = clean.length >= 1 && clean.length <= ARRANGEMENT_FOLDER_NAME_MAX;
+  const canSubmit = clean.length >= 1 && clean.length <= ARRANGEMENT_FOLDER_NAME_MAX;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!valid) return;
+    if (!canSubmit) return;
     onClose();
     if (req.mode === "rename" && req.folderId) {
-      renameFolder(store, req.folderId, clean);
+      if (!existing || clean !== existing.name) {
+        renameFolder(store, req.folderId, clean);
+      }
+      if (existing && color !== (existing.color ?? null)) {
+        recolorFolder(store, req.folderId, color);
+      }
     } else {
       createFolder(store, clean, {
         ...(color ? { color } : {}),
@@ -327,11 +322,7 @@ function FolderPrompt({ req, onClose }: { req: FolderPromptRequest; onClose: () 
   };
 
   const heading = req.mode === "rename" ? "Rename folder" : "New folder";
-  const title = (
-    <h2 className={phone ? "menu-sheet-title" : "confirm-title"} id={`${id}-title`}>
-      {heading}
-    </h2>
-  );
+  const submitLabel = req.mode === "rename" ? "Save" : "Create";
   return (
     <>
       <button
@@ -353,8 +344,24 @@ function FolderPrompt({ req, onClose }: { req: FolderPromptRequest; onClose: () 
         }}
       >
         {phone && <span className="menu-grab" aria-hidden="true" />}
-        {phone ? <div className="menu-sheet-head">{title}</div> : title}
-        <form onSubmit={submit} className="stree-folder-form">
+        {phone ? (
+          <header className="pick-ios-bar">
+            <button type="button" className="pick-ios-btn" onClick={onClose}>
+              Cancel
+            </button>
+            <h2 className="pick-ios-bar-title ellipsis" id={`${id}-title`}>
+              {heading}
+            </h2>
+            <button type="submit" form={formId} className="pick-ios-btn pick-ios-btn--primary" disabled={!canSubmit}>
+              {submitLabel}
+            </button>
+          </header>
+        ) : (
+          <h2 className="confirm-title" id={`${id}-title`}>
+            {heading}
+          </h2>
+        )}
+        <form id={formId} onSubmit={submit} className="stree-folder-form">
           <input
             ref={inputRef}
             className="field pick-field"
@@ -363,6 +370,7 @@ function FolderPrompt({ req, onClose }: { req: FolderPromptRequest; onClose: () 
             maxLength={ARRANGEMENT_FOLDER_NAME_MAX}
             placeholder="Folder name"
             aria-label="Folder name"
+            enterKeyHint="done"
             autoComplete="off"
             spellCheck={false}
             onChange={(e) => setName(e.target.value)}
@@ -373,40 +381,40 @@ function FolderPrompt({ req, onClose }: { req: FolderPromptRequest; onClose: () 
               }
             }}
           />
-          {req.mode === "create" && (
-            <fieldset className="stree-color-row">
-              <legend className="sr-only">Folder color</legend>
+          <fieldset className="stree-color-row pick-colors">
+            <legend className="sr-only">Folder color</legend>
+            <button
+              type="button"
+              aria-pressed={color === null}
+              aria-label="No color"
+              className={`stree-color-opt${color === null ? " stree-color-opt--on" : ""}`}
+              onClick={() => setColor(null)}
+            >
+              <span className="stree-color-none" aria-hidden="true" />
+            </button>
+            {LABEL_COLORS.map((c) => (
               <button
+                key={c}
                 type="button"
-                aria-pressed={color === null}
-                aria-label="No color"
-                className={`stree-color-opt${color === null ? " stree-color-opt--on" : ""}`}
-                onClick={() => setColor(null)}
+                aria-pressed={color === c}
+                aria-label={LABEL_DEFAULT_NAMES[c]}
+                className={`stree-color-opt${color === c ? " stree-color-opt--on" : ""}`}
+                onClick={() => setColor(c)}
               >
-                <span className="stree-color-none" aria-hidden="true" />
+                <span className={`label-dot label-dot--${c}`} aria-hidden="true" />
               </button>
-              {LABEL_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  aria-pressed={color === c}
-                  aria-label={LABEL_DEFAULT_NAMES[c]}
-                  className={`stree-color-opt${color === c ? " stree-color-opt--on" : ""}`}
-                  onClick={() => setColor(c)}
-                >
-                  <span className={`label-dot label-dot--${c}`} aria-hidden="true" />
-                </button>
-              ))}
-            </fieldset>
+            ))}
+          </fieldset>
+          {!phone && (
+            <div className="confirm-actions">
+              <button type="button" className="btn" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn--primary" disabled={!canSubmit}>
+                {submitLabel}
+              </button>
+            </div>
           )}
-          <div className={phone ? "menu-sheet-group" : "confirm-actions"}>
-            <button type="button" className={phone ? "menu-sheet-item menu-sheet-cancel" : "btn"} onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className={phone ? "menu-sheet-item" : "btn btn--primary"} disabled={!valid}>
-              {req.mode === "rename" ? "Save" : "Create"}
-            </button>
-          </div>
         </form>
       </div>
     </>

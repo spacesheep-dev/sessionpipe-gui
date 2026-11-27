@@ -23,7 +23,6 @@ import {
 import { sanitizeFolderName } from "@shared/arrangement";
 import type { MenuList } from "../components/ContextMenu";
 import type { AppState, Store } from "../data/store";
-import { phoneLayout, sizeClass } from "./device";
 import { sessionTitle } from "./format";
 import { hiddenNow } from "./hidden";
 import { calmNextCommit } from "./motion";
@@ -605,10 +604,15 @@ export function arrangeItems(s: SessionSummary, store: Store, o?: { inTree?: boo
   const pinned = at >= 0;
   const folders = state.arrangement.folders ?? [];
   const curFolder = state.arrangement.inFolder?.[s.key];
-  // On a phone (compact layout, no sidebar), omit Pin, Unpin and Pinned moves.
-  const showPin = !phoneLayout() || sizeClass() === "regular";
+  // Every surface (desktop, iPad, and phone Board's Organized view) can pin and arrange sessions.
+  const showPin = true;
   const run = (move: Move) => () => void arrange(store, s.key, move, o?.inTree ? { source: "menu" } : undefined);
   const folderItems: MenuList = [
+    folders.length > 8 && {
+      label: "Search folders…",
+      run: () => requestMoveFolder(s.key, { fromTree: o?.inTree }),
+    },
+    folders.length > 8 && { sep: true as const },
     ...folders.map((f) => ({
       label: f.name,
       swatch: f.color,

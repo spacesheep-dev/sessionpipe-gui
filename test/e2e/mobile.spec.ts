@@ -1749,3 +1749,371 @@ test.describe("phone: usage", () => {
     await expect(sheet).toContainText("Forget these numbers");
   });
 });
+
+// Phone Board Organized view: Status | Organized switcher above the list, Pinned + Custom
+// Folders + auto-grouped Projects (disambiguated names, rolled-up lamps on fold, per-project
+// `+` New session), folder CRUD with Undo, and zero horizontal overflow at 390px and 320px.
+test.describe("phone: organized board", () => {
+  test.skip(({ isMobile }) => !isMobile, "phone project only");
+
+  const ARRANGEMENT = "/api/ui/arrangement";
+  interface Arr {
+    rev: number;
+    placed: Record<string, string | null>;
+    pinned: string[];
+    folders?: { id: string; name: string; color?: string }[];
+    inFolder?: Record<string, string>;
+  }
+
+  test("switches to Organized mode, shows Pinned, Custom Folders, and disambiguated Projects with rolled-up lamps, and has zero overflow at 390px and 320px", async ({
+    page,
+    request,
+  }) => {
+    const tag = randomUUID().slice(0, 6);
+    const { sinkToken: token } = (await (await request.get(INFO)).json()) as { sinkToken: string };
+    const created: { id: string; seq: number; needs?: boolean }[] = [];
+    const postOne = async (def: { title: string; repo: string; cwd: string; state: "working" | "needs" | "idle" }) => {
+      const id = randomUUID();
+      let seq = 0;
+      let clock = Date.now() - 4_000;
+      const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+        clock += 200;
+        return {
+          protocol: 1,
+          id: ulid(clock),
+          type,
+          time: new Date(clock).toISOString(),
+          tier: 1,
+          harness: { name: "claude-code", version: "2.1.296", event: hook },
+          session: {
+            id,
+            seq: seq++,
+            machine: `org-box-${tag}`,
+            cwd: def.cwd,
+            repo: def.repo,
+            title: def.title,
+            title_source: "custom",
+          },
+          privacy: { rulesets: ["secrets@1"], pii: false },
+          data,
+        };
+      };
+      const events = [
+        ev("session.started", { source: "startup" }, "SessionStart"),
+        ev("turn.started", { turn_id: "t1", prompt_chars: 18 }, "UserPromptSubmit"),
+      ];
+      if (def.state === "needs") {
+        events.push(
+          ev(
+            "attention.needed",
+            { attention_id: `a-${id}`, kind: "permission", tool: "Bash", message: "Run tests" },
+            "PreToolUse",
+          ),
+        );
+      } else if (def.state === "idle") {
+        events.push(ev("turn.ended", { turn_id: "t1", reason: "stop", ms: 1200 }, "Stop"));
+      }
+      const res = await request.post(EVENTS, {
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+          "sessionpipe-protocol": "1",
+        },
+        data: { events },
+      });
+      expect(res.status()).toBe(202);
+      created.push({ id, seq, needs: def.state === "needs" });
+      return { id, key: `claude-code:${id}`, title: def.title };
+    };
+
+    const folderId = `f_mob_${tag}`;
+    const pinnedSess = await postOne({
+      title: `Org ${tag} pinned`,
+      repo: `github.com/acme/org-pin-${tag}`,
+      cwd: `~/code/org-pin-${tag}`,
+      state: "working",
+    });
+    const folderSess = await postOne({
+      title: `Org ${tag} foldered`,
+      repo: `github.com/acme/org-fold-${tag}`,
+      cwd: `~/code/org-fold-${tag}`,
+      state: "needs",
+    });
+    const projA = await postOne({
+      title: `Org ${tag} alpha`,
+      repo: `github.com/alpha-${tag}/shared-app`,
+      cwd: `~/code/alpha-${tag}/shared-app`,
+      state: "needs",
+    });
+    const projB = await postOne({
+      title: `Org ${tag} beta`,
+      repo: `github.com/beta-${tag}/shared-app`,
+      cwd: `~/code/beta-${tag}/shared-app`,
+      state: "idle",
+    });
+
+    try {
+      const before = (await (await request.get(ARRANGEMENT)).json()) as Arr;
+      const patchRes = await request.patch(ARRANGEMENT, {
+        data: {
+          pinned: [...before.pinned.filter((k) => k !== pinnedSess.key), pinnedSess.key],
+          folders: [
+            ...(before.folders ?? []).filter((f) => f.id !== folderId),
+            { id: folderId, name: `Focus ${tag}`, color: "purple" },
+          ],
+          inFolder: { [folderSess.key]: folderId },
+        },
+      });
+      expect(patchRes.status()).toBe(200);
+
+      await openBoard(page);
+      // Default remains Status, with no sidebar tree on phone.
+      await expect(page.locator(".stree")).toHaveCount(0);
+      const switcher = page.locator(".board-view-bar");
+      await expect(switcher).toBeVisible();
+      await expect(switcher.getByRole("radio", { name: "Status" })).toBeChecked();
+      const optBox = (await switcher.locator(".seg-opt").first().boundingBox())!;
+      expect(optBox.height).toBeGreaterThanOrEqual(36);
+
+      // Switch to Organized view.
+      await switcher.locator(".seg-opt", { hasText: "Organized" }).click();
+      await expect(switcher.getByRole("radio", { name: "Organized" })).toBeChecked();
+
+      // Pinned section shows pinned active session.
+      const pinnedSec = page.locator("section.group--pinned");
+      await expect(pinnedSec).toBeVisible();
+      await expect(pinnedSec.locator(`article.card[data-flip="${pinnedSess.key}"]`)).toBeVisible();
+
+      // Custom folder shows color dot, name, and its active session.
+      const folderSec = page.locator(`section.group--folder[data-board-folder="${folderId}"]`);
+      await expect(folderSec).toBeVisible();
+      await expect(folderSec.locator(".label-dot--purple")).toBeVisible();
+      await expect(folderSec.locator(`article.card[data-flip="${folderSess.key}"]`)).toBeVisible();
+
+      // Disambiguated projects: alpha-<tag>/shared-app and beta-<tag>/shared-app.
+      const alphaProj = page.locator(`section.group--project[data-board-project="repo:alpha-${tag}/shared-app"]`);
+      const betaProj = page.locator(`section.group--project[data-board-project="repo:beta-${tag}/shared-app"]`);
+      await expect(alphaProj.locator(".group-org-name")).toHaveText(`alpha-${tag}/shared-app`);
+      await expect(betaProj.locator(".group-org-name")).toHaveText(`beta-${tag}/shared-app`);
+      await expect(alphaProj.locator(`article.card[data-flip="${projA.key}"]`)).toBeVisible();
+      await expect(betaProj.locator(`article.card[data-flip="${projB.key}"]`)).toBeVisible();
+
+      // Folding a folder or project hides its rows and surfaces the rolled-up needs_you lamp.
+      await folderSec.locator(".group-toggle").click();
+      await expect(folderSec.locator(".group-toggle")).toHaveAttribute("aria-expanded", "false");
+      await expect(folderSec.locator(`article.card[data-flip="${folderSess.key}"]`)).toHaveCount(0);
+      await expect(folderSec.locator('[data-rolled="needs_you"]')).toBeVisible();
+
+      await alphaProj.locator(".group-toggle").click();
+      await expect(alphaProj.locator(".group-toggle")).toHaveAttribute("aria-expanded", "false");
+      await expect(alphaProj.locator(`article.card[data-flip="${projA.key}"]`)).toHaveCount(0);
+      await expect(alphaProj.locator('[data-rolled="needs_you"]')).toBeVisible();
+
+      // Re-expand both.
+      await folderSec.locator(".group-toggle").click();
+      await expect(folderSec.locator(`article.card[data-flip="${folderSess.key}"]`)).toBeVisible();
+      await alphaProj.locator(".group-toggle").click();
+      await expect(alphaProj.locator(`article.card[data-flip="${projA.key}"]`)).toBeVisible();
+
+      // Zero horizontal overflow at 390px and 320px.
+      await noSidewaysScroll(page);
+      await resizeWindow(page, { width: 320, height: 568 });
+      await noSidewaysScroll(page);
+      await resizeWindow(page, { width: 390, height: 844 });
+
+      // Switching back to Status restores standard status sections.
+      await switcher.locator(".seg-opt", { hasText: "Status" }).click();
+      await expect(switcher.getByRole("radio", { name: "Status" })).toBeChecked();
+      await expect(page.locator("section.group--project")).toHaveCount(0);
+      await expect(page.locator("section.group--needs_you")).toBeVisible();
+    } finally {
+      const cur = (await (await request.get(ARRANGEMENT)).json()) as Arr;
+      await request.patch(ARRANGEMENT, {
+        data: {
+          pinned: cur.pinned.filter((k) => k !== pinnedSess.key),
+          folders: (cur.folders ?? []).filter((f) => f.id !== folderId),
+        },
+      });
+      let clock = Date.now();
+      const endEvents = created.flatMap((s) => {
+        let seq = s.seq;
+        const mk = (type: string, data: Record<string, unknown>, hook: string) => {
+          clock += 10;
+          return {
+            protocol: 1,
+            id: ulid(clock),
+            type,
+            time: new Date(clock).toISOString(),
+            tier: 1,
+            harness: { name: "claude-code", version: "2.1.296", event: hook },
+            session: { id: s.id, seq: seq++, machine: `org-box-${tag}`, cwd: "~/code/cleanup" },
+            privacy: { rulesets: ["secrets@1"], pii: false },
+            data,
+          };
+        };
+        return [
+          ...(s.needs
+            ? [mk("attention.cleared", { attention_id: `a-${s.id}`, reason: "resolved" }, "PostToolUse")]
+            : []),
+          mk("turn.ended", { turn_id: "t1", reason: "stop", ms: 2000 }, "Stop"),
+          mk("session.ended", { reason: "exit" }, "SessionEnd"),
+        ];
+      });
+      await request.post(EVENTS, {
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+          "sessionpipe-protocol": "1",
+        },
+        data: { events: endEvents },
+      });
+    }
+  });
+
+  test("creates, renames, recolors, and deletes a folder with Undo on phone", async ({ page, request }) => {
+    const tag = randomUUID().slice(0, 6);
+    const initialName = `Release ${tag}`;
+    const renamedName = `Ship ${tag}`;
+    try {
+      await openBoard(page);
+      // View options menu also exposes Organized toggle and New folder….
+      await page.getByRole("button", { name: "View options" }).click();
+      const viewSheet = page.locator(".menu-sheet");
+      await expect(viewSheet.getByRole("menuitem", { name: "New folder…" })).toBeVisible();
+      await viewSheet.getByRole("menuitemcheckbox", { name: "Group by folders & projects" }).click();
+      await expect(page.locator(".board-view-bar").getByRole("radio", { name: "Organized" })).toBeChecked();
+
+      // Create folder via + New folder button in the Folders tier bar.
+      const newBtn = page.locator(".board-org-new");
+      await expect(newBtn).toBeVisible();
+      expect((await newBtn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await newBtn.click();
+
+      const createDialog = page.getByRole("dialog", { name: "New folder" });
+      await expect(createDialog).toBeVisible();
+      await createDialog.getByRole("textbox", { name: "Folder name" }).fill(initialName);
+      await createDialog.getByRole("button", { name: "Blue" }).click();
+      await createDialog.getByRole("button", { name: "Create" }).click();
+
+      const folderSec = page.locator("section.group--folder", { hasText: initialName });
+      await expect(folderSec).toBeVisible();
+      await expect(folderSec.locator(".label-dot--blue")).toBeVisible();
+      await expect(folderSec.locator(".board-org-empty")).toHaveText("No active sessions");
+
+      // Rename via folder's ⋯ action sheet.
+      const actionBtn = folderSec.getByRole("button", { name: `Actions for ${initialName}` });
+      expect((await actionBtn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await actionBtn.click();
+      await page.locator(".menu-sheet").getByRole("menuitem", { name: "Rename…" }).click();
+      const renameDialog = page.getByRole("dialog", { name: "Rename folder" });
+      await expect(renameDialog).toBeVisible();
+      await renameDialog.getByRole("textbox", { name: "Folder name" }).fill(renamedName);
+      await renameDialog.getByRole("button", { name: "Save" }).click();
+
+      const renamedSec = page.locator("section.group--folder", { hasText: renamedName });
+      await expect(renamedSec).toBeVisible();
+
+      // Recolor to Green via folder's ⋯ action sheet.
+      await renamedSec.getByRole("button", { name: `Actions for ${renamedName}` }).click();
+      await page.locator(".menu-sheet").getByRole("menuitem", { name: "Color" }).click();
+      await page.locator(".menu-sheet").getByRole("menuitemradio", { name: "Green" }).click();
+      await expect(renamedSec.locator(".label-dot--green")).toBeVisible();
+
+      // Delete folder and Undo via toast.
+      await renamedSec.getByRole("button", { name: `Actions for ${renamedName}` }).click();
+      await page.locator(".menu-sheet").getByRole("menuitem", { name: "Delete folder" }).click();
+      await expect(renamedSec).toHaveCount(0);
+      const undoToast = page.locator(".toast", { hasText: `Deleted folder “${renamedName}”` });
+      await expect(undoToast).toBeVisible();
+      await undoToast.getByRole("button", { name: "Undo" }).click();
+      await expect(renamedSec).toBeVisible();
+      await noSidewaysScroll(page);
+    } finally {
+      const cur = (await (await request.get(ARRANGEMENT)).json()) as Arr;
+      const keep = (cur.folders ?? []).filter((f) => f.name !== initialName && f.name !== renamedName);
+      if (keep.length !== (cur.folders ?? []).length) {
+        await request.patch(ARRANGEMENT, { data: { folders: keep } });
+      }
+    }
+  });
+
+  test("per-project + button opens New session prefilled with that project's machine and folder", async ({
+    context,
+    page,
+  }) => {
+    const tag = randomUUID().slice(0, 6);
+    await seenSetupHere(context);
+    const key = await passkeyPage(context, page);
+    const projCwd = `/Users/e2e/work/proj-${tag}`;
+    const d = await fakeDaemon(key, {
+      name: `org-pair-${tag}`,
+      harnesses: ["claude-code"],
+      folders: [projCwd],
+      mode: "auto",
+      start: { "claude-code": { permissions: ["read", "safe", "auto"], permission: "auto", any_model: true } },
+    });
+    const token = await sinkToken();
+    const id = randomUUID();
+    let seq = 0;
+    let clock = Date.now() - 10_000;
+    const ev = (type: string, data: Record<string, unknown>, hook: string) => {
+      clock += 300;
+      return {
+        protocol: 1,
+        id: ulid(clock),
+        type,
+        time: new Date(clock).toISOString(),
+        tier: 1,
+        harness: { name: "claude-code", version: "2.1.296", event: hook },
+        session: {
+          id,
+          seq: seq++,
+          machine: d.name,
+          cwd: projCwd,
+          repo: `github.com/acme/proj-${tag}`,
+          title: `Paired ${tag}`,
+          title_source: "custom",
+        },
+        privacy: { rulesets: ["secrets@1"], pii: false },
+        data,
+      };
+    };
+    try {
+      await fetch(`${CONTROL_BASE}/api/sessionpipe/v1/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+          "sessionpipe-protocol": "1",
+        },
+        body: JSON.stringify({
+          events: [
+            ev("session.started", { source: "startup" }, "SessionStart"),
+            ev("turn.started", { turn_id: "t1", prompt_chars: 12 }, "UserPromptSubmit"),
+          ],
+        }),
+      });
+      await page.goto(`${CONTROL_BASE}/`);
+      const switcher = page.locator(".board-view-bar");
+      await expect(switcher).toBeVisible();
+      await switcher.locator(".seg-opt", { hasText: "Organized" }).click();
+
+      const projSec = page.locator(`section.group--project[data-board-project="repo:acme/proj-${tag}"]`);
+      await expect(projSec).toBeVisible();
+      const plusBtn = projSec.getByRole("button", { name: `New session in proj-${tag}` });
+      await expect(plusBtn).toBeVisible();
+      const plusBox = (await plusBtn.boundingBox())!;
+      expect(plusBox.width).toBeGreaterThanOrEqual(44);
+      expect(plusBox.height).toBeGreaterThanOrEqual(44);
+      await plusBtn.click();
+
+      const sheet = page.locator("[data-new-session]");
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator("[data-ns-row=machine]")).toContainText(d.name);
+      await expect(sheet.locator("[data-ns-row=folder]")).toContainText(`proj-${tag}`);
+      await noSidewaysScroll(page);
+    } finally {
+      await d.stop();
+    }
+  });
+});

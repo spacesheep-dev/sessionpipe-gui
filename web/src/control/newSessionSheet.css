@@ -689,9 +689,19 @@
 .ns-sheet--phone .ns-folder-name {
   color: var(--fg-2);
 }
+.ns-sheet--phone .ns-path {
+  min-height: var(--tap);
+  font-size: max(1rem, 16px);
+}
 .ns-sheet--phone .ns-text {
   min-height: 160px;
   padding: 12px 16px;
+  font-size: max(1rem, 16px);
+}
+@media (max-width: 359px) {
+  .ns-sheet--phone .ns-folder-parent {
+    display: none;
+  }
 }
 /* The files sit in one row under the message that scrolls sideways, never stacked in it. */
 .ns-sheet--phone .ns-files {
