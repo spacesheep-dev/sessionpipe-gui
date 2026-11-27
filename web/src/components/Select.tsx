@@ -24,6 +24,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { safeSides, useSelectSheet } from "../lib/device";
+import { CheckIcon, ChevronIcon } from "./Icons";
 import "../styles/select.css";
 
 export interface SelectOption<T> {
@@ -620,16 +621,7 @@ function Picker<T>({
           </span>
         ) : null}
         <span className="sel-text ellipsis">{summary()}</span>
-        <svg className="sel-chevron" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-          <path
-            d="M3 4.5 6 7.5l3-3"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <ChevronIcon size={12} direction="down" className="sel-chevron" />
       </button>
       {popover}
     </>
@@ -660,16 +652,5 @@ export function filterOptions<T>(options: SelectOption<T>[], q: string): SelectO
 }
 
 function Check() {
-  return (
-    <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
-      <path
-        d="M2.5 6.5 5 9l4.5-6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <CheckIcon size={12} />;
 }

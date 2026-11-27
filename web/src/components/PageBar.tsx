@@ -23,6 +23,7 @@ import { useBehind } from "../account/current";
 import { useStore } from "../data/hooks";
 import { usePhoneLayout } from "../lib/device";
 import { SearchInput } from "./bits";
+import { BackIcon } from "./Icons";
 import { listBehind, useConnection } from "./Shell";
 
 /** The phone's subtitle line under a large title: the meta, or while the stream is down
@@ -241,16 +242,7 @@ export function BackButton({ onClick, label }: { onClick: () => void; label?: st
       aria-label="Back"
       title={`Back to ${text}`}
     >
-      <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
-        <path
-          d="M12.5 4.5 7 10l5.5 5.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <BackIcon size={18} />
       {phone ? (
         <span className="bar-back-label" aria-hidden="true">
           {text}

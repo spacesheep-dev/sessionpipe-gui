@@ -7,6 +7,7 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMenuOpen } from "../components/ContextMenu";
 import { drawnY } from "./drawn";
+import { usePageScrollerRef } from "./pageScroll";
 
 /** Whether the person asked for less motion, read live. */
 export const reducedMotion = (): boolean =>
@@ -416,26 +417,30 @@ export function useSheetDrag(
 /** Sets `data-stuck` on a sticky element while it is pinned with content scrolled under
  *  it (a section header under the page bar), for its hairline. */
 export function useStuck(ref: RefObject<HTMLElement | null>): void {
+  const pageScrollRef = usePageScrollerRef();
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const box = pageScrollRef?.current ?? null;
+    const target: EventTarget = box ?? window;
     let raf = 0;
     const check = () => {
       raf = 0;
       const top = Number.parseFloat(getComputedStyle(el).top) || 0;
-      const stuck = window.scrollY > 0 && el.getBoundingClientRect().top <= top + 0.5;
+      const origin = box ? box.getBoundingClientRect().top : 0;
+      const stuck = (box?.scrollTop ?? window.scrollY) > 0 && el.getBoundingClientRect().top - origin <= top + 0.5;
       el.toggleAttribute("data-stuck", stuck);
     };
     const on = () => {
       if (!raf) raf = requestAnimationFrame(check);
     };
     check();
-    window.addEventListener("scroll", on, { passive: true });
+    target.addEventListener("scroll", on, { passive: true });
     window.addEventListener("resize", on);
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("scroll", on);
+      target.removeEventListener("scroll", on);
       window.removeEventListener("resize", on);
     };
-  }, [ref]);
+  }, [ref, pageScrollRef]);
 }

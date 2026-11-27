@@ -35,6 +35,7 @@ import { useListNav } from "../lib/keys";
 import { type LabelFilter, labelPasses, labelQuery } from "../lib/labels";
 import { absoluteUrl, copyItem, openOutside } from "../lib/menus";
 import { reducedMotion, tokenMs, useListHold } from "../lib/motion";
+import { scrollPageTo, usePageScrollerRef } from "../lib/pageScroll";
 import { Link, navigate, sessionPath } from "../lib/router";
 import { useAppSettings, useLens } from "../lib/settings";
 import { useShortcut } from "../lib/shortcuts";
@@ -364,7 +365,7 @@ export function Feed() {
   const togglePause = useCallback(() => (paused ? resume() : setPaused(true)), [paused, resume]);
   const showNew = () => {
     resume();
-    window.scrollTo({ top: 0 });
+    scrollPageTo(0);
   };
 
   const older = useCallback(() => {
@@ -678,7 +679,9 @@ function useGlide(ref: RefObject<HTMLOListElement | null>, rows: readonly Stored
  *  so what is being read does not move. Changes state only when it crosses. */
 function useScrolledAway(ref: RefObject<HTMLElement | null>): boolean {
   const [away, setAway] = useState(false);
+  const pageScrollRef = usePageScrollerRef();
   useEffect(() => {
+    const target: EventTarget = pageScrollRef?.current ?? window;
     let raf = 0;
     const check = () => {
       raf = 0;
@@ -693,12 +696,12 @@ function useScrolledAway(ref: RefObject<HTMLElement | null>): boolean {
       if (!raf) raf = requestAnimationFrame(check);
     };
     check();
-    window.addEventListener("scroll", on, { passive: true });
+    target.addEventListener("scroll", on, { passive: true });
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("scroll", on);
+      target.removeEventListener("scroll", on);
     };
-  }, [ref]);
+  }, [ref, pageScrollRef]);
   return away;
 }
 

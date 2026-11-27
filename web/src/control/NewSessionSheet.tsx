@@ -39,6 +39,7 @@ import {
 } from "react";
 import { useSendStates } from "../account/sendable";
 import { ActionButton, EmptyState, HarnessGlyph, withFormScrim } from "../components/bits";
+import { CloseIcon, FolderIcon, PaperclipIcon, RefreshIcon, StarIcon } from "../components/Icons";
 import { filterOptions, Select, type SelectOption } from "../components/Select";
 import { useAppState, useLimits, useListedSessions, useMachines } from "../data/hooks";
 import { usePhoneLayout } from "../lib/device";
@@ -1099,15 +1100,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
                 data-tip="Try again"
                 onClick={() => retry(f)}
               >
-                <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" fill="none">
-                  <path
-                    d="M9.6 6.6A3.7 3.7 0 1 1 8.4 3.2M9.4 1.6v2.3H7.1"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+                <RefreshIcon size={10} />
               </button>
             )}
             <button
@@ -1116,9 +1109,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
               aria-label={`Remove ${f.name}`}
               onClick={() => removeFile(f.key)}
             >
-              <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-                <path d="M3 3l6 6M9 3 3 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
+              <CloseIcon size={10} />
             </button>
           </li>
         ))}
@@ -1156,19 +1147,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
           data-tip="Add files"
           onClick={() => fileInput.current?.click()}
         >
-          <svg
-            viewBox="0 0 16 16"
-            width="16"
-            height="16"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.25"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M10.5 4.5 5.7 9.3a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a3.2 3.2 0 0 0-4.5-4.5L3.3 7.3a4.8 4.8 0 0 0 6.8 6.8l3.6-3.6" />
-          </svg>
+          <PaperclipIcon size={16} />
           {files.length > 0 && (
             <span className="ns-attach-count num" aria-hidden="true">
               {files.length}
@@ -1499,41 +1478,12 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
 
 /** Crisp 14 px monochrome folder glyph for the Folder trigger. */
 function FolderGlyph() {
-  return (
-    <svg
-      className="ns-folder-icon"
-      viewBox="0 0 16 16"
-      width="14"
-      height="14"
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.45"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6a1.5 1.5 0 0 1 1.15.54l.6.72c.24.28.59.44.96.44H12.5A1.5 1.5 0 0 1 14 6.2v5.3a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5v-7Z" />
-    </svg>
-  );
+  return <FolderIcon size={14} className="ns-folder-icon" />;
 }
 
 /** Crisp 14 px star glyph for pinning/unpinning the chosen folder. */
 function StarGlyph({ filled }: { filled: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="14"
-      height="14"
-      aria-hidden="true"
-      fill={filled ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth="1.45"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m8 2.2 1.76 3.56 3.94.58-2.85 2.78.67 3.92L8 11.2l-3.52 1.84.67-3.92L2.3 6.34l3.94-.58L8 2.2Z" />
-    </svg>
-  );
+  return <StarIcon size={14} filled={filled} />;
 }
 
 /** Where an element's first line of text starts, in the viewport (its content box). */

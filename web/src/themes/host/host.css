@@ -20,6 +20,9 @@
     height: 100dvh;
   }
 }
+.shell.shell--split > .main--bleed > .theme-page {
+  height: 100%;
+}
 
 /* By attribute, not class: a theme may replace the container's className and must not
    lose the frame it sits in by doing so. */

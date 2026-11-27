@@ -9,6 +9,30 @@
   --split-width: 0px;
   padding-right: var(--split-width);
 }
+/* While a session is open beside the page on desktop, lock the outer document to the
+   viewport and let <main> scroll the page so the window never grows a second scrollbar
+   alongside the panel's own scroller. */
+html:has(> body #root > .shell.shell--split) {
+  overflow: hidden;
+}
+.shell.shell--split {
+  min-height: 0;
+  height: calc(100dvh - var(--demo-bar-h, 0px));
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+.shell.shell--split > .rail {
+  height: 100%;
+}
+.shell.shell--split > .main {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.shell.shell--split[data-covers] > .main {
+  overflow: hidden;
+}
 .split-dragging .shell,
 .split-dragging .panel {
   transition: none;
@@ -171,6 +195,9 @@
 @media (min-width: 720px) and (max-width: 839px) and (pointer: fine) {
   .shell {
     padding-right: 0;
+  }
+  .shell.shell--split > .main {
+    overflow: hidden;
   }
   .panel {
     left: var(--side-w, var(--rail));

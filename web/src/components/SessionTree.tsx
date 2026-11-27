@@ -106,6 +106,15 @@ import {
 import { HarnessGlyph, StateDot } from "./bits";
 import { closeMenu, type MenuList, openMenu, useContextMenu } from "./ContextMenu";
 import { FolderIcon, folderMenuItems, PlusSmallIcon, ProjectIcon } from "./GroupBits";
+import {
+  ChevronIcon,
+  GroupProjectsIcon,
+  MachineIcon,
+  MoreDotsIcon,
+  NewFolderIcon,
+  PinIcon,
+  PlusCircleIcon,
+} from "./Icons";
 import { useLabelKeys } from "./LabelDot";
 import "../styles/sidetree.css";
 
@@ -216,99 +225,18 @@ const NO_ROWS: readonly SessionSummary[] = [];
 function AwayMark() {
   return (
     <span className="stree-away" aria-hidden="true">
-      <svg
-        viewBox="0 0 20 20"
-        width="12"
-        height="12"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <rect x="2.5" y="4" width="15" height="10" rx="1.5" />
-        <path d="M7 17h6" />
-      </svg>
+      <MachineIcon size={12} />
     </span>
   );
 }
 
 /** A pin, for the place a held row is pinned. */
 function PinGlyph() {
-  return (
-    <svg
-      className="stree-new-glyph"
-      viewBox="0 0 20 20"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M7.5 3.5h5l-.8 5 2.8 2.5v1h-9v-1l2.8-2.5z" />
-      <path d="M10 12v4.5" />
-    </svg>
-  );
+  return <PinIcon size={16} className="stree-new-glyph" />;
 }
 
 function Chevron() {
-  return (
-    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-      <path
-        d="M6 4l4 4-4 4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/** Header button icon: group sessions by project. */
-function GroupProjectsIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="14"
-      height="14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="2" y="2.5" width="12" height="4.5" rx="1.2" />
-      <rect x="2" y="9" width="12" height="4.5" rx="1.2" />
-      <path d="M4.5 4.75h3M4.5 11.25h4.5" />
-    </svg>
-  );
-}
-
-/** Header button icon: new custom folder. */
-function NewFolderIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="14"
-      height="14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.3 1.5h5.1A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
-      <path d="M8 7v3.5M6.25 8.75h3.5" />
-    </svg>
-  );
+  return <ChevronIcon size={12} />;
 }
 
 export const SessionTree = memo(function SessionTree({
@@ -1404,20 +1332,7 @@ export const SessionTree = memo(function SessionTree({
               data-tip-keys={touch ? undefined : hintFor("newSession.open") || undefined}
               data-tip-side="right"
             >
-              <svg
-                className="stree-new-glyph"
-                viewBox="0 0 20 20"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                aria-hidden="true"
-              >
-                <circle cx="10" cy="10" r="7" />
-                <path d="M10 7v6M7 10h6" />
-              </svg>
+              <PlusCircleIcon size={touch ? 20 : 16} className="stree-new-glyph" />
               <span>New session</span>
             </button>
             <button
@@ -1433,7 +1348,7 @@ export const SessionTree = memo(function SessionTree({
                 setSettings({ sidebarGroup: grouped ? "flat" : "project" });
               }}
             >
-              <GroupProjectsIcon />
+              <GroupProjectsIcon size={touch ? 18 : 16} />
             </button>
             <button
               type="button"
@@ -1445,7 +1360,7 @@ export const SessionTree = memo(function SessionTree({
               data-tip-side="bottom"
               onClick={startCreateFolder}
             >
-              <NewFolderIcon />
+              <NewFolderIcon size={touch ? 18 : 16} />
             </button>
           </>
         )}
@@ -1990,11 +1905,7 @@ function FolderGroupRow({
               });
             }}
           >
-            <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true">
-              <circle cx="4.5" cy="10" r="1.5" />
-              <circle cx="10" cy="10" r="1.5" />
-              <circle cx="15.5" cy="10" r="1.5" />
-            </svg>
+            <MoreDotsIcon size={16} />
           </button>
         )}
       </div>
@@ -2145,7 +2056,7 @@ function ProjectGroupRow({
               startInProject();
             }}
           >
-            <PlusSmallIcon size={touch ? 16 : 12} />
+            <PlusSmallIcon size={touch ? 16 : 13} />
           </button>
         )}
       </div>

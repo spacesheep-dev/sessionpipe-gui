@@ -25,6 +25,7 @@ import {
   useSettings,
 } from "../lib/theme";
 import { Segmented } from "./bits";
+import { DisplaySunIcon } from "./Icons";
 
 export const APPEARANCE: { value: Theme; label: string }[] = [
   { value: "auto", label: "System" },
@@ -98,23 +99,8 @@ export function useListedSkins(): {
   };
 }
 
-export function GearIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      width={size}
-      height={size}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="10" cy="10" r="2.5" />
-      <path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6" />
-    </svg>
-  );
+export function GearIcon({ size = 20 }: { size?: number }) {
+  return <DisplaySunIcon size={size} />;
 }
 
 export function QuickSettings({

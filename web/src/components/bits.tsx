@@ -23,6 +23,7 @@ import { MEASURE_EVENT } from "../lib/giveWay";
 import { HARNESS_ICONS } from "../lib/harnessIcons";
 import { syncSpins } from "../lib/spin";
 import { ago, durCoarse, ms, since, tickFor, useNow } from "../lib/time";
+import { CheckIcon, CopyIcon, SearchIcon } from "./Icons";
 import { Select } from "./Select";
 
 /** The status glyph (styles/shared.css `.dot`): the one signal a row shows for its state.
@@ -423,26 +424,7 @@ export function CopyIconButton({ text, label = "Copy" }: { text: string; label?:
       title={label}
       onClick={() => void copyText(text).then(() => setDone(true))}
     >
-      <svg
-        viewBox="0 0 16 16"
-        width="16"
-        height="16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        {done ? (
-          <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
-        ) : (
-          <>
-            <rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5" />
-            <path d="M10.5 3.5V3A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5" />
-          </>
-        )}
-      </svg>
+      {done ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
       <span className="sr-only" aria-live="polite">
         {done ? "Copied" : ""}
       </span>
@@ -487,10 +469,7 @@ export function SearchInput({
 }) {
   return (
     <label className="search">
-      <svg className="search-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-        <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
+      <SearchIcon size={14} className="search-icon" />
       <input
         data-search
         type="search"

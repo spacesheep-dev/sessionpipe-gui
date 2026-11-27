@@ -11,6 +11,7 @@ import { LENSES, type Lens, lensLabel, setTierLens, useAppSettings } from "../li
 import { TIER_HINT, TIER_LABEL } from "../lib/tier";
 import { Segmented } from "./bits";
 import { type MenuList, openMenu, useMenuOpen } from "./ContextMenu";
+import { ChevronIcon } from "./Icons";
 
 export const LENS_OPTIONS = LENSES.map((l) => ({
   value: l === null ? "all" : String(l),
@@ -92,16 +93,7 @@ export function LensChip() {
             </span>
           ))}
         </span>
-        <svg className="lens-chip-caret" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
-          <path
-            d="M3 4.5 6 7.5l3-3"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <ChevronIcon size={10} direction="down" className="lens-chip-caret" />
       </button>
     </div>
   );

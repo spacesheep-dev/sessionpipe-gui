@@ -113,7 +113,7 @@ span.nav-glyph > svg {
 }
 .tabbar .nav-link--on .nav-glyph {
   color: var(--tint);
-  stroke-width: 2;
+  stroke-width: 1.7;
 }
 .tabbar .nav-link:active {
   opacity: 0.55;
@@ -176,8 +176,8 @@ span.nav-glyph > svg {
 }
 .rail .rail-foot .theme-btn > .nav-dot {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 6px;
+  right: 6px;
   left: auto;
   margin: 0;
 }
@@ -489,7 +489,7 @@ span.nav-glyph > svg {
   /* The rail's button for the sessions column, over the pages, lit while it shows. */
   .rail-nav.rail-nav--toggle {
     flex: none;
-    padding-bottom: 0;
+    padding: 6px 6px 0;
   }
   .rail-nav--toggle::after {
     content: "";
@@ -567,8 +567,8 @@ span.nav-glyph > svg {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 8px 6px;
+    gap: 3px;
+    padding: 6px 6px;
     overflow-y: auto;
     scrollbar-width: none;
   }
@@ -589,7 +589,7 @@ span.nav-glyph > svg {
   /* The compact rail is icons only, as a Mac's narrow sidebar is; each icon's tooltip
      names its page and keys (Tip.tsx). The label stays for assistive tech. */
   .rail .nav-link {
-    min-height: 40px;
+    min-height: 36px;
     gap: 4px;
     border-radius: var(--radius);
     color: var(--fg-2);
@@ -645,7 +645,21 @@ span.nav-glyph > svg {
     flex-direction: column;
     align-items: center;
     gap: 4px;
-    padding: 8px 0 12px;
+    padding: 6px 0 10px;
+  }
+  .rail-foot::before {
+    content: "";
+    width: 32px;
+    margin: 0 auto 6px;
+    border-top: var(--hairline) solid var(--line);
+  }
+  .rail-foot .theme-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .rail-foot .theme-btn svg {
+    width: 20px;
+    height: 20px;
   }
   .rail .conn {
     flex-direction: column;
@@ -660,7 +674,8 @@ span.nav-glyph > svg {
      the attention colour, on their words. */
   .glance {
     flex: none;
-    padding: 0 8px 8px;
+    border-top: var(--hairline) solid var(--line);
+    padding: 6px 8px 10px;
   }
   /* Both links keep the 24 px a pointer needs (WCAG 2.5.8). */
   .glance-head {
