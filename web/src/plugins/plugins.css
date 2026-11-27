@@ -287,6 +287,9 @@
   .plug-cfg-btn {
     min-height: var(--tap);
   }
+  .plug-input {
+    min-height: var(--tap);
+  }
   .plug-chip {
     min-height: var(--tap);
     padding: 4px 14px;

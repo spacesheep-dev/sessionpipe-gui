@@ -20,8 +20,6 @@ import {
   type ArrangementFolder,
   type ControlActivity,
   isEmptySession,
-  LABEL_COLORS,
-  LABEL_DEFAULT_NAMES,
   type MachineSummary,
   type SessionKey,
   type SessionSummary,
@@ -55,17 +53,15 @@ import {
   type ArrangeSource,
   arrange,
   createFolder,
-  deleteFolder,
   moveTargets,
   onArranged,
   planMove,
-  recolorFolder,
   renameFolder,
-  reorderFolder,
   requestFolderPrompt,
   requestMoveFolder,
   requestMoveUnder,
 } from "../lib/arrange";
+import { useFolded } from "../lib/folded";
 import { harnessMark, sessionTitle } from "../lib/format";
 import { haptic } from "../lib/haptics";
 import { isHidden, useHidden } from "../lib/hidden";
@@ -108,7 +104,8 @@ import {
   touchScrolls,
 } from "../lib/treeDrag";
 import { HarnessGlyph, StateDot } from "./bits";
-import { closeMenu, type MenuList, useContextMenu } from "./ContextMenu";
+import { closeMenu, type MenuList, openMenu, useContextMenu } from "./ContextMenu";
+import { FolderIcon, folderMenuItems, PlusSmallIcon, ProjectIcon } from "./GroupBits";
 import { useLabelKeys } from "./LabelDot";
 import "../styles/sidetree.css";
 
@@ -119,61 +116,6 @@ export const KIDS_SHOWN = 8;
 
 // Keep unused constant lint clean if referenced only for docs.
 void DRAG_SLOP_PX;
-
-// ----- what this device folded (session keys, custom folders `f:<id>`, projects `p:<key>`) -----
-
-const FOLDED_KEY = "sessionpipe-gui.sidebar.folded";
-/** Folded parents / groups remembered at most (the oldest go first). */
-const FOLDED_MAX = 500;
-const readFolded = (): string[] => {
-  try {
-    const v = JSON.parse(localStorage.getItem(FOLDED_KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : [];
-  } catch {
-    return [];
-  }
-};
-function useFolded(): [
-  ReadonlySet<string>,
-  (key: string, fold: boolean) => void,
-  (keys: readonly string[], fold: boolean) => void,
-] {
-  const [folded, set] = useState<ReadonlySet<string>>(() => new Set(readFolded()));
-  const persist = (next: ReadonlySet<string>) => {
-    try {
-      localStorage.setItem(FOLDED_KEY, JSON.stringify([...next].slice(-FOLDED_MAX)));
-    } catch {
-      // a private window: folded for this visit
-    }
-  };
-  const toggle = useCallback((key: string, fold: boolean) => {
-    set((was) => {
-      if (was.has(key) === fold) return was;
-      const next = new Set(was);
-      if (fold) next.add(key);
-      else next.delete(key);
-      persist(next);
-      return next;
-    });
-  }, []);
-  const toggleMany = useCallback((keys: readonly string[], fold: boolean) => {
-    if (keys.length === 0) return;
-    set((was) => {
-      let changed = false;
-      const next = new Set(was);
-      for (const k of keys) {
-        if (next.has(k) === fold) continue;
-        changed = true;
-        if (fold) next.add(k);
-        else next.delete(k);
-      }
-      if (!changed) return was;
-      persist(next);
-      return next;
-    });
-  }, []);
-  return [folded, toggle, toggleMany];
-}
 
 // ----- the rows as drawn -----
 
@@ -328,54 +270,6 @@ function Chevron() {
   );
 }
 
-/** Monochrome 16 px folder icon for custom folders. */
-function FolderIcon({ open }: { open?: boolean }) {
-  return (
-    <svg
-      className="stree-folder-glyph"
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {open ? (
-        <>
-          <path d="M2 5a1.5 1.5 0 0 1 1.5-1.5h2.6l1.3 1.4h4.6a1.5 1.5 0 0 1 1.4 1.1" />
-          <path d="M2 6.5h11.3a1 1 0 0 1 .97 1.24l-.9 3.6A1.5 1.5 0 0 1 11.9 12.5H3.5A1.5 1.5 0 0 1 2 11z" />
-        </>
-      ) : (
-        <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.8l1.4 1.5h4.8A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
-      )}
-    </svg>
-  );
-}
-
-/** Monochrome 16 px project / repository icon for project groups. */
-function ProjectIcon() {
-  return (
-    <svg
-      className="stree-project-glyph"
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
-      <path d="M5.5 6h5M5.5 9h3.5" />
-    </svg>
-  );
-}
-
 /** Header button icon: group sessions by project. */
 function GroupProjectsIcon() {
   return (
@@ -413,24 +307,6 @@ function NewFolderIcon() {
     >
       <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.3 1.5h5.1A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />
       <path d="M8 7v3.5M6.25 8.75h3.5" />
-    </svg>
-  );
-}
-
-/** Small `+` glyph for "New session in <project>". */
-function PlusSmallIcon() {
-  return (
-    <svg
-      viewBox="0 0 14 14"
-      width="12"
-      height="12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <path d="M7 3.2v7.6M3.2 7h7.6" />
     </svg>
   );
 }
@@ -1118,7 +994,8 @@ export const SessionTree = memo(function SessionTree({
     own,
   );
 
-  // Heading menus: Unfold all / Fold all for Pinned and Sessions.
+  // Heading menus: Unfold all / Fold all for Pinned and Sessions, plus Group by project on Sessions.
+  const onSectionTouchDown = useTouchMenu(touch);
   const sectionMenu = (nodes: readonly TreeNode[], extraGroupKeys?: readonly string[]): MenuList | null => {
     const keys = [...(extraGroupKeys ?? []), ...parentKeysIn(nodes)];
     if (keys.length === 0) return null;
@@ -1131,7 +1008,19 @@ export const SessionTree = memo(function SessionTree({
   };
   const pinnedHeadingMenu = useContextMenu(() => sectionMenu(pinned), { title: () => "Pinned" });
   const sessionsHeadingMenu = useContextMenu(
-    () => sectionMenu(roots, grouped ? projectGroups.map((pg) => `p:${pg.key}`) : undefined),
+    () => {
+      const foldItems = sectionMenu(roots, grouped ? projectGroups.map((pg) => `p:${pg.key}`) : undefined);
+      return [
+        {
+          label: grouped ? "Show flat list" : "Group by project",
+          run: () => {
+            calmNextCommit();
+            setSettings({ sidebarGroup: grouped ? "flat" : "project" });
+          },
+        },
+        ...(foldItems ? [{ sep: true as const }, ...foldItems] : []),
+      ];
+    },
     { title: () => "Sessions" },
   );
   const foldersHeadingMenu = useContextMenu(
@@ -1576,6 +1465,7 @@ export const SessionTree = memo(function SessionTree({
                 id={`${groupId}-pinned`}
                 data-zone="pinned"
                 data-target={drag?.target?.kind === "pinned" ? "" : undefined}
+                onPointerDown={onSectionTouchDown}
                 {...pinnedHeadingMenu}
               >
                 Pinned
@@ -1593,7 +1483,12 @@ export const SessionTree = memo(function SessionTree({
           )}
           {(folders.length > 0 || creatingFolder) && (
             <section className="stree-section" aria-labelledby={`${groupId}-folders`}>
-              <h2 className="stree-label" id={`${groupId}-folders`} {...foldersHeadingMenu}>
+              <h2
+                className="stree-label"
+                id={`${groupId}-folders`}
+                onPointerDown={onSectionTouchDown}
+                {...foldersHeadingMenu}
+              >
                 Folders
               </h2>
               <div className="stree-list" role="tree" aria-labelledby={`${groupId}-folders`} onKeyDown={onKey}>
@@ -1648,7 +1543,7 @@ export const SessionTree = memo(function SessionTree({
                                 drag?.target?.kind === "folder" && drag.target.folderId === f.id ? "" : undefined
                               }
                             >
-                              Drop sessions here
+                              {touch ? "No active sessions" : "Drop sessions here"}
                             </p>
                           )}
                         </div>
@@ -1700,6 +1595,7 @@ export const SessionTree = memo(function SessionTree({
               id={`${groupId}-sessions`}
               data-zone="sessions"
               data-target={drag?.target?.kind === "top" ? "" : undefined}
+              onPointerDown={onSectionTouchDown}
               {...sessionsHeadingMenu}
             >
               Sessions
@@ -1825,39 +1721,92 @@ export const SessionTree = memo(function SessionTree({
 
 const nodeKey = (n: TreeNode) => n.s.key;
 
-/** Touch long-press menu trigger for folder / project group rows inside `.stree`
- *  (ContextMenu.tsx skips `.stree` so session rows own their own press/drag gesture). */
+/** Touch long-press menu trigger for folder / project group rows and section headings inside
+ *  `.stree` (ContextMenu.tsx skips `.stree` so session rows own their own press/drag gesture). */
 function useTouchMenu(touch: boolean) {
   const activeCleanup = useRef<(() => void) | null>(null);
+  const activePointerId = useRef<number | null>(null);
   useEffect(() => () => activeCleanup.current?.(), []);
   return useCallback(
     (e: ReactPointerEvent<HTMLElement>) => {
-      if (!touch || e.pointerType !== "touch") return;
+      if (!touch || e.pointerType === "mouse" || e.button !== 0) return;
+      if (activePointerId.current !== null) return;
       activeCleanup.current?.();
       const el = e.currentTarget;
+      const pointerId = e.pointerId;
       const start = { x: e.clientX, y: e.clientY };
       let timer = 0;
       let swallowTimer = 0;
-      const swallow = (c: Event) => {
-        c.preventDefault();
-        c.stopPropagation();
-      };
-      const cleanup = () => {
-        window.clearTimeout(timer);
+      let opened = false;
+      activePointerId.current = pointerId;
+      el.setAttribute("data-pressed", "");
+
+      const clearSwallow = () => {
         window.clearTimeout(swallowTimer);
-        window.removeEventListener("pointermove", onMove, true);
-        window.removeEventListener("pointerup", cleanup, true);
-        window.removeEventListener("pointercancel", cleanup, true);
-        window.removeEventListener("click", swallow, { capture: true });
+        swallowTimer = 0;
+        window.removeEventListener("click", swallow, true);
         if (activeCleanup.current === cleanup) activeCleanup.current = null;
       };
+      const swallow = (c: Event) => {
+        if ((c.target as HTMLElement | null)?.closest?.(".menu-sheet")) return;
+        c.preventDefault();
+        c.stopPropagation();
+        clearSwallow();
+      };
+      const detachHold = () => {
+        window.clearTimeout(timer);
+        timer = 0;
+        window.removeEventListener("pointermove", onMove, true);
+        window.removeEventListener("pointerup", onUp, true);
+        window.removeEventListener("pointercancel", onCancel, true);
+        window.removeEventListener("contextmenu", noMenu, true);
+        if (activePointerId.current === pointerId) activePointerId.current = null;
+      };
+      const cleanup = () => {
+        detachHold();
+        clearSwallow();
+        el.removeAttribute("data-pressed");
+        if (activeCleanup.current === cleanup) activeCleanup.current = null;
+      };
+      const installSwallow = () => {
+        window.addEventListener("click", swallow, true);
+        swallowTimer = window.setTimeout(clearSwallow, 400);
+      };
       const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
         if (touchScrolls(ev.clientX - start.x, ev.clientY - start.y)) cleanup();
       };
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        detachHold();
+        if (opened) {
+          if (!el.hasAttribute("data-menu-open")) el.removeAttribute("data-pressed");
+          installSwallow();
+        } else {
+          el.removeAttribute("data-pressed");
+          if (activeCleanup.current === cleanup) activeCleanup.current = null;
+        }
+      };
+      const onCancel = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        detachHold();
+        el.removeAttribute("data-pressed");
+        if (opened) {
+          installSwallow();
+        } else if (activeCleanup.current === cleanup) {
+          activeCleanup.current = null;
+        }
+      };
+      const noMenu = (ev: Event) => {
+        if ((ev as { __touch?: boolean }).__touch) return;
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+      };
+
       timer = window.setTimeout(() => {
+        timer = 0;
+        opened = true;
         window.removeEventListener("pointermove", onMove, true);
-        window.removeEventListener("pointerup", cleanup, true);
-        window.removeEventListener("pointercancel", cleanup, true);
         haptic("selection");
         const ce = new MouseEvent("contextmenu", {
           bubbles: true,
@@ -1866,16 +1815,13 @@ function useTouchMenu(touch: boolean) {
           clientY: start.y,
         });
         el.dispatchEvent(Object.assign(ce, { __touch: true }));
-        window.addEventListener("click", swallow, { capture: true, once: true });
-        swallowTimer = window.setTimeout(() => {
-          window.removeEventListener("click", swallow, { capture: true });
-          if (activeCleanup.current === cleanup) activeCleanup.current = null;
-        }, 800);
+        if (!el.hasAttribute("data-menu-open")) el.removeAttribute("data-pressed");
       }, LONG_PRESS_MS);
       activeCleanup.current = cleanup;
       window.addEventListener("pointermove", onMove, true);
-      window.addEventListener("pointerup", cleanup, true);
-      window.addEventListener("pointercancel", cleanup, true);
+      window.addEventListener("pointerup", onUp, true);
+      window.addEventListener("pointercancel", onCancel, true);
+      window.addEventListener("contextmenu", noMenu, true);
     },
     [touch],
   );
@@ -1934,138 +1880,123 @@ function FolderGroupRow({
   children?: ReactNode;
 }) {
   const store = useStore();
+  const folderRowRef = useRef<HTMLDivElement>(null);
   const onTouchDown = useTouchMenu(touch);
-  const menu = useContextMenu(
-    () => {
-      const kidKeys = kidsInFolder();
-      const anyKidFolded = kidKeys.some((k) => latestFolds.current.has(k));
-      const anyKidOpen = kidKeys.some((k) => !latestFolds.current.has(k));
-      return [
-        { label: "Rename…", run: onStartRename },
-        {
-          label: "Color",
-          items: [
-            {
-              label: "None",
-              radio: true,
-              checked: !folder.color,
-              run: () => void recolorFolder(store, folder.id, null),
-            },
-            { sep: true },
-            ...LABEL_COLORS.map((c) => ({
-              label: LABEL_DEFAULT_NAMES[c],
-              swatch: c,
-              radio: true,
-              checked: folder.color === c,
-              run: () => void recolorFolder(store, folder.id, c),
-            })),
-          ],
-        },
-        index > 0 && { label: "Move up", run: () => void reorderFolder(store, folder.id, -1) },
-        index < total - 1 && { label: "Move down", run: () => void reorderFolder(store, folder.id, 1) },
-        kidKeys.length > 0 && { sep: true },
-        kidKeys.length > 0 && {
-          label: "Unfold all",
-          disabled: !anyKidFolded,
-          run: () => setFoldedMany(kidKeys, false),
-        },
-        kidKeys.length > 0 && {
-          label: "Fold all",
-          disabled: !anyKidOpen,
-          run: () => setFoldedMany(kidKeys, true),
-        },
-        { sep: true },
-        {
-          label: "Delete folder",
-          danger: true,
-          run: () => {
-            calmNextCommit();
-            deleteFolder(store, folder.id);
-          },
-        },
-      ];
-    },
-    { title: () => folder.name },
-  );
+  const buildMenu = () =>
+    folderMenuItems(store, folder, index, total, {
+      onRename: onStartRename,
+      kidKeys: kidsInFolder(),
+      folded: latestFolds.current,
+      setFoldedMany,
+    });
+  const menu = useContextMenu(buildMenu, { title: () => folder.name });
   const rolled = folded && loud !== "none" ? loud : undefined;
   return (
     <div role="none" className="stree-item stree-group-item">
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the tree's onKey handler owns Enter, Space, and arrows */}
-      <div
-        role="treeitem"
-        aria-level={1}
-        aria-posinset={index + 1}
-        aria-setsize={total}
-        aria-expanded={!folded}
-        aria-owns={!folded ? groupId : undefined}
-        tabIndex={tab ? 0 : -1}
-        className={`stree-row stree-group-row stree-folder-row${renaming ? " stree-folder-row--editing" : ""}`}
-        data-flip={`fhead:${folder.id}`}
-        data-tree-nav=""
-        data-group-row={foldKey}
-        data-zone="folder"
-        data-folder-id={folder.id}
-        data-rolled={rolled}
-        data-target={target ? "" : undefined}
-        onClick={() => {
-          if (!renaming) onToggleFold();
-        }}
-        onDoubleClick={(e) => {
-          if (touch || renaming) return;
-          e.stopPropagation();
-          onStartRename();
-        }}
-        onPointerDown={onTouchDown}
-        onFocus={onFocus}
-        {...menu}
-      >
-        <span className="stree-group-chev" data-folded={folded ? "" : undefined} aria-hidden="true">
-          <Chevron />
-        </span>
-        <span className="stree-lead">
-          <FolderIcon open={!folded} />
-        </span>
-        {folder.color && (
-          <span className={`stree-folder-dot label-dot label-dot--${folder.color}`} aria-hidden="true" />
-        )}
-        {renaming ? (
-          <input
-            ref={inputRef}
-            type="text"
-            className="stree-inline-input"
-            value={draft}
-            maxLength={ARRANGEMENT_FOLDER_NAME_MAX}
-            aria-label="Folder name"
-            autoComplete="off"
-            spellCheck={false}
-            onClick={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => e.stopPropagation()}
-            onChange={(e) => onDraftChange(e.target.value)}
-            onBlur={() => onCommitRename(false)}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter") {
-                e.preventDefault();
-                onCommitRename(true);
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                onCancelEdit();
-              }
-            }}
-          />
-        ) : (
-          <span className="stree-title" dir="auto">
-            {folder.name}
+      <div role="none" className="stree-folder-head">
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: the tree's onKey handler owns Enter, Space, and arrows */}
+        <div
+          ref={folderRowRef}
+          role="treeitem"
+          aria-level={1}
+          aria-posinset={index + 1}
+          aria-setsize={total}
+          aria-expanded={!folded}
+          aria-owns={!folded ? groupId : undefined}
+          tabIndex={tab ? 0 : -1}
+          className={`stree-row stree-group-row stree-folder-row${renaming ? " stree-folder-row--editing" : ""}`}
+          data-flip={`fhead:${folder.id}`}
+          data-tree-nav=""
+          data-group-row={foldKey}
+          data-zone="folder"
+          data-folder-id={folder.id}
+          data-rolled={rolled}
+          data-target={target ? "" : undefined}
+          onClick={() => {
+            if (!renaming) onToggleFold();
+          }}
+          onDoubleClick={(e) => {
+            if (touch || renaming) return;
+            e.stopPropagation();
+            onStartRename();
+          }}
+          onPointerDown={renaming ? undefined : onTouchDown}
+          onFocus={onFocus}
+          {...menu}
+        >
+          <span className="stree-group-chev" data-folded={folded ? "" : undefined} aria-hidden="true">
+            <Chevron />
           </span>
+          <span className="stree-lead">
+            <FolderIcon open={!folded} />
+          </span>
+          {folder.color && (
+            <span className={`stree-folder-dot label-dot label-dot--${folder.color}`} aria-hidden="true" />
+          )}
+          {renaming ? (
+            <input
+              ref={inputRef}
+              type="text"
+              className="stree-inline-input"
+              value={draft}
+              maxLength={ARRANGEMENT_FOLDER_NAME_MAX}
+              aria-label="Folder name"
+              autoComplete="off"
+              spellCheck={false}
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onChange={(e) => onDraftChange(e.target.value)}
+              onBlur={() => onCommitRename(false)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onCommitRename(true);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  onCancelEdit();
+                }
+              }}
+            />
+          ) : (
+            <span className="stree-title" dir="auto">
+              {folder.name}
+            </span>
+          )}
+          <span className="stree-group-count num" aria-hidden="true">
+            {count}
+          </span>
+          <span className="stree-lamp">{rolled && <GroupLamp loud={rolled} size={touch ? 12 : 10} />}</span>
+          <span className="sr-only">
+            , folder, {count} {count === 1 ? "session" : "sessions"}
+            {rolled ? loudWords(rolled) : ""}
+          </span>
+        </div>
+        {touch && !renaming && (
+          <button
+            type="button"
+            className="icon-btn stree-folder-more"
+            aria-label={`Folder actions for ${folder.name}`}
+            aria-haspopup="menu"
+            tabIndex={-1}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              openMenu(buildMenu(), e.currentTarget, {
+                source: "touch",
+                invoker: e.currentTarget,
+                owner: folderRowRef.current ?? e.currentTarget,
+                title: folder.name,
+              });
+            }}
+          >
+            <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true">
+              <circle cx="4.5" cy="10" r="1.5" />
+              <circle cx="10" cy="10" r="1.5" />
+              <circle cx="15.5" cy="10" r="1.5" />
+            </svg>
+          </button>
         )}
-        <span className="stree-group-count num" aria-hidden="true">
-          {count}
-        </span>
-        <span className="stree-lamp">{rolled && <GroupLamp loud={rolled} size={touch ? 12 : 10} />}</span>
-        <span className="sr-only">
-          , folder, {count} {count === 1 ? "session" : "sessions"}
-          {rolled ? loudWords(rolled) : ""}
-        </span>
       </div>
       {children}
     </div>
@@ -2214,7 +2145,7 @@ function ProjectGroupRow({
               startInProject();
             }}
           >
-            <PlusSmallIcon />
+            <PlusSmallIcon size={touch ? 16 : 12} />
           </button>
         )}
       </div>

@@ -780,7 +780,7 @@ test.describe("a row is never lost", () => {
 test.describe("the phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test("has no list, omits Pin, and keeps Move under…", async ({ page, request }) => {
+  test("has no list, offers Pin and Move under…", async ({ page, request }) => {
     const tag = randomUUID().slice(0, 6);
     const [a, b] = await sessions(request, [{ title: `Tree ${tag} phone` }, { title: `Tree ${tag} phone parent` }]);
     await openPage(page, "/");
@@ -810,8 +810,8 @@ test.describe("the phone", () => {
       document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
     await sheet.evaluate((el) => Promise.all(el.getAnimations().map((x) => x.finished)));
-    // Compact phone omits Pin, Unpin and Pinned moves.
-    await expect(sheet.getByRole("menuitem", { name: "Pin", exact: true })).toHaveCount(0);
+    // Compact phone supports Pin (shown in the Board's Organized view) and Move under….
+    await expect(sheet.getByRole("menuitem", { name: "Pin", exact: true })).toBeVisible();
     await sheet.getByRole("menuitem", { name: "Move under…" }).click();
     const picker = page.getByRole("dialog", { name: "Move under…" });
     await expect(picker).toBeVisible();

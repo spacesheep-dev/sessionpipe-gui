@@ -97,6 +97,12 @@ html:is([data-shell="ios"], [data-shell="android"]) .menu-sheet {
   padding-bottom: max(calc(var(--safe-bottom, env(safe-area-inset-bottom)) + 8px), 16px);
   max-height: calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - 24px);
 }
+html:is([data-shell="ios"], [data-shell="android"]):not([data-size-class="regular"])
+  .menu-sheet:is(.pick-sheet, .labels-sheet) {
+  bottom: var(--kb, 0px);
+  padding-bottom: max(calc(var(--safe-bottom, env(safe-area-inset-bottom)) - var(--kb, 0px) + 8px), 8px);
+  max-height: calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - var(--kb, 0px) - 24px);
+}
 
 /* A scan in progress (native/scanner.ts): the camera is behind the webview, so the page's
    ground goes transparent and the viewfinder (PhoneOnboarding.tsx) is all that shows. */

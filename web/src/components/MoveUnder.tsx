@@ -15,7 +15,7 @@ import { usePhoneLayout } from "../lib/device";
 import { useFocusTrap } from "../lib/focus";
 import { sessionTitle } from "../lib/format";
 import { fuzzy } from "../lib/fuzzy";
-import { calmNextCommit } from "../lib/motion";
+import { calmNextCommit, useSheetDrag } from "../lib/motion";
 import { HarnessGlyph } from "./bits";
 import { MoveFolderHost } from "./MoveFolder";
 import "../styles/pick.css";
@@ -69,6 +69,7 @@ function Picker({ moving, fromTree, onClose }: { moving: SessionKey; fromTree: b
   const s = state.sessions.get(moving);
   const id = useId();
   useFocusTrap(ref, Boolean(s), { onClose, initial: "input" });
+  useSheetDrag(ref, onClose, { handle: ".menu-grab, .menu-sheet-head", enabled: phone && Boolean(s) });
   useEffect(() => {
     if (!s) onClose();
   }, [s, onClose]);
@@ -129,6 +130,7 @@ function Picker({ moving, fromTree, onClose }: { moving: SessionKey; fromTree: b
           aria-controls={`${id}-list`}
           aria-activedescendant={shown.length ? `${id}-opt-${choice}` : undefined}
           aria-autocomplete="list"
+          enterKeyHint="search"
           autoComplete="off"
           spellCheck={false}
           onChange={(e) => {

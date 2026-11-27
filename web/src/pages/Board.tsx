@@ -12,9 +12,9 @@
 // rows slide there (lib/motion.ts). With nothing on it yet the board is a listening
 // state that names this machine and its hooked agents, and dissolves into the first row.
 // While the stream is down the rows stay, quiet, their clocks stopped.
-import type { ControlActivity, Info, SessionState, SessionSummary } from "@shared/api";
+import type { ArrangementFolder, ControlActivity, Info, SessionState, SessionSummary } from "@shared/api";
 import { ROUTES, SESSION_STATES, splitKey } from "@shared/api";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBehind, useCatchingUp } from "../account/current";
 import {
   ChipSelect,
@@ -23,11 +23,13 @@ import {
   HarnessGlyph,
   Listening,
   SearchInput,
+  Segmented,
   Since,
   StateDot,
 } from "../components/bits";
 import { type MenuList, MoreButton, useContextMenu } from "../components/ContextMenu";
 import { type BoardFilter, boardFilterItems, boardFilterSummary, FilterMenu } from "../components/FilterMenu";
+import { FolderIcon, folderMenuItems, GroupLamp, PinIcon, PlusSmallIcon, ProjectIcon } from "../components/GroupBits";
 import { LabelChip, useLabelKeys } from "../components/LabelDot";
 import { LensChip, LensNote } from "../components/LensChip";
 import { NoConnection } from "../components/NoConnection";
@@ -62,22 +64,26 @@ import {
   useStreamDown,
   useUnreadKeys,
 } from "../data/hooks";
+import type { Store } from "../data/store";
 import { agentFound } from "../lib/agents";
+import { onArranged, requestFolderPrompt } from "../lib/arrange";
 import { foldsAway, sectionOf, waitingIn } from "../lib/delegated";
 import { phoneLayout, usePhoneLayout } from "../lib/device";
+import { useFolded } from "../lib/folded";
 import { harnessMark, repoBranch, STATE_HEADING, STATE_HINT, sessionTitle } from "../lib/format";
 import { hiddenRows, inItsPlace, isHidden, useHidden } from "../lib/hidden";
 import { focusSearch, inPanel, useListNav } from "../lib/keys";
 import { type LabelFilter, labelName, labelPasses, labelQuery, requestLabelRename } from "../lib/labels";
 import { isUnread, setUnread } from "../lib/marks";
-import { type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
+import { calmNextCommit, type Held, useFlip, useHeldOrder, useListHold, usePresence } from "../lib/motion";
 import { accountMode, apiFetch } from "../lib/net";
+import { groupByProject, type ProjectGroup, projectOf } from "../lib/projects";
 import { pageBarBottom, useResizeAnchor } from "../lib/resizeAnchor";
 import { Link, navigate, searchAll, sessionPath } from "../lib/router";
-import { type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
+import { type BoardGroup, type Lens, setMode, setSettings, useAppSettings, useLens } from "../lib/settings";
 import { hintFor, useBindingVersion, useShortcut } from "../lib/shortcuts";
 import { openSession, openSplit, useSplitKey } from "../lib/split";
-import { arrangeTree } from "../lib/tree";
+import { arrangeTree, type Loud, louder, loudOf, type Rolled, rollUp } from "../lib/tree";
 import { NEW_WORDS as N } from "../native/accountWords";
 import { useSetupStatus } from "../setup/api";
 
@@ -119,6 +125,7 @@ function viewItems(o: {
   clear: () => void;
   showDone: boolean;
   setShowDone: (v: boolean) => void;
+  boardGroup: BoardGroup;
   beside: boolean;
   lens: Lens;
   simple: boolean;
@@ -131,6 +138,12 @@ function viewItems(o: {
   return [
     rows && { label: "Find…", action: "search.focus", run: () => void focusSearch() },
     rows && o.filtered && { label: "Clear filters", run: o.clear },
+    rows && {
+      label: "Group by folders & projects",
+      checked: o.boardGroup === "organized",
+      run: () => setSettings({ boardGroup: o.boardGroup === "organized" ? "status" : "organized" }),
+    },
+    rows && { label: "New folder…", run: () => requestFolderPrompt({ mode: "create" }) },
     rows && { label: "Show done sessions", checked: o.showDone, run: () => o.setShowDone(!o.showDone) },
     rows && !o.simple && { label: "Show counts", checked: o.counts, run: () => setShowCounts(!o.counts) },
     rows && { label: "Edit labels…", run: () => requestLabelRename() },
@@ -190,7 +203,7 @@ export function Board() {
   const store = useStore();
   const tree = useSessionTree();
   const { all } = tree;
-  const { snapshotAt } = useAppState();
+  const { snapshotAt, marks } = useAppState();
   const firstLoad = useFirstLoad();
   // An account reading its history: the board it has stays as it is until the history is in.
   const behind = useBehind();
@@ -211,7 +224,16 @@ export function Board() {
     });
   }, []);
   const lens = useLens();
-  const { mode, openSessions } = useAppSettings();
+  const { mode, openSessions, boardGroup } = useAppSettings();
+  const organized = boardGroup === "organized";
+  const [folded, setFolded] = useFolded();
+  useEffect(
+    () =>
+      onArranged((_words, what) => {
+        if (what?.move.kind === "folder") setFolded(`f:${what.move.folderId}`, false);
+      }),
+    [setFolded],
+  );
   const simple = mode === "simple";
   const counts = useShowCounts() && !simple;
   const beside = openSessions === "beside";
@@ -287,7 +309,7 @@ export function Board() {
     },
     [folder, inFolderMap, customFolders],
   );
-  const { roots, childrenOf } = useMemo(() => {
+  const { roots, childrenOf, treeNodes } = useMemo(() => {
     const drawn = (p: SessionSummary) =>
       (!machine || p.machine === machine) &&
       (!harness || p.harness === harness) &&
@@ -303,7 +325,7 @@ export function Board() {
       hangs: (s, p) => !foldsAway(s, p, showDone, needsHere),
       needs: needsHere,
     });
-    return { roots: t.roots.map((n) => n.s), childrenOf: t.childrenOf };
+    return { roots: t.roots.map((n) => n.s), childrenOf: t.childrenOf, treeNodes: t.nodes };
   }, [all, arrangement, machine, harness, labels, label, folderPasses, lq, aliased, hidden, showDone, needsHere]);
   // A row is in Needs you while a session under it needs you (one hidden on this device in
   // that state, which the Inbox badge leaves out, takes it nowhere), so the section holds
@@ -413,12 +435,127 @@ export function Board() {
     [hiddenList],
   );
 
+  const unreadOf = useCallback((s: SessionSummary) => isUnread(s, marks), [marks]);
+  const pairedNames = useMemo(() => new Set(paired.map((m) => m.name)), [paired]);
+  const activeHeld = useMemo(() => {
+    const list: Held<SessionSummary>[] = [];
+    for (const st of SESSION_STATES) if (st !== "done") list.push(...groups.get(st)!);
+    return list;
+  }, [groups]);
+  const activeByKey = useMemo(() => new Map(activeHeld.map((h) => [h.key, h])), [activeHeld]);
+  const pinSet = useMemo(() => new Set(arrangement.pinned), [arrangement.pinned]);
+  const pinnedActive = useMemo(
+    () =>
+      organized ? arrangement.pinned.map((k) => activeByKey.get(k)).filter((h): h is Held<SessionSummary> => !!h) : [],
+    [organized, arrangement.pinned, activeByKey],
+  );
+  const folderIdSet = useMemo(() => new Set(customFolders.map((f) => f.id)), [customFolders]);
+  const visibleFolders = useMemo(
+    () => (folder === "none" ? [] : folder ? customFolders.filter((f) => f.id === folder) : customFolders),
+    [customFolders, folder],
+  );
+  const folderItems = useMemo(() => {
+    const map = new Map<string, Held<SessionSummary>[]>();
+    if (!organized) return map;
+    for (const f of customFolders) map.set(f.id, []);
+    for (const h of activeHeld) {
+      if (pinSet.has(h.key)) continue;
+      const fid = inFolderMap?.[h.key];
+      if (fid && map.has(fid)) map.get(fid)!.push(h);
+    }
+    return map;
+  }, [organized, customFolders, activeHeld, pinSet, inFolderMap]);
+  const unassignedActive = useMemo(() => {
+    if (!organized) return [];
+    return activeHeld.filter((h) => {
+      if (pinSet.has(h.key)) return false;
+      const fid = inFolderMap?.[h.key];
+      return !fid || !folderIdSet.has(fid);
+    });
+  }, [organized, activeHeld, pinSet, inFolderMap, folderIdSet]);
+  const orgRoll = useMemo(() => {
+    if (!organized) return new Map<string, Rolled>();
+    const nodes = activeHeld.map((h) => treeNodes.get(h.key) ?? { s: h.item, level: 0, kids: [], placed: false });
+    return rollUp(nodes, { unread: unreadOf });
+  }, [organized, activeHeld, treeNodes, unreadOf]);
+  const folderLoud = useMemo(() => {
+    const out = new Map<string, Loud>();
+    if (!organized) return out;
+    for (const f of visibleFolders) {
+      let l: Loud = "none";
+      for (const h of folderItems.get(f.id) ?? []) {
+        l = louder(l, loudOf(h.item, unreadOf));
+        l = louder(l, orgRoll.get(h.key)?.loud ?? "none");
+      }
+      out.set(f.id, l);
+    }
+    return out;
+  }, [organized, visibleFolders, folderItems, unreadOf, orgRoll]);
+  const projectGroups = useMemo(() => {
+    if (!organized) return [];
+    const nodes = unassignedActive.map((h) => treeNodes.get(h.key) ?? { s: h.item, level: 0, kids: [], placed: false });
+    return groupByProject(nodes, orgRoll, { unread: unreadOf });
+  }, [organized, unassignedActive, treeNodes, orgRoll, unreadOf]);
+  const { projectStarts, unmatchedPending } = useMemo(() => {
+    const byProject = new Map<string, ControlActivity[]>();
+    const unmatched: ControlActivity[] = [];
+    if (!organized || pending.length === 0) return { projectStarts: byProject, unmatchedPending: unmatched };
+    const norm = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+    for (const a of pending) {
+      let hit: string | undefined;
+      if (a.cwd) {
+        const info = projectOf({ cwd: a.cwd });
+        const cleanCwd = norm(a.cwd);
+        const match =
+          projectGroups.find((pg) => pg.key === info.key) ??
+          projectGroups.find((pg) => pg.roots.some((n) => n.s.cwd && norm(n.s.cwd) === cleanCwd));
+        hit = match?.key;
+      }
+      if (hit) {
+        const list = byProject.get(hit) ?? [];
+        list.push(a);
+        byProject.set(hit, list);
+      } else {
+        unmatched.push(a);
+      }
+    }
+    return { projectStarts: byProject, unmatchedPending: unmatched };
+  }, [organized, pending, projectGroups]);
+
   const ordered = useMemo(() => {
     const list: Held<SessionSummary>[] = [];
-    for (const st of SESSION_STATES) if (st !== "done" || showDone) list.push(...groups.get(st)!);
+    if (organized) {
+      list.push(...pinnedActive);
+      for (const f of visibleFolders) {
+        if (folded.has(`f:${f.id}`)) continue;
+        list.push(...(folderItems.get(f.id) ?? []));
+      }
+      for (const pg of projectGroups) {
+        if (folded.has(`p:${pg.key}`)) continue;
+        for (const n of pg.roots) {
+          const h = activeByKey.get(n.s.key);
+          if (h) list.push(h);
+        }
+      }
+      if (showDone) list.push(...groups.get("done")!);
+    } else {
+      for (const st of SESSION_STATES) if (st !== "done" || showDone) list.push(...groups.get(st)!);
+    }
     if (showHidden) list.push(...hiddenHeld);
     return list;
-  }, [groups, showDone, showHidden, hiddenHeld]);
+  }, [
+    organized,
+    pinnedActive,
+    visibleFolders,
+    folded,
+    folderItems,
+    projectGroups,
+    activeByKey,
+    groups,
+    showDone,
+    showHidden,
+    hiddenHeld,
+  ]);
   const hrefs = useMemo(() => ordered.map((h) => sessionPath(h.item.harness, h.item.id)), [ordered]);
   const keys = useMemo(() => ordered.map((h) => h.key), [ordered]);
 
@@ -451,7 +588,6 @@ export function Board() {
   // ⌥⌘1 … ⌥⌘7 label the row under the cursor, ⌥⌘0 clears it; u marks it read or unread.
   useLabelKeys(() => (cursorKey ? [cursorKey] : []));
   useUnreadKeys(() => (ordered[cursor] ? [ordered[cursor]!.item] : []));
-  const marks = useAppState().marks;
   const doneUnread = useMemo(() => groups.get("done")!.filter((h) => isUnread(h.item, marks)).length, [groups, marks]);
   // e hides or unhides it, ⇧E hides it until it needs you; the cursor keeps its place.
   useHideKeys(
@@ -474,7 +610,20 @@ export function Board() {
   const view = () => {
     const unread = visible.filter((s) => isUnread(s, store.get().marks));
     const markRead = () => setUnread(store, unread, false);
-    return viewItems({ empty, filtered, clear, showDone, setShowDone, beside, lens, simple, counts, unread, markRead });
+    return viewItems({
+      empty,
+      filtered,
+      clear,
+      showDone,
+      setShowDone,
+      boardGroup,
+      beside,
+      lens,
+      simple,
+      counts,
+      unread,
+      markRead,
+    });
   };
   const pageMenu = useBackgroundMenu(view, { title: () => "Board" });
   const doneMenu = useContextMenu(() => [
@@ -708,12 +857,26 @@ export function Board() {
           {accountMode() ? <AccountFirstRun paired={paired[0]?.name} /> : <FirstRun paired={paired[0]?.name} />}
         </div>
       )}
+      {phone && ready && !emptyShown.mounted && (
+        <div className="board-view-bar">
+          <Segmented
+            label="Group sessions"
+            value={boardGroup}
+            onChange={(v) => setSettings({ boardGroup: v })}
+            options={[
+              { value: "status", label: "Status" },
+              { value: "organized", label: "Organized" },
+            ]}
+          />
+        </div>
+      )}
       {noMatch && (
         <NoMatch
           q={q}
           machine={machine}
           harness={harness}
           label={label ? (label === "none" ? "no label" : labelName(labels, label)) : ""}
+          folder={folderName}
           clear={clear}
           clearSearch={() => setQ("")}
         />
@@ -723,7 +886,121 @@ export function Board() {
           first row of all is a new row to useFlip (its entrance). */}
       <div className="board-list" ref={listRef} hidden={!ready || noMatch || undefined}>
         {ready && <OfflineLine machine={machine} hold={hold} />}
-        {ready &&
+        {ready && organized ? (
+          <>
+            {unmatchedPending.length > 0 && (
+              <section className="group group--working" aria-label={`${unmatchedPending.length} starting`}>
+                <h2 className="group-head group-head--org">
+                  <span className="group-org-name">Starting</span>
+                  <span key={unmatchedPending.length} className="group-count num">
+                    {unmatchedPending.length}
+                  </span>
+                </h2>
+                <div className="grid">
+                  {unmatchedPending.map((a) => (
+                    <StartingCard key={a.id} a={a} machine={paired.find((m) => m.control?.machineId === a.machineId)} />
+                  ))}
+                </div>
+              </section>
+            )}
+            {pinnedActive.length > 0 && (
+              <section className="group group--pinned" aria-label={`${pinnedActive.length} pinned`}>
+                <h2 className="group-head group-head--org">
+                  <PinIcon className="group-org-glyph" />
+                  <span className="group-org-name">Pinned</span>
+                  <span key={pinnedActive.length} className="group-count num">
+                    {pinnedActive.length}
+                  </span>
+                </h2>
+                <div className="grid">{pinnedActive.map((h) => row(h, index++))}</div>
+              </section>
+            )}
+            {folder !== "none" && (
+              <div className="board-org-tier">
+                <span className="board-org-tier-label">Folders</span>
+                <button type="button" className="board-org-new" onClick={() => requestFolderPrompt({ mode: "create" })}>
+                  <PlusSmallIcon size={14} />
+                  <span>New folder</span>
+                </button>
+              </div>
+            )}
+            {visibleFolders.map((f) => {
+              const items = folderItems.get(f.id) ?? [];
+              const origIndex = customFolders.findIndex((x) => x.id === f.id);
+              const foldKey = `f:${f.id}`;
+              const isFolded = folded.has(foldKey);
+              return (
+                <OrgFolderGroup
+                  key={f.id}
+                  folder={f}
+                  index={origIndex}
+                  total={customFolders.length}
+                  folded={isFolded}
+                  onToggle={() => {
+                    calmNextCommit();
+                    setFolded(foldKey, !isFolded);
+                  }}
+                  count={items.length}
+                  loud={folderLoud.get(f.id) ?? "none"}
+                  store={store}
+                >
+                  {!isFolded && items.map((h) => row(h, index++))}
+                </OrgFolderGroup>
+              );
+            })}
+            {projectGroups.length > 0 && (
+              <div className="board-org-tier">
+                <span className="board-org-tier-label">Projects</span>
+              </div>
+            )}
+            {projectGroups.map((pg) => {
+              const foldKey = `p:${pg.key}`;
+              const isFolded = folded.has(foldKey);
+              const starting = projectStarts.get(pg.key) ?? [];
+              const items = pg.roots.map((n) => activeByKey.get(n.s.key)).filter((h): h is Held<SessionSummary> => !!h);
+              let pairedLatest: SessionSummary | undefined;
+              let pairedTime = -1;
+              for (const n of pg.roots) {
+                const s = n.s;
+                if (!s.machine || !pairedNames.has(s.machine)) continue;
+                const t = Date.parse(s.lastAt || s.startedAt) || 0;
+                if (!pairedLatest || t > pairedTime) {
+                  pairedLatest = s;
+                  pairedTime = t;
+                }
+              }
+              const loud = starting.length > 0 ? louder(pg.loud, "working") : pg.loud;
+              return (
+                <OrgProjectGroup
+                  key={pg.key}
+                  group={pg}
+                  folded={isFolded}
+                  onToggle={() => {
+                    calmNextCommit();
+                    setFolded(foldKey, !isFolded);
+                  }}
+                  count={items.length + starting.length}
+                  loud={loud}
+                  pairedLatest={pairedLatest}
+                >
+                  {!isFolded && (
+                    <>
+                      {starting.map((a) => (
+                        <StartingCard
+                          key={a.id}
+                          a={a}
+                          machine={paired.find((m) => m.control?.machineId === a.machineId)}
+                        />
+                      ))}
+                      {items.map((h) => row(h, index++))}
+                    </>
+                  )}
+                </OrgProjectGroup>
+              );
+            })}
+          </>
+        ) : (
+          ready &&
           SESSION_STATES.filter((st) => st !== "done").map((st) => {
             const list = groups.get(st)!;
             const starting = st === "working" ? pending : [];
@@ -761,7 +1038,8 @@ export function Board() {
                 )}
               </section>
             );
-          })}
+          })
+        )}
 
         {ready && doneCount > 0 && (
           <section className="group group--done" aria-label={`${doneCount} done`}>
@@ -873,6 +1151,7 @@ function NoMatch({
   machine,
   harness,
   label,
+  folder,
   clear,
   clearSearch,
 }: {
@@ -880,6 +1159,7 @@ function NoMatch({
   machine: string;
   harness: string;
   label: string;
+  folder: string;
   clear: () => void;
   clearSearch: () => void;
 }) {
@@ -888,10 +1168,11 @@ function NoMatch({
     "sessions",
     machine && ` on ${machine}`,
     label && ` with ${label === "no label" ? "no label" : `the ${label} label`}`,
+    folder && (folder === "No folder" ? " outside custom folders" : ` in ${folder}`),
   ]
     .filter(Boolean)
     .join("");
-  const only = !!q && !machine && !harness && !label;
+  const only = !!q && !machine && !harness && !label && !folder;
   return (
     <EmptyState
       center
@@ -1091,5 +1372,147 @@ function StartingCard({
         <BesideButton onClick={() => openSplit(a.session!)} />
       </div>
     </article>
+  );
+}
+
+/** One custom folder section in the Board's Organized view: sticky header with disclosure,
+ *  folder icon, optional color dot, count, rolled-up status lamp when collapsed, long-press
+ *  context menu, and trailing ⋯ action button. */
+function OrgFolderGroup({
+  folder,
+  index,
+  total,
+  folded,
+  onToggle,
+  count,
+  loud,
+  store,
+  children,
+}: {
+  folder: ArrangementFolder;
+  index: number;
+  total: number;
+  folded: boolean;
+  onToggle: () => void;
+  count: number;
+  loud: Loud;
+  store: Store;
+  children?: ReactNode;
+}) {
+  const buildMenu = () =>
+    folderMenuItems(store, folder, index, total, {
+      onRename: () => requestFolderPrompt({ mode: "rename", folderId: folder.id, initialName: folder.name }),
+    });
+  const menu = useContextMenu(buildMenu, { title: () => folder.name });
+  return (
+    <section className="group group--folder" data-board-folder={folder.id} aria-label={`${folder.name}, ${count}`}>
+      <h2 className="group-head group-head--org" {...menu}>
+        <button type="button" className="group-toggle" onClick={onToggle} aria-expanded={!folded}>
+          <svg className="group-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+            <path
+              d="M6 4l4 4-4 4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <FolderIcon open={!folded} className="group-org-glyph" />
+          {folder.color && <span className={`label-dot label-dot--${folder.color}`} aria-hidden="true" />}
+          <span className="group-org-name ellipsis" dir="auto">
+            {folder.name}
+          </span>
+          <span key={count} className="group-count num">
+            {count}
+          </span>
+          {folded && <GroupLamp loud={loud} />}
+        </button>
+        <MoreButton
+          build={buildMenu}
+          label={`Actions for ${folder.name}`}
+          title={() => folder.name}
+          className="group-org-action"
+        />
+      </h2>
+      {!folded &&
+        (count > 0 ? <div className="grid">{children}</div> : <p className="board-org-empty">No active sessions</p>)}
+    </section>
+  );
+}
+
+/** One auto-grouped project section in the Board's Organized view: sticky header with
+ *  disclosure, project icon, disambiguated name, count, rolled-up status lamp when collapsed,
+ *  long-press menu, and trailing `+` button when a session runs on a paired machine. */
+function OrgProjectGroup({
+  group,
+  folded,
+  onToggle,
+  count,
+  loud,
+  pairedLatest,
+  children,
+}: {
+  group: ProjectGroup;
+  folded: boolean;
+  onToggle: () => void;
+  count: number;
+  loud: Loud;
+  pairedLatest?: SessionSummary;
+  children?: ReactNode;
+}) {
+  const startInProject = () => {
+    if (!pairedLatest) return;
+    openNewSession({
+      machine: pairedLatest.machine,
+      ...(pairedLatest.harness ? { harness: pairedLatest.harness } : {}),
+      ...(pairedLatest.cwd ? { cwd: pairedLatest.cwd } : {}),
+    });
+  };
+  const menu = useContextMenu(
+    () => (pairedLatest ? [{ label: `New session in ${group.label}`, run: startInProject }] : []),
+    { title: () => group.label, subtitle: () => group.subtitle ?? "" },
+  );
+  return (
+    <section className="group group--project" data-board-project={group.key} aria-label={`${group.label}, ${count}`}>
+      <h2
+        className="group-head group-head--org"
+        title={group.subtitle ? `${group.label} · ${group.subtitle}` : group.label}
+        {...menu}
+      >
+        <button type="button" className="group-toggle" onClick={onToggle} aria-expanded={!folded}>
+          <svg className="group-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+            <path
+              d="M6 4l4 4-4 4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <ProjectIcon className="group-org-glyph" />
+          <span className="group-org-name ellipsis" dir="auto">
+            {group.label}
+          </span>
+          <span key={count} className="group-count num">
+            {count}
+          </span>
+          {folded && <GroupLamp loud={loud} />}
+        </button>
+        {pairedLatest && (
+          <button
+            type="button"
+            className="icon-btn group-org-action"
+            aria-label={`New session in ${group.label}`}
+            title={`New session in ${group.label}`}
+            onClick={startInProject}
+          >
+            <PlusSmallIcon size={14} />
+          </button>
+        )}
+      </h2>
+      {!folded && <div className="grid">{children}</div>}
+    </section>
   );
 }

@@ -272,6 +272,16 @@
 .menu-sheet-head--confirm ~ .menu-sheet-group .menu-sheet-item {
   justify-content: center;
 }
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
+  /* Input-bearing sheets ride above the software keyboard on compact phones; regular-width
+     tablets centre them via styles/regular.css (--float-floor). Horizontal safe-area padding
+     from .menu-sheet stays intact. */
+  html:not([data-size-class="regular"]) .menu-sheet:is(.pick-sheet, .labels-sheet) {
+    bottom: var(--kb, 0px);
+    padding-bottom: max(calc(var(--safe-bottom, env(safe-area-inset-bottom)) - var(--kb, 0px) + 8px), 8px);
+    max-height: calc(100dvh - var(--safe-top, env(safe-area-inset-top)) - var(--kb, 0px) - 24px);
+  }
+}
 
 /* ----- the confirm (desktop) ----- */
 

@@ -17,6 +17,7 @@ export type Mode = "simple" | "advanced";
 export type DefaultPage = "/" | "/inbox" | "/feed" | "/review" | "/machines";
 export type OpenSessions = "page" | "beside";
 export type SidebarGroup = "flat" | "project";
+export type BoardGroup = "status" | "organized";
 export type Lens = Tier | null;
 
 export interface AppSettings {
@@ -34,6 +35,8 @@ export interface AppSettings {
   treeHidden: boolean;
   /** How the sidebar's Sessions section groups unfoldered roots on this device. */
   sidebarGroup: SidebarGroup;
+  /** How the Board groups active sessions: by status (default) or inside Pinned, Custom Folders & Projects. */
+  boardGroup: BoardGroup;
 }
 
 /** The labelled sidebar's widths: from the narrowest its rows were drawn for to where the
@@ -102,6 +105,7 @@ const defaults = (phone: boolean): AppSettings => ({
   sidebarWidth: SIDEBAR_DEFAULT,
   treeHidden: false,
   sidebarGroup: "flat",
+  boardGroup: "status",
 });
 
 const isLens = (v: unknown): v is Lens => v === null || v === 0 || v === 1 || v === 2 || v === 3;
@@ -145,6 +149,7 @@ function resolve(p: Stored, d: AppSettings): AppSettings {
     sidebarWidth: typeof p.sidebarWidth === "number" ? sidebarClamp(p.sidebarWidth) : d.sidebarWidth,
     treeHidden: typeof p.treeHidden === "boolean" ? p.treeHidden : d.treeHidden,
     sidebarGroup: p.sidebarGroup === "project" || p.sidebarGroup === "flat" ? p.sidebarGroup : d.sidebarGroup,
+    boardGroup: p.boardGroup === "organized" || p.boardGroup === "status" ? p.boardGroup : d.boardGroup,
   };
 }
 

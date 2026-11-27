@@ -926,7 +926,7 @@ export function Sheet({ target, closing }: { target: NewSessionTarget; closing: 
         className={`icon-btn ns-pin ${folderPinned ? "ns-pin--on" : ""}`}
         aria-label={folderPinned ? "Unpin folder" : "Pin folder"}
         aria-pressed={folderPinned}
-        data-tip={folderPinned ? "Unpin folder" : "Pin folder"}
+        data-tip={phone ? undefined : folderPinned ? "Unpin folder" : "Pin folder"}
         data-ns-pin
         onClick={togglePinFolder}
       >

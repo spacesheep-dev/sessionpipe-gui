@@ -48,6 +48,7 @@
    that changes cross-fades in --dur-fast (its element is keyed by the number), never a
    rolling digit; one that is there when the page paints just shows. */
 .group-count {
+  flex: none;
   color: var(--fg-3);
   font-weight: 400;
 }
@@ -1080,4 +1081,157 @@
 .sep {
   color: var(--fg-4);
   white-space: pre;
+}
+
+/* ---------- board view switcher & organized view ---------- */
+
+/* Phone segmented control above the list (Status | Organized): stays strictly inside
+   .page's safe-area gutter (--edge-l / --edge-r) and never scrolls sideways. */
+.board-view-bar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin: -10px 0 -10px;
+}
+.board-view-bar > .seg {
+  width: 100%;
+  min-width: 0;
+  border-radius: calc(var(--radius) + 2px);
+}
+.board-view-bar .seg-opt {
+  position: relative;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+/* 36 px visual height like UISegmentedControl; 44 px vertical tap area for fingers. */
+.board-view-bar .seg-opt::before {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+
+/* Tier subheads ("Folders" + "+ New folder", "Projects") inside Organized view. */
+.board-org-tier {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  margin: 16px calc(12px - var(--gutter)) 2px;
+  padding: 0 var(--gutter);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.board-list > .board-org-tier:first-child,
+.board-list > .offline-line + .board-org-tier {
+  margin-top: 0;
+}
+.board-org-tier + .group {
+  margin-top: 2px;
+}
+.board-org-tier-label {
+  color: var(--fg-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.board-org-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--tint-fg, var(--fg-2));
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .board-org-new:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+}
+.board-org-new:active {
+  background: var(--press);
+  transition: none;
+}
+
+/* Sticky headers for Pinned, Custom Folders, and Projects in Organized mode. */
+.group-head--org {
+  gap: 6px;
+}
+.group-head--org[data-menu-open] {
+  background: var(--bg-2);
+}
+.group-head--org > .group-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 6px;
+  padding: 0;
+  text-align: left;
+}
+.group-head--org > .group-toggle > .group-caret {
+  margin-left: -2px;
+}
+.group-org-glyph {
+  flex: none;
+  display: block;
+  color: var(--fg-3);
+}
+.group-head--org .label-dot {
+  flex: none;
+}
+.group-org-name {
+  min-width: 0;
+  color: var(--fg-2);
+}
+.group-rolled-lamp {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin-left: 2px;
+}
+.group-org-action {
+  flex: none;
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+}
+.board-org-empty {
+  margin: 0;
+  padding: 10px 12px 10px 40px;
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-tight);
+}
+
+@media (max-width: 719px), (pointer: coarse), (max-width: 839px) and (pointer: none) {
+  .board-org-tier {
+    min-height: 44px;
+  }
+  .board-org-new {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: var(--text-sm);
+  }
+  .group-head--org {
+    min-height: 44px;
+  }
+  .group-head--org > .group-toggle {
+    min-height: 44px;
+  }
+  .group-org-action {
+    width: 44px;
+    height: 44px;
+  }
+  .board-org-empty {
+    padding: 12px 12px 12px 36px;
+  }
 }
