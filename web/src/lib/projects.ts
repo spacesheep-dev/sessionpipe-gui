@@ -18,7 +18,7 @@ import {
 } from "./tree";
 
 export interface ProjectInfo {
-  /** Stable grouping key: "repo:<owner/name>", "cwd:<path>", or "other". */
+  /** Stable grouping key: "repo:<owner/name>", "cwd:<path>" (lowercased for a Windows path), or "other". */
   key: string;
   /** Short display label (repo basename, cwd basename, or "Other"). */
   label: string;
@@ -95,7 +95,11 @@ export function projectOf(s: Pick<SessionSummary, "repo" | "cwd">): ProjectInfo 
       return { key: `cwd:${clean}`, label: clean };
     }
     const label = basename(clean);
-    const normKey = clean.replace(/\\/g, "/");
+    // Windows folders are case-insensitive: `C:\Users\Me\Proj` and `c:\users\me\proj`, or
+    // core's `~\Code\acme` and `~\code\acme`, are one project. POSIX paths keep their case.
+    const winPath = isWin || clean.includes("\\");
+    const slashed = clean.replace(/\\/g, "/");
+    const normKey = winPath ? slashed.toLowerCase() : slashed;
     const lastSep = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
     const parentRaw = lastSep > 0 ? clean.slice(0, lastSep) : lastSep === 0 ? "/" : "";
     const subtitle = parentRaw ? tildifyPath(parentRaw.replace(/\\/g, "/")) : undefined;
