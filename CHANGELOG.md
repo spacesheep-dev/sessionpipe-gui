@@ -6,6 +6,13 @@ All notable changes to `sessionpipe-gui`. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Windows folder spelled in another case is one project in the sidebar.** Sessions in
+  `C:\Users\Me\Proj` and `c:\users\me\proj`, or `~\Code\acme` and `~\code\acme`, were
+  two Projects groups, labelled `Me/Proj` and `me/proj`; Windows folders ignore case, so
+  they are one group now. POSIX folders still tell case apart.
+
 ## [0.8.13] - 2026-11-27
 
 Eliminates the double scrollbar when the split session panel is open by scrolling the main pane independently and locking outer document overflow while split view is active (with seamless scroll position transfer and covering-panel lock). Introduces a unified, branded `1.25px` optical-stroke icon system across the navigation rail, sidebar tree, panel bars, menus, and settings, and equalizes chrome and button sizing across the desktop icon rail (`36×36` with `20×20` icons top and bottom), sidebar header controls (`28×28` with `16×16` icons), and calmer unread status dots.

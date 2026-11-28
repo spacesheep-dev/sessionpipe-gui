@@ -80,6 +80,38 @@ describe("groupByProject", () => {
     expect(byKey.get("cwd:~/unique")).toBe("unique");
   });
 
+  it("groups a Windows folder spelled in another case as one project, keeping POSIX case", () => {
+    const a = make("codex:a", { cwd: "C:\\Users\\Me\\Proj" });
+    const b = make("codex:b", { cwd: "c:\\users\\me\\proj\\" });
+    const c = make("claude-code:c", { cwd: "~\\Code\\acme" });
+    const d = make("claude-code:d", { cwd: "~\\code\\acme" });
+    const e = make("gemini:e", { cwd: "/srv/App" });
+    const f = make("gemini:f", { cwd: "/srv/app" });
+    const tree = arrangeTree({ all: [a, b, c, d, e, f], arrangement: { placed: {}, pinned: [] } });
+    const roll = rollUp(tree.roots, { unread: () => false });
+    const groups = groupByProject(tree.roots, roll);
+    const win = groups.find((g) => g.key === "cwd:c:/users/me/proj");
+    const home = groups.find((g) => g.key === "cwd:~/code/acme");
+    expect(win?.count).toBe(2);
+    expect(home?.count).toBe(2);
+    // The label keeps a session's own spelling: the first of the group's roots as given.
+    const first = (keyOf: string) => tree.roots.find((n) => projectOf(n.s).key === keyOf)!;
+    expect(win?.label).toBe(projectOf(first("cwd:c:/users/me/proj").s).label);
+    expect(home?.label).toBe(projectOf(first("cwd:~/code/acme").s).label);
+    expect(
+      groups
+        .filter((g) => g.key.startsWith("cwd:/srv/"))
+        .map((g) => g.key)
+        .sort(),
+    ).toEqual(["cwd:/srv/App", "cwd:/srv/app"]);
+    expect(projectOf({ cwd: "C:\\Users\\Me\\Proj" })).toEqual({
+      key: "cwd:c:/users/me/proj",
+      label: "Proj",
+      subtitle: "C:/Users/Me",
+      parentSeg: "Me",
+    });
+  });
+
   it("orders needs_you first, then live, then finished; then newest startedAt and alphabetical", () => {
     const doneOld = make("claude-code:done", {
       repo: "org/done-proj",
